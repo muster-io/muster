@@ -2,9 +2,10 @@
 // Copyright The Muster Authors
 
 // Complete Destination reads for the web tests, one builder per Destination type. Every required field holds a neutral
-// value — healthy, no Routes, no owning Team, nobody mentioned, the limiter the form proposes — and a test passes, field
-// by field, only what it cares about; the type stays the builder's. A required field added to a read is set here, the
-// one place the TypeScript check names, instead of in every test that builds a Destination.
+// value — healthy, no Routes, no owning Team, nobody mentioned, the Organization's buttons, the limiter the form
+// proposes — and a test passes, field by field, only what it cares about; the type stays the builder's. A required
+// field added to a read is set here, the one place the TypeScript check names, instead of in every test that builds a
+// Destination.
 
 import type {
   BridgeDestination,
@@ -41,6 +42,7 @@ export function mattermostDestination(
     team_id: "team-dev",
     channel_id: "ch-alerts",
     mentions: defaultMentions(),
+    buttons: { source: "organization" },
     limiter: { limit: 5, per_seconds: 1 },
     ...overrides,
     type: "mattermost",
@@ -57,6 +59,7 @@ export function telegramDestination(
     connection_id: "CN0000000000TG",
     channel_id: "@muster_alerts",
     mentions: defaultMentions(),
+    buttons: { source: "organization" },
     limiter: { limit: 10, per_seconds: 60 },
     ...overrides,
     type: "telegram",
@@ -73,6 +76,7 @@ export function slackDestination(
     connection_id: "CN0000000000SL",
     channel_id: "C0FAKEALERTS",
     mentions: defaultMentions(),
+    buttons: { source: "organization" },
     limiter: { limit: 30, per_seconds: 60 },
     ...overrides,
     type: "slack",
@@ -89,6 +93,7 @@ export function bridgeDestination(
     connection_id: "CN0000000000BR",
     channel_id: "ch-alerts",
     mentions: defaultMentions(),
+    buttons: { source: "organization" },
     limiter: { limit: 30, per_seconds: 60 },
     ...overrides,
     type: "bridge",

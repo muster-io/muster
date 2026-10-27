@@ -478,6 +478,30 @@ func (e BulkOutcome) Valid() bool {
 	}
 }
 
+// Defines values for ButtonSetItemButton.
+const (
+	ButtonSetItemButtonAcknowledge  ButtonSetItemButton = "acknowledge"
+	ButtonSetItemButtonResolve      ButtonSetItemButton = "resolve"
+	ButtonSetItemButtonSnooze       ButtonSetItemButton = "snooze"
+	ButtonSetItemButtonSnoozePreset ButtonSetItemButton = "snooze_preset"
+)
+
+// Valid indicates whether the value is a known member of the ButtonSetItemButton enum.
+func (e ButtonSetItemButton) Valid() bool {
+	switch e {
+	case ButtonSetItemButtonAcknowledge:
+		return true
+	case ButtonSetItemButtonResolve:
+		return true
+	case ButtonSetItemButtonSnooze:
+		return true
+	case ButtonSetItemButtonSnoozePreset:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CommandName.
 const (
 	CommandNameAcknowledge   CommandName = "acknowledge"
@@ -742,6 +766,24 @@ func (e DeliveryState) Valid() bool {
 	case DeliveryStateWaitingForBrokenDestination:
 		return true
 	case DeliveryStateWithheld:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DestinationButtonSetSource.
+const (
+	DestinationButtonSetSourceOrganization DestinationButtonSetSource = "organization"
+	DestinationButtonSetSourceOwn          DestinationButtonSetSource = "own"
+)
+
+// Valid indicates whether the value is a known member of the DestinationButtonSetSource enum.
+func (e DestinationButtonSetSource) Valid() bool {
+	switch e {
+	case DestinationButtonSetSourceOrganization:
+		return true
+	case DestinationButtonSetSourceOwn:
 		return true
 	default:
 		return false
@@ -4174,6 +4216,9 @@ type BridgeConnectionInputType string
 
 // BridgeDestination defines model for BridgeDestination.
 type BridgeDestination struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons DestinationButtonSet `json:"buttons"`
+
 	// ChannelId The channel as its messenger names it, an opaque string of up to 512 characters; surrounding white space is trimmed.
 	ChannelId string `json:"channel_id"`
 
@@ -4213,6 +4258,9 @@ type BridgeDestinationType string
 
 // BridgeDestinationInput A Bridge Destination (C-22.FR-3) is a channel of the bridge's messenger, named by its id. Saving it runs the bridge's `checkChannel`, which posts nothing, and keeps the channel's name the bridge answers.
 type BridgeDestinationInput struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons *DestinationButtonSet `json:"buttons,omitempty"`
+
 	// ChannelId The channel as its messenger names it, an opaque string of up to 512 characters; surrounding white space is trimmed.
 	ChannelId string `json:"channel_id"`
 
@@ -4438,6 +4486,20 @@ type BulkCommandResult struct {
 // BulkOutcome defines model for BulkOutcome.
 type BulkOutcome string
 
+// ButtonSetItem One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item's pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.
+type ButtonSetItem struct {
+	Button ButtonSetItemButton `json:"button"`
+
+	// Preset A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.
+	Preset *SnoozePreset `json:"preset,omitempty"`
+
+	// SnoozeSeconds The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.
+	SnoozeSeconds *int64 `json:"snooze_seconds,omitempty"`
+}
+
+// ButtonSetItemButton defines model for ButtonSetItem.Button.
+type ButtonSetItemButton string
+
 // CommandName The Commands a caller may run on an Alert Group now (`allowed_commands`). `still_on_it` appears while a Reminder is pending and the caller is the Owner; `add_note` while the caller holds `alert-groups:note`. A Service account is never offered `acknowledge` or `still_on_it`.
 type CommandName string
 
@@ -4559,6 +4621,16 @@ type DeliveryState string
 type Destination struct {
 	union json.RawMessage
 }
+
+// DestinationButtonSet A Destination's button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization's set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination's open Root messages, as edits.
+type DestinationButtonSet struct {
+	// Items Required with `own`, ignored with `organization`.
+	Items  *[]ButtonSetItem           `json:"items,omitempty"`
+	Source DestinationButtonSetSource `json:"source"`
+}
+
+// DestinationButtonSetSource defines model for DestinationButtonSet.Source.
+type DestinationButtonSetSource string
 
 // DestinationCheckItem defines model for DestinationCheckItem.
 type DestinationCheckItem struct {
@@ -5343,6 +5415,8 @@ type MattermostConnectionInputType string
 
 // MattermostDestination defines model for MattermostDestination.
 type MattermostDestination struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons     DestinationButtonSet      `json:"buttons"`
 	ChannelId   string                    `json:"channel_id"`
 	ChannelName nullable.Nullable[string] `json:"channel_name,omitempty"`
 
@@ -5381,7 +5455,9 @@ type MattermostDestinationType string
 
 // MattermostDestinationInput defines model for MattermostDestinationInput.
 type MattermostDestinationInput struct {
-	ChannelId string `json:"channel_id"`
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons   *DestinationButtonSet `json:"buttons,omitempty"`
+	ChannelId string                `json:"channel_id"`
 
 	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
@@ -5721,6 +5797,9 @@ type OidcWarningKind string
 
 // Organization defines model for Organization.
 type Organization struct {
+	// Buttons The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it.
+	Buttons OrganizationButtonSet `json:"buttons"`
+
 	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent bool `json:"critical_is_urgent"`
@@ -5777,6 +5856,9 @@ type Organization struct {
 
 // OrganizationBase defines model for OrganizationBase.
 type OrganizationBase struct {
+	// Buttons The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it.
+	Buttons *OrganizationButtonSet `json:"buttons,omitempty"`
+
 	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
@@ -5815,8 +5897,19 @@ type OrganizationBase struct {
 	WorkingDays *[]Weekday `json:"working_days,omitempty"`
 }
 
+// OrganizationButtonSet The Organization's button set, `organization.buttons` (C-28.FR-8): the buttons the Root messages of the Destinations that follow it show, in the order of the buttons by status. `all: true`, the default, is every button, durations a Route gains later included; `all: false` shows only `items`, which are then required. Unsnooze on a snoozed Root message and the buttons of Reminders always show; the UI, the API and the Text commands of Bridges keep every action. A change re-renders the open Root messages of the Destinations that follow the Organization, as edits.
+type OrganizationButtonSet struct {
+	All bool `json:"all"`
+
+	// Items Required when `all` is false, ignored otherwise.
+	Items *[]ButtonSetItem `json:"items,omitempty"`
+}
+
 // OrganizationInput defines model for OrganizationInput.
 type OrganizationInput struct {
+	// Buttons The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it.
+	Buttons *OrganizationButtonSet `json:"buttons,omitempty"`
+
 	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
@@ -6883,6 +6976,9 @@ type SlackConnectionInputType string
 
 // SlackDestination defines model for SlackDestination.
 type SlackDestination struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons DestinationButtonSet `json:"buttons"`
+
 	// ChannelId The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
 	ChannelId string `json:"channel_id"`
 
@@ -6922,6 +7018,9 @@ type SlackDestinationType string
 
 // SlackDestinationInput A Slack Destination (C-24.FR-3) is a public or private channel of its Slack Connection's workspace, named by its id. Saving it runs `conversations.info`, which posts nothing, refuses an unknown or archived channel and one without the bot, and keeps the channel's name.
 type SlackDestinationInput struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons *DestinationButtonSet `json:"buttons,omitempty"`
+
 	// ChannelId The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
 	ChannelId string `json:"channel_id"`
 
@@ -7330,6 +7429,9 @@ type TelegramConnectionInputType string
 
 // TelegramDestination defines model for TelegramDestination.
 type TelegramDestination struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons DestinationButtonSet `json:"buttons"`
+
 	// ChannelChatId The channel's numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.
 	ChannelChatId nullable.Nullable[string] `json:"channel_chat_id,omitempty"`
 
@@ -7374,6 +7476,9 @@ type TelegramDestinationType string
 
 // TelegramDestinationInput A Telegram Destination is configured by its channel only; Muster finds the channel's discussion group itself (see `TelegramDestination.discussion_group_id`).
 type TelegramDestinationInput struct {
+	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	Buttons *DestinationButtonSet `json:"buttons,omitempty"`
+
 	// ChannelId Telegram chat id or `@username` of the channel. Comments must be enabled on the channel.
 	ChannelId string `json:"channel_id"`
 

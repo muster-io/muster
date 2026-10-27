@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/keyring"
@@ -46,6 +47,14 @@ const (
 const (
 	FieldHeartbeatURL           = "organizations.outgoing_heartbeat_url"
 	FieldHeartbeatProxyPassword = "organizations.outgoing_heartbeat_proxy_password"
+)
+
+// KindOrganizationButtons is the kind of the open_group_updates row that a changed button set of the Organization
+// writes (C-28.FR-9), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups,
+// which claim it.
+const (
+	KindOrganizationButtons = "organization_buttons"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
 // maxHeartbeatURL bounds the URL of the outgoing heartbeat.
@@ -88,8 +97,10 @@ type Organization struct {
 	WeekStart    string
 	// WorkingDays and WorkdayEnd are the days and the end of the Organization's Working hours, which start at
 	// WorkdayStart in TimeZone (organization.working_hours, C-25.FR-9).
-	WorkingDays     []string
-	WorkdayEnd      string
+	WorkingDays []string
+	WorkdayEnd  string
+	// Buttons is organization.buttons, the button set of the Destinations that follow the Organization (C-28.FR-8).
+	Buttons         buttons.Set
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -118,8 +129,10 @@ type Input struct {
 	WorkdayStart *string
 	WeekStart    *string
 	// WorkingDays and WorkdayEnd are the days and the end of organization.working_hours; nil keeps the stored ones.
-	WorkingDays     *[]string
-	WorkdayEnd      *string
+	WorkingDays *[]string
+	WorkdayEnd  *string
+	// Buttons is organization.buttons; nil keeps the stored one.
+	Buttons         *ButtonSetInput
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -131,6 +144,13 @@ type Input struct {
 	OIDCTokenGraceSeconds int64
 	HeartbeatURL          SecretInput
 	HeartbeatProxy        ProxyInput
+}
+
+// ButtonSetInput is the Organization's button set as an update writes it: every button, or the items, which Items
+// nil leaves missing.
+type ButtonSetInput struct {
+	All   bool
+	Items []buttons.ItemInput
 }
 
 // FieldError is a field of an update that is not valid, at a JSON pointer of the request body.
@@ -152,6 +172,8 @@ type SettingsQueries interface {
 	LockOutboundPolicy(ctx context.Context, orgID int64) (int64, error)
 	UpdateOutboundPolicy(ctx context.Context, arg dbgen.UpdateOutboundPolicyParams) (int64, error)
 	ListSeverityValues(ctx context.Context, arg dbgen.ListSeverityValuesParams) ([]dbgen.ListSeverityValuesRow, error)
+	InsertOrganizationButtonsUpdate(ctx context.Context, arg dbgen.InsertOrganizationButtonsUpdateParams) error
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 	// Notify sends a live-update hint, in the transaction when the queries run in one.
 	Notify(ctx context.Context, h db.Hint) error
@@ -282,6 +304,11 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 			return Organization{}, fmt.Errorf("read the %s: %w", f.name, err)
 		}
 	}
+	set, err := buttons.ParseSet(row.Buttons)
+	if err != nil {
+		return Organization{}, err
+	}
+	o.Buttons = set
 	return o, nil
 }
 
@@ -290,7 +317,10 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 // any; another one is ErrVersionMismatch. An invalid field is a *FieldError at the full JSON pointer of the field, and
 // changes nothing. A change is recorded in the Audit log as organization.updated with its before/after diff, in which
 // the Secrets show only that they changed, and announced to the live-updates streams with an organization hint, in
-// the transaction of the change. An update that changes nothing writes nothing. A new or cleared URL clears the result
+// the transaction of the change. A changed button set also requests the re-render of the open Root messages of the
+// Destinations that follow it: an open_group_updates row organization_buttons, whose notification wakes the workers of
+// every replica once the transaction commits (C-28.FR-9). An update that changes nothing writes nothing. A new or
+// cleared URL clears the result
 // of the last outgoing heartbeat and also sends a system-status hint. Severity levels and Instance labels apply from
 // the next evaluation: their readers read them in their own transactions (C-20.FR-2).
 func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
@@ -350,6 +380,10 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 		if err != nil {
 			return err
 		}
+		set, err := json.Marshal(after.Buttons)
+		if err != nil {
+			return err
+		}
 		if _, err := q.UpdateSettings(ctx, dbgen.UpdateSettingsParams{
 			OrgID:                            s.orgID,
 			Name:                             after.Name,
@@ -375,10 +409,16 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			ProxyPasswordCiphertext:          password.Ciphertext,
 			ProxyPasswordKeyID:               optText(password.KeyID),
 			ProxyPasswordUpdatedAt:           optTime(password.UpdatedAt),
+			Buttons:                          set,
 			UrlChanged:                       urlChanged,
 			Now:                              now,
 		}); err != nil {
 			return fmt.Errorf("change the organization: %w", err)
+		}
+		if !setsEqual(before.Buttons, after.Buttons) {
+			if err := s.requestButtonsUpdate(ctx, q, now); err != nil {
+				return err
+			}
 		}
 		if out, err = s.get(ctx, q); err != nil {
 			return err
@@ -410,6 +450,26 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 	return out, nil
 }
 
+// requestButtonsUpdate, in the transaction of a change of the Organization's button set, asks the workers of
+// internal/groups to re-render the open Root messages of the Destinations that follow it (C-28.FR-9): one
+// open_group_updates row, requested at the business time of the change, and a notification that wakes them once the
+// transaction commits.
+func (s *Service) requestButtonsUpdate(ctx context.Context, q SettingsQueries, now time.Time) error {
+	if err := q.InsertOrganizationButtonsUpdate(ctx, dbgen.InsertOrganizationButtonsUpdateParams{OrgID: s.orgID,
+		RequestedAt: now}); err != nil {
+		return fmt.Errorf("re-render the root messages of the organization's button set: %w", err)
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
+}
+
+// setsEqual reports whether two button sets show the same buttons.
+func setsEqual(a, b buttons.Set) bool {
+	return a.All == b.All && slices.Equal(a.Items, b.Items)
+}
+
 // applyInput validates every field of in and returns the resource after them.
 func applyInput(before Organization, in Input) (Organization, error) {
 	if fe := validate(in); fe != nil {
@@ -422,6 +482,13 @@ func applyInput(before Organization, in Input) (Organization, error) {
 	}
 	if in.WeekStart != nil {
 		after.WeekStart = *in.WeekStart
+	}
+	if in.Buttons != nil {
+		set, fe := buttonSetOf(*in.Buttons)
+		if fe != nil {
+			return Organization{}, fe
+		}
+		after.Buttons = set
 	}
 	if in.WorkingDays != nil {
 		after.WorkingDays = inWeekOrder(*in.WorkingDays)
@@ -461,6 +528,23 @@ func applyInput(before Organization, in Input) (Organization, error) {
 				"of at most %d characters.", maxHeartbeatURL)}
 	}
 	return after, nil
+}
+
+// buttonSetOf is the Organization's button set of an update: every button, which ignores the items, or its items,
+// validated at /buttons/items/{i} (C-28.FR-8); all false without items is required at /buttons/items.
+func buttonSetOf(in ButtonSetInput) (buttons.Set, *FieldError) {
+	if in.All {
+		return buttons.All(), nil
+	}
+	if in.Items == nil {
+		return buttons.Set{}, &FieldError{Pointer: "/buttons/items", Code: CodeRequired,
+			Detail: "A button set that is not all lists its items."}
+	}
+	items, ie := buttons.Validate(in.Items)
+	if ie != nil {
+		return buttons.Set{}, &FieldError{Pointer: ie.Pointer("/buttons"), Code: ie.Code, Detail: ie.Detail}
+	}
+	return buttons.Set{Items: items}, nil
 }
 
 // validHeartbeatURL reports whether raw is an absolute http or https URL with a host, without a fragment.
@@ -518,6 +602,7 @@ type view struct {
 	WeekStart             string            `json:"week_start"`
 	WorkingDays           []string          `json:"working_days"`
 	WorkdayEnd            string            `json:"workday_end"`
+	Buttons               json.RawMessage   `json:"buttons"`
 	SeverityLabel         string            `json:"severity_label"`
 	SeverityMapping       []SeverityMapping `json:"severity_mapping"`
 	SeverityStyles        []SeverityStyle   `json:"severity_styles"`
@@ -542,10 +627,11 @@ type heartbeatView struct {
 }
 
 func viewOf(o Organization) view {
+	set, _ := json.Marshal(o.Buttons) // booleans, strings and numbers only
 	return view{
 		Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart, WeekStart: o.WeekStart,
 		WorkingDays: o.WorkingDays, WorkdayEnd: o.WorkdayEnd, SeverityLabel: o.SeverityLabel,
-		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, InstanceLabels: o.InstanceLabels,
+		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, InstanceLabels: o.InstanceLabels, Buttons: set,
 		Retention: retentionView{
 			StoredSnapshotsDays: o.Retention.StoredSnapshotsDays, AlertDetailsDays: o.Retention.AlertDetailsDays,
 			AlertGroupSummariesDays: o.Retention.AlertGroupSummariesDays, AuditLogDays: o.Retention.AuditLogDays,

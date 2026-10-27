@@ -20,6 +20,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/keyring"
@@ -225,7 +226,10 @@ type fakeSettings struct {
 	notified  []int64
 	values    []dbgen.ListSeverityValuesRow
 	valueArgs []dbgen.ListSeverityValuesParams
-	fail      map[string]error
+	// buttonUpdates are the open_group_updates rows organization_buttons, and woken the notifications on their channel.
+	buttonUpdates []dbgen.InsertOrganizationButtonsUpdateParams
+	woken         []string
+	fail          map[string]error
 }
 
 func newFakeSettings(t *testing.T) *fakeSettings {
@@ -288,7 +292,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.RetentionAuditLogDays = arg.RetentionAuditLogDays
 	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
-	s.row.OutgoingHeartbeatProxy = arg.Proxy
+	s.row.OutgoingHeartbeatProxy, s.row.Buttons = arg.Proxy, arg.Buttons
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
 	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
 	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
@@ -344,6 +348,23 @@ func (s *fakeSettings) ListSeverityValues(_ context.Context, arg dbgen.ListSever
 	[]dbgen.ListSeverityValuesRow, error) {
 	s.valueArgs = append(s.valueArgs, arg)
 	return s.values, s.fail["ListSeverityValues"]
+}
+
+func (s *fakeSettings) InsertOrganizationButtonsUpdate(_ context.Context,
+	arg dbgen.InsertOrganizationButtonsUpdateParams) error {
+	if err := s.fail["InsertOrganizationButtonsUpdate"]; err != nil {
+		return err
+	}
+	s.buttonUpdates = append(s.buttonUpdates, arg)
+	return nil
+}
+
+func (s *fakeSettings) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	s.woken = append(s.woken, channel)
+	return nil
 }
 
 func (s *fakeSettings) NotifyOutboundPolicy(_ context.Context, orgID int64) error {
@@ -737,6 +758,116 @@ func TestSnoozePresetSettings(t *testing.T) {
 	}
 	if read, err := svc.Get(t.Context()); err != nil || read.WorkdayStart != "08:30" || read.WeekStart != "sunday" {
 		t.Errorf("read back %+v, %v", read, err)
+	}
+}
+
+// TestButtonSet is C-28.FR-8 and FR-10 on the service: the Organization reads every button until an update lists its
+// items, which is stored, recorded as organization.updated with /buttons in its diff, announced, and requests the
+// re-render of the Root messages that follow it — one open_group_updates row organization_buttons at the business
+// time of the change and a notification on muster_open_group_updates; an update that omits the set keeps it and
+// requests nothing, as does one that sends the same set again; all true ignores the items; the refusals are 422 at the
+// item's pointer and change nothing; a failed request rolls the change back; a stored set that is not one fails the
+// read.
+func TestButtonSet(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, err := svc.Get(t.Context())
+	if err != nil || !o.Buttons.All || o.Buttons.Items != nil {
+		t.Fatalf("Get = %+v, %v", o.Buttons, err)
+	}
+	day := int64(86400)
+	tomorrow := buttons.PresetTomorrow
+	in := inputOf(o)
+	in.Buttons = &ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemAcknowledge},
+		{Button: buttons.ItemSnooze, SnoozeSeconds: &day}, {Button: buttons.ItemSnoozePreset, Preset: &tomorrow}}}
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	want := []buttons.Item{{Button: buttons.ItemAcknowledge}, {Button: buttons.ItemSnooze, SnoozeSeconds: 86400},
+		{Button: buttons.ItemSnoozePreset, Preset: buttons.PresetTomorrow}}
+	if err != nil || got.Buttons.All || !slices.Equal(got.Buttons.Items, want) {
+		t.Fatalf("an own list = %+v, %v", got.Buttons, err)
+	}
+	stored := `{"all":false,"items":[{"button":"acknowledge"},{"button":"snooze","snooze_seconds":86400},` +
+		`{"button":"snooze_preset","preset":"tomorrow"}]}`
+	if len(s.updates) != 1 || string(s.updates[0].Buttons) != stored {
+		t.Errorf("stored %s", s.updates[0].Buttons)
+	}
+	if len(s.audit) != 1 || string(s.audit[0].Diff) != `[{"pointer":"/buttons","before":{"all":true},"after":`+
+		stored+`}]` {
+		t.Errorf("diff %s", s.audit[0].Diff)
+	}
+	if len(s.hints) != 1 || s.hints[0] != (db.Hint{OrgID: 7, Type: HintOrganization}) {
+		t.Errorf("hints = %+v", s.hints)
+	}
+	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationButtonsUpdateParams{OrgID: 7,
+		RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
+		t.Errorf("re-render requested %+v, woken %v", s.buttonUpdates, s.woken)
+	}
+	if read, err := svc.Get(t.Context()); err != nil || !slices.Equal(read.Buttons.Items, want) {
+		t.Errorf("read back %+v, %v", read.Buttons, err)
+	}
+
+	in = inputOf(got)
+	in.Name = "Ops"
+	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		!slices.Equal(kept.Buttons.Items, want) || string(s.updates[1].Buttons) != stored ||
+		len(s.buttonUpdates) != 1 || string(s.audit[1].Diff) != `[{"pointer":"/name","before":"Muster","after":"Ops"}]` {
+		t.Errorf("an update that omits the set = %+v, %v", kept.Buttons, err)
+	}
+	in.Buttons = &ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemAcknowledge},
+		{Button: buttons.ItemSnooze, SnoozeSeconds: &day}, {Button: buttons.ItemSnoozePreset, Preset: &tomorrow}}}
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		len(s.updates) != 2 || len(s.buttonUpdates) != 1 {
+		t.Errorf("the same set again: %v, %d writes", err, len(s.updates))
+	}
+	in.Buttons = &ButtonSetInput{All: true, Items: []buttons.ItemInput{{Button: buttons.ItemResolve}}}
+	if all, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		!all.Buttons.All || all.Buttons.Items != nil || string(s.updates[2].Buttons) != `{"all":true}` ||
+		len(s.buttonUpdates) != 2 {
+		t.Errorf("all again = %+v, %v", all.Buttons, err)
+	}
+
+	zero := int64(0)
+	for _, c := range []struct {
+		pointer, code string
+		set           ButtonSetInput
+	}{
+		{"/buttons/items", CodeRequired, ButtonSetInput{}},
+		{"/buttons/items/1", CodeDuplicate, ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemResolve},
+			{Button: buttons.ItemResolve}}}},
+		{"/buttons/items/0", CodeRequired, ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemSnooze}}}},
+		{"/buttons/items/0", CodeOutOfRange, ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemSnooze,
+			SnoozeSeconds: &zero}}}},
+		{"/buttons/items/1", CodeRequired, ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemResolve},
+			{Button: buttons.ItemSnoozePreset}}}},
+	} {
+		writes := len(s.updates)
+		in.Buttons = &c.set
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != c.pointer || f.Code != c.code ||
+			f.Detail == "" {
+			t.Errorf("%s %s: %v", c.pointer, c.code, err)
+		}
+		if len(s.updates) != writes || len(s.buttonUpdates) != 2 {
+			t.Errorf("%s %s: a refused set was written", c.pointer, c.code)
+		}
+	}
+
+	for _, method := range []string{"InsertOrganizationButtonsUpdate", "NotifyOpenGroupUpdates"} {
+		s.fail = map[string]error{method: errors.New("no")}
+		in.Buttons = &ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemResolve}}}
+		if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil ||
+			!strings.Contains(err.Error(), "no") {
+			t.Errorf("%s fails: %v", method, err)
+		}
+		if read, _ := svc.Get(t.Context()); !read.Buttons.All {
+			t.Errorf("%s fails: the change was kept", method)
+		}
+	}
+	s.fail = map[string]error{}
+	s.row.Buttons = []byte(`[]`)
+	if _, err := svc.Get(t.Context()); err == nil {
+		t.Error("a stored set that is an array was read")
 	}
 }
 

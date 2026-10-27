@@ -13,4 +13,11 @@ export type BridgeDestination = BridgeDestinationInput & DestinationReadFields &
      * @nullable
      */
   readonly channel_name?: string | null;
-});
+}) & Required<Pick<BridgeDestinationInput & DestinationReadFields & ({
+  type: BridgeDestinationType;
+  /**
+     * The channel's name as the bridge's `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.
+     * @nullable
+     */
+  readonly channel_name?: string | null;
+}), 'buttons'>>;

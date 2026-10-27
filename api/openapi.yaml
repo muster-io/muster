@@ -10056,6 +10056,9 @@ components:
             `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end`
             or `/workday_start`. Omit it on an update to keep it.
           example: '18:00'
+        buttons:
+          description: The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it.
+          $ref: '#/components/schemas/OrganizationButtonSet'
         severity_label:
           type: string
           description: Label that carries severity.
@@ -10097,6 +10100,7 @@ components:
         - id
         - workday_start
         - week_start
+        - buttons
         - critical_is_urgent
         - working_days
         - workday_end
@@ -12323,6 +12327,67 @@ components:
       enum:
       - tomorrow
       - week_start
+    ButtonSetItem:
+      type: object
+      description: 'One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an
+        acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1
+        and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`.
+        Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown.
+        Refused with `422` `validation-failed` at the item''s pointer: `required` for a missing `snooze_seconds` or
+        `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a
+        second time.'
+      required:
+      - button
+      properties:
+        button:
+          type: string
+          enum:
+          - acknowledge
+          - resolve
+          - snooze
+          - snooze_preset
+        snooze_seconds:
+          type: integer
+          format: int64
+          description: The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.
+        preset:
+          $ref: '#/components/schemas/SnoozePreset'
+    OrganizationButtonSet:
+      type: object
+      description: 'The Organization''s button set, `organization.buttons` (C-28.FR-8): the buttons the Root messages of
+        the Destinations that follow it show, in the order of the buttons by status. `all: true`, the default, is every
+        button, durations a Route gains later included; `all: false` shows only `items`, which are then required.
+        Unsnooze on a snoozed Root message and the buttons of Reminders always show; the UI, the API and the Text
+        commands of Bridges keep every action. A change re-renders the open Root messages of the Destinations that
+        follow the Organization, as edits.'
+      required:
+      - all
+      properties:
+        all:
+          type: boolean
+        items:
+          type: array
+          description: Required when `all` is false, ignored otherwise.
+          items:
+            $ref: '#/components/schemas/ButtonSetItem'
+    DestinationButtonSet:
+      type: object
+      description: 'A Destination''s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the
+        Organization", the default, follows the Organization''s set and its later changes; `own` shows only `items`,
+        which are then required. A change re-renders the Destination''s open Root messages, as edits.'
+      required:
+      - source
+      properties:
+        source:
+          type: string
+          enum:
+          - organization
+          - own
+        items:
+          type: array
+          description: Required with `own`, ignored with `organization`.
+          items:
+            $ref: '#/components/schemas/ButtonSetItem'
     SnoozePresetList:
       type: object
       required:
@@ -14007,6 +14072,10 @@ components:
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
             unknown or deleted Team is refused with `422` `unknown_id`.
           $ref: '#/components/schemas/NullablePublicId'
+        buttons:
+          description: The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on
+            an update keeps it.
+          $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           $ref: '#/components/schemas/Limiter'
     TelegramDestinationInput:
@@ -14040,6 +14109,10 @@ components:
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
             unknown or deleted Team is refused with `422` `unknown_id`.
           $ref: '#/components/schemas/NullablePublicId'
+        buttons:
+          description: The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on
+            an update keeps it.
+          $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           $ref: '#/components/schemas/Limiter'
     BridgeDestinationInput:
@@ -14076,6 +14149,10 @@ components:
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
             unknown or deleted Team is refused with `422` `unknown_id`.
           $ref: '#/components/schemas/NullablePublicId'
+        buttons:
+          description: The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on
+            an update keeps it.
+          $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           description: '`destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits
             together, or half of the Connection''s `info.limits.send_per_second_per_channel` when its info has it.'
@@ -14117,6 +14194,10 @@ components:
             never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An
             unknown or deleted Team is refused with `422` `unknown_id`.
           $ref: '#/components/schemas/NullablePublicId'
+        buttons:
+          description: The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on
+            an update keeps it.
+          $ref: '#/components/schemas/DestinationButtonSet'
         limiter:
           description: '`destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.'
           $ref: '#/components/schemas/Limiter'
@@ -14195,6 +14276,8 @@ components:
       - $ref: '#/components/schemas/MattermostDestinationInput'
       - $ref: '#/components/schemas/DestinationReadFields'
       - type: object
+        required:
+        - buttons
         properties:
           team_name:
             type:
@@ -14209,6 +14292,8 @@ components:
       - $ref: '#/components/schemas/TelegramDestinationInput'
       - $ref: '#/components/schemas/DestinationReadFields'
       - type: object
+        required:
+        - buttons
         properties:
           channel_title:
             type:
@@ -14238,6 +14323,8 @@ components:
       - $ref: '#/components/schemas/BridgeDestinationInput'
       - $ref: '#/components/schemas/DestinationReadFields'
       - type: object
+        required:
+        - buttons
         properties:
           channel_name:
             type:
@@ -14251,6 +14338,8 @@ components:
       - $ref: '#/components/schemas/SlackDestinationInput'
       - $ref: '#/components/schemas/DestinationReadFields'
       - type: object
+        required:
+        - buttons
         properties:
           channel_name:
             type:

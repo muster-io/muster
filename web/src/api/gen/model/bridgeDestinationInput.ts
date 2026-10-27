@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { BridgeDestinationInputType } from './bridgeDestinationInputType';
+import type { DestinationButtonSet } from './destinationButtonSet';
 import type { Limiter } from './limiter';
 import type { MentionSettings } from './mentionSettings';
 import type { NullablePublicId } from './nullablePublicId';
@@ -23,6 +24,8 @@ export interface BridgeDestinationInput {
   mentions: MentionSettings;
   /** The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
   owning_team_id?: NullablePublicId | null;
+  /** The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it. */
+  buttons?: DestinationButtonSet;
   /** `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it. */
   limiter: Limiter;
 }

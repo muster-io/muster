@@ -139,6 +139,14 @@ export const ListDestinationsResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(listDestinationsResponseItemsItemOneOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -210,6 +218,14 @@ export const ListDestinationsResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(listDestinationsResponseItemsItemTwoOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -432,6 +448,14 @@ export const ListDestinationsResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(listDestinationsResponseItemsItemFourOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -502,6 +526,14 @@ export const ListDestinationsResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(listDestinationsResponseItemsItemFiveOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -642,6 +674,14 @@ export const CreateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(createDestinationBodyOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -684,6 +724,14 @@ export const CreateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(createDestinationBodyTwoOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -838,6 +886,14 @@ export const CreateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(createDestinationBodyFourOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -880,6 +936,14 @@ export const CreateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(createDestinationBodyFiveOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1002,6 +1066,14 @@ export const CreateDestinationResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(createDestinationResponseDestinationOneOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1073,6 +1145,14 @@ export const CreateDestinationResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(createDestinationResponseDestinationTwoOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1295,6 +1375,14 @@ export const CreateDestinationResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(createDestinationResponseDestinationFourOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1365,6 +1453,14 @@ export const CreateDestinationResponse = zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(createDestinationResponseDestinationFiveOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1526,6 +1622,14 @@ export const GetDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(getDestinationResponseOneOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1597,6 +1701,14 @@ export const GetDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(getDestinationResponseTwoOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1819,6 +1931,14 @@ export const GetDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(getDestinationResponseFourOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -1889,6 +2009,14 @@ export const GetDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(getDestinationResponseFiveOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2038,6 +2166,14 @@ export const UpdateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(updateDestinationBodyOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2080,6 +2216,14 @@ export const UpdateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(updateDestinationBodyTwoOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2234,6 +2378,14 @@ export const UpdateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(updateDestinationBodyFourOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2276,6 +2428,14 @@ export const UpdateDestinationBody = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(updateDestinationBodyFiveOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).optional().describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2397,6 +2557,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(updateDestinationResponseOneOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2468,6 +2636,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Keyed by the Mention names of Loud events. Reminders and auto-unacknowledge always mention the Owner, Takeovers the previous Owner.'),
   "owning_team_id": zod.string().regex(updateDestinationResponseTwoOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2690,6 +2866,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(updateDestinationResponseFourOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)
@@ -2760,6 +2944,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
 }).describe('Whom to mention for one kind of Loud event. The default is nobody.')
 }).describe('Nobody, `channel`, `here` and chosen users; `all` and messenger groups are refused with `unsupported`.'),
   "owning_team_id": zod.string().regex(updateDestinationResponseFiveOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team\'s Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('The Destination\'s button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.'),
   "limiter": zod.object({
   "limit": zod.int().min(1),
   "per_seconds": zod.int().min(1)

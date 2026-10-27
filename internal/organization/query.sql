@@ -74,7 +74,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons
 FROM organizations
 WHERE id = @org_id;
 
@@ -120,6 +120,7 @@ SET name                                         = @name,
     outgoing_heartbeat_proxy_password_ciphertext = @proxy_password_ciphertext,
     outgoing_heartbeat_proxy_password_key_id     = @proxy_password_key_id,
     outgoing_heartbeat_proxy_password_updated_at = @proxy_password_updated_at,
+    buttons                                      = @buttons,
     outgoing_heartbeat_last_attempt_at = CASE WHEN @url_changed::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
     outgoing_heartbeat_last_ok         = CASE WHEN @url_changed::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
@@ -159,3 +160,13 @@ FROM (
 ) p
 WHERE o.id = p.id AND o.outgoing_heartbeat_last_attempt_at = @attempt_at::timestamptz
 RETURNING p.previous;
+
+-- InsertOrganizationButtonsUpdate requests that a change of the Organization's button set reach the open Root messages
+-- of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
+-- name: InsertOrganizationButtonsUpdate :exec
+INSERT INTO open_group_updates (org_id, kind, requested_at)
+VALUES (@org_id, 'organization_buttons', @requested_at::timestamptz);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

@@ -298,7 +298,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons
 FROM organizations
 WHERE id = $1
 `
@@ -328,6 +328,7 @@ type GetSettingsRow struct {
 	Version                                 int64
 	WorkingDays                             []string
 	WorkdayEnd                              string
+	Buttons                                 []byte
 }
 
 // GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
@@ -360,8 +361,26 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.Version,
 		&i.WorkingDays,
 		&i.WorkdayEnd,
+		&i.Buttons,
 	)
 	return i, err
+}
+
+const insertOrganizationButtonsUpdate = `-- name: InsertOrganizationButtonsUpdate :exec
+INSERT INTO open_group_updates (org_id, kind, requested_at)
+VALUES ($1, 'organization_buttons', $2::timestamptz)
+`
+
+type InsertOrganizationButtonsUpdateParams struct {
+	OrgID       int64
+	RequestedAt time.Time
+}
+
+// InsertOrganizationButtonsUpdate requests that a change of the Organization's button set reach the open Root messages
+// of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
+func (q *Queries) InsertOrganizationButtonsUpdate(ctx context.Context, arg InsertOrganizationButtonsUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertOrganizationButtonsUpdate, arg.OrgID, arg.RequestedAt)
+	return err
 }
 
 const listSeverityValues = `-- name: ListSeverityValues :many
@@ -440,6 +459,16 @@ func (q *Queries) LockSettings(ctx context.Context, orgID int64) (int64, error) 
 	var version int64
 	err := row.Scan(&version)
 	return version, err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const recordOutgoingHeartbeat = `-- name: RecordOutgoingHeartbeat :one
@@ -531,14 +560,15 @@ SET name                                         = $1,
     outgoing_heartbeat_proxy_password_ciphertext = $21,
     outgoing_heartbeat_proxy_password_key_id     = $22,
     outgoing_heartbeat_proxy_password_updated_at = $23,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $24::boolean THEN NULL
+    buttons                                      = $24,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $25::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $24::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $24::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $25::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $25::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $25,
+    updated_at = $26,
     version = version + 1
-WHERE id = $26
+WHERE id = $27
 `
 
 type UpdateSettingsParams struct {
@@ -565,6 +595,7 @@ type UpdateSettingsParams struct {
 	ProxyPasswordCiphertext          []byte
 	ProxyPasswordKeyID               pgtype.Text
 	ProxyPasswordUpdatedAt           pgtype.Timestamptz
+	Buttons                          []byte
 	UrlChanged                       bool
 	Now                              time.Time
 	OrgID                            int64
@@ -597,6 +628,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.ProxyPasswordCiphertext,
 		arg.ProxyPasswordKeyID,
 		arg.ProxyPasswordUpdatedAt,
+		arg.Buttons,
 		arg.UrlChanged,
 		arg.Now,
 		arg.OrgID,

@@ -13,4 +13,11 @@ export type SlackDestination = SlackDestinationInput & DestinationReadFields & (
      * @nullable
      */
   readonly channel_name?: string | null;
-});
+}) & Required<Pick<SlackDestinationInput & DestinationReadFields & ({
+  type: SlackDestinationType;
+  /**
+     * The channel's name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.
+     * @nullable
+     */
+  readonly channel_name?: string | null;
+}), 'buttons'>>;

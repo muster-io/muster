@@ -4468,6 +4468,13 @@ func (s *probeOrgSettings) ListSeverityValues(context.Context, orgdb.ListSeverit
 
 func (s *probeOrgSettings) NotifyOutboundPolicy(context.Context, int64) error { return nil }
 
+func (s *probeOrgSettings) InsertOrganizationButtonsUpdate(context.Context,
+	orgdb.InsertOrganizationButtonsUpdateParams) error {
+	return errors.New("not used by the probe")
+}
+
+func (s *probeOrgSettings) NotifyOpenGroupUpdates(context.Context, string) error { return nil }
+
 func (s *probeOrgSettings) ClaimOutgoingHeartbeat(_ context.Context, arg orgdb.ClaimOutgoingHeartbeatParams) (
 	orgdb.ClaimOutgoingHeartbeatRow, error) {
 	if !s.url.Set() || s.attemptAt.After(arg.DueBefore) {

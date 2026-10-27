@@ -1890,24 +1890,160 @@ func TestIntegrationTeams(t *testing.T) {
 	})
 }
 
+// TestIntegrationButtonSets runs 0023 over a database whose Organization, Destination and open_group_updates row of the
+// kind route_minimum_severity a replica of 0.1 wrote: up gives the Organization every button and the Destination "As
+// in the Organization", keeps the row, validates every new CHECK and the foreign key and drops the old kind CHECK, so
+// that the rows of destination_buttons, with a Destination, and organization_buttons are taken and an unknown kind, a
+// destination_buttons without a Destination and sets of the wrong JSON type are not; a replica of 0.1 still inserts
+// its Organizations and Destinations without the columns. Down deletes the rows of the new kinds, keeps the older row,
+// drops the columns and restores the old kind CHECK, validated; up again works. The versions are reached by number,
+// so that the test holds whichever migration precedes 0023.
+func TestIntegrationButtonSets(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 22)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000B1', 'r', 1, false, '{alertname}', 0, 0, true, '{3600}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-10-26', '2026-10-26'
+			FROM organizations`)
+		hook := func(publicID, name string) string {
+			return `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+				signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+				limiter_per_seconds, health, created_at, updated_at)
+				SELECT id, '` + publicID + `', 'webhook', '` + name + `', 'events', '{}', '\x00', 'k1', '2026-10-26',
+					'{}', 1, 1, 'healthy', '2026-10-26', '2026-10-26'
+				FROM organizations`
+		}
+		e.exec(t, hook("DS0000000000B1", "hook"))
+		e.exec(t, `INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+			SELECT id, 'route_minimum_severity', (SELECT id FROM routes), '2026-10-26' FROM organizations`)
+		insert := func(t *testing.T, kind string, destination bool) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, destination_id,
+				requested_at)
+				SELECT id, $1, CASE WHEN $2::boolean THEN (SELECT id FROM destinations LIMIT 1) END, '2026-10-26'
+				FROM organizations`, kind, destination)
+			return err
+		}
+		organizationButtons := func(t *testing.T) string {
+			t.Helper()
+			var got string
+			if err := e.d.Pool.QueryRow(t.Context(), `SELECT buttons::text FROM organizations`).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+
+		if err := e.mm.Migrate(23); err != nil {
+			t.Fatalf("up to 23: %v", err)
+		}
+		if got := organizationButtons(t); got != `{"all": true}` {
+			t.Errorf("after up: the organization's buttons %s", got)
+		}
+		if n := e.count(t, `SELECT count(*) FROM destinations WHERE buttons IS NULL`); n != 1 {
+			t.Errorf("after up: %d destinations as in the organization, want 1", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'route_minimum_severity'
+			AND destination_id IS NULL`); n != 1 {
+			t.Errorf("after up: %d rows of route_minimum_severity, want 1", n)
+		}
+		want := "open_group_updates.open_group_updates_destination_id_fkey:true " +
+			"open_group_updates.open_group_updates_destination_scope_check:true " +
+			"open_group_updates.open_group_updates_kind_v2_check:true"
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_d") + " " +
+			e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got != want {
+			t.Errorf("after up: constraints\n%s\nwant\n%s", got, want)
+		}
+		if got := e.constraints(t, []string{"organizations", "destinations"}, "%buttons"); got !=
+			"destinations.destinations_buttons_check:true organizations.organizations_buttons_check:true" {
+			t.Errorf("after up: the checks of the sets %s", got)
+		}
+		for _, kind := range []string{"destination_buttons", "organization_buttons"} {
+			if err := insert(t, kind, kind == "destination_buttons"); err != nil {
+				t.Errorf("a row of %s: %v", kind, err)
+			}
+		}
+		refused(t, "a row of destination_buttons without a destination", insert(t, "destination_buttons", false),
+			"open_group_updates_destination_scope_check")
+		refused(t, "a row of an unknown kind", insert(t, "button_set", false), "open_group_updates_kind_v2_check")
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE organizations SET buttons = '[]'`)
+		refused(t, "the organization's set as an array", err, "organizations_buttons_check")
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE destinations SET buttons = '{"all": true}'`)
+		refused(t, "a destination's set as an object", err, "destinations_buttons_check")
+		e.exec(t, `UPDATE organizations SET buttons = '{"all": false, "items": [{"button": "acknowledge"}]}'`)
+		e.exec(t, `UPDATE destinations SET buttons = '[{"button": "resolve"}]'`)
+		e.exec(t, hook("DS0000000000B2", "hook of 0.1"))
+		if n := e.count(t, `SELECT count(*) FROM destinations WHERE public_id = 'DS0000000000B2'
+			AND buttons IS NULL`); n != 1 {
+			t.Error("after up: a destination written as 0.1 writes it is not as in the organization")
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 23 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		for what, sql := range map[string]string{
+			"organizations.buttons": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'organizations' AND column_name = 'buttons'`,
+			"destinations.buttons": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'destinations' AND column_name = 'buttons'`,
+			"open_group_updates.destination_id": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'open_group_updates' AND column_name = 'destination_id'`,
+			"the rows of the new kinds": `SELECT count(*) FROM open_group_updates
+				WHERE kind <> 'route_minimum_severity'`,
+		} {
+			if n := e.count(t, sql); n != 0 {
+				t.Errorf("after down: %s is left", what)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 1 {
+			t.Errorf("after down: %d rows, want the row of route_minimum_severity", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_check:true" {
+			t.Errorf("after down: the kind checks %s", got)
+		}
+		refused(t, "a row of destination_buttons after down", func() error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, requested_at)
+				SELECT id, 'organization_buttons', '2026-10-26' FROM organizations`)
+			return err
+		}(), "open_group_updates_kind_check")
+
+		if err := e.mm.Migrate(23); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if got := organizationButtons(t); got != `{"all": true}` {
+			t.Errorf("up again: the organization's buttons %s", got)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (22)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (23)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":22`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":23`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":22`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":23`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1923,10 +2059,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (22)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (23)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":22`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":23`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

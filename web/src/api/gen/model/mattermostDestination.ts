@@ -12,4 +12,10 @@ export type MattermostDestination = MattermostDestinationInput & DestinationRead
   team_name?: string | null;
   /** @nullable */
   channel_name?: string | null;
-});
+}) & Required<Pick<MattermostDestinationInput & DestinationReadFields & ({
+  type: MattermostDestinationType;
+  /** @nullable */
+  team_name?: string | null;
+  /** @nullable */
+  channel_name?: string | null;
+}), 'buttons'>>;
