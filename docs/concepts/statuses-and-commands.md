@@ -349,7 +349,9 @@ The set changes only the buttons of Root messages. Reminders keep **Still on it*
 [Text commands](#text-commands) of Bridges, the web UI and the API keep every action; and a press on a button that a
 message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:
 Slack leaves the **Snooze…** menu out when the set shows no duration and no preset, and a bridge with a limit on buttons
-still drops the Snooze buttons beyond it. A test message and the preview of a Destination show the buttons of its set.
+still drops the Snooze buttons beyond it. On a bridge without buttons, the line "Reply in the Thread: …" lists only the
+Text commands of the buttons the set shows, while every other Text command still works. A test message and the preview
+of a Destination show the buttons of its set.
 
 A saved change of a set updates the open Root messages of the Destinations that use it within seconds, as edits, which
 notify nobody. With the Organization's set left at every button, a Snooze duration added to a Route shows on the next

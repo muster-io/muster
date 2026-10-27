@@ -109,6 +109,17 @@ func TestTestRootButtonSet(t *testing.T) {
 	if m := r.TestRoot(src, MarkupMarkdown, "").Message; m.Buttons == nil || len(m.Buttons) != 0 {
 		t.Errorf("no button: %#v", m.Buttons)
 	}
+	// The commands line of a bridge without buttons names the Text commands of the shown buttons only (C-28.FR-9).
+	src = source("firing", 2)
+	src.Buttons = ac7
+	if got := CommandsLine(r.TestRoot(src, MarkupCommonMark, "").Message, false); got !=
+		"Reply in the Thread: ack · snooze 24h" {
+		t.Errorf("the commands line of the set: %q", got)
+	}
+	src.Buttons = &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemResolve}}}
+	if got := CommandsLine(r.TestRoot(src, MarkupCommonMark, "").Message, false); got != "Reply in the Thread: resolve" {
+		t.Errorf("the commands line of resolve only: %q", got)
+	}
 	reply := Message{Kind: KindReply, Buttons: []Button{{Command: buttons.CommandStillOnIt}}}
 	if got := ShownButtons(reply, &buttons.Set{}, nil); len(got.Buttons) != 1 {
 		t.Errorf("a reply lost its buttons: %+v", got)
