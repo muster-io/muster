@@ -1081,20 +1081,21 @@ WHERE m.org_id = @org_id AND m.alert_group_id = ANY(@alert_group_ids::bigint[]) 
 GROUP BY m.alert_group_id;
 
 -- ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
--- Destination, whose Root messages its button set re-renders (C-28.FR-9).
+-- Destination that is not being retired, whose Root messages its button set re-renders (C-28.FR-9).
 -- name: ListOpenGroupsOfDestinationAfter :many
 SELECT g.id
 FROM alert_groups g
 WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
   AND EXISTS (SELECT 1
               FROM deliveries d
-              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND d.destination_id = @destination_id)
+              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND d.destination_id = @destination_id
+                AND NOT d.desired_retire)
 ORDER BY g.id
 LIMIT @lim;
 
 -- ListOpenGroupsFollowingOrganizationAfter lists, by id after a cursor, a batch of the open Alert Groups with a
--- delivery in a messenger Destination that is not deleted and follows the Organization's button set, whose Root
--- messages a change of that set re-renders (C-28.FR-9).
+-- delivery that is not being retired in a messenger Destination that is not deleted and follows the Organization's
+-- button set, whose Root messages a change of that set re-renders (C-28.FR-9).
 -- name: ListOpenGroupsFollowingOrganizationAfter :many
 SELECT g.id
 FROM alert_groups g
@@ -1102,8 +1103,8 @@ WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
   AND EXISTS (SELECT 1
               FROM deliveries d
               JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
-              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND x.buttons IS NULL AND x.type <> 'webhook'
-                AND x.deleted_at IS NULL)
+              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND NOT d.desired_retire AND x.buttons IS NULL
+                AND x.type <> 'webhook' AND x.deleted_at IS NULL)
 ORDER BY g.id
 LIMIT @lim;
 

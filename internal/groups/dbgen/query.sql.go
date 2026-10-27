@@ -2604,8 +2604,8 @@ WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
   AND EXISTS (SELECT 1
               FROM deliveries d
               JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
-              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND x.buttons IS NULL AND x.type <> 'webhook'
-                AND x.deleted_at IS NULL)
+              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND NOT d.desired_retire AND x.buttons IS NULL
+                AND x.type <> 'webhook' AND x.deleted_at IS NULL)
 ORDER BY g.id
 LIMIT $3
 `
@@ -2617,8 +2617,8 @@ type ListOpenGroupsFollowingOrganizationAfterParams struct {
 }
 
 // ListOpenGroupsFollowingOrganizationAfter lists, by id after a cursor, a batch of the open Alert Groups with a
-// delivery in a messenger Destination that is not deleted and follows the Organization's button set, whose Root
-// messages a change of that set re-renders (C-28.FR-9).
+// delivery that is not being retired in a messenger Destination that is not deleted and follows the Organization's
+// button set, whose Root messages a change of that set re-renders (C-28.FR-9).
 func (q *Queries) ListOpenGroupsFollowingOrganizationAfter(ctx context.Context, arg ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsFollowingOrganizationAfter, arg.OrgID, arg.AfterID, arg.Lim)
 	if err != nil {
@@ -2645,7 +2645,8 @@ FROM alert_groups g
 WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
   AND EXISTS (SELECT 1
               FROM deliveries d
-              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND d.destination_id = $3)
+              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND d.destination_id = $3
+                AND NOT d.desired_retire)
 ORDER BY g.id
 LIMIT $4
 `
@@ -2658,7 +2659,7 @@ type ListOpenGroupsOfDestinationAfterParams struct {
 }
 
 // ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
-// Destination, whose Root messages its button set re-renders (C-28.FR-9).
+// Destination that is not being retired, whose Root messages its button set re-renders (C-28.FR-9).
 func (q *Queries) ListOpenGroupsOfDestinationAfter(ctx context.Context, arg ListOpenGroupsOfDestinationAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfDestinationAfter,
 		arg.OrgID,
