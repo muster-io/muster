@@ -217,6 +217,11 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
   and a set can name a duration that no Route has yet.
 - A press on a button that a set no longer shows still runs its Command: the action id stays valid, and the Command is
   checked as any other (C-28.FR-9).
+- `ButtonSetItem` deliberately leaves `snooze_seconds` without `minimum: 1` and leaves the conditional rules —
+  `snooze_seconds` with `snooze`, `preset` with `snooze_preset`, `items` with `own` or `all: false` — out of the schema,
+  stating them in the descriptions instead: the request validation would answer them with `400` `invalid_format`
+  or `required`, where this contract asks for `422` `out_of_range` and `required` at the item's pointer, which the
+  domain validation gives.
 - Depends on S-111 for `open_group_updates`; it needs neither Teams nor Schedules.
 - Migration `0023`: the story map gave it `0022`, which S-115 (`0022_teams`) took by merging first, so it takes the
   next free number as §4 of the stories README says; a story merged out of that order renumbers its migration to the
