@@ -22,6 +22,9 @@ files_touched:
   - internal/connections/bridge_test.go
   - internal/internalalerts/registry.go
   - internal/internalalerts/internalalerts_test.go
+  - internal/routing/suggestions.go
+  - internal/routing/suggestions_test.go
+  - internal/routing/query.sql
   - internal/leader/tasks.go
   - internal/leader/leader_test.go
   - internal/runtime/runtime.go
@@ -35,6 +38,7 @@ files_touched:
   - docs/operations/runbooks/index.md
   - docs/operations/monitoring.md
   - mkdocs.yml
+  - docs/install/versions.md
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
   - design/prd/L2.md
@@ -42,6 +46,7 @@ files_touched:
   - test/e2e/gateway_broken_test.go
 acceptance:
   - "[C-30.FR-8, C-30.AC-5] A gateway whose call the fake answers `401` — `forbidden`, a Fatal answer — or whose call used up `delivery.transient_budget` becomes Broken: the Bridge Connection reads `gateway` {`broken` true, `broken_since`, `reason`}, `MusterNotificationGatewayBroken` is raised with `connection` and `connection_name`, and the next run of the Leader task `gateway_broken_gauge` sets `muster_notification_gateway_broken{connection}` to 1 (`broken_test.go`, `broken_integration_test.go`)."
+  - "[C-30.FR-8] The suggested Route \"Muster internal alerts\" groups by `connection` too — its Group key gains `connection` after `route` and after S-133's `schedule` if that has merged — so that two Broken gateways make two Alert Groups; the simulation of `Suggestions` counts each Notification gateway as an entity of `MusterNotificationGatewayBroken`; the upgrade notes of 0.2.0 name `connection` among the labels to add to a Route accepted in 0.1 (`suggestions_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] While a gateway is Broken, every call that comes due ends Not delivered with the reason `gateway_broken` and records `page_not_delivered`, and none of them is sent after it recovers; the sender probes it through `info` every `delivery.broken_probe_interval`, and a successful probe — or a successful Connection check — ends the state, resolves the alert and sets the gauge to 0 at the next run (`broken_integration_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] A Bridge Connection with both roles whose gateway is Broken keeps its Destinations healthy and delivering, and a Broken Destination of it leaves the gateway as it is (`broken_integration_test.go`)."
   - "[C-30.FR-8] The chart renders the rule `MusterNotificationGatewayBroken` — `max by (connection) (muster_notification_gateway_broken{job=\"muster\"}) == 1`, `for` 5m, severity `critical` — with its threshold and `for` as chart values and its `runbook_url`; its rule unit test fires after 5 minutes at 1 and not at 0; reference.md moves the Internal alert, the chart rule and the metric into the main tables; P-88 is confirmed for both chart rules of L2; `make rules-test helm-check docs-check` pass."
@@ -89,6 +94,14 @@ issue: 438
 - **Internal alert** (`internal/internalalerts/registry.go`): `MusterNotificationGatewayBroken` — severity `critical`,
   entity `connection` with `connection_name` — "Notification gateway {name} is Broken", the description naming the
   reason and the runbook.
+- **Route suggestion** (`internal/routing/suggestions.go`, `query.sql`; maintainer's decision Q3 of the plan review):
+  the Group key of the suggestion `internal_alerts` gains `internalalerts.EntityConnection` (`connection`), so that
+  every Broken gateway has an Alert Group of its own, as every Schedule's gap has with S-133; the entity simulation of
+  `Suggestions` reads the Bridge Connections in the role `gateway` with a query of its own and adds them as entities of
+  `MusterNotificationGatewayBroken`. The Group key of the L1 suggestion is `alertname`, `integration`, `destination`,
+  `route`; S-133 adds `schedule` and S-149 `connection`, always in that order — `schedule` before `connection` —
+  whichever of the two merges first, since neither depends on the other; the second to merge adds its label to the Group
+  key, to `suggestions_test.go` and to the upgrade note that the first wrote.
 - **Leader task** (`internal/leader/tasks.go`): `gateway_broken_gauge`, appended to the closed list, every
   `delivery.broken_probe_interval`, sets `muster_notification_gateway_broken{connection}` to 1 for each Broken gateway
   and to 0 for the others, and removes the series of a deleted Connection; safe to run twice (ADR-0007). The Leader
@@ -103,14 +116,18 @@ issue: 438
 - **Log events**: `gateway_broken`, `gateway_recovered`, C-30.
 - **Settings**: `delivery.broken_probe_interval`, `delivery.transient_budget`; the chart values of the rule (P-88).
 - **Documentation**: the runbook page `docs/operations/runbooks/MusterNotificationGatewayBroken.md`, in the runbook
-  index and the navigation; `docs/operations/monitoring.md` lists it among the Internal alerts with a chart rule.
+  index and the navigation; `docs/operations/monitoring.md` lists it among the Internal alerts with a chart rule and
+  says that the suggested Route groups by `connection`; `docs/install/versions.md` — the upgrade note of 0.2.0: an
+  installation that accepted the suggestion in 0.1 adds `connection` to that Route's Group key; if S-133 merged first,
+  this story adds `connection` to the note it wrote for `schedule`, and otherwise writes the note, which S-133 extends.
 
 ## Steps
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up.
 2. Write the Broken state, the probe and the calls due while Broken; add the spec. Check: `make generate-check`;
    `broken_test.go` with a manual clock; `broken_integration_test.go` with a bridge of both roles.
-3. Register the Internal alert, the Leader task and the gauge. Check: `internalalerts_test.go`, `leader_test.go`.
+3. Register the Internal alert, the Leader task and the gauge, and add `connection` to the suggestion. Check:
+   `internalalerts_test.go`, `leader_test.go`, `suggestions_test.go`.
 4. Add the chart rule, its test, the runbook and the shared rows. Check: `make rules-test helm-check docs-check`.
 5. Write `test/e2e/gateway_broken_test.go`. Check: the Verification below.
 

@@ -49,6 +49,7 @@ files_touched:
   - internal/archlint/archlint.go
   - AGENTS.md
   - web/src/test/fixtures/alert-groups.ts
+  - web/src/test/fixtures/teams.ts
   - test/e2e/team_label_test.go
   - docs/concepts/teams.md
   - docs/outgoing-webhooks/events.md
@@ -147,7 +148,8 @@ issue: 407
   (`internal/archlint/archlint.go`, AGENTS.md).
 - **Alerts view** (`internal/ingest/alertsview.go`): the Teams of each Alert from `alert_teams`.
 - **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): the builders of Alert Group and Alert reads
-  set `teams` to `[]`, so that `make generate` keeps the TypeScript check of the web tests green.
+  set `teams` to `[]`, and the builder of Team reads (`web/src/test/fixtures/teams.ts`, S-115) sets `matchers` to `[]`,
+  so that `make generate` keeps the TypeScript check of the web tests green.
 - **Outgoing webhooks** (`internal/webhooks/body.go`): `alert_group.teams`; the two events one to one in events mode.
 - **Organization**: `team_label` in the read, update, defaults and diff; the reserved names come from
   `internalalerts.ReservedLabels()` — `alertname`, `severity` and every entity and name label of the registry, with

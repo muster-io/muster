@@ -21,6 +21,7 @@ files_touched:
   - internal/notificationrules/rules_integration_test.go
   - internal/api/notificationrules.go
   - internal/api/notificationrules_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/organization/organization.go
   - internal/organization/settings.go
@@ -34,7 +35,7 @@ files_touched:
   - docs/concepts/notification-rules.md
   - mkdocs.yml
 acceptance:
-  - "[C-31.FR-1] A rule is an ordered list of actions — `mention`, `call` (with `gateway_id`, required when more than one Notification gateway exists) and `wait` (with `minutes`) — with at least one `mention` or `call`; more than 10 actions answers `422` `out_of_range` at the rule, a wait outside 1 to 60 minutes `422` `out_of_range` at its `minutes` (`notification_rule.limits`), and a rule without an action that Pages `422` `required` (`rules_test.go`)."
+  - "[C-31.FR-1] A rule is an ordered list of actions — `mention`, `call` (with `gateway_id`, required when more than one Notification gateway exists) and `wait` (with `wait_seconds`) — with at least one `mention` or `call`; more than 10 actions answers `422` `out_of_range` at the rule, a wait outside 1 to 60 minutes (`notification_rule.limits`) or not a whole number of minutes — `wait_seconds` not a multiple of 60 from 60 to 3600, such as 90 or 3660 — `422` `out_of_range` at its `wait_seconds`, and a rule without an action that Pages `422` `required` (`rules_test.go`)."
   - "[C-31.FR-2, C-20.FR-1] The Organization reads `notification_rules` — normal: a Mention; important: a Mention, a wait of 5 minutes, a Mention — and `updateOrganization` changes them under the same validation, recorded in the diff of `organization.updated`; a User without rules of their own reads the state `organization` with the Organization's current rules (`organization_test.go`, `rules_test.go`)."
   - "[C-31.FR-2, C-31.FR-5, C-31.AC-6] With the default rules, the state `call` makes the important rule exactly a call through the gateway, a Mention, a wait of 5 minutes and a Mention — the call and the first Mention at the same moment — and leaves the normal rule a Mention; `no_call` keeps the Organization's rules without any call; `call` on an Organization's important rule that already calls through that gateway adds no second call; with two gateways at which the User has confirmed contacts, `call` without `gateway_id` answers `422` `required` at `/gateway_id` (`states_test.go`)."
   - "[C-31.FR-2, C-31.AC-4] A User in the state `organization` follows a change of `organization.notification_rules` at once; the rules of a User in `call`, `no_call` or `custom` stay as they were; `resetMyNotificationRules` returns a User to `organization`, which then follows the Organization again (`rules_integration_test.go`)."
@@ -77,8 +78,9 @@ issue: 441
     `If-Match`), `resetMyNotificationRules` (`POST /me/notification-rules/reset`) — `x-permission: authenticated`, the
     web session only (C-03.FR-27); `getUserNotificationRules` (`GET /users/{user_id}/notification-rules`,
     `users:read`) and `updateUserNotificationRules` (`PUT`, `users:write`, `If-Match`), session or token.
-  - Schemas: `NotificationRuleAction` {`kind` (`mention`, `call`, `wait`), `gateway_id` (with `call`), `minutes` (with
-    `wait`)}; in reads also `gateway` (`EntityRef`), `available`, `unavailable_reason` (`gateway_deleted`,
+  - Schemas: `NotificationRuleAction` {`kind` (`mention`, `call`, `wait`), `gateway_id` (with `call`), `wait_seconds`
+    (with `wait`: a multiple of 60 within `notification_rule.limits`, since durations are `*_seconds` in the API,
+    `api/README.md`)}; in reads also `gateway` (`EntityRef`), `available`, `unavailable_reason` (`gateway_deleted`,
     `no_confirmed_contact`, or null); `NotificationRuleSet` {`normal`, `important`} (`NotificationRuleAction`[]);
     `NotificationRulesState` (`organization`, `call`, `no_call`, `custom`); `NotificationRules` {`state`, `gateway`
     (`EntityRef` or null, with `call`), `normal`, `important` — always the sequences in effect —, `etag`};
@@ -86,7 +88,8 @@ issue: 441
     only)}.
   - `OrganizationBase` gains the optional `notification_rules` (`NotificationRuleSet`); `Organization` requires it.
   - Problem codes: `gateway_required` and `contact_required` (`validation-failed`, in `errors[].code`); `out_of_range`
-    and `required` at the action or the rule.
+    and `required` at the action or the rule. `internal/api/problem.go` maps the errors of `notificationrules` — these
+    codes, `session_required`, a stale version — to their problems.
 - **Schema** (migration `0039_notification_rules`, expand only; `schema.md` §4.2, §4.3 and a new §4.18 Paging):
   - `organizations.notification_rules jsonb NOT NULL DEFAULT` the defaults of C-31.FR-2, with a CHECK that it is an
     object with the arrays `normal` and `important`.
@@ -138,10 +141,10 @@ curl -s -o /dev/null -w '%{http_code}\n' "${P[@]}" $API/me/notification-rules   
 # the Organization changes its important rule: petr ("call") stays, ivan ("organization") follows
 O=$(curl -s "${A[@]}" $API/organization)
 curl -s "${A[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization -d "$(jq -c 'del(.etag, .id, .working_hours) |
-  .notification_rules.important = [{"kind":"mention"},{"kind":"wait","minutes":10},{"kind":"mention"}]' <<<"$O")" > /dev/null
+  .notification_rules.important = [{"kind":"mention"},{"kind":"wait","wait_seconds":600},{"kind":"mention"}]' <<<"$O")" > /dev/null
 IVAN=$(curl -s "${A[@]}" "$API/users?q=ivan" | jq -r '.items[0].id'); PETR=$(curl -s "${A[@]}" "$API/users?q=petr" | jq -r '.items[0].id')
-curl -s "${A[@]}" $API/users/$IVAN/notification-rules | jq -c '[.important[] | .minutes // .kind]'   # ["mention",10,"mention"]
-curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -c '[.important[] | .minutes // .kind]'   # ["call","mention",5,"mention"]
+curl -s "${A[@]}" $API/users/$IVAN/notification-rules | jq -c '[.important[] | .wait_seconds // .kind]'   # ["mention",600,"mention"]
+curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -c '[.important[] | .wait_seconds // .kind]'   # ["call","mention",300,"mention"]
 
 # an Admin sets three Mentions; the Audit log shows the diff; the limit holds
 E=$(curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -r .etag)
@@ -150,8 +153,8 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/users/$PETR/notification-rules -
 curl -s "${A[@]}" "$API/audit-log?action=notification_rules.updated" | jq -r '.items[0].actor.login'      # admin
 E=$(curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -r .etag)
 curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/users/$PETR/notification-rules -d '{"state":"custom",
-  "normal":[{"kind":"mention"},{"kind":"wait","minutes":61}],"important":[{"kind":"mention"}]}' | jq -c '[.status, .errors[0].pointer]'
-# [422,"/normal/1/minutes"]
+  "normal":[{"kind":"mention"},{"kind":"wait","wait_seconds":90}],"important":[{"kind":"mention"}]}' | jq -c '[.status, .errors[0].pointer]'
+# [422,"/normal/1/wait_seconds"]
 curl -s "${S[@]}" -X POST $API/me/notification-rules/reset | jq -r .state                             # organization
 ```
 
@@ -174,6 +177,9 @@ Organization whose important rule calls, `call` on one that already calls throug
 - "Call" and "Don't call" keep the Organization's rules as they were when the User chose them (journal D569), so a
   later change of the Organization's rules reaches only the Users in `organization`.
 - Migration `0039` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- A wait is `wait_seconds` in the API and in the stored rules, a multiple of 60, as every duration of the API is in
+  seconds (maintainer's decision Q4 of the plan review); C-31 and `notification_rule.limits` speak in minutes, which the
+  multiple keeps, and the profile (S-153) shows and edits minutes.
 
 ## Coverage
 

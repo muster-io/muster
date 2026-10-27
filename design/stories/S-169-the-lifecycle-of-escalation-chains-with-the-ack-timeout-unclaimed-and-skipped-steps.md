@@ -52,11 +52,12 @@ acceptance:
   - "[C-32.FR-6, C-32.AC-4, C-17.FR-1] When the first chain of an Alert Group starts, its ack timeout timer is removed and no notice follows; when it becomes firing again, the ack timeout starts over only if no chain starts; an Alert Group on which no chain applies gets the notices of C-17.AC-1 (`timers_test.go`)."
   - "[C-32.FR-7, C-32.AC-5, C-17.FR-3, C-17.FR-11] After every chain started on an Alert Group has passed its last step without an acknowledgement, it is Unclaimed and records `unclaimed` once; a chain of a Team that joins afterwards makes it no longer Unclaimed while it runs, and it is Unclaimed again, recording `unclaimed`, once that chain has run out (`escalation_test.go`, `runs_integration_test.go`)."
   - "[C-32.FR-14, C-32.AC-8, C-25.FR-9, C-32.AC-15, C-09.FR-22] A step limited to Working hours is skipped outside those of the chain's owning Team — else the Organization's — and made inside them; a step whose Severity condition the Alert Group does not meet, a `page_on_call` step whose Schedule has a gap now, and a person named by a step who has become a Viewer or been disabled since it was saved are skipped, each recording the Quiet `escalation_step_skipped` with the chain, the step and the reason (`outside_working_hours`, `severity`, `schedule_gap`, `viewer`, `disabled`), and the chain goes on with its next step at once (`engine_test.go`)."
-  - "[C-32.FR-15, C-32.AC-8, C-32.FR-3] A `wait` step delays the next one by its minutes on the business clock; \"Repeat from step 3, up to 2 times\" makes steps 3 to 6 three times in all and then goes on (`engine_test.go`)."
+  - "[C-32.FR-15, C-32.AC-8, C-32.FR-3] A `wait` step delays the next one by its `wait_seconds` on the business clock; \"Repeat from step 3, up to 2 times\" makes steps 3 to 6 three times in all and then goes on (`engine_test.go`)."
   - "[C-32.FR-16, C-32.AC-16] A run keeps the steps its chain had when it started until it stops or starts over; a change of the chain while it runs leaves that run on its old steps, and the next run takes the new ones (P-73) (`runs_test.go`)."
   - "[C-32.FR-18, C-09.FR-1, C-32.AC-17] `getAlertGroup` reads `escalation_chains`: each chain of its current start with its state (`running`, `ran_out`, `stopped`), the current step and `next_step_at`; `listEscalationChainRuns` (`escalation-chains:read`) lists a chain's recent runs, newest first, each with its Alert Group, its steps made and skipped with their reasons, and what stopped it — the Command and its actor — or that it ran out (`runs_test.go`, `escalation_runs_test.go`)."
   - "[C-15.FR-2] Outgoing webhooks in events mode receive `escalation_step_skipped` one to one, with the chain, the step and the reason (`body_test.go`)."
   - "[C-32.FR-5] Steps are `timers` rows of the kind `escalation_step` that any replica claims with its lease, and every step runs as a system transition of the dispatcher with Muster as the actor; two replicas make each step once, so a lost Leader never stops a chain (NFR-4) (`runs_integration_test.go`)."
+  - "[C-32.FR-4, C-32.FR-5] The timer of a run has the run as its subject — `escalation_run_id` set, `alert_group_id` and `storm_id` null — so two chains running on one Alert Group, the Route's and a Team's, each keep their own `escalation_step` timer beside the Alert Group's Reminder or Snooze timer, and each fires its own run's step, reading the Alert Group through the run; `timers_alert_group_key` and `UpsertTimer` are unchanged; stopping a run deletes its timer, and deleting the Alert Group deletes its runs and their timers (`runs_integration_test.go`, `db_test.go`)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
 issue: 458
@@ -111,9 +112,21 @@ issue: 458
     belongs to); indexes `(org_id, alert_group_id, generation)` and `(org_id, chain_id, started_at DESC)`.
   - `escalation_run_steps`: `org_id`, `run_id` (FK, cascade), `seq`, `number`, `kind`, `at`, `outcome`, `reason`;
     primary key `(run_id, seq)` — what "How it went" lists, pruned with the Alert Group's details.
-  - `timers`: `kind` gains `escalation_step` and the table `escalation_run_id` (FK, cascade); `timers_subject_v2_check`
-    (an `escalation_step` has both `alert_group_id` and `escalation_run_id`), `NOT VALID` then validated; a unique
-    partial index `(escalation_run_id) WHERE kind = 'escalation_step'`.
+  - `timers`: `kind` gains `escalation_step` through `timers_kind_v2_check`, which replaces the inline CHECK of `0001`
+    (named `timers_kind_check` by PostgreSQL) — added `NOT VALID`, validated in a second transaction, the old one
+    dropped in a third, like the subject CHECK below — and the table gains `escalation_run_id` (FK `escalation_runs`,
+    `ON DELETE CASCADE`). The subject of a step's timer is its run, not its Alert Group: `alert_group_id` and `storm_id`
+    are null. So the unique index `timers_alert_group_key` (`(alert_group_id, kind) WHERE alert_group_id IS NOT NULL`)
+    and `UpsertTimer` of `internal/groups/query.sql`, whose `ON CONFLICT` infers it, stay untouched: the runs of several
+    chains on one Alert Group (C-32.FR-4) each have a timer, and 0.1 replicas of a rolling update keep setting their ack
+    timeout, Reminder and Snooze timers with the statement they have. `timers_subject_v2_check` replaces
+    `timers_subject_check`: `storm_calm_check` → `storm_id` set, the others null; `escalation_step` →
+    `escalation_run_id` set, `alert_group_id` and `storm_id` null; every other kind → `alert_group_id` set, the others
+    null; added `NOT VALID`, validated in a second transaction, the old one dropped in a third, as `0010` does for a
+    CHECK. A unique partial index `timers_escalation_run_key (escalation_run_id) WHERE kind = 'escalation_step'` keeps
+    one timer per run. The run cascades from its Alert Group and its timer from the run, so deleting an Alert Group
+    still deletes every timer about it. `schema.md` §4.10 says that the timers of runs name their run and why, §5 that
+    the worker claims them like any timer, and §2 names `escalation` among the writers of `timers`.
   - `timeline_entries` gains `escalation_run_id`, `escalation_chain_id` and `step_number`; the kind and event exist
     since `_v4` (S-148).
   - `alert_groups.chain_generation bigint NOT NULL DEFAULT 0`, which each start or start-over of the chains raises.
@@ -134,15 +147,19 @@ issue: 458
   later ends Unclaimed while it runs (FR-7).
 - **Escalation** (`internal/escalation`): `runs.go` — the runs, their sources, the snapshot of steps, their states, the
   reads, and the implementation of `groups.ChainRuns`, which writes `escalation_runs` and their timers in the
-  dispatcher's transaction; `engine.go` — `FireStep`, the handler of the timer kind, takes the current step and makes
-  it or skips it — its Working hours through `WorkingHoursOf` at the business clock, its Severity condition against the
-  Alert Group's level, a `page_on_call` step's gap through `schedules.OnCallAt` (S-131), the current state of the people
-  a step names — then waits, repeats or goes on at once, and dispatches `EscalationStepSkipped` and `ChainsRanOut`; a
-  run is `ran_out` once its last step is made, and Acknowledge, Snooze and Resolve stop only the runs that are still
-  `running`, leaving a run that ran out as it is; a step that Pages is handed to `StepPages`, an interface declared
-  here, which this story wires to nothing.
-- **Timers** (`internal/timers`): the claim returns `escalation_run_id`; the kind is registered in the runtime with its
-  handler.
+  dispatcher's transaction — the timers through its own upsert in `internal/escalation/query.sql`, `ON CONFLICT
+  (escalation_run_id) WHERE kind = 'escalation_step'`, never `UpsertTimer` — and deletes a run's timer when the run
+  stops; `engine.go` — `FireStep`, the handler of the timer kind, reads the run by the timer's `escalation_run_id`,
+  takes its Alert Group through the run (`escalation_runs.alert_group_id`) and locks it through the dispatcher, does
+  nothing when the run is no longer `running`, then takes the current step and makes it or skips it — its Working hours
+  through `WorkingHoursOf` at the business clock, its Severity condition against the Alert Group's level, a
+  `page_on_call` step's gap through `schedules.OnCallAt` (S-131), the current state of the people a step names — then
+  waits, repeats or goes on at once, and dispatches `EscalationStepSkipped` and `ChainsRanOut`; a run is `ran_out` once
+  its last step is made, and Acknowledge, Snooze and Resolve stop only the runs that are still `running`, leaving a run
+  that ran out as it is; a step that Pages is handed to `StepPages`, an interface declared here, which this story wires
+  to nothing.
+- **Timers** (`internal/timers`): the claim returns `escalation_run_id`, which `Timer` gains beside the nullable
+  `AlertGroupID`; the kind is registered in the runtime with its handler.
 - **Event tables and SPA** (`internal/delivery/enqueue.go`, `internal/groups/events_test.go`,
   `web/src/components/timeline.tsx`): the row of `escalation_step_skipped` (nothing in a messenger) in
   `delivery.Table`, counted by `enqueue_test.go`; the table-driven test of the closed table covers it and `unclaimed`
@@ -166,7 +183,9 @@ issue: 458
    Working hours of a Team and of the Organization, Severity conditions, a gap, a Viewer and a disabled person, and a
    change of the chain while a run goes on.
 3. Wire the points of C-32.FR-5 into the dispatcher with the ack timeout and Unclaimed. Check: `escalation_test.go` (a
-   row per point, the rows of C-32.AC-18), `timers_test.go`.
+   row per point, the rows of C-32.AC-18), `timers_test.go`; `runs_integration_test.go` starts the Route's and a Team's
+   chain on one Alert Group with a Reminder pending and finds three timers, fires both steps, and deletes the Alert
+   Group.
 4. Add the reads, the webhook event, the fixture and the log events; add the spec. Check: `make generate-check`;
    `body_test.go`; the web tests.
 5. Confirm P-70 and P-73, write the documentation and `test/e2e/escalation_runs_test.go`. Check: the Verification below;
@@ -231,6 +250,13 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
 - New Alerts that remove an acknowledgement and Maintenance windows, which C-32.FR-5 mentions, are specified later in
   L2; nothing of them is here.
 - Migration `0041` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- The timers of runs name the run instead of the Alert Group (plan review, H2): `timers_alert_group_key` allows one
+  timer per Alert Group and kind, and narrowing it would break `UpsertTimer`'s `ON CONFLICT` inference and the 0.1
+  replicas of a rolling update. S-155 does the same for the timers of Notification rule runs.
+- Interim until S-155 (plan review, L6): the first chain that starts removes the ack timeout timer (C-32.FR-6), while a
+  `page_*` step Pages nobody yet, so on `edge` an Alert Group on a Route or Team with a chain gets neither ack timeout
+  notices nor Pages. Until S-155 merges, configure no Escalation chain on Routes or Teams of an installation that relies
+  on the ack timeout, such as the test environment; the end-to-end tests of this story run on their own data.
 
 ## Coverage
 

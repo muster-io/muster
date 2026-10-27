@@ -33,6 +33,7 @@ files_touched:
   - web/src/components/app-shell.test.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/teams.spec.ts
@@ -41,6 +42,7 @@ files_touched:
   - web/e2e/navigation.spec.ts
   - web/e2e/routes.spec.ts
   - web/e2e/destinations.spec.ts
+  - web/e2e/phone-width.spec.ts
 acceptance:
   - "[C-25.FR-3, C-25.AC-10] The main navigation has \"Teams\" for every Role; the Teams list shows each Team with its name, slug and how many people are in it, and \"New Team\" for an Admin; the Team page shows the name, slug and description, and \"People\" with each person's Role, source — \"added by hand\" or the identity provider group that matched — linked messengers, and \"Remove\" only for people added by hand; \"Add person\" picks a User; a Responder sees the pages without the controls that change them, in English and in Russian (`team-people.test.tsx`, `teams.spec.ts`)."
   - "[C-25.FR-4, C-03.FR-5] The Team page's \"Identity provider groups\" and the Role mapping of the OIDC settings both edit entries of a claim and a group, the claim offered from the `claims_supported` of the last connection check with the groups claim first, with the hint \"Checked at every sign-in, like the Role mapping: each entry reads its own claim, and `a/b/*` takes the whole subtree. The Role of the people does not change.\" on the Team page; an entry the server refuses shows its message at the entry (`claim-entries-editor.test.tsx`, `oidc-settings.spec.ts`)."
@@ -93,13 +95,17 @@ issue: 408
 - **Forms**: "Owning Team" (a select of the Teams with "None") in the section "Severity, Escalation chains and owner"
   of `route-severity-and-owner.tsx` and in `destination-form.tsx`, with the hint above; the Audit log names
   `/owning_team_id` "Owning Team", `/idp_entries` "Identity provider groups", `/working_hours` "Working hours".
-- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, new): `teamRead` builds a complete `Team` read with neutral
-  values, overridable field by field, as S-166's builders do for Destinations and Connections; this story's tests and
-  every later one build Team reads only through it, and a later story that adds a required field to the Team read
-  (S-139) sets its neutral value there. This story waits for S-118 and S-121, which add Team fields before it.
+- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, S-115): the builders of Team reads that S-115 created and
+  S-117, S-118 and S-121 extended; this story's tests and every later one build Team reads only through them, adding
+  what the pages need, and a later story that adds a required field to the Team read (S-139, S-154) sets its neutral
+  value there.
 - **Documentation links** (`docs-links.json`): `page.teams` → `concepts/teams.md`, `field.team_idp` →
   `concepts/teams.md#membership-from-the-identity-provider`, `field.working_hours` → `concepts/teams.md#working-hours`;
-  the anchors exist from S-115 and S-117.
+  the anchors exist from S-115 and S-117. `GUIDE_ABOUT` of `web/src/components/docs-link.tsx`, which `satisfies
+  Record<PageDocsKey, …>` over every `page.*` key, gains `page.teams` with the text `docs.guides.teams` ("Teams" /
+  «Команды») in both locales, so the Guide link reads "Guide: Teams" and the TypeScript check passes.
+- **Phone width** (`web/e2e/phone-width.spec.ts`): "Teams" makes 9 links in the main navigation instead of 8, which the
+  spec counts at 360 pixels; it still scrolls inside itself.
 - **Texts** (EN / RU), from C-25's UI and the approved mockups: "Teams" / «Команды», "New Team" / «Новая команда»,
   "People" / «Участники», "Add person" / «Добавить участника», "added by hand" / «вручную», "Identity provider groups" /
   «Группы провайдера учётных записей», the hint above / «Проверяются при каждом входе, как сопоставления ролей: у

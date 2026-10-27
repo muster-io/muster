@@ -27,6 +27,7 @@ files_touched:
   - internal/schedules/schedules_integration_test.go
   - internal/api/schedules.go
   - internal/api/schedules_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/runtime/runtime.go
   - internal/teams/teams.go
@@ -44,7 +45,7 @@ acceptance:
   - "[C-27.FR-1, C-27.FR-13, C-25.FR-1, C-25.FR-2] `createSchedule` makes a Schedule of a Team with a name unique in that Team (`409` `name_taken`), a time zone — the Organization's when omitted (`schedule.time_zone`) — and its Rotation layers; the first Schedule of a Team reads `main` true and a later one `main` false; `updateSchedule` with `main` true makes it the Team's main Schedule and the previous one not main in one transaction; `getSchedule`, `updateSchedule` with `If-Match` (`412` when stale, `428` without) and `deleteSchedule` work as for Teams; every change is an Audit log entry `schedule.created`, `schedule.updated` or `schedule.deleted` with a before/after diff, and `muster_schedule_info{schedule,name}` has one series per Schedule (`schedules_test.go`, `schedules_integration_test.go`)."
   - "[C-27.FR-2] A Rotation layer limited to Friday 19:00–09:00 has its Shift from Friday 19:00 to Saturday 09:00, which belongs to Friday: its person is On-call on Friday at 23:00 and on Saturday at 08:00, nobody on Saturday at 10:00 and on Thursday at 23:00; a window whose end equals its start is refused with `422` `out_of_range` at `/rotation_layers/{i}/limits/end` (`rotation_test.go`, `schedules_test.go`)."
   - "[C-27.FR-2, C-27.AC-1] With the two Rotation layers of scenario 1 in Europe/Berlin — below, weekly Shifts handed over on Monday at 10:00 among petr, sergey and olga; above, weekly Shifts limited to Monday to Friday 11:00–19:00 among olga and petr — `getScheduleOnCall` gives the upper Rotation layer's person on a Wednesday at 15:00 and the lower one's at 21:00 and on the Saturday at 15:00; the lower Rotation layer's handover is at 09:00Z on the Monday before the last Sunday of March and at 08:00Z on the Monday after it, 10:00 in Berlin both times (`rotation_test.go`, `schedules_test.go`)."
-  - "[C-27.FR-2, C-27.AC-3] Saving a Rotation layer that names a Viewer, a disabled User or a User who is not in the Team is refused with `422` `not_pageable` at the person's pointer, `/rotation_layers/{i}/user_ids/{j}`, with the `reason` `viewer`, `disabled` or `not_in_team`, for the people the save adds to the Rotation layer; a person already in it whom the stored version keeps — one disabled since — does not refuse the save, so a rename of the Schedule still saves; a Shift length other than a day or a week takes whole hours from 1 (`422` `out_of_range` otherwise) (`schedules_test.go`)."
+  - "[C-27.FR-2, C-27.AC-3] Saving a Rotation layer that names a Viewer, a disabled User or a User who is not in the Team is refused with `422` `not_pageable` at the person's pointer, `/rotation_layers/{i}/user_ids/{j}`, with the `reason` `viewer`, `disabled` or `not_in_team`, for the people the save adds to the Rotation layer; a person already in it whom the stored version keeps — one disabled since — does not refuse the save, so a rename of the Schedule still saves; a Shift length other than a day or a week takes `shift_seconds`, whole hours from one hour — a multiple of 3600 from 3600; `422` `out_of_range` at `/rotation_layers/{i}/shift_seconds` otherwise, 5400 included (`schedules_test.go`)."
   - "[C-27.FR-3, C-27.FR-6, C-27.AC-2, C-27.AC-10] An Override that makes petr On-call on a Wednesday 11:00–21:00 makes him On-call from 11:00 to 19:00 over the upper Rotation layer and from 19:00 to 21:00 over the lower one, and leaves the On-call of 10:00 and 22:00 unchanged; it records `schedule_override.created` with its people and span, and the fake Mattermost, Telegram, Slack and bridge servers record no new message or direct message; of two Overrides that overlap, the person of the one created last is On-call in the overlap; an Override with `replaces_user_id` changes nothing in the On-call (`result_test.go`, `overrides_test.go`, `schedules_test.go`)."
   - "[C-27.FR-6, C-27.AC-3] `createScheduleOverride` by a Responder who is not in the Team gets `409` `not_in_team`, by a Viewer `403`; an Override whose person who takes the Shift is a Viewer, disabled or outside the Team gets `422` `not_pageable` at `/user_id`, while one whose `replaces_user_id` names a disabled User or someone outside the Team is saved; an Admin who is not in the Team creates one; `updateScheduleOverride` with a stale `If-Match` gets `412`; an Override that ends before the business clock's now, or whose end is not after its start, gets `422` `out_of_range` at `/end`; changing or deleting an Override that has ended gets `409` `override_ended` (`overrides_test.go`, `schedules_test.go`)."
   - "[C-27.FR-4, C-27.FR-5, C-27.AC-4] After a User of the upper Rotation layer is disabled — or turned into a Viewer, or taken out of the Team — the On-call during their Shifts is the person of the lower Rotation layer, `getScheduleOnCall` lists the warning `disabled`, `viewer` or `not_in_team` with the person and the Rotation layer, and where no Override and no other Rotation layer has a Shift with someone who may be Paged the segment has no person: a gap; an Override whose person may not be Paged is skipped the same way (`result_test.go`)."
@@ -105,7 +106,8 @@ issue: 420
     `Schedule` = `ScheduleInput` + `id`, `team` (`TeamRef`), `rotation_layers` (`RotationLayer`[]), `created_at`,
     `etag`; `ScheduleList`; `ScheduleRef` {`id`, `name`, `team` (`TeamRef`)}; `RotationLayerInput` {`id` (optional, an
     existing Rotation layer's, which keeps its identity), `name`, `user_ids` (`PublicId`[], at least one, in turn),
-    `shift_length` (`day`, `week`, `hours`), `shift_hours` (integer ≥ 1, required with `hours`), `handover_time`
+    `shift_length` (`day`, `week`, `hours`), `shift_seconds` (integer, a multiple of 3600 and at least 3600, required
+    with `hours` and refused with the others — durations are `*_seconds` in the API, `api/README.md`), `handover_time`
     (`HH:MM`), `handover_day` (`Weekday`, required with `week`), `start_date` (a date), `limits` (`RotationLimits` or
     null)}; `RotationLimits` {`days` (`Weekday`[], at least one), `start` and `end` (`HH:MM`, optional together; an
     `end` earlier than `start` crosses midnight, and an `end` equal to `start` is refused)};
@@ -129,17 +131,21 @@ issue: 420
     optional property of `Problem`: `{type, id, name}[]`, the kind of each object that holds the resource (`schedule`
     here, `escalation_chain` from S-154), its `public_id` and its name; `team_in_use` (declared
     in S-115) raised for a Team with Schedules, naming them in `in_use_by`; `name_taken`; `out_of_range` at `/end`,
-    `/to`, `/rotation_layers/{i}/shift_hours` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
+    `/to`, `/rotation_layers/{i}/shift_seconds` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
     `conflict`) for a change or a deletion of an Override that has ended.
+  - `internal/api/problem.go`: `problemFor` maps the errors of `schedules` — not found, `name_taken`, a stale version,
+    `not_in_team`, `override_ended`, `schedule_in_use` and `team_in_use` with `in_use_by` — and `Problem` gains the
+    member `InUseBy` that `writeProblem` writes as `in_use_by`; the L1 `inUseProblem` of Lookup tables generalizes to
+    it, its `LinkRules` staying as they are; the error item of `not_pageable` gains `reason` through `gen.ProblemError`.
 - **Schema** (migration `0029_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
   - `schedules`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^SC[0-9A-HJKMNP-TV-Z]{12}$')`), `team_id` (FK
     `teams`), `name`, `time_zone`, `main boolean NOT NULL DEFAULT false`, `version`, `created_at`, `updated_at`;
     unique `(team_id, lower(name))`; unique partial index `(team_id) WHERE main` — one main Schedule per Team.
-  - `rotation_layers`: `id`, `org_id`, `public_id` (`RY`), `schedule_id` (FK, `ON DELETE CASCADE`), `position`
-    (1 for the lowest), `name`, `shift_length` (`CHECK IN ('day', 'week', 'hours')`), `shift_hours` (set exactly with
-    `hours`, ≥ 1), `handover_time` (`HH:MM` pattern), `handover_day` (set exactly with `week`), `start_date date`,
-    `limit_days text[]`, `limit_start`, `limit_end` (`limit_end <> limit_start` when both are set — an end earlier than
-    the start crosses midnight); unique `(schedule_id, position)`.
+  - `rotation_layers`: `id`, `org_id`, `public_id` (`RY`), `schedule_id` (FK, `ON DELETE CASCADE`), `position` (1 for
+    the lowest), `name`, `shift_length` (`CHECK IN ('day', 'week', 'hours')`), `shift_seconds` (set exactly with
+    `hours`, a positive multiple of 3600), `handover_time` (`HH:MM` pattern), `handover_day` (set exactly with `week`),
+    `start_date date`, `limit_days text[]`, `limit_start`, `limit_end` (`limit_end <> limit_start` when both are set —
+    an end earlier than the start crosses midnight); unique `(schedule_id, position)`.
   - `rotation_layer_users`: `org_id`, `rotation_layer_id` (FK, cascade), `position`, `user_id` (FK `users`); primary
     key `(rotation_layer_id, position)`.
   - `schedule_overrides`: `id`, `org_id`, `public_id` (`VR`), `schedule_id` (FK, cascade), `user_id`,
@@ -151,9 +157,9 @@ issue: 420
 - **Schedules** (`internal/schedules`, a flat domain package, ADR-0016): validates, writes through its queries,
   records the Audit log (`schedule.created`, `schedule.updated`, `schedule.deleted`, `schedule_override.created`,
   `schedule_override.updated`, `schedule_override.deleted`) and sends the hint `schedule`:
-  - `rotation.go` — the Shifts of a Rotation layer over a period: the first Shift starts on `start_date` at the
-    handover time with the first person and each lasts a day, a week (handed over on `handover_day`) or `shift_hours`
-    of wall-clock time; times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00
+  - `rotation.go` — the Shifts of a Rotation layer over a period: the first Shift starts on `start_date` at the handover
+    time with the first person and each lasts a day, a week (handed over on `handover_day`) or `shift_seconds` of
+    wall-clock time; times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00
     across a change of the clocks; the limits cut each Shift to their days and time of day: a window whose end is
     earlier than its start runs until the end on the next day, and with days of the week each window belongs to the day
     it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00 (C-27.FR-2).
@@ -314,6 +320,9 @@ None open. Settled:
 - "May be Paged" is the current state of the person, not their state at the time of a past segment: the Result of a
   week after someone was disabled shows the Rotation layer below for the whole week, which is what the warnings say.
 - The only check that looks at a Team (C-25.FR-1) is the precondition of Overrides; every other check is the Role's.
+- A Shift length in hours is `shift_seconds` in the API, a multiple of 3600, as every duration of the API is in
+  seconds (`api/README.md`, maintainer's decision Q4 of the plan review); C-27.FR-2 speaks of whole hours, which the
+  multiple keeps, and the Schedule page (S-135) shows and edits it in hours.
 - `getScheduleOnCall` gives the FE the Shifts of each Rotation layer and the Overrides as well as the Result, which is
   what the two-week view draws (S-135).
 

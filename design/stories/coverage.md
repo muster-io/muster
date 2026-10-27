@@ -54,7 +54,7 @@ for L2](#l1-requirements-revised-for-l2)
 | C-24 Slack | Slack | 37 | S-097, S-098, S-099, S-100, S-101, S-102, S-105, S-103, S-104 | yes | 37 of 37 |
 | C-25 Teams | L2 Teams | 26 | S-115, S-116, S-117, S-118, S-163, S-121, S-170, S-119, S-120, S-124, S-125, S-131, S-133, S-135, S-138, S-139, S-140, S-171, S-141, S-142, S-143, S-144, S-154, S-169, S-158 | yes | 26 of 26 |
 | C-26 Routing to Teams and by Severity | L2 Teams | 24 | S-111, S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169 | yes | 24 of 24 |
-| C-27 Schedules | L2 On call | 24 | S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137, S-167, S-150, S-154, S-172 | yes | 24 of 24 |
+| C-27 Schedules | L2 On call | 24 | S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137, S-150, S-154, S-172 | yes | 24 of 24 |
 | C-28 Mentions and buttons of a Destination | L2 Teams, L2 On call | 20 | S-113, S-114, S-138, S-139, S-140, S-171, S-165, S-141, S-142, S-143, S-144 | yes | 20 of 20 |
 | C-29 Compact message layout | L2 Teams | 16 | S-125, S-126, S-127, S-128, S-129, S-130, S-168 | yes | 16 of 16 |
 | C-30 Notification gateways | L2 Paging | 18 | S-145, S-167, S-146, S-147, S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158 | yes | 18 of 18 |
@@ -1007,7 +1007,7 @@ S-162, S-112, S-121, S-170, S-122, S-119, S-123, S-124, S-140, S-169
 ## C-27
 
 [Schedules](../prd/l2/C-27-schedules.md) · L2 On call · stories: S-131, S-132, S-133, S-164, S-134, S-135, S-136, S-137,
-S-167, S-150, S-154, S-172
+S-150, S-154, S-172
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -1018,7 +1018,7 @@ S-167, S-150, S-154, S-172
 | C-27.FR-5 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 and P-88 stay provisional until the test environment confirms them |
-| C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-167 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API (S-167) and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
+| C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
 | C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
 | C-27.FR-11 | S-131 | complete |  |
@@ -1238,6 +1238,7 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-17.FR-11 | S-169 | complete | `unclaimed` when the last chain runs out |
 | C-18.FR-4 | S-155 | complete | a Page by Mention reaches a person only through an Account link |
 | C-18.FR-6 | S-167 (part), S-150 (part) | complete | gateway contacts set only by their person, seen and removed by Admins (S-167, S-150) |
+| C-18.FR-10 | S-145 | complete | gateway-only Connections not offered to link an account through |
 | C-20.FR-1 | S-111 (part), S-112 (part), S-113 (part), S-114 (part), S-115 (part), S-118 (part), S-119 (part), S-120 (part), S-152 (part), S-153 (part) | complete | the default Notification rules (S-152, S-153) |
 | C-20.FR-9 | S-115 (part), S-119 (part) | complete |  |
 | C-22.FR-2 | S-139 (part), S-145 (part) | complete | group mentions and mentions of everyone in `info` (S-139); the roles (S-145) |

@@ -103,7 +103,7 @@ API=localhost:8080/api/v1; FWH=127.0.0.1:18093/_fake
 E=$(curl -s "${A[@]}" $API/escalation-chains/$CD | jq -r .etag)
 curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/escalation-chains/$CD -d "$(curl -s "${A[@]}" $API/escalation-chains/$CD |
   jq -c "{name, description, owning_team_id: .owning_team.id, steps: ([{kind: \"webhook\", destination_id: \"$WH\"}] +
-  [.steps[] | {kind, importance, schedule_id: .schedule.id, minutes}])}")" > /dev/null
+  [.steps[] | {kind, importance, schedule_id: .schedule.id, wait_seconds}])}")" > /dev/null
 curl -s -X PUT $FAM/groups/w1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"NodeDown"}}' > /dev/null
 PUTA w1 a '{"labels":{"category":"infra","system":"k8s","severity":"critical"}}'; NOTIFY w1 '{"reason":"first notification"}'; sleep 2
 curl -s $FWH/received/ops-bot | jq -c '[.[] | .body | fromjson | {event, chain: .escalation.chain.name, step: .escalation.step}]'

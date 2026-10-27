@@ -25,6 +25,7 @@ files_touched:
   - internal/escalation/chains_integration_test.go
   - internal/api/escalationchains.go
   - internal/api/escalationchains_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/routing/routes.go
   - internal/routing/query.sql
@@ -36,6 +37,7 @@ files_touched:
   - internal/api/teams.go
   - web/src/test/fixtures/teams.ts
   - internal/schedules/schedules.go
+  - internal/schedules/query.sql
   - internal/schedules/schedules_integration_test.go
   - internal/runtime/runtime.go
   - internal/metrics/catalogue.go
@@ -48,8 +50,8 @@ files_touched:
   - internal/auth/auth_integration_test.go
 acceptance:
   - "[C-32.FR-1, C-32.FR-19, C-25.FR-2] `createEscalationChain` makes a chain with a name unique in the Organization (`409` `name_taken`), a description, an optional `owning_team_id` and its ordered steps; `getEscalationChain`, `updateEscalationChain` with `If-Match` (`412` when stale, `428` without) and `deleteEscalationChain` work as for Teams; `listEscalationChains` filters by `team` — a Team's `public_id` or `mine` — and `q`; every change is an Audit log entry `escalation_chain.created`, `escalation_chain.updated` or `escalation_chain.deleted` with a before/after diff, and `muster_escalation_chain_info{chain,name}` has one series per chain (`chains_test.go`, `chains_integration_test.go`)."
-  - "[C-32.FR-3] A step is one of `page_on_call` (a Schedule of any Team, `normal` or `important`), `page_people` (`user_ids`, `normal` or `important`), `page_team` (a Team — the chain's owning Team when omitted — or `everyone` with `channel`, `here`, `all` or `everyone`), `call` (`call_target` `on_call` with a Schedule or `people` with `user_ids`, and `gateway_id` when more than one Notification gateway exists), `wait` (`minutes`), `webhook` (an outgoing webhook Destination in events mode or both) and `repeat` (`repeat_from`, an earlier step's number, and `repeat_times`); a step that Pages or sends takes `working_hours_only` and a `severity_condition`; other fields with a kind answer `422` at their pointer (`steps_test.go`)."
-  - "[C-32.FR-3, C-32.AC-15] Saving a step that names a Viewer or a disabled User — in `page_people` or `call` — answers `422` `not_pageable` at `/steps/{i}/user_ids/{j}` with the `reason` `viewer` or `disabled`, for the people the save adds, as S-131 does for Rotation layers; more than 20 steps, a wait outside 1 to 1,440 minutes, `repeat_times` above 10 or a `repeat_from` that is not an earlier step answer `422` `out_of_range` (`escalation.limits`); a `webhook` step naming a Destination that is not an outgoing webhook in events mode or both answers `422` `webhook_events_required` (`steps_test.go`)."
+  - "[C-32.FR-3] A step is one of `page_on_call` (a Schedule of any Team, `normal` or `important`), `page_people` (`user_ids`, `normal` or `important`), `page_team` (a Team — the chain's owning Team when omitted — or `everyone` with `channel`, `here`, `all` or `everyone`), `call` (`call_target` `on_call` with a Schedule or `people` with `user_ids`, and `gateway_id` when more than one Notification gateway exists), `wait` (`wait_seconds`, a whole number of minutes), `webhook` (an outgoing webhook Destination in events mode or both) and `repeat` (`repeat_from`, an earlier step's number, and `repeat_times`); a step that Pages or sends takes `working_hours_only` and a `severity_condition`; other fields with a kind answer `422` at their pointer (`steps_test.go`)."
+  - "[C-32.FR-3, C-32.AC-15] Saving a step that names a Viewer or a disabled User — in `page_people` or `call` — answers `422` `not_pageable` at `/steps/{i}/user_ids/{j}` with the `reason` `viewer` or `disabled`, for the people the save adds, as S-131 does for Rotation layers; more than 20 steps, a wait outside 1 to 1,440 minutes or not a whole number of minutes — `wait_seconds` not a multiple of 60 from 60 to 86400 —, `repeat_times` above 10 or a `repeat_from` that is not an earlier step answer `422` `out_of_range` (`escalation.limits`); a `webhook` step naming a Destination that is not an outgoing webhook in events mode or both answers `422` `webhook_events_required` (`steps_test.go`)."
   - "[C-30.FR-9, C-32.FR-3] A `call` step answers `422` `gateway_required` while no Notification gateway exists, and `422` `required` at `gateway_id` while several do; a chain whose `call` step names a gateway deleted since reads the warning `gateway_deleted` on that step (`steps_test.go`, `warnings_test.go`)."
   - "[C-32.FR-2, C-08.FR-1] Routes and Teams take `chain_entries` — each a chain with a `severity_condition`, `any` by default — in their inputs, reads and Audit log diffs, with `routes:write` and `teams:write`; the chain reads its `referrers` (each Route and Team with its condition) and `destinations` (those of its Routes and Teams, where it writes); `deleteEscalationChain` of a named chain answers `409` `chain_in_use` naming them in `in_use_by` (`routes_test.go`, `teams_test.go`, `chains_test.go`)."
   - "[C-32.FR-17] A chain reads `warnings`: `everyone_unsupported` for a `page_team` step whose Team mention or token one of its Destinations' Connections cannot mention, with the Destination and the reason of `MentionUnavailableReason` — such as a Telegram Destination — and `gateway_deleted` and `destination_deleted` for steps whose gateway or webhook Destination is gone (`warnings_test.go`)."
@@ -102,7 +104,8 @@ issue: 443
     `reason`}), `created_at`, `etag`; `EscalationChainList`; `EscalationChainRef` {`id`, `name`, `owning_team`};
     `EscalationStepKind` (`page_on_call`, `page_people`, `page_team`, `call`, `wait`, `webhook`, `repeat`);
     `PageImportance` (`normal`, `important`); `EscalationStepInput` {`kind`, `importance`, `schedule_id`, `user_ids`,
-    `team_id`, `everyone`, `call_target` (`on_call`, `people`), `gateway_id`, `minutes`, `destination_id`,
+    `team_id`, `everyone`, `call_target` (`on_call`, `people`), `gateway_id`, `wait_seconds` (a multiple of 60 within
+    `escalation.limits`; durations are `*_seconds` in the API, `api/README.md`), `destination_id`,
     `repeat_from`, `repeat_times`, `working_hours_only` (default false), `severity_condition` (`SeverityCondition` of
     S-121, default `any`)}; `ChainEntry` {`chain_id`, `severity_condition`}.
   - `RouteInput` and `TeamInput` gain `chain_entries` (`ChainEntry`[], optional; omitted on update keeps); `Route` and
@@ -112,14 +115,16 @@ issue: 443
     `escalation_chain`, `route` and `team`.
   - Problem codes: `chain_in_use` (`409` `conflict`, with `in_use_by`); `webhook_events_required` (`validation-failed`);
     `gateway_required` (declared by S-152); `not_pageable` (S-131) at `/steps/{i}/user_ids/{j}`; `name_taken`;
-    `out_of_range`; `unknown_id` at the step's reference.
+    `out_of_range`; `unknown_id` at the step's reference. `internal/api/problem.go` maps the errors of `escalation` —
+    not found, `name_taken`, a stale version, `chain_in_use` with its `in_use_by` (S-131's member), and
+    `webhook_events_required` — to their problems.
 - **Schema** (migration `0040_escalation_chains`, expand only; `schema.md` §2, §4.8, §4.15 and §4.18):
   - `escalation_chains`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^EC[0-9A-HJKMNP-TV-Z]{12}$')`), `name`,
     `description`, `owning_team_id` (FK `teams`, nullable), `version`, `created_at`, `updated_at`; unique `(org_id,
     lower(name))`; index `(org_id, owning_team_id)`.
   - `escalation_steps`: `id`, `org_id`, `chain_id` (FK, `ON DELETE CASCADE`), `position`, `kind` (`CHECK` of the seven
     kinds), `importance`, `schedule_id` (FK `schedules`), `team_id` (FK `teams`), `everyone` (the four names),
-    `call_target`, `gateway_connection_id` (FK `connections`), `minutes`, `destination_id` (FK `destinations`),
+    `call_target`, `gateway_connection_id` (FK `connections`), `wait_seconds`, `destination_id` (FK `destinations`),
     `repeat_from`, `repeat_times`, `working_hours_only boolean NOT NULL DEFAULT false`, `severity_condition` (the CHECK
     of S-121); a CHECK that each kind has exactly its fields; unique `(chain_id, position)`; indexes on `schedule_id`,
     `team_id`, `gateway_connection_id` and `destination_id`.
@@ -141,10 +146,12 @@ issue: 443
 - **Routing and Teams**: `chain_entries` in the inputs, views and diffs of Routes and Teams; `deleteTeam` refuses a Team
   that owns a chain with `team_in_use`, naming it (P-64 holds); a deleted Team's `team_escalation_chains` rows go with
   it.
-- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, S-119): the builders of Team reads set `chain_entries` and
+- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, S-115): the builders of Team reads set `chain_entries` and
   `chains` to `[]`, so that `make generate` keeps the TypeScript check of the web tests green.
-- **Schedules** (`internal/schedules/schedules.go`): `Referrers` lists the chains whose steps name the Schedule, so
-  `deleteSchedule` answers `schedule_in_use` (S-131).
+- **Schedules** (`internal/schedules/schedules.go`, `query.sql`): `Referrers` lists the chains whose steps name the
+  Schedule, so `deleteSchedule` answers `schedule_in_use` (S-131). It is a query of `schedules` over
+  `escalation_steps` and `escalation_chains` in `internal/schedules/query.sql`, not a call into `escalation`, since
+  `schedules` imports no package of Paging (S-155, S-169).
 - **Metric** (`internal/metrics/catalogue.go`): `muster_escalation_chain_info{chain,name}` (gauge, C-32), moved in
   reference.md from "Metrics added in L2".
 - **Shared tables**: reference.md moves `escalation-chains:read` and `escalation-chains:write` from "Permissions added
@@ -176,8 +183,8 @@ make dev > dev.log 2>&1 &
 # Viewer vic; the demo gateway GW (S-145); the Team "checkout" (TC) with no Schedule, created for the refusal below.
 API=localhost:8080/api/v1
 VIC=$(curl -s "${A[@]}" "$API/users?q=vic" | jq -r '.items[0].id')
-STEPS="[{\"kind\":\"page_on_call\",\"schedule_id\":\"$SM\",\"importance\":\"normal\"},{\"kind\":\"wait\",\"minutes\":10},
- {\"kind\":\"page_on_call\",\"schedule_id\":\"$SM\",\"importance\":\"important\",\"severity_condition\":\"critical\"},{\"kind\":\"wait\",\"minutes\":15},
+STEPS="[{\"kind\":\"page_on_call\",\"schedule_id\":\"$SM\",\"importance\":\"normal\"},{\"kind\":\"wait\",\"wait_seconds\":600},
+ {\"kind\":\"page_on_call\",\"schedule_id\":\"$SM\",\"importance\":\"important\",\"severity_condition\":\"critical\"},{\"kind\":\"wait\",\"wait_seconds\":900},
  {\"kind\":\"page_on_call\",\"schedule_id\":\"$SL\",\"importance\":\"important\",\"severity_condition\":\"critical\"},
  {\"kind\":\"page_team\",\"working_hours_only\":true},{\"kind\":\"repeat\",\"repeat_from\":3,\"repeat_times\":2}]"
 CP=$(curl -s "${A[@]}" $API/escalation-chains -d "{\"name\":\"payments\",\"owning_team_id\":\"$TP\",\"steps\":$STEPS}" | jq -r .id)
@@ -187,7 +194,8 @@ curl -s "${A[@]}" $API/escalation-chains/$CP | jq -c '{n: [.steps[].number], tea
 curl -s "${A[@]}" $API/escalation-chains -d "{\"name\":\"x\",\"steps\":[{\"kind\":\"page_people\",\"user_ids\":[\"$VIC\"],\"importance\":\"normal\"}]}" |
   jq -c '{status, e: .errors[0] | {pointer, code, reason}}'
 # {"status":422,"e":{"pointer":"/steps/0/user_ids/0","code":"not_pageable","reason":"viewer"}}
-curl -s "${A[@]}" $API/escalation-chains -d '{"name":"y","steps":[{"kind":"wait","minutes":1441}]}' | jq -c '[.status, .errors[0].code]'   # [422,"out_of_range"]
+curl -s "${A[@]}" $API/escalation-chains -d '{"name":"y","steps":[{"kind":"wait","wait_seconds":86460}]}' | jq -c '[.status, .errors[0].code]'   # [422,"out_of_range"]
+curl -s "${A[@]}" $API/escalation-chains -d '{"name":"y","steps":[{"kind":"wait","wait_seconds":90}]}' | jq -c '[.status, .errors[0].pointer]'   # [422,"/steps/0/wait_seconds"]
 
 # naming the chain on the Team and devops' chain on the Route; deleting what is named
 TE=$(curl -s "${A[@]}" $API/teams/$TP | jq -r .etag)
@@ -197,7 +205,7 @@ curl -s "${A[@]}" $API/escalation-chains/$CP | jq -c '{t: [.referrers.teams[].te
 # {"t":["payments"],"d":["payments-critical","payments-notice"]}
 curl -s "${A[@]}" -X DELETE $API/escalation-chains/$CP | jq -c '{status, code, by: [.in_use_by[].name]}'  # {"status":409,"code":"chain_in_use","by":["payments"]}
 curl -s "${A[@]}" -X DELETE $API/schedules/$SL | jq -c '{status, code, by: [.in_use_by[].type]}'        # {"status":409,"code":"schedule_in_use","by":["escalation_chain"]}
-CC=$(curl -s "${A[@]}" $API/escalation-chains -d "{\"name\":\"checkout\",\"owning_team_id\":\"$TC\",\"steps\":[{\"kind\":\"wait\",\"minutes\":5}]}" | jq -r .id)
+CC=$(curl -s "${A[@]}" $API/escalation-chains -d "{\"name\":\"checkout\",\"owning_team_id\":\"$TC\",\"steps\":[{\"kind\":\"wait\",\"wait_seconds\":300}]}" | jq -r .id)
 curl -s "${A[@]}" -X DELETE $API/teams/$TC | jq -c '{code, by: [.in_use_by[] | .type]}'          # {"code":"team_in_use","by":["escalation_chain"]}
 curl -s -o /dev/null -w '%{http_code}\n' "${R[@]}" -X DELETE $API/escalation-chains/$CP              # 403
 curl -s "${V[@]}" "$API/escalation-chains?team=$TP" | jq -r '.items[0].name'                        # payments
@@ -225,6 +233,9 @@ a person disabled after the save, which a rename of the chain still saves.
 - No chain runs yet: until S-169 a chain is configuration only, so "starts no Escalation chain" of C-25.AC-13 and
   C-26.FR-9 keeps holding.
 - `route.run_team_chains` (S-121) starts to act in S-169.
+- A wait is `wait_seconds`, a multiple of 60, as every duration of the API is in seconds (maintainer's decision Q4 of
+  the plan review); C-32 and `escalation.limits` speak in minutes, which the multiple keeps, and the chain page (S-158)
+  shows and edits minutes.
 - Migration `0040` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
 
 ## Coverage

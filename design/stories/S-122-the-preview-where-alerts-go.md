@@ -10,6 +10,7 @@ files_touched:
   - api/openapi.yaml
   - internal/routing/preview.go
   - internal/routing/preview_test.go
+  - internal/routing/reach.go
   - internal/routing/query.sql
   - internal/routing/routing_integration_test.go
   - internal/api/routes.go
@@ -58,11 +59,14 @@ issue: 411
 - **Routing** (`internal/routing/preview.go`): the Alerts of the period that the Route would take, as for the Group key
   preview (C-08.FR-5, the same period, cap and Static labels), grouped under the proposed key; for each group the
   highest Severity level of its Alerts (by the Organization's mapping) raised to the Minimum severity, its Teams by the
-  current classification of S-118 (`teams.Classifier`, read outside a Snapshot), and its reach by the rule of S-121 —
-  the Route's proposed entries whose condition the level meets and, with `deliver_to_teams`, the saved entries of each
-  of its Teams. The preview reads only; it writes nothing, records no Audit log entry and sends no hint. The
-  `routing.group_key_preview_examples` largest groups are listed; `destination_counts` covers every Alert Group the
-  Alerts would form, not only the listed ones.
+  current classification of S-118 (`teams.Classifier`, read outside a Snapshot), and its reach by S-121's
+  `routing.Reach` (`internal/routing/reach.go`) — the Route's proposed entries whose condition the level meets and, with
+  `deliver_to_teams`, the saved entries of each of its Teams. The rule is in `routing` itself, so the preview imports
+  neither `groups` nor `delivery`; it calls `Reach` with the unsaved entries as values, and the count of Alert Groups
+  per Destination over a set of reaches (`destination_counts`) goes beside it in `reach.go`, which the vectors of
+  `testdata/reach/` do not change. The preview reads only; it writes nothing, records no Audit log entry and sends no
+  hint. The `routing.group_key_preview_examples` largest groups are listed; `destination_counts` covers every Alert
+  Group the Alerts would form, not only the listed ones.
 - **Teams** (`internal/teams/classify.go`): the classifier answers outside the Snapshot's transaction too, from a
   read of the Team label, slugs and matchers.
 - **Settings**: `routing.group_key_preview_period`, `routing.group_key_preview_examples`,
