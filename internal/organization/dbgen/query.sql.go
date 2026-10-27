@@ -560,7 +560,7 @@ SET name                                         = $1,
     outgoing_heartbeat_proxy_password_ciphertext = $21,
     outgoing_heartbeat_proxy_password_key_id     = $22,
     outgoing_heartbeat_proxy_password_updated_at = $23,
-    buttons                                      = $24,
+    buttons                                      = coalesce($24::jsonb, buttons),
     outgoing_heartbeat_last_attempt_at = CASE WHEN $25::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
     outgoing_heartbeat_last_ok         = CASE WHEN $25::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
@@ -602,7 +602,8 @@ type UpdateSettingsParams struct {
 }
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
-// URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL.
+// URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
+// null button set keeps the stored one.
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,
 		arg.Name,
