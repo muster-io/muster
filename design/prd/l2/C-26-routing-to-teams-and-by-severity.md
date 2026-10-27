@@ -93,8 +93,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   (`organization.critical_is_urgent`) no longer act, in expand and contract steps. The 0.2.0 migration gives every Route
   marked urgent the Minimum severity critical. Until 0.3.0 the API keeps `urgent` on Routes and on Route profiles as a
   read-only field — `true` exactly when the Minimum severity is critical — and `critical_is_urgent` on the Organization
-  as a read-only `true`; requests that send them are accepted and the values ignored. 0.3.0 removes the fields and their
-  columns. The upgrade notes of 0.2.0 say: Routes marked urgent got the Minimum severity critical, which also makes
+  as a read-only `true`. Requests that send them are accepted: by the expand and contract rule of
+  [L2 §2](../L2.md#2-conventions), a Route request with `urgent: true` and no Minimum severity, as a 0.1 client sends
+  it, is read as the Minimum severity critical; `urgent: false`, and `urgent` beside a Minimum severity, change nothing;
+  `critical_is_urgent`, which the new form cannot express, is ignored. 0.3.0 removes the fields and their columns. The upgrade notes of 0.2.0 say: Routes marked urgent got the Minimum severity critical, which also makes
   their Alert Groups critical for Severity conditions, and an Organization that had turned "critical is Urgent" off now
   sees its critical Alert Groups as Urgent — a rise to critical ends their Snoozes and, where
   `route.urgent_rise_removes_ack` is on, their acknowledgements. The migration and the API also do this:
@@ -174,7 +176,8 @@ Checked with the fake Alertmanager, the fake messenger servers and the recording
   severity of a Route with an acknowledged warning Alert Group to critical keeps it acknowledged and starts no
   Escalation chain.
 - **C-26.AC-8** After the 0.2.0 migration, a Route that was marked urgent has the Minimum severity critical, reads
-  `urgent: true`, and an update that sends `urgent: false` changes nothing; `route-profiles` returns `paging` and
+  `urgent: true`, and an update that sends `urgent: false` changes nothing, while a create or an update that sends
+  `urgent: true` without `minimum_severity` gives the Minimum severity critical; `route-profiles` returns `paging` and
   `informational`, and `organization` reads `critical_is_urgent: true` whatever an update sends. An open warning Alert
   Group of a Route marked urgent is critical and Urgent after the migration, with no new Timeline entry and no new
   delivery; a new Route created with the Minimum severity critical has `routes.urgent` set; a Route created without

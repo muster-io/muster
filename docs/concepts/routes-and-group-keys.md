@@ -122,7 +122,9 @@ Route's "rise to Urgent removes the acknowledgement" is on.
 
 From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
 got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
-`critical_is_urgent` on the Organization as read-only fields until 0.3.0, and ignores them in requests. See the
+`critical_is_urgent` on the Organization until 0.3.0. A Route request with `urgent: true` and no `minimum_severity`, as
+a 0.1 client sends it, sets the Minimum severity critical; `urgent: false`, `urgent` beside `minimum_severity`, and
+`critical_is_urgent` change nothing. See the
 [upgrade notes of 0.2.0](../install/versions.md#upgrade-notes).
 
 ## Group keys
