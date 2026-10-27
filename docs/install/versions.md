@@ -94,9 +94,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
-    level on the Alert Groups it changes, while `urgent` agrees, since 0.2.0 writes `routes.urgent`. The window lasts as
-    long as the rollout; an Alert Group that a 0.1 replica changed meanwhile keeps the lower level until a later change
-    of its Alerts, or of the Route's Minimum severity, computes it again.
+    level on the Alert Groups it changes, with `urgent` true, since 0.2.0 writes `routes.urgent`. Until a later change
+    of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
+    Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

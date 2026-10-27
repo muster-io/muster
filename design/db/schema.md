@@ -1400,14 +1400,15 @@ at start, by that notification and by the development clock, and claims one row 
 ```sql
 WITH due AS MATERIALIZED (
     SELECT id FROM open_group_updates
-     WHERE org_id = $1 AND (lease_until IS NULL OR lease_until <= $real_now)
+     WHERE org_id = $1 AND kind = ANY($kinds) AND (lease_until IS NULL OR lease_until <= $real_now)
      ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
   FROM due WHERE u.org_id = $1 AND u.id = due.id
 RETURNING u.id, u.kind, u.route_id, u.after_alert_group_id;
 ```
 
-It then walks the open Alert Groups of the row's scope by id after `after_alert_group_id`, 50 at a time, each batch in
+A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows
+it. It then walks the open Alert Groups of the row's scope by id after `after_alert_group_id`, 50 at a time, each batch in
 one transaction that checks the lease, locks the Alert Groups, applies the change through the dispatcher as a system
 transition, and moves `after_alert_group_id` and the lease (60 s, real clock) on; the transaction of the last batch
 deletes the row. A lost lease leaves the row to any replica, which resumes after the last committed batch; an Alert

@@ -36,6 +36,8 @@ files_touched:
   - internal/groups/commands_test.go
   - internal/groups/dispatcher.go
   - internal/groups/timers.go
+  - internal/groups/move.go
+  - internal/groups/list_integration_test.go
   - internal/groups/read.go
   - internal/groups/events.go
   - internal/groups/query.sql
@@ -57,6 +59,7 @@ files_touched:
   - test/e2e/lifecycle_test.go
   - docs/concepts/routes-and-group-keys.md
   - docs/concepts/alert-groups.md
+  - docs/configure/organization.md
   - docs/install/versions.md
 acceptance:
   - "[C-26.FR-8, C-08.FR-6, C-09.FR-1, C-08.FR-1] The Severity level of an Alert Group is the highest Severity level of its firing Alerts raised to its Route's `minimum_severity` (`none`, `warning`, `critical`), and `urgent` is true exactly when that level is critical, whatever `routes.urgent` and `organizations.critical_is_urgent` hold; a Route with the Minimum severity critical makes a warning Alert's Alert Group critical and Urgent, while `listIntegrationAlerts`, `listAlertGroupAlerts` and the `alerts[]` of its `created` webhook event show the Alert as warning (`transitions_test.go`, `minimum_severity_test.go`)."
@@ -156,14 +159,17 @@ issue: 400
 - **Organization** (`internal/organization`, `internal/api/organization.go`): reads return `critical_is_urgent: true`;
   updates ignore the field, so it never appears in the diff of `organization.updated`.
 - **Groups** (`internal/groups`): `urgentOf` becomes `level == critical`; the level of `grouping.go` and
-  `transitions.go` is raised to the Route's Minimum severity (`routeInfo` gains it, the `GetRoute*` queries read it);
+  `transitions.go` is raised to the Route's Minimum severity (`routeInfo` gains it, the `GetRoute*` queries read it),
+  and a move to the Default route (`move.go`) computes it again against the Default route's Minimum severity, a rise
+  with the Quiet entry of the Minimum severity and a fall silently;
   the derived urgency of the list, counts and reads (`query.sql`) becomes `g.severity_level = 'critical'`. The fakes of
   the unit tests follow: the route rows of `dispatcher_test.go` gain `MinimumSeverity` and its emulation of the read's
   urgency (`urgent`) becomes the stored level; `TestUrgencyFollowsConfiguration` of `list_test.go`, which asserts the L1
   rule that an urgent Route makes its open Alert Groups Urgent, is replaced by a test of the new rule.
   `updates.go` is the worker of `open_group_updates` on every replica: woken at start, by a `NOTIFY` from the inserting
   transaction and by the development clock, it claims a row with `FOR UPDATE SKIP LOCKED` and a lease of 60 s on the
-  real clock, renewed per batch, and walks the open Alert Groups of its scope by id from `after_alert_group_id` in
+  real clock — a replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica
+  that knows it — renewed per batch, and walks the open Alert Groups of its scope by id from `after_alert_group_id` in
   batches of 50, each in its own dispatcher transaction as a system transition (`MinimumSeverityChanged`, Transport
   `system`, actor Muster): the level is computed again; a rise records the Quiet `severity_raised`, or, when it reaches
   critical, the Quiet `urgency_raised` of the row "removes nothing" of C-09.FR-22 — never the Loud one, since a change
@@ -185,9 +191,10 @@ issue: 400
   it elsewhere); `docs/install/versions.md` gains the entry 0.2.0 of its upgrade notes for C-26.FR-10, with its
   paragraph "Rolling upgrade from 0.1": every migration of 0.2.0 applies when the first 0.2.0 replica starts, while
   0.1 replicas still run until the rollout ends; a 0.1 replica ignores the Minimum severity — it stores a lower Severity
-  level on the Alert Groups it changes, while `urgent` agrees, since 0.2.0 writes `routes.urgent` — and the stories that
-  add more of what 0.1 replicas ignore add one sentence each (S-115, S-117, S-121, S-140). The window lasts as long as
-  the rollout, and nothing of it remains afterwards.
+  level on the Alert Groups it changes, with `urgent` true, since 0.2.0 writes `routes.urgent`; until a later change of
+  their Alerts or of the Route's Minimum severity, the API and the list show such an Alert Group as not Urgent while its
+  messages and webhooks treat it as Urgent — and the stories that add more of what 0.1 replicas ignore add one sentence
+  each (S-115, S-117, S-121, S-140).
 
 ## Steps
 
