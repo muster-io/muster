@@ -61,6 +61,11 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   only, so `a/bx` does not match; every other entry matches exactly, and there are no globs or regular expressions. The
   highest Role found over all entries wins. The mapping editor suggests the claims that discovery lists in
   `claims_supported`. Teams map groups the same way (C-25.FR-4).
+  _Revised for L2 (2026-10-27):_ the API keeps one list of entries for the Role mapping, but Muster stores the entries
+  of the revision above apart from the mapping of L1 (`role_mappings`, beside `group_mappings`): until 0.3.0 the L1
+  mapping keeps only the entries that a replica of 0.1 reads the same way — the groups claim and an exact group — so
+  that during a rolling update such a replica never grants a Role through an entry of another claim or a subtree; the
+  entries of a Team are stored with the Team.
 - **C-03.FR-6** Saving OIDC settings with an empty mapping and no Role for unmatched users shows the warning
   `nobody_can_sign_in`, "Nobody will be able to sign in through OIDC". The warning `groups_claim_missing` says that no
   sign-in has carried the groups claim yet, so group mappings have not matched anyone yet. It exists only while no

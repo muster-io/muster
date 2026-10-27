@@ -64,7 +64,8 @@ Account links of C-18. Then "Personal notification rules": "What happens when an
 sequence in words; the switch "Also call through the Notification gateway" — "As in the Organization", "Call", "Don't
 call" — with "to {contact}" and, with several gateways, the choice of one, "Confirm your contact for calls and SMS below
 first." or "Unavailable: a Notification gateway is needed (a bridge for calls and SMS)"; and the contact block of C-30.
-Users → a User's page: their rules, editable by Admins. Organization → Alert handling: the default rules.
+Users → a User's page: their rules, editable by Admins. Organization → Alert handling: the default rules, in words;
+in 0.2.0 they change only through the API.
 
 ## API surface
 

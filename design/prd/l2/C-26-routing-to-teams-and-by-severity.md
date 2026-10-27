@@ -118,8 +118,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   and the hint that a new Team only adds channels and removes none. When the option is on and the Group key lacks the
   Team label, the form says that Alerts of different Teams with the same key share one Alert Group, shown in the
   channels of all of them, and offers "Add {team label} to the key". A preview "Where alerts go" takes the recent Alerts
-  that the Route would take, as the Group key preview does (C-08.FR-5), and shows the Alert Groups they would form under
-  the unsaved settings, with the Teams of each and the Destinations each reaches.
+  that the Route would take, as the Group key preview does (C-08.FR-5), and shows the largest Alert Groups they would
+  form under the unsaved settings — as many as the Group key preview shows (`routing.group_key_preview_examples`, 5) —
+  with the Teams of each and the Destinations each reaches, and, for every Destination that any Alert Group the Alerts
+  would form reaches, how many of all those Alert Groups reach it, shown or not.
 - **C-26.FR-13** The documentation has a page on routing to Teams, with the worked example of operations channels and
   team channels by Severity, that says the feature is optional — many installations need only two operations channels —
   and explains, with an example, that a shared Alert Group has one status and one list of Alerts in every channel and

@@ -80,7 +80,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   update mention as before; 0.3.0 removes the field and the column. The upgrade notes say so.
 - **C-28.FR-6** When a Destination becomes a Destination of a Team (C-26.FR-1) and has no entry naming that Team, Muster
   adds the entry "Team {Team}" for every Loud event, recorded in the Audit log; it mentions someone only where the Team
-  has a Team mention for the Destination's Connection. An Admin may remove it.
+  has a Team mention for the Destination's Connection. A Telegram Destination gets no such entry, since Telegram cannot
+  mention Teams (FR-2). An Admin may remove it.
 - **C-28.FR-7** The first publication of a Storm summary (C-11.FR-6) carries the Mentions of the entries for
   `storm_started` of that Destination, with "On-call of the Team from the label" and "Team from the label" taken from
   the Teams of the Alert Groups the summary counts; a Storm summary starts no Escalation chain.
@@ -105,8 +106,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
 ### Settings
 
-- **C-28.FR-10** The Mentions and the button set are part of the Destination form of every type (C-13.FR-9); the
-  Organization's button set is on the Organization's page Alert handling (C-20). Changes are recorded in the Audit log
+- **C-28.FR-10** The Mentions are part of the Destination form of every type, and the button set of the form of every
+  messenger type — an outgoing webhook sends no buttons and has no button set (C-13.FR-9); the Organization's button
+  set is on the Organization's page Alert handling (C-20). Changes are recorded in the Audit log
   with a before/after diff and use optimistic locking.
 - **C-28.FR-11** The documentation's page on whom a message mentions describes the entries, the table of FR-2, Team
   mentions without a fallback to the On-call, and the migration of FR-5; the page on buttons describes the sets.
