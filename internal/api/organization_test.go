@@ -374,8 +374,8 @@ func TestUpdateOrganizationButtons(t *testing.T) {
 	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
 		m["buttons"] = map[string]any{"all": false}
 	}), "If-Match", "*")
-	if f.inputs[2].Buttons == nil || f.inputs[2].Buttons.Items != nil {
-		t.Errorf("all false without items: input %+v", f.inputs[2].Buttons)
+	if a.status != http.StatusOK || f.inputs[2].Buttons == nil || f.inputs[2].Buttons.Items != nil {
+		t.Errorf("all false without items = %d, input %+v", a.status, f.inputs[2].Buttons)
 	}
 	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
 		m["buttons"] = map[string]any{"all": true, "items": items}
