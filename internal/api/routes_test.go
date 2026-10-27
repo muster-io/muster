@@ -244,7 +244,7 @@ func TestRoutesAPI(t *testing.T) {
 	}
 	in := fr.inputs[0]
 	if in.Name != "payments" || len(in.Matchers) != 2 || in.Matchers[1] != (routing.Matcher{Label: "pod", Op: "=~",
-		Value: "api-.*"}) || in.Urgent || in.MinimumSeverity != nil || !slices.Equal(in.GroupKey, []string{"alertname"}) ||
+		Value: "api-.*"}) || !in.Urgent || in.MinimumSeverity != nil || !slices.Equal(in.GroupKey, []string{"alertname"}) ||
 		len(in.DestinationIDs) != 0 ||
 		in.Description != nil || in.Policy.Language != "ru" || in.Policy.Templates != (routing.Templates{}) ||
 		!slices.Equal(in.Policy.SnoozeDurationsSeconds, []int64{3600, 14400}) || in.Policy.Reminders.Enabled ||
@@ -406,8 +406,9 @@ func TestReorderRoutesAPI(t *testing.T) {
 }
 
 // TestRouteMinimumSeverityAPI is C-26.FR-8 and FR-10 at the API: minimum_severity reaches the Route's input, an
-// omitted one stays unset so that an update keeps it, urgent is ignored and no longer required, and a value outside
-// none, warning and critical is refused by the specification.
+// omitted one stays unset so that an update keeps it, urgent is no longer required and reaches the input as given, for
+// routing to read true without a Minimum severity as critical, and a value outside none, warning and critical is
+// refused by the specification.
 func TestRouteMinimumSeverityAPI(t *testing.T) {
 	x, fr := newRoutesAPI(t)
 	withoutUrgent := strings.Replace(routeBody, `"urgent":true,`, ``, 1)

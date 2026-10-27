@@ -19,7 +19,7 @@ export interface RouteInput {
   /** Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze. */
   minimum_severity?: MinimumSeverity;
   /**
-     * Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.
+     * From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
      * @deprecated
      */
   urgent?: boolean;

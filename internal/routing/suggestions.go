@@ -51,9 +51,9 @@ func suggested(id string) (Input, error) {
 			Name: HeartbeatLostRouteName,
 			Matchers: []Matcher{{Label: "alertname", Op: string(matchers.Equal),
 				Value: internalalerts.HeartbeatLost.Name}},
-			MinimumSeverity: new(MinimumCritical), Urgent: true,
-			GroupKey:       []string{"alertname", internalalerts.EntityIntegration},
-			DestinationIDs: []string{}, Policy: onCall().Policy,
+			MinimumSeverity: new(MinimumCritical),
+			GroupKey:        []string{"alertname", internalalerts.EntityIntegration},
+			DestinationIDs:  []string{}, Policy: onCall().Policy,
 		}, nil
 	case SuggestionInternalAlerts:
 		return Input{

@@ -250,7 +250,7 @@ func (q *Queries) EnsureDefaultRoute(ctx context.Context, arg EnsureDefaultRoute
 }
 
 const getRoute = `-- name: GetRoute :one
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -279,7 +279,6 @@ type GetRouteRow struct {
 	Position                       int64
 	IsDefault                      bool
 	MinimumSeverity                string
-	Urgent                         bool
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -319,7 +318,6 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.Position,
 		&i.IsDefault,
 		&i.MinimumSeverity,
-		&i.Urgent,
 		&i.GroupKey,
 		&i.ReopenWindowSeconds,
 		&i.GracePeriodSeconds,
@@ -902,7 +900,7 @@ func (q *Queries) ListRouteSuggestionDismissals(ctx context.Context, arg ListRou
 
 const listRoutes = `-- name: ListRoutes :many
 
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -923,7 +921,6 @@ type ListRoutesRow struct {
 	Position                       int64
 	IsDefault                      bool
 	MinimumSeverity                string
-	Urgent                         bool
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -970,7 +967,6 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.Position,
 			&i.IsDefault,
 			&i.MinimumSeverity,
-			&i.Urgent,
 			&i.GroupKey,
 			&i.ReopenWindowSeconds,
 			&i.GracePeriodSeconds,

@@ -10,12 +10,11 @@ const (
 )
 
 // Profile is a Route profile: a starting set of Route settings that only pre-fills a new Route and is never stored.
-// Neither profile sets a Minimum severity (C-26.FR-11); Urgent, the deprecated urgent mark, follows it.
+// Neither profile sets a Minimum severity (C-26.FR-11).
 type Profile struct {
 	ID              string
 	Name            string
 	MinimumSeverity string
-	Urgent          bool
 	GroupKey        []string
 	Policy          Policy
 }

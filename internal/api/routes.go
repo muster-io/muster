@@ -364,11 +364,12 @@ func routePolicyOf(p routing.Policy) gen.RoutePolicy {
 	}
 }
 
-// routeInputOf is the Route a request writes; urgent is ignored, as the urgent mark follows the Minimum severity
-// (C-26.FR-10).
+// routeInputOf is the Route a request writes; urgent true without minimum_severity, a 0.1 client's urgent mark, is read
+// as the Minimum severity critical by routing (C-26.FR-10).
 func routeInputOf(in gen.RouteInput) routing.Input {
 	t := in.Policy.Templates
-	out := routing.Input{Name: in.Name, Description: in.Description, GroupKey: in.GroupKey,
+	out := routing.Input{Name: in.Name, Description: in.Description, Urgent: in.Urgent != nil && *in.Urgent,
+		GroupKey:       in.GroupKey,
 		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
 			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}}

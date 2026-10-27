@@ -268,8 +268,9 @@ func (e *OpenAlertGroupsError) Error() string {
 }
 
 // Input is what createRoute and updateRoute write. A nil Description or MinimumSeverity keeps the stored value on an
-// update, and is empty or none on a creation; Matchers replace the stored ones as a whole. Urgent is ignored: the
-// urgent mark follows the Minimum severity (C-26.FR-10).
+// update, and is empty or none on a creation; Matchers replace the stored ones as a whole. Urgent is the deprecated
+// urgent mark of a 0.1 client (C-26.FR-10): true without a MinimumSeverity is read as the Minimum severity critical;
+// false, or beside a MinimumSeverity, changes nothing.
 type Input struct {
 	Name            string
 	Description     *string
@@ -489,8 +490,8 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 	for i, r := range rows {
 		out.Routes[i] = routeOf(dbgen.GetRouteRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
 			Description: r.Description, Position: r.Position, IsDefault: r.IsDefault,
-			MinimumSeverity: r.MinimumSeverity, Urgent: r.Urgent,
-			GroupKey: r.GroupKey, ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
+			MinimumSeverity: r.MinimumSeverity,
+			GroupKey:        r.GroupKey, ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
 			UrgentRiseRemovesAck: r.UrgentRiseRemovesAck, SnoozeDurationsSeconds: r.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: r.ThreadBatchingWindowSeconds, StormThreshold: r.StormThreshold,
 			Language: r.Language, TemplateRootMessage: r.TemplateRootMessage, TemplateLine: r.TemplateLine,
@@ -758,7 +759,7 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		p := in.Policy
 		routeID, err := q.InsertRoute(ctx, dbgen.InsertRouteParams{
 			OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, First: how.first,
-			MinimumSeverity: minimumOf(in.MinimumSeverity),
+			MinimumSeverity: minimumOf(in),
 			GroupKey:        in.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
 			UrgentRiseRemovesAck: p.UrgentRiseRemovesAck, SnoozeDurationsSeconds: p.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: p.ThreadBatchingWindowSeconds, StormThreshold: p.StormThreshold,
@@ -889,6 +890,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		next.Name, next.Matchers, next.GroupKey, next.Policy = in.Name, in.Matchers, in.GroupKey, in.Policy
 		if in.MinimumSeverity != nil {
 			next.MinimumSeverity = *in.MinimumSeverity
+		} else if in.Urgent {
+			next.MinimumSeverity = MinimumCritical
 		}
 		next.Urgent = next.MinimumSeverity == MinimumCritical
 		next.DestinationIDs = dests.publicIDs()
@@ -1467,12 +1470,17 @@ func (s *Service) RunInfo(ctx context.Context, ticks <-chan time.Time) {
 	}
 }
 
-// minimumOf is the Minimum severity a new Route takes: the one written, none when omitted.
-func minimumOf(m *string) string {
-	if m == nil {
+// minimumOf is the Minimum severity a new Route takes: the one written; critical for the urgent mark of a 0.1 client
+// without one (C-26.FR-10); none otherwise.
+func minimumOf(in Input) string {
+	switch {
+	case in.MinimumSeverity != nil:
+		return *in.MinimumSeverity
+	case in.Urgent:
+		return MinimumCritical
+	default:
 		return MinimumNone
 	}
-	return *m
 }
 
 func text(s *string) pgtype.Text {

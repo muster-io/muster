@@ -6324,7 +6324,7 @@ type Route struct {
 	// TemplateError Set while a template of the Route keeps failing.
 	TemplateError *TemplateErrorState `json:"template_error,omitempty"`
 
-	// Urgent Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.
+	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Urgent bool `json:"urgent"`
 }
@@ -6347,7 +6347,7 @@ type RouteInput struct {
 	Name   string      `json:"name"`
 	Policy RoutePolicy `json:"policy"`
 
-	// Urgent Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.
+	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Urgent *bool `json:"urgent,omitempty"`
 }

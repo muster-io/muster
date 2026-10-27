@@ -4,7 +4,7 @@
 -- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
 -- error and their active Storm.
 -- name: ListRoutes :many
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -19,7 +19,7 @@ ORDER BY r.is_default, r.position, r.id;
 -- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
 -- active Storm.
 -- name: GetRoute :one
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,

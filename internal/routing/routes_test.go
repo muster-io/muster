@@ -225,7 +225,7 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 	s.nextID++
 	s.rows = append(s.rows, &routeRow{ListRoutesRow: dbgen.ListRoutesRow{
 		ID: s.nextID, PublicID: arg.PublicID, Name: arg.Name, Description: arg.Description, Position: position,
-		MinimumSeverity: arg.MinimumSeverity, Urgent: arg.MinimumSeverity == MinimumCritical, GroupKey: arg.GroupKey, ReopenWindowSeconds: arg.ReopenWindowSeconds,
+		MinimumSeverity: arg.MinimumSeverity, GroupKey: arg.GroupKey, ReopenWindowSeconds: arg.ReopenWindowSeconds,
 		GracePeriodSeconds: arg.GracePeriodSeconds, UrgentRiseRemovesAck: arg.UrgentRiseRemovesAck,
 		SnoozeDurationsSeconds: arg.SnoozeDurationsSeconds, ThreadBatchingWindowSeconds: arg.ThreadBatchingWindowSeconds,
 		StormThreshold: arg.StormThreshold, Language: arg.Language, TemplateRootMessage: arg.TemplateRootMessage,
@@ -251,7 +251,7 @@ func (s *fakeStore) EnsureDefaultRoute(_ context.Context, arg dbgen.EnsureDefaul
 	s.nextID++
 	s.rows = append(s.rows, &routeRow{ListRoutesRow: dbgen.ListRoutesRow{
 		ID: s.nextID, PublicID: arg.PublicID, Name: arg.Name, Description: arg.Description, IsDefault: true,
-		MinimumSeverity: arg.MinimumSeverity, Urgent: arg.MinimumSeverity == MinimumCritical, GroupKey: arg.GroupKey, ReopenWindowSeconds: arg.ReopenWindowSeconds,
+		MinimumSeverity: arg.MinimumSeverity, GroupKey: arg.GroupKey, ReopenWindowSeconds: arg.ReopenWindowSeconds,
 		GracePeriodSeconds: arg.GracePeriodSeconds, UrgentRiseRemovesAck: arg.UrgentRiseRemovesAck,
 		SnoozeDurationsSeconds: arg.SnoozeDurationsSeconds, ThreadBatchingWindowSeconds: arg.ThreadBatchingWindowSeconds,
 		StormThreshold: arg.StormThreshold, Language: arg.Language, AckTimeoutEnabled: arg.AckTimeoutEnabled,
@@ -272,7 +272,7 @@ func (s *fakeStore) UpdateRoute(_ context.Context, arg dbgen.UpdateRouteParams) 
 	for _, r := range s.rows {
 		if r.ID == arg.ID && arg.OrgID == orgID {
 			r.Name, r.Description, r.GroupKey = arg.Name, arg.Description, arg.GroupKey
-			r.MinimumSeverity, r.Urgent = arg.MinimumSeverity, arg.MinimumSeverity == MinimumCritical
+			r.MinimumSeverity = arg.MinimumSeverity
 			r.ReopenWindowSeconds, r.GracePeriodSeconds = arg.ReopenWindowSeconds, arg.GracePeriodSeconds
 			r.UrgentRiseRemovesAck, r.SnoozeDurationsSeconds = arg.UrgentRiseRemovesAck, arg.SnoozeDurationsSeconds
 			r.ThreadBatchingWindowSeconds, r.StormThreshold = arg.ThreadBatchingWindowSeconds, arg.StormThreshold
@@ -518,7 +518,7 @@ func (s *fakeStore) BumpRoutesOfDestination(_ context.Context, arg dbgen.BumpRou
 // getRowOf is a row of ListRoutes with its place in evaluation order, as GetRoute reads it.
 func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 	return dbgen.GetRouteRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description,
-		Position: r.Position, IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity, Urgent: r.Urgent,
+		Position: r.Position, IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity,
 		GroupKey:            r.GroupKey,
 		ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
 		UrgentRiseRemovesAck: r.UrgentRiseRemovesAck, SnoozeDurationsSeconds: r.SnoozeDurationsSeconds,
@@ -637,7 +637,7 @@ func TestCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.rows[len(store.rows)-1].MinimumSeverity != MinimumCritical || !store.rows[len(store.rows)-1].Urgent {
+	if store.rows[len(store.rows)-1].MinimumSeverity != MinimumCritical {
 		t.Errorf("stored %+v", store.rows[len(store.rows)-1])
 	}
 	if created.Name != "payments" || created.Description != "Payments on call" || !created.Urgent ||
@@ -684,13 +684,23 @@ func TestCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if second.Name != "second" || second.Position != 1 || second.Description != "" || len(second.Matchers) != 0 ||
-		second.MinimumSeverity != MinimumNone || second.Urgent || store.rows[len(store.rows)-1].Urgent {
-		t.Errorf("second %+v", second)
+		second.MinimumSeverity != MinimumCritical || !second.Urgent ||
+		store.rows[len(store.rows)-1].MinimumSeverity != MinimumCritical {
+		t.Errorf("second, with a 0.1 client's urgent mark %+v", second)
+	}
+	// The urgent mark beside an explicit Minimum severity, or false, changes nothing: the explicit value wins.
+	both := input("both")
+	both.Urgent, both.MinimumSeverity = true, ptr(MinimumWarning)
+	if got, err := svc.Create(t.Context(), by, both); err != nil || got.MinimumSeverity != MinimumWarning || got.Urgent {
+		t.Errorf("urgent beside warning %+v, %v", got, err)
+	}
+	if got, err := svc.Create(t.Context(), by, input("neither")); err != nil || got.MinimumSeverity != MinimumNone {
+		t.Errorf("neither %+v, %v", got, err)
 	}
 	if _, err := svc.Create(t.Context(), by, input("payments")); !errors.Is(err, ErrNameTaken) {
 		t.Errorf("taken = %v", err)
 	}
-	if list, _ := svc.List(t.Context()); names(list) != "payments,second,Default" || list.Version != 3 {
+	if list, _ := svc.List(t.Context()); names(list) != "payments,second,both,neither,Default" || list.Version != 5 {
 		t.Errorf("after a refused creation %s %d", names(list), list.Version)
 	}
 }
@@ -990,6 +1000,23 @@ func TestMinimumSeverity(t *testing.T) {
 	list, _ := svc.List(t.Context())
 	if def := list.Routes[len(list.Routes)-1]; def.MinimumSeverity != MinimumNone || def.Urgent {
 		t.Errorf("default %+v", def)
+	}
+	// A 0.1 client's update: urgent true without a Minimum severity is critical; false keeps it (C-26.FR-10).
+	reset := input("db")
+	reset.MinimumSeverity = ptr(MinimumNone)
+	if got, err := svc.Update(t.Context(), by, r.PublicID, nil, reset); err != nil || got.MinimumSeverity != MinimumNone {
+		t.Fatalf("reset = %+v, %v", got, err)
+	}
+	old := input("db")
+	old.Urgent = true
+	if got, err := svc.Update(t.Context(), by, r.PublicID, nil, old); err != nil ||
+		got.MinimumSeverity != MinimumCritical || !got.Urgent {
+		t.Errorf("urgent true = %+v, %v", got, err)
+	}
+	old.Urgent = false
+	if got, err := svc.Update(t.Context(), by, r.PublicID, nil, old); err != nil ||
+		got.MinimumSeverity != MinimumCritical {
+		t.Errorf("urgent false = %+v, %v", got, err)
 	}
 }
 
@@ -1373,7 +1400,7 @@ func TestProfiles(t *testing.T) {
 	}
 	for _, p := range ps {
 		pol := p.Policy
-		if p.Urgent || p.MinimumSeverity != MinimumNone ||
+		if p.MinimumSeverity != MinimumNone ||
 			!slices.Equal(p.GroupKey, []string{"alertname", "severity", "cluster"}) ||
 			pol.ReopenWindowSeconds != 900 || pol.GracePeriodSeconds != 900 || !pol.UrgentRiseRemovesAck ||
 			pol.ThreadBatchingWindowSeconds != 60 || pol.StormThreshold != 20 || pol.Language != "en" ||
