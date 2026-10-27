@@ -1044,6 +1044,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
       the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
       yours did.
+    - Migration 0023 adds the [button sets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets): the Organization's
+      shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -1058,7 +1060,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
     differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
     start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
-    save the settings again on a 0.2.0 replica.
+    save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
+    does not know them and renders every button on the messages it touches.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -1089,6 +1092,32 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_working_days_check;
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_end_check;
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_order_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0023 runs in three transactions: the first adds the button sets, the second validates their CHECKs and
+    foreign key, the third drops the old CHECK of the kinds of `open_group_updates`. A failure leaves the schema
+    recorded as dirty at version 23. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'buttons';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 22, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_buttons_check;
+        ALTER TABLE destinations VALIDATE CONSTRAINT destinations_buttons_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v2_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 
@@ -8705,7 +8734,8 @@ privately how to link it.
 
 ### What each button does
 
-The buttons of a Root message depend on the status of its Alert Group:
+The buttons of a Root message depend on the status of its Alert Group, and on the [button set](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets) of its
+Destination, which shows all of them by default:
 
 | Status | Buttons |
 |---|---|
@@ -8727,10 +8757,49 @@ The buttons of a Root message depend on the status of its Alert Group:
 - **Unsnooze** ends the Snooze early. The Alert Group becomes Firing again.
 - On a **Reminder**, **Still on it** tells Muster you are still handling the Alert Group, and **Unack** gives it up.
 - A **Storm summary** and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
-  status, but pressing them changes nothing: you get "This is a test message; nothing was changed".
+  status and of its Destination's button set, but pressing them changes nothing: you get "This is a test message;
+  nothing was changed".
 
 A press edits the Root message to show the result. A press that Muster refuses, such as a Resolve by a Viewer, is answered
 privately to the person who pressed, and nothing changes.
+
+### Button sets
+
+A busy channel can show fewer buttons. Each messenger Destination shows on its Root messages the buttons of a **button
+set**: the Organization's, which shows every button until an Admin lists them (`organization.buttons`), or a set of its
+own (`destination.buttons`). A Destination "As in the Organization", the default, follows later changes of the
+Organization's set. A set lists:
+
+- **Acknowledge**, which brings **Unack** with it on an acknowledged Alert Group;
+- **Resolve**;
+- each Snooze duration, by its value, such as 24 hours;
+- the [Snooze presets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#snooze-presets) "Until tomorrow" and "Until {first day of the week}".
+
+From its set, a Root message shows the buttons that its status offers and that the set lists, in the order of the table
+above. Of the Route's Snooze durations it shows only those in the set, so a duration in the set that the Route does not
+have shows nothing, and it shows the presets only on a Route with Snooze durations. **Unsnooze** on a snoozed Alert
+Group is not part of any set and always shows. A Destination whose set is Acknowledge, 24 hours and "Until tomorrow"
+shows, on a Route with the durations 1 h, 4 h and 24 h:
+
+| Status | Buttons |
+|---|---|
+| Firing | **Ack**, **Snooze 24 h**, **Until tomorrow 09:00** |
+| Acknowledged | **Unack**, **Snooze 24 h**, **Until tomorrow 09:00** |
+| Snoozed | **Ack**, **Unsnooze** |
+
+The set changes only the buttons of Root messages. Reminders keep **Still on it** and **Unack**; the
+[Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) of Bridges, the web UI and the API keep every action; and a press on a button that a
+message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:
+Slack leaves the **Snooze…** menu out when the set shows no duration and no preset, and a bridge with a limit on buttons
+still drops the Snooze buttons beyond it. On a bridge without buttons, the line "Reply in the Thread: …" lists only the
+Text commands of the buttons the set shows, while every other Text command still works. A test message and the preview
+of a Destination show the buttons of its set.
+
+A saved change of a set updates the open Root messages of the Destinations that use it within seconds, as edits, which
+notify nobody. With the Organization's set left at every button, a Snooze duration added to a Route shows on the next
+update of its Root messages. The sets are `buttons` of the Organization and of each messenger Destination in the
+[API](https://muster-io.github.io/muster/latest/reference/api.md); an outgoing webhook sends no buttons and has no set. Each change is recorded in the Audit
+log.
 
 ### Text commands
 

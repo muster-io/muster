@@ -2999,6 +2999,8 @@ critical, and a Route raises the level of its Alert Groups with its
   Organization whose working day started at 18:00 or later gets the end <code>23:59</code> — and one that started at 23:59,
   the latest time with no later end, the start <code>23:58</code>. Check the Organization's settings after the upgrade if
   yours did.</li>
+<li>Migration 0023 adds the <a href="../../concepts/statuses-and-commands/#button-sets">button sets</a>: the Organization's
+  shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.</li>
 </ul>
 <p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
 Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -3012,7 +3014,8 @@ Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent
 Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
 differently. A 0.1 replica also does not know the end of the working day: its <code>updateOrganization</code> that sets the
 start of the working day at or after the end fails the CHECK of migration 0022 with <code>500</code> until the rollout ends;
-save the settings again on a 0.2.0 replica.</p>
+save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
+does not know them and renders every button on the messages it touches.</p>
 <p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
 and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
 waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
@@ -3042,6 +3045,34 @@ database role as Muster:</p>
 <div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_working_days_check</span><span class="p">;</span>
 <span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_workday_end_check</span><span class="p">;</span>
 <span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_workday_order_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Migration 0023 runs in three transactions: the first adds the button sets, the second validates their CHECKs and
+foreign key, the third drops the old CHECK of the kinds of <code>open_group_updates</code>. A failure leaves the schema
+recorded as dirty at version 23. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">columns</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'organizations'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">column_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'buttons'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 22, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_buttons_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">destinations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">destinations_buttons_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_destination_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_kind_v2_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_destination_scope_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">open_group_updates_kind_check</span><span class="p">;</span>
 <span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
 </code></pre></div>
 </li>

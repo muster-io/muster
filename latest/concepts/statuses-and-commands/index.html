@@ -1727,6 +1727,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#button-sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Button sets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#text-commands" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3083,6 +3094,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#button-sets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Button sets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#text-commands" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3486,7 +3508,8 @@ must have linked their messenger account to their Muster user; see <a href="../.
 accounts</a>. A press from an unlinked account changes nothing, and the person is told
 privately how to link it.</p>
 <h3 id="what-each-button-does">What each button does<a class="headerlink" href="#what-each-button-does" title="Permanent link">&para;</a></h3>
-<p>The buttons of a Root message depend on the status of its Alert Group:</p>
+<p>The buttons of a Root message depend on the status of its Alert Group, and on the <a href="#button-sets">button set</a> of its
+Destination, which shows all of them by default:</p>
 <table>
 <thead>
 <tr>
@@ -3527,10 +3550,61 @@ privately how to link it.</p>
 <li><strong>Unsnooze</strong> ends the Snooze early. The Alert Group becomes Firing again.</li>
 <li>On a <strong>Reminder</strong>, <strong>Still on it</strong> tells Muster you are still handling the Alert Group, and <strong>Unack</strong> gives it up.</li>
 <li>A <strong>Storm summary</strong> and an ack timeout notice carry only links to Muster. A test message carries the buttons of its
-  status, but pressing them changes nothing: you get "This is a test message; nothing was changed".</li>
+  status and of its Destination's button set, but pressing them changes nothing: you get "This is a test message;
+  nothing was changed".</li>
 </ul>
 <p>A press edits the Root message to show the result. A press that Muster refuses, such as a Resolve by a Viewer, is answered
 privately to the person who pressed, and nothing changes.</p>
+<h3 id="button-sets">Button sets<a class="headerlink" href="#button-sets" title="Permanent link">&para;</a></h3>
+<p>A busy channel can show fewer buttons. Each messenger Destination shows on its Root messages the buttons of a <strong>button
+set</strong>: the Organization's, which shows every button until an Admin lists them (<code>organization.buttons</code>), or a set of its
+own (<code>destination.buttons</code>). A Destination "As in the Organization", the default, follows later changes of the
+Organization's set. A set lists:</p>
+<ul>
+<li><strong>Acknowledge</strong>, which brings <strong>Unack</strong> with it on an acknowledged Alert Group;</li>
+<li><strong>Resolve</strong>;</li>
+<li>each Snooze duration, by its value, such as 24 hours;</li>
+<li>the <a href="#snooze-presets">Snooze presets</a> "Until tomorrow" and "Until {first day of the week}".</li>
+</ul>
+<p>From its set, a Root message shows the buttons that its status offers and that the set lists, in the order of the table
+above. Of the Route's Snooze durations it shows only those in the set, so a duration in the set that the Route does not
+have shows nothing, and it shows the presets only on a Route with Snooze durations. <strong>Unsnooze</strong> on a snoozed Alert
+Group is not part of any set and always shows. A Destination whose set is Acknowledge, 24 hours and "Until tomorrow"
+shows, on a Route with the durations 1 h, 4 h and 24 h:</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Buttons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Firing</td>
+<td><strong>Ack</strong>, <strong>Snooze 24 h</strong>, <strong>Until tomorrow 09:00</strong></td>
+</tr>
+<tr>
+<td>Acknowledged</td>
+<td><strong>Unack</strong>, <strong>Snooze 24 h</strong>, <strong>Until tomorrow 09:00</strong></td>
+</tr>
+<tr>
+<td>Snoozed</td>
+<td><strong>Ack</strong>, <strong>Unsnooze</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The set changes only the buttons of Root messages. Reminders keep <strong>Still on it</strong> and <strong>Unack</strong>; the
+<a href="#text-commands">Text commands</a> of Bridges, the web UI and the API keep every action; and a press on a button that a
+message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:
+Slack leaves the <strong>Snooze…</strong> menu out when the set shows no duration and no preset, and a bridge with a limit on buttons
+still drops the Snooze buttons beyond it. On a bridge without buttons, the line "Reply in the Thread: …" lists only the
+Text commands of the buttons the set shows, while every other Text command still works. A test message and the preview
+of a Destination show the buttons of its set.</p>
+<p>A saved change of a set updates the open Root messages of the Destinations that use it within seconds, as edits, which
+notify nobody. With the Organization's set left at every button, a Snooze duration added to a Route shows on the next
+update of its Root messages. The sets are <code>buttons</code> of the Organization and of each messenger Destination in the
+<a href="../../reference/api/">API</a>; an outgoing webhook sends no buttons and has no set. Each change is recorded in the Audit
+log.</p>
 <h3 id="text-commands">Text commands<a class="headerlink" href="#text-commands" title="Permanent link">&para;</a></h3>
 <p>Some messengers have no buttons, or a bridge does not offer them. A <strong>Text command</strong> is a Command written as a reply in a
 Thread. Only a <strong>Bridge</strong> Destination takes them, and only when the bridge declares <code>thread_messages</code>. A Root message
