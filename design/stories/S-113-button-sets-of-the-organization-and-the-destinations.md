@@ -47,6 +47,7 @@ files_touched:
   - internal/slack/layout_test.go
   - internal/groups/updates.go
   - internal/groups/updates_test.go
+  - internal/groups/dispatcher.go
   - internal/groups/dispatcher_test.go
   - internal/groups/groups_integration_test.go
   - internal/groups/query.sql
