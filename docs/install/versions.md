@@ -98,6 +98,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
       the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
       yours did.
+    - Migration 0023 adds the [button sets](../concepts/statuses-and-commands.md#button-sets): the Organization's
+      shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -112,7 +114,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
     differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
     start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
-    save the settings again on a 0.2.0 replica.
+    save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
+    does not know them and renders every button on the messages it touches.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -143,6 +146,32 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_working_days_check;
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_end_check;
         ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_order_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0023 runs in three transactions: the first adds the button sets, the second validates their CHECKs and
+    foreign key, the third drops the old CHECK of the kinds of `open_group_updates`. A failure leaves the schema
+    recorded as dirty at version 23. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'buttons';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 22, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_buttons_check;
+        ALTER TABLE destinations VALIDATE CONSTRAINT destinations_buttons_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v2_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 
