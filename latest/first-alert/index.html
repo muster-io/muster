@@ -2970,7 +2970,7 @@ when it fails.</p>
 <h2 id="4-send-alert-groups-to-the-destination">4. Send Alert Groups to the Destination<a class="headerlink" href="#4-send-alert-groups-to-the-destination" title="Permanent link">&para;</a></h2>
 <p>A <strong>Route</strong> picks Alerts by their labels and decides where their Alert Groups go. Alerts that no other Route takes go
 to the <strong>Default route</strong>, which has no Destination yet. Open <strong>Routes</strong>, select <strong>Create route</strong> and choose the profile
-<strong>On-call</strong>. Name the Route <code>checkout</code> and select <strong>Add matcher</strong>: the label <code>service</code>, <code>=</code>, the value <code>checkout</code>. In
+<strong>Paging</strong>. Name the Route <code>checkout</code> and select <strong>Add matcher</strong>: the label <code>service</code>, <code>=</code>, the value <code>checkout</code>. In
 <strong>Group key</strong>, remove <code>severity</code> and <code>cluster</code> and add <code>service</code>, so that each alert name of each service is one Alert
 Group. Under <strong>Destinations</strong>, choose <code>alerts</code> in <strong>Add a Destination</strong>, then select <strong>Create</strong>.</p>
 <p><img alt="The Route checkout with the Matcher service=&quot;checkout&quot;, the Group key alertname and service, and the Destination alerts" class="screenshot" src="../assets/screenshots/first-alert/06-route.png" /></p>

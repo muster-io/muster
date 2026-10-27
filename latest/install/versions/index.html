@@ -2966,6 +2966,10 @@ critical, and a Route raises the level of its Alert Groups with its
   both until 0.3.0 removes them: <code>urgent</code> is <code>true</code> exactly when the Minimum severity is critical, and
   <code>critical_is_urgent</code> is always <code>true</code>.</li>
 </ul>
+<p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
+Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids; during a rolling update a
+0.1 replica still answers <code>on_call</code>, and a page of the 0.1 web UI names both profiles Informational, so reload the
+web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.</p>
 <p><strong>Rolling upgrade from 0.1.</strong> Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
 replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
 level on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0 writes <code>routes.urgent</code>. Until a later change

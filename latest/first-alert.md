@@ -66,7 +66,7 @@ when it fails.
 
 A **Route** picks Alerts by their labels and decides where their Alert Groups go. Alerts that no other Route takes go
 to the **Default route**, which has no Destination yet. Open **Routes**, select **Create route** and choose the profile
-**On-call**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
+**Paging**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
 **Group key**, remove `severity` and `cluster` and add `service`, so that each alert name of each service is one Alert
 Group. Under **Destinations**, choose `alerts` in **Add a Destination**, then select **Create**.
 

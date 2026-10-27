@@ -3142,18 +3142,18 @@ you reload.</p>
 can change every field afterwards. There are two:</p>
 <dl>
 <dt>Ack timeout (<code>route.ack_timeout</code>)</dt>
-<dd>On-call: on; first notice after 15 minutes · Informational: off</dd>
+<dd>Paging: on; first notice after 15 minutes · Informational: off</dd>
 <dt>Reminders (<code>route.reminders</code>)</dt>
-<dd>On-call: on; first after 4 hours · Informational: off</dd>
+<dd>Paging: on; first after 4 hours · Informational: off</dd>
 <dt>Snooze durations (<code>route.snooze_durations</code>)</dt>
-<dd>On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d</dd>
+<dd>Paging: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d</dd>
 <dt>Group key (<code>route.group_key</code>)</dt>
-<dd>On-call: <code>alertname</code>, <code>severity</code>, <code>cluster</code> · Informational: the same</dd>
+<dd>Paging: <code>alertname</code>, <code>severity</code>, <code>cluster</code> · Informational: the same</dd>
 <dt>Reopen window and Grace period</dt>
-<dd>On-call: 15 minutes each · Informational: the same</dd>
+<dd>Paging: 15 minutes each · Informational: the same</dd>
 </dl>
 <p>Choose <strong>Informational</strong> for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
-notices, no Reminders, and long Snooze durations. Choose <strong>On-call</strong> for the rest. See <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and
+notices, no Reminders, and long Snooze durations. Choose <strong>Paging</strong> for the rest. See <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and
 commands</a> for what the timers do.</p>
 <h3 id="minimum-severity">Minimum severity<a class="headerlink" href="#minimum-severity" title="Permanent link">&para;</a></h3>
 <p>The <strong>Minimum severity</strong> of a Route (<code>route.minimum_severity</code>: none, <code>warning</code> or <code>critical</code>; none by default) is the
@@ -3308,9 +3308,9 @@ labels</a>.</p>
 <h2 id="create-a-route">Create a Route<a class="headerlink" href="#create-a-route" title="Permanent link">&para;</a></h2>
 <ol>
 <li>
-<p>Open <strong>Routes</strong> and select <strong>Create route</strong>. Choose a <a href="#route-profiles">Route profile</a>, <strong>On-call</strong> or
+<p>Open <strong>Routes</strong> and select <strong>Create route</strong>. Choose a <a href="#route-profiles">Route profile</a>, <strong>Paging</strong> or
    <strong>Informational</strong>; <strong>Choose another profile</strong> takes you back.</p>
-<p><img alt="Create route: the choice between the profiles On-call and Informational" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png" /></p>
+<p><img alt="Create route: the choice between the profiles Paging and Informational" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png" /></p>
 </li>
 <li>
 <p>Enter a <strong>Name</strong> and, if you like, a <strong>Description</strong>. Add the <a href="#matchers">Matchers</a> and check the
@@ -3328,7 +3328,7 @@ labels</a>.</p>
    Reminders</strong> — see <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and commands</a> —
    and <strong>Message</strong>, which <a href="../../configure/messages-and-templates/#edit-a-routes-message">Messages and templates</a>
    explains.</p>
-<p><img alt="The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-policy.png" /></p>
+<p><img alt="The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-policy.png" /></p>
 </li>
 <li>
 <p>Select <strong>Create</strong>. The Routes list opens with the new Route just above the Default route, with its Matchers, its
@@ -3342,7 +3342,7 @@ labels</a>.</p>
 Destination to the Default route and everything reaches one place. This is the setup of the <a href="../../quick-start/">Quick start</a>
 plus a messenger.</p>
 <p><strong>Pages for payments.</strong> Create the Route <code>payments-critical</code> with the Matchers <code>team="payments"</code> and
-<code>severity="critical"</code>, the On-call profile and a Destination that is the payments team's channel. Put it above the
+<code>severity="critical"</code>, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.</p>
 <p><strong>Certificates.</strong> Create the Route <code>certificates</code> with the Matcher <code>alertname=~"Cert.*"</code>, the Informational profile and a

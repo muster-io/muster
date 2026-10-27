@@ -2878,7 +2878,7 @@ duplicates, picks the events worth a call, and calls the provider.</p>
    <a href="../events/#create-the-destination">Create the Destination</a>. The relay below checks only the signature, so it needs
    the Secret <code>token</code> and its header from that example only when something in front of it asks for a credential. Keep
    the Signing secret that the answer shows once, and give it to the relay.</li>
-<li>Create a Route that matches what should ring a phone, with the Destination, and an On-call profile.</li>
+<li>Create a Route that matches what should ring a phone, with the Destination, and the Paging profile.</li>
 <li>Run the relay. This sketch is Python; the <code>verify</code> function is the one on <a href="../events/#verify-the-signature">Verify the
    signature</a>:</li>
 </ol>

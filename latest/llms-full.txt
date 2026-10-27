@@ -329,7 +329,7 @@ when it fails.
 
 A **Route** picks Alerts by their labels and decides where their Alert Groups go. Alerts that no other Route takes go
 to the **Default route**, which has no Destination yet. Open **Routes**, select **Create route** and choose the profile
-**On-call**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
+**Paging**. Name the Route `checkout` and select **Add matcher**: the label `service`, `=`, the value `checkout`. In
 **Group key**, remove `severity` and `cluster` and add `service`, so that each alert name of each service is one Alert
 Group. Under **Destinations**, choose `alerts` in **Add a Destination**, then select **Create**.
 
@@ -1039,6 +1039,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
       both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
       `critical_is_urgent` is always `true`.
+
+    **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
+    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
+    0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles Informational, so reload the
+    web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
@@ -3892,7 +3897,7 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   09:00" and "Until Monday 09:00", for example — with a style hint for each, the presets `neutral` like the durations,
   at most as many as the bridge allows. Beyond that limit the Snooze buttons go first, whatever their labels: the
   "Until Monday" preset (the first day of the week), then the "Until tomorrow" preset, then the durations from the
-  longest. A firing Root message on an On-call Route has seven buttons, so a bridge that allows five gets Ack, Resolve
+  longest. A firing Root message on a Paging Route has seven buttons, so a bridge that allows five gets Ack, Resolve
   and the three durations, and one that allows six also "Until tomorrow 09:00". Without buttons, a bridge that forwards
   the messages of a Thread gets a last line in each Root message that is not resolved, such as "Reply in the Thread:
   ack · resolve · snooze 1h", and takes the presets as Text commands such as `snooze tomorrow`.
@@ -5030,7 +5035,7 @@ without a notification. Edits are always Quiet. Do not make an edit ring anyone.
 `success`), and `data`. The data is opaque and signed by Muster; return it unchanged with the press. Map a style that
 your messenger lacks to the closest one, or show a plain button. Muster sends at most `max_per_message` buttons, and
 drops Snooze buttons first: the preset of the first day of the week ("Until Monday 09:00"), then the preset of the next
-morning ("Until tomorrow 09:00"), then the durations from the longest. A firing Root message on an On-call Route has
+morning ("Until tomorrow 09:00"), then the durations from the longest. A firing Root message on a Paging Route has
 seven buttons, Ack, Resolve, three durations and the two presets, so a bridge that declares `max_per_message: 5` gets
 Ack, Resolve and the three durations.
 
@@ -6660,7 +6665,7 @@ duplicates, picks the events worth a call, and calls the provider.
    [Create the Destination](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#create-the-destination). The relay below checks only the signature, so it needs
    the Secret `token` and its header from that example only when something in front of it asks for a credential. Keep
    the Signing secret that the answer shows once, and give it to the relay.
-2. Create a Route that matches what should ring a phone, with the Destination, and an On-call profile.
+2. Create a Route that matches what should ring a phone, with the Destination, and the Paging profile.
 3. Run the relay. This sketch is Python; the `verify` function is the one on [Verify the
    signature](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md#verify-the-signature):
 
@@ -7791,22 +7796,22 @@ When you create a Route, you choose a **Route profile**. A profile only fills in
 can change every field afterwards. There are two:
 
 Ack timeout (`route.ack_timeout`)
-:   On-call: on; first notice after 15 minutes · Informational: off
+:   Paging: on; first notice after 15 minutes · Informational: off
 
 Reminders (`route.reminders`)
-:   On-call: on; first after 4 hours · Informational: off
+:   Paging: on; first after 4 hours · Informational: off
 
 Snooze durations (`route.snooze_durations`)
-:   On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
+:   Paging: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
 
 Group key (`route.group_key`)
-:   On-call: `alertname`, `severity`, `cluster` · Informational: the same
+:   Paging: `alertname`, `severity`, `cluster` · Informational: the same
 
 Reopen window and Grace period
-:   On-call: 15 minutes each · Informational: the same
+:   Paging: 15 minutes each · Informational: the same
 
 Choose **Informational** for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
-notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and
+notices, no Reminders, and long Snooze durations. Choose **Paging** for the rest. See [Statuses and
 commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) for what the timers do.
 
 ### Minimum severity
@@ -7918,10 +7923,10 @@ labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#s
 
 ## Create a Route
 
-1. Open **Routes** and select **Create route**. Choose a [Route profile](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#route-profiles), **On-call** or
+1. Open **Routes** and select **Create route**. Choose a [Route profile](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#route-profiles), **Paging** or
    **Informational**; **Choose another profile** takes you back.
 
-    ![Create route: the choice between the profiles On-call and Informational](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
+    ![Create route: the choice between the profiles Paging and Informational](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
 
 2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#matchers) and check the
    [Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#group-keys) with its [preview](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#preview-before-you-save).
@@ -7939,7 +7944,7 @@ labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#s
    and **Message**, which [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#edit-a-routes-message)
    explains.
 
-    ![The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
 
 5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
    Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#order-and-the-default-route).
@@ -7954,7 +7959,7 @@ Destination to the Default route and everything reaches one place. This is the s
 plus a messenger.
 
 **Pages for payments.** Create the Route `payments-critical` with the Matchers `team="payments"` and
-`severity="critical"`, the On-call profile and a Destination that is the payments team's channel. Put it above the
+`severity="critical"`, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.
 
@@ -8499,7 +8504,7 @@ Details:
   makes you say which: a request names exactly one of `until`, `no_end` and `preset`. A Snooze with no end asks you to
   confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
-  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
+  4 hours and 24 hours on a Paging Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
   two Snooze presets; see [In messengers](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#in-messengers).
 - **Unresolve** is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
@@ -8742,7 +8747,7 @@ message.
 ## Ack timeouts, Reminders and auto-unacknowledge
 
 Three timers make sure nobody forgets: one for an Alert Group nobody has taken, one for an Alert Group somebody took and
-then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the On-call profile turns
+then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the Paging profile turns
 the first two on and the Informational profile turns everything off.
 
 ### Ack timeout
@@ -8751,7 +8756,7 @@ The ack timeout runs while an Alert Group is Firing. It starts at the Alert Grou
 starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve stop it.
 
 When nobody acknowledges, Muster sends up to three **notices**, at doubling intervals from the Route's first interval
-(`route.ack_timeout`, 15 minutes on an On-call Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
+(`route.ack_timeout`, 15 minutes on a Paging Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
 Each is a Loud Thread reply that Mentions whom the Destination's `ack_timeout` setting says. After the last notice the
 Alert Group is **Unclaimed**: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
 filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.
@@ -8761,7 +8766,7 @@ until its first Publication.
 
 ### Reminders
 
-When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (`route.reminders`, on an On-call
+When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (`route.reminders`, on a Paging
 Route). The first **Reminder** comes 4 hours after the acknowledgement, and each next interval doubles up to 24 hours: at 4,
 12, 28 and 52 hours, then every 24 hours. Each is a Loud Thread reply that Mentions the Owner, with the buttons **Still
 on it** and **Unack**.
