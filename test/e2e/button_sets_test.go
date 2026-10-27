@@ -177,7 +177,7 @@ func TestButtonSets(t *testing.T) {
 		e := e.on(t)
 		edits := len(e.calls(http.MethodPut, "/api/v4/posts/"+e.rootIn(n, "ch-alerts").ID+"/patch"))
 		before := done("destination_buttons")
-		if a := e.putButtons(e.mmDest, ac7, `"1"`); a.status != http.StatusPreconditionFailed {
+		if a := e.putButtons(e.mmDest, ac7, `"99"`); a.status != http.StatusPreconditionFailed {
 			t.Errorf("a stale If-Match = %d %s", a.status, a.body)
 		}
 		if a := e.putButtons(e.mmDest, ac7, ""); a.status != http.StatusOK || !strings.Contains(string(a.body),
