@@ -283,7 +283,7 @@ test("the editor and the preview in Russian, 360 px wide", async ({ browser }) =
   await shot(page, "routes-editor-ru-360");
 
   await page.goto("/routes/new");
-  await expect(page.getByRole("button", { name: "Дежурный" })).toHaveAccessibleDescription(
+  await expect(page.getByRole("button", { name: "С призывом" })).toHaveAccessibleDescription(
     "Для алертов, на которые кто-то должен отреагировать: тайм-аут подтверждения и напоминания включены.",
   );
   await page.getByRole("button", { name: "Информационный" }).click();
