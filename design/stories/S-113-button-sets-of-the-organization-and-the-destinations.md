@@ -21,6 +21,7 @@ files_touched:
   - internal/organization/settings.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
+  - internal/archlint/secretleak.go
   - internal/api/organization.go
   - internal/api/organization_test.go
   - internal/destinations/destinations.go
