@@ -123,6 +123,7 @@
 - [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md): Every change to an Alert Group is either **Loud** or **Quiet**.
 - [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md): An Alert Group is always in one of four statuses, and only a few things move it from one to another.
 - [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md): A Destination is **Broken** when Muster has decided that it cannot deliver there until something changes: the messenger refused the bot for good, or the messenger kept failing until Muster ran out of patience.
+- [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md): A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its own configuration with a filter.
 
 ### Operations
 
@@ -166,4 +167,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 742096 bytes, about 185524 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 747950 bytes, about 186987 tokens.

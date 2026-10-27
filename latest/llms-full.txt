@@ -1039,6 +1039,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
       both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
       `critical_is_urgent` is always `true`.
+    - Migration 0022 adds [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) and the Organization's Working hours: Monday to Friday, from
+      the start of the working day to its end, `18:00`. The end must be later than the start on the same day, so an
+      Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
+      the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
+      yours did.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -1051,12 +1056,15 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
     Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
     Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
-    differently.
+    differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
+    start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
+    save the settings again on a 0.2.0 replica.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
-    and gives up after 5 seconds of waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas. Its
-    changes are one transaction, so a failure leaves the schema as 0.1.4 left it, recorded as dirty at version 21, and
-    the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
+    and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
+    waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
+    to start with `schema_dirty`. The changes of 0021 are one transaction, so a failure leaves the schema as 0.1.4 left
+    it, recorded as dirty at version 21. To recover, with the same database role as Muster:
 
     1. Check whether the migration took effect:
 
@@ -1068,6 +1076,23 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 20, dirty = false;`. If it
        returns 1, the migration committed and only its record failed: `UPDATE schema_migrations SET dirty = false;`.
     3. Start the 0.2.0 replica again, or run `muster migrate`, at a quieter time; it applies migration 0021 again.
+
+    Migration 0022 runs in two transactions: the first adds the Teams and the Working hours, the second validates the
+    CHECKs of the Working hours. A failure leaves the schema recorded as dirty at version 22. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect: `SELECT to_regclass('teams');`
+    2. If it returns NULL, clear the failed attempt: `UPDATE schema_migrations SET version = 21, dirty = false;`.
+    3. If it returns `teams`, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_working_days_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_end_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_order_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -8967,6 +8992,69 @@ A deleted Destination receives one last edit of each open Root message, "No long
 {link}", and nothing after that. For a Bridge Root message past its edit window, the last edit is a Thread reply with
 the same text. An outgoing webhook in events mode sends no final event, and its queued events end as Not delivered.
 
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/teams.md -->
+# Teams
+
+A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
+own configuration with a filter. Teams are managed through the API under `/api/v1/teams`.
+
+## What a Team is
+
+A Team has:
+
+- a **name**, unique in the Organization, compared without regard to case;
+- a **slug**, such as `payments`. A slug is 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — and
+  starts with a letter or a digit (`team.slug_format`), so `Payments` and `-x` are refused. It is unique in the
+  Organization and compared exactly;
+- a **description**;
+- the **people** in it, which may be nobody;
+- its **Working hours**: its own, else the Organization's.
+
+What a Team owns
+:   A Route or a Destination names its owning Team in the field `owning_team_id`; reads carry it as `owning_team`,
+    with the Team's id, name and slug. `listRoutes` and `listDestinations` take the parameter `team`: a Team's id, or
+    `mine` for the Teams you are in ("My Teams"). The owner only organizes: owning a Destination does not make it
+    deliver to the Team, and a Route's owning Team adds no delivery.
+
+What a Team does not grant
+:   A Team grants no Permission and limits none: Roles stay the same for the whole Organization. A Responder in a Team
+    cannot change the Team, and a Viewer in a Team is refused Acknowledge as any Viewer is. Only an Admin creates,
+    edits and deletes Teams and adds people to them; every Role reads them.
+
+Deleting a Team
+:   The people leave it, its Working hours are removed, and the Routes and Destinations it owned have no owner from
+    then on, each with a new version. Its slug and name are free at once for a new Team. The Team itself is kept,
+    marked deleted, for what still names it.
+
+Every change of a Team and of the people in it is recorded in the Audit log, and the metric `muster_team_info` has
+one series per Team that is not deleted, with its name ([Metrics](https://muster-io.github.io/muster/latest/reference/metrics.md)). The operations are listed
+in the [API reference](https://muster-io.github.io/muster/latest/reference/api.md).
+
+## People
+
+An Admin adds Users to a Team by hand and removes them, through the API (`addTeamUser`, `removeTeamUser`). A User may be
+in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — `by_hand` for a
+person an Admin added — and the messengers they linked.
+
+- Disabling a User keeps them in their Teams.
+- Deleting a User takes them out of every Team.
+
+## Working hours
+
+Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The end is later than
+the start on the same day: Working hours never span midnight. Holidays are not part of them.
+
+The Organization's Working hours
+:   Monday to Friday, from the start of the working day — the time at which the Snooze presets end, `09:00` by
+    default — to `18:00`, in the Organization's time zone (`organization.working_hours`). An Admin changes the days
+    (`working_days`) and the end (`workday_end`) with the Organization's settings; an end that is not later than the
+    start is refused.
+
+A Team's Working hours
+:   A Team's own Working hours, with days, a start, an end and an IANA time zone such as `Europe/Berlin`
+    (`own_working_hours`), else the Organization's. A Team without its own moves with the Organization: a new start of
+    the working day moves the Team's start too.
+
 <!-- Source: https://muster-io.github.io/muster/latest/operations/backup-and-restore.md -->
 # Backup and restore
 
@@ -10765,9 +10853,9 @@ The pages of this section are generated from the code and the specification of t
 
 Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes
 them; the endpoint also serves the process (`process_*`) and Go runtime (`go_*`) metrics. Configuration entities
-appear only by their `public_id` (`integration`, `route`, `destination`); the labels of an `*_info` metric carry
-what it describes, such as a name or the version; every other label takes its values from the closed set listed
-below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported only by the
+appear only by their `public_id` (`integration`, `route`, `destination`, `team`); the labels of an `*_info` metric
+carry what it describes, such as a name or the version; every other label takes its values from the closed set
+listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported only by the
 replica that is the Leader. The capability is the one that exports the metric.
 
 ### `muster_alert_group_time_to_ack_seconds`
@@ -10841,7 +10929,7 @@ Time from the arrival of an API request on the app listener to the end of its an
 
 Buckets (`le`): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 
 ### `muster_api_requests_total`
@@ -10850,7 +10938,7 @@ counter · labels: `route_pattern`, `method`, `code` · C-03 · exported by ever
 
 Requests to the API on the app listener, by the operation's path template, the method and the status code.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 - `code`: `200`, `201`, `202`, `204`, `302`, `304`, `400`, `401`, `403`, `404`, `405`, `409`, `410`, `412`, `413`, `415`, `422`, `428`, `429`, `500`, `501`, `502`, `503`, `504` — the HTTP status code of the answer
 
@@ -11112,6 +11200,15 @@ gauge · labels: `route` · C-11 · exported by the Leader only
 1 while the Route has an active Storm, 0 otherwise, per Route that is not deleted; set by the Leader.
 
 - `route` (entity): the public_id of the route
+
+### `muster_team_info`
+
+gauge · labels: `team`, `name` · C-25 · exported by every replica
+
+Always 1, one series per Team that is not deleted; the labels carry its public_id and name.
+
+- `team` (entity): the public_id of the team
+- `name` (info): the name of the Team
 
 ### `muster_template_errors_total`
 

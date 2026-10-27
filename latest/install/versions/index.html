@@ -1491,6 +1491,8 @@
       
         
       
+        
+      
     
     
     
@@ -1685,6 +1687,33 @@
     
   
   Broken Destinations
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Teams
 
     
   </span>
@@ -2965,6 +2994,11 @@ critical, and a Route raises the level of its Alert Groups with its
   critical; <code>urgent: false</code>, <code>urgent</code> beside <code>minimum_severity</code>, and <code>critical_is_urgent</code> change nothing. Reads keep
   both until 0.3.0 removes them: <code>urgent</code> is <code>true</code> exactly when the Minimum severity is critical, and
   <code>critical_is_urgent</code> is always <code>true</code>.</li>
+<li>Migration 0022 adds <a href="../../concepts/teams/">Teams</a> and the Organization's Working hours: Monday to Friday, from
+  the start of the working day to its end, <code>18:00</code>. The end must be later than the start on the same day, so an
+  Organization whose working day started at 18:00 or later gets the end <code>23:59</code> — and one that started at 23:59,
+  the latest time with no later end, the start <code>23:58</code>. Check the Organization's settings after the upgrade if
+  yours did.</li>
 </ul>
 <p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
 Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -2976,11 +3010,14 @@ level on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0
 of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
 Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
 Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
-differently.</p>
+differently. A 0.1 replica also does not know the end of the working day: its <code>updateOrganization</code> that sets the
+start of the working day at or after the end fails the CHECK of migration 0022 with <code>500</code> until the rollout ends;
+save the settings again on a 0.2.0 replica.</p>
 <p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
-and gives up after 5 seconds of waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas. Its
-changes are one transaction, so a failure leaves the schema as 0.1.4 left it, recorded as dirty at version 21, and
-the 0.2.0 replica refuses to start with <code>schema_dirty</code>. To recover, with the same database role as Muster:</p>
+and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
+waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
+to start with <code>schema_dirty</code>. The changes of 0021 are one transaction, so a failure leaves the schema as 0.1.4 left
+it, recorded as dirty at version 21. To recover, with the same database role as Muster:</p>
 <ol>
 <li>
 <p>Check whether the migration took effect:</p>
@@ -2993,6 +3030,24 @@ the 0.2.0 replica refuses to start with <code>schema_dirty</code>. To recover, w
    returns 1, the migration committed and only its record failed: <code>UPDATE schema_migrations SET dirty = false;</code>.</p>
 </li>
 <li>Start the 0.2.0 replica again, or run <code>muster migrate</code>, at a quieter time; it applies migration 0021 again.</li>
+</ol>
+<p>Migration 0022 runs in two transactions: the first adds the Teams and the Working hours, the second validates the
+CHECKs of the Working hours. A failure leaves the schema recorded as dirty at version 22. To recover, with the same
+database role as Muster:</p>
+<ol>
+<li>Check whether the first transaction took effect: <code>SELECT to_regclass('teams');</code></li>
+<li>If it returns NULL, clear the failed attempt: <code>UPDATE schema_migrations SET version = 21, dirty = false;</code>.</li>
+<li>
+<p>If it returns <code>teams</code>, finish the second transaction and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_working_days_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_workday_end_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">organizations</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">organizations_workday_order_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
 </ol>
 </dd>
 <dt>0.1.1</dt>
