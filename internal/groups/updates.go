@@ -4,10 +4,12 @@
 package groups
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"time"
 
@@ -172,7 +174,8 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 }
 
 // rerenderButtons runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids,
-// locked in id order in the transaction of q, after a change of a button set (C-28.FR-9): delivery edits, Quietly,
+// locked in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
+// (C-28.FR-9): delivery edits, Quietly,
 // each Root message whose Desired state the set changed and leaves the others, whose hashes are unchanged, so that a
 // second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint is
 // sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as
@@ -187,18 +190,22 @@ func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, a
 	if err != nil {
 		return 0, err
 	}
+	// The re-render step takes the membership lock of each Alert Group's Route shared; the Alert Groups go in the
+	// order (Route, id), so that the Routes are taken in id order, as the deletion of a Destination takes them.
+	open := make([]*Group, 0, len(locked))
+	for _, g := range locked {
+		if g != nil && g.Status != StatusResolved {
+			open = append(open, g)
+		}
+	}
+	slices.SortFunc(open, func(a, b *Group) int {
+		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
+	})
 	now := s.d.clock.Now().UTC()
 	n := 0
-	for _, id := range ids {
-		g := locked[id]
-		if g == nil || g.Status == StatusResolved {
-			continue
-		}
-		changed := false
-		var failures []TemplateFailure
-		if err := s.d.rerender(ctx, q, Rendering{Group: g, Actor: System, After: after.add,
-			Fallback: func(f TemplateFailure) { failures = append(failures, f) },
-			Changed:  func() { changed = true }}); err != nil {
+	for _, g := range open {
+		failures, changed, err := s.d.render(ctx, q, g, System, nil, after)
+		if err != nil {
 			return 0, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
 		}
 		if !changed {

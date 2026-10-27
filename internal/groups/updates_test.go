@@ -487,12 +487,14 @@ func TestButtonsUpdate(t *testing.T) {
 	u.db.retired = map[[2]int64]bool{{u.elsewhere.ID, 21}: true}
 	u.db.following = []int64{22}
 	changes[u.acked.ID], changes[u.firing.ID] = true, true
+	u.acked.RouteID = 3
 	before := []dbgen.LockGroupsRow{*u.acked, *u.snoozed, *u.firing, *u.elsewhere}
 	entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
 		requested: u.clock.Now()})
 	u.round(t, u.worker)
-	if want := []int64{u.acked.ID, u.firing.ID}; !slices.Equal(rendered, want) {
+	// The acknowledged Alert Group, the first by id, is of the later Route 3: the Alert Groups go by Route, then id.
+	if want := []int64{u.firing.ID, u.acked.ID}; !slices.Equal(rendered, want) {
 		t.Errorf("rendered %v, want %v", rendered, want)
 	}
 	if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
@@ -514,7 +516,7 @@ func TestButtonsUpdate(t *testing.T) {
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
 		requested: u.clock.Now()})
 	u.round(t, u.worker)
-	if !slices.Equal(rendered, []int64{u.acked.ID, u.firing.ID}) || !strings.Contains(u.log.String(),
+	if !slices.Equal(rendered, []int64{u.firing.ID, u.acked.ID}) || !strings.Contains(u.log.String(),
 		`"kind":"destination_buttons","destination":"DS000000000021","alert_groups":0`) {
 		t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
 	}
@@ -579,11 +581,15 @@ func TestButtonsUpdate(t *testing.T) {
 				r.Changed()
 				return nil
 			})
-			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: kind, destinationID: 21,
-				requested: u.clock.Now()})
+			// A row of the Organization's set names no Destination.
+			row, scope := &fakeUpdate{id: u.db.id(), kind: kind, requested: u.clock.Now()}, ""
+			if kind == KindDestinationButtons {
+				row.destinationID, scope = 21, `"destination":"DS000000000021",`
+			}
+			u.db.updates = append(u.db.updates, row)
 			u.db.fail[failing] = errBoom
 			if u.round(t, u.worker); len(u.db.updates) != 1 || !strings.Contains(u.log.String(),
-				`"event":"open_group_update_failed","kind":"`+kind+`","destination":"DS000000000021","error":`) {
+				`"event":"open_group_update_failed","kind":"`+kind+`",`+scope+`"error":`) {
 				t.Errorf("%s with %s failing: log %s", kind, failing, u.log)
 			}
 		}

@@ -546,14 +546,8 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
 	if d.rerender != nil {
-		received, err := d.receivedAt(ctx, q)
+		failures, _, err := d.render(ctx, q, g, actor, recorded, after)
 		if err != nil {
-			return err
-		}
-		var failures []TemplateFailure
-		if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded,
-			ReceivedAt: received, After: after.add,
-			Fallback: func(f TemplateFailure) { failures = append(failures, f) }}); err != nil {
 			return err
 		}
 		if err := d.recordFallbacks(ctx, q, g, failures, now); err != nil {
@@ -572,6 +566,26 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		}
 	}
 	return nil
+}
+
+// render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
+// and returns the Route templates that failed, which the caller records (recordFallbacks), and whether it changed a
+// Desired state; after collects what runs once the transaction committed. The dispatcher calls it for every change,
+// and the re-render of a changed button set without a lifecycle event (updates.go).
+func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Actor, recorded []Recorded,
+	after *committed) ([]TemplateFailure, bool, error) {
+	received, err := d.receivedAt(ctx, q)
+	if err != nil {
+		return nil, false, err
+	}
+	var failures []TemplateFailure
+	changed := false
+	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
+		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
+		Changed: func() { changed = true }}); err != nil {
+		return nil, false, err
+	}
+	return failures, changed, nil
 }
 
 // recordFallbacks records, as the system, one system entry fallback_template_used per Route template the re-render
