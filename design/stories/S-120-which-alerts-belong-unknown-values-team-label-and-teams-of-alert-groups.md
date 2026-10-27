@@ -86,9 +86,9 @@ issue: null
 - **General** (`admin.organization.general.tsx`): "Team label" under the time zone; `reserved_label` shows the server's
   message at the field.
 - **Alert Group page** (`alert-group-header.tsx`, `alert-group-alerts.tsx`, `timeline.tsx`): the header line "Teams:
-  {team} — by the Team label" or "— by the matcher {matcher}", one per Team, a deleted Team in its name with "(deleted)";
-  the Timeline texts "{team} joined — by the Team label" / "— by the matcher {matcher}" and "No Team has the value
-  {value} of the Team label"; each Alert's Teams.
+  {team} — by the Team label" or "— by the matcher {matcher}", one per Team, a deleted Team in its name with
+  "(deleted)"; the Timeline texts "{team} joined — by the Team label" / "— by the matcher {matcher}" and "No Team has
+  the value {value} of the Team label"; each Alert's Teams.
 - **Alert Group list** (`alert-group-table.tsx`, `alert-group-filters.tsx`, `lib/alert-group-search.ts`): the column
   "Teams" (hidden first at phone width, as the other optional columns are), the filter "Team" and the quick filter
   "My Teams", in the URL as `team`.
@@ -99,10 +99,11 @@ issue: null
 - **Texts** (EN / RU), from C-25's UI, reference.md and the approved mockups: the hint above / «Алерт относится к
   команде по значению метки команды или по её матчерам. Доступ команды не ограничивают: роли общие для Организации.»,
   "Unknown values of {{label}}" / «Неизвестные значения {{label}}», the banner / «Алерты приходили с этими значениями,
-  но такой команды нет: места доставки команды не добавляются, никого не зовут.», "Create Team" / «Создать команду», "Which
-  Alerts belong to this Team" / «Какие алерты — этой команды», the two hints / «Матчер может смотреть на любую метку
-  алерта, не только на namespace. Подходит любой из матчеров.» and «На стендах с общим namespace матчите по pod / app
-  или ставьте метку команды на поды.», "Teams" / «Команды», "My Teams" / «Мои команды», "Team label" / «Метка команды».
+  но такой команды нет: места доставки команды не добавляются, никого не зовут.», "Create Team" / «Создать команду»,
+  "Which Alerts belong to this Team" / «Какие алерты — этой команды», the two hints / «Матчер может смотреть на любую
+  метку алерта, не только на namespace. Подходит любой из матчеров.» and «На стендах с общим namespace матчите по pod /
+  app или ставьте метку команды на поды.», "Teams" / «Команды», "My Teams" / «Мои команды», "Team label" / «Метка
+  команды».
 
 ## Steps
 

@@ -28,6 +28,7 @@ files_touched:
   - internal/groups/teams.go
   - internal/groups/teams_test.go
   - internal/groups/events.go
+  - internal/groups/events_test.go
   - internal/groups/filters.go
   - internal/groups/read.go
   - internal/groups/query.sql
@@ -109,7 +110,8 @@ issue: null
   - `organizations.team_label text NOT NULL DEFAULT 'team'` and `organizations.teams_version bigint NOT NULL DEFAULT
     0`, which every change of a Team or of the Team label increments, so that each replica's cached classification
     (below) sees the change in the Snapshot's own transaction, as the Routes' stamp does.
-  - `team_matchers`: `org_id`, `team_id`, `label`, `op` (`=`, `!=`, `=~`, `!~`), `value`, `position`; replaced as a whole.
+  - `team_matchers`: `org_id`, `team_id`, `label`, `op` (`=`, `!=`, `=~`, `!~`), `value`, `position`; replaced as a
+    whole.
   - `alert_teams`: `org_id`, `alert_id`, `team_id`, `rule` (`label`, `matcher`), `matcher`; primary key
     `(alert_id, team_id)`; written by routing when the Alert starts firing (replaced at each new firing) and, from
     S-163, added to by the evaluation; `alerts.unknown_team_value text`, the value of the Team label that named no Team
@@ -136,12 +138,13 @@ issue: null
   such Alerts only through the evaluation on save of S-163.
 - **Groups** (`internal/groups/teams.go`, `grouping.go`): when Alerts join an Alert Group — `created`, `alerts_added`,
   `reopened`, a Replacement — the dispatcher adds the Teams of the joining Alerts that the Alert Group lacks to
-  `alert_group_teams` and records one Quiet `team_joined` per Team, and one Quiet `unknown_team_value` per value not
-  yet in `unknown_team_values`; both are rows of the closed table of `events.go` and of delivery's `Table`
-  (`team_joined`: a Root message update; `unknown_team_value`: nothing) — `Enqueue` refuses an event without a row,
-  and `enqueue_test.go` counts the rows of `Table`, so both change with them. The list, counts and reads join
-  `alert_group_teams` and `teams` (`filters.go`, `read.go`, `query.sql`); "My Teams" is the caller's `team_users`.
-  The table joins the list of lint 2 (`internal/archlint/archlint.go`, AGENTS.md).
+  `alert_group_teams` and records one Quiet `team_joined` per Team, and one Quiet `unknown_team_value` per value not yet
+  in `unknown_team_values`; both are rows of the closed table of `events.go` and of delivery's `Table` (`team_joined`: a
+  Root message update; `unknown_team_value`: nothing) — `Enqueue` refuses an event without a row, and `enqueue_test.go`
+  counts the rows of `Table`, so both change with them; `TestLifecycleEventTable` of `events_test.go` fails on a row of
+  `events.go` without its case, so it gains both events. The list, counts and reads join `alert_group_teams` and `teams`
+  (`filters.go`, `read.go`, `query.sql`); "My Teams" is the caller's `team_users`. The table joins the list of lint 2
+  (`internal/archlint/archlint.go`, AGENTS.md).
 - **Alerts view** (`internal/ingest/alertsview.go`): the Teams of each Alert from `alert_teams`.
 - **Web test fixtures** (`web/src/test/fixtures/alert-groups.ts`, S-166): the builders of Alert Group and Alert reads
   set `teams` to `[]`, so that `make generate` keeps the TypeScript check of the web tests green.
@@ -233,7 +236,7 @@ None.
 - `alert_group_teams` is written only by `groups`, like the Alert Group's other tables, so it joins lint 2.
 - `team_joined` and `unknown_team_value` are Quiet and never ring anyone; `team_joined` re-renders the Root message,
   which shows Teams from S-125 on.
-- With 44 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
+- With 45 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
   were split into S-163 when the contract was written.
 - Migration `0025` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present

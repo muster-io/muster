@@ -101,13 +101,13 @@ issue: null
   NULL DEFAULT '{"all": true}'` with `CHECK (jsonb_typeof(buttons) = 'object')`; `destinations.buttons jsonb` (null =
   "As in the Organization") with `CHECK (buttons IS NULL OR jsonb_typeof(buttons) = 'array')`; the CHECK of
   `open_group_updates.kind` is replaced by `open_group_updates_kind_v2_check`, which lists every kind present —
-  `route_minimum_severity`, `destination_buttons` and `organization_buttons` — and a CHECK that `destination_buttons` names a
-  Destination (new nullable column `open_group_updates.destination_id`), all `NOT VALID` and validated in a second
-  transaction, as 0018 does. The down migration drops the columns and restores the kind CHECK.
-- **Buttons** (`internal/buttons/set.go`): `Set` — all, or a list of items — with `Shows(Button, durations)`: Acknowledge
-  and Unacknowledge by `acknowledge`, Resolve by `resolve`, a duration button when its value is in the set, a preset
-  button when its preset is; Unsnooze and the Reminder's buttons always. `ForStatus` keeps its order and the filter
-  keeps it too, so the order of reference.md stays.
+  `route_minimum_severity`, `destination_buttons` and `organization_buttons` — and a CHECK that `destination_buttons`
+  names a Destination (new nullable column `open_group_updates.destination_id`), all `NOT VALID` and validated in a
+  second transaction, as 0018 does. The down migration drops the columns and restores the kind CHECK.
+- **Buttons** (`internal/buttons/set.go`): `Set` — all, or a list of items — with `Shows(Button, durations)`:
+  Acknowledge and Unacknowledge by `acknowledge`, Resolve by `resolve`, a duration button when its value is in the set,
+  a preset button when its preset is; Unsnooze and the Reminder's buttons always. `ForStatus` keeps its order and the
+  filter keeps it too, so the order of reference.md stays.
 - **Delivery** (`internal/delivery`): `Destination` gains `Buttons`; `desiredOf` drops from the Root message of each
   Destination the buttons its effective set (its own, else the Organization's) does not show, before the Desired
   state's hash, so a set that changes nothing changes no hash; Thread replies, Storm summaries and Reminders are not
@@ -122,7 +122,9 @@ issue: null
   whose Desired state changed, Quietly. Safe to run twice: the second run finds every hash unchanged.
 - **Audit log and live updates**: `organization.updated` and `destination.updated` carry `/buttons` in their diffs; the
   `organization` and `destination` hints as for every field.
-- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `buttons` (`{"source": "organization"}`), so `make generate` leaves the TypeScript check of the web tests green.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the
+  neutral value of `buttons` (`{"source": "organization"}`), so `make generate` leaves the TypeScript check of the web
+  tests green.
 - **Settings**: `organization.buttons`, `destination.buttons`, `route.snooze_durations`; reference.md "Buttons and
   links by status" already holds the revised rule.
 - **Log events, metrics**: none new; the worker's `open_group_update_done` names the new kinds.
@@ -195,9 +197,9 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
 
 ## Open questions
 
-1. **A button set on outgoing webhooks?** Settled: no. An outgoing webhook sends no buttons in either mode, so it has
-   no `buttons` field and the form of S-114 shows no Buttons section for it; C-28.FR-10's "every type" is read as every
-   messenger type. The contract above follows it.
+1. **A button set on outgoing webhooks?** Settled by the maintainer (review of PR #399): no. An outgoing webhook sends
+   no buttons in either mode, so it has no `buttons` field and the form of S-114 shows no Buttons section for it;
+   C-28.FR-10 now gives the button set to the form of every messenger type. The contract above follows it.
 
 ## Notes
 

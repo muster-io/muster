@@ -4,9 +4,9 @@
 - Date: 2026-10-26
 
 Which story covers each functional requirement (`C-NN.FR-n`) and acceptance statement (`C-NN.AC-n`) of
-[L1](../prd/L1.md) and of the core of [L2](../prd/L2.md). A capability is done when its stories together cover every ID of its file
-([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID fully or in
-part; this page joins them.
+[L1](../prd/L1.md) and of the core of [L2](../prd/L2.md). A capability is done when its stories together cover every ID
+of its file ([conventions](README.md#3-sizing-and-slicing)). The table of each story file says whether it covers an ID
+fully or in part; this page joins them.
 
 - **Covered by** lists the written stories that cover the ID, with `(part)` where a story covers only part of it.
 - **Status**: `complete` — the listed stories cover the ID together; `open: S-NNN` — a planned story completes it.
@@ -17,7 +17,12 @@ part; this page joins them.
 - **Note** names, for an acceptance statement that cannot be checked when its capability merges, the later story that
   verifies it — the one in which its dependency appears — and why ([L1 conventions](../prd/L1.md#2-conventions)).
 
-Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07) · [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) · [C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) · [C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) · [C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [L1 requirements revised for L2](#l1-requirements-revised-for-l2)
+Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C-05](#c-05) · [C-06](#c-06) · [C-07](#c-07)
+· [C-08](#c-08) · [C-09](#c-09) · [C-10](#c-10) · [C-11](#c-11) · [C-12](#c-12) · [C-13](#c-13) · [C-14](#c-14) ·
+[C-15](#c-15) · [C-16](#c-16) · [C-17](#c-17) · [C-18](#c-18) · [C-19](#c-19) · [C-20](#c-20) · [C-21](#c-21) ·
+[C-22](#c-22) · [C-23](#c-23) · [C-24](#c-24) · [NFR](#non-functional-requirements) · [C-25](#c-25) · [C-26](#c-26) ·
+[C-27](#c-27) · [C-28](#c-28) · [C-29](#c-29) · [C-30](#c-30) · [C-31](#c-31) · [C-32](#c-32) · [L1 requirements revised
+for L2](#l1-requirements-revised-for-l2)
 
 ## Summary
 
@@ -58,7 +63,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-01
 
-[Project skeleton and releases](../prd/l1/C-01-project-skeleton-and-releases.md) · Foundation · stories: S-001, S-002, S-003, S-004
+[Project skeleton and releases](../prd/l1/C-01-project-skeleton-and-releases.md) · Foundation · stories: S-001, S-002,
+S-003, S-004
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -85,7 +91,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-02
 
-[Process startup and runtime](../prd/l1/C-02-process-startup-and-runtime.md) · Foundation · stories: S-005, S-006, S-007, S-008, S-009
+[Process startup and runtime](../prd/l1/C-02-process-startup-and-runtime.md) · Foundation · stories: S-005, S-006,
+S-007, S-008, S-009
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -128,7 +135,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-03
 
-[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-062, S-014, S-015, S-072
+[Sign-in and access](../prd/l1/C-03-sign-in-and-access.md) · Foundation · stories: S-010, S-011, S-012, S-013, S-062,
+S-014, S-015, S-072
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -336,7 +344,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-09
 
-[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031, S-065, S-095
+[Alert Group lifecycle](../prd/l1/C-09-alert-group-lifecycle.md) · Observation · stories: S-028, S-029, S-030, S-031,
+S-065, S-095
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -718,7 +727,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-20
 
-[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories: S-055, S-071, S-056, S-072, S-092, S-094
+[Organization settings and security](../prd/l1/C-20-organization-settings-and-security.md) · Operations · stories:
+S-055, S-071, S-056, S-072, S-092, S-094
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -739,7 +749,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-21
 
-[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057, S-058, S-060, S-091, S-106, S-107, S-108, S-109, S-110
+[Documentation site and runbooks](../prd/l1/C-21-documentation-site-and-runbooks.md) · Operations · stories: S-057,
+S-058, S-060, S-091, S-106, S-107, S-108, S-109, S-110
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|
@@ -766,7 +777,8 @@ Contents: [C-01](#c-01) · [C-02](#c-02) · [C-03](#c-03) · [C-04](#c-04) · [C
 
 ## C-22
 
-[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083, S-085, S-086, S-079, S-084, S-093
+[Bridge](../prd/l1/C-22-bridge.md) · Bridge · stories: S-073, S-080, S-074, S-081, S-075, S-076, S-077, S-078, S-083,
+S-085, S-086, S-079, S-084, S-093
 
 | ID | Covered by | Status | Note |
 |---|---|---|---|

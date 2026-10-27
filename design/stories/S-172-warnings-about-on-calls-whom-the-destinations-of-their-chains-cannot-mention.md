@@ -12,6 +12,8 @@ files_touched:
   - internal/schedules/query.sql
   - internal/telegram/destcheck.go
   - internal/telegram/destcheck_test.go
+  - internal/destinations/query.sql
+  - internal/destinations/destinations.go
   - test/e2e/schedule_reach_test.go
   - docs/concepts/schedules.md
 acceptance:
@@ -49,9 +51,16 @@ issue: null
   name a chain with a `page_on_call` or `call` step on the Schedule, as `delivery.PageTargets` of S-155 finds them for a
   run; each warning keeps its reason (C-27.FR-8).
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): the step `discussion_group_members` of S-164 also
-  asks `getChatMember` for the people with a Telegram Account link for the Connection who are in a Rotation layer or an
-  Override, from the business clock's now to `schedule.gap_view` ahead, of a Schedule that such a chain Pages, once per
-  person; a failed call leaves the person unknown, as in S-164.
+  asks `getChatMember` for the people with a Telegram Account link for the Connection whom a chain Paging in that
+  Destination can Page through a Schedule, once per person; a failed call leaves the person unknown, as in S-164.
+- **Destinations** (`internal/destinations/query.sql`, `destinations.go`): the query `ListChainPagedTelegramPeople`,
+  beside S-164's query of the people of the Teams that name the Destination — the Users with a Telegram Account link for
+  the Destination's Connection who are in a Rotation layer, or take an Override that ends after the business clock's
+  now, of a Schedule that a `page_on_call` or `call` step names in a chain named by a Route or a Team that names the
+  Destination (`route_escalation_chains`, `team_escalation_chains`, `escalation_steps`, `rotation_layer_users`,
+  `schedule_overrides`), with `org_id` at every level; `destinations.go` exposes it to the check as S-164's query is.
+- **Imports** (ADR-0016, as S-164 and S-169 state them): the query reads those tables in SQL, so neither `telegram` nor
+  `destinations` imports `schedules` or `escalation`, and `schedules` imports neither of them.
 - **Settings**: `schedule.gap_view`.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/schedules.md` — "Unreachable On-calls" names the chains' Destinations.

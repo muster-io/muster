@@ -61,8 +61,8 @@ issue: null
 - **Audit log**: `/message_labels` "Labels in the message", `/own_message_labels` "Own labels in the message".
 - **Documentation links**: `field.message_labels` → `configure/messages-and-templates.md#labels-in-the-message` (the
   section of S-125).
-- **Texts** (EN / RU), from C-29's UI and the approved mockups: "Labels in the message" / «Метки в сообщении», "+ label" /
-  «+ метка», "From recent Alert Groups of the Route" / «Из недавних групп маршрута», the hint / «По умолчанию: ключ
+- **Texts** (EN / RU), from C-29's UI and the approved mockups: "Labels in the message" / «Метки в сообщении», "+ label"
+  / «+ метка», "From recent Alert Groups of the Route" / «Из недавних групп маршрута», the hint / «По умолчанию: ключ
   группировки без `alertname` и метки важности, метку команды и `namespace`. Метки без значения в группе не
   показываются.», "Reset to default" / «Как по умолчанию», "{{length}} of {{limit}} characters" / «{{length}} из
   {{limit}} символов».
@@ -77,8 +77,8 @@ issue: null
 ## Verification
 
 Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`; from a terminal, as in S-125, create the Route
-"Infrastructure" with the demo Mattermost Destination on `ch-alerts` and fire three `KubernetesContainerOOMKilled` Alerts. Then in
-Playwright at 1280 × 800, in English and in Russian:
+"Infrastructure" with the demo Mattermost Destination on `ch-alerts` and fire three `KubernetesContainerOOMKilled`
+Alerts. Then in Playwright at 1280 × 800, in English and in Russian:
 
 1. Routes → "Infrastructure" → "Message" → "Labels in the message" shows the chips `system`, `team`, `namespace` and the
    hint.

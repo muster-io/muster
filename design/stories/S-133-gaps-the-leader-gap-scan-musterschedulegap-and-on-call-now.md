@@ -214,9 +214,11 @@ clock moves past `auth.session_idle_timeout`, which is why the checks use the Pe
 
 None open. Settled:
 
-1. **Settled: `muster_schedule_gap` is 1 only for a Schedule whose gap alert is active**, so that the chart rule, the
-   backup of the Internal alert, follows the same setting, and a second line in working hours does not page through
-   the chart; it is 0 for the others.
+1. **Settled by C-27.FR-7: `muster_schedule_gap` is 1 only for a Schedule whose gap alert is active**, and 0 for the
+   others. FR-7 describes the gauge within the gap scan of the Schedules that report their gaps (`schedule.gap_alert`)
+   and exports it "for the chart rule of the same name", which reference.md calls "the backup for the Internal alert";
+   and FR-14 says a Schedule that covers only part of the day keeps the alert off. A backup that fired where the alert
+   is off would page for such a second line, so the gauge follows the scan's Schedules.
 
 ## Notes
 

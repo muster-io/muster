@@ -58,7 +58,9 @@ issue: null
 
 - **Spec** (`api/openapi.yaml`): `LifecycleEvent` and `WebhookEventName` gain `escalation_webhook`;
   `OutgoingWebhookEvent` gains the optional `escalation` {`chain` (`EscalationChainRef`), `step` (number)}, set on that
-  event only; `TimelineEscalationEntry` uses `destination` (S-121) for it; `EscalationSkipReason` gains
+  event only, and carries on it S-121's optional `destination` {`id`, `name`, `type`} — the step's Destination;
+  `TimelineEscalationEntry` gains `destination` (`DestinationRef`), which `internal/groups/read.go` builds from S-121's
+  `timeline_entries.destination_id` column, as S-121 does for `TimelineSystemEntry`; `EscalationSkipReason` gains
   `destination_deleted` and `webhook_events_required`.
 - **Schema**: none new — the Timeline accepts the event since `_v4` and `webhook_events` since S-148; a row of
   `webhook_events` for a Destination that has no delivery of the Alert Group is allowed as it is.
@@ -77,7 +79,7 @@ issue: null
 - **Delivery's event table** (`internal/delivery/enqueue.go`): the row of `escalation_webhook`, sent only to its
   Destination; `enqueue_test.go` counts it.
 - **Webhooks** (`internal/webhooks/body.go`): the body of `escalation_webhook` — the Alert Group as in every event —
-  and `escalation`; S-168 adds the Assignees to the `alert_group` of every event, this one included.
+  with `escalation` and `destination`; S-168 adds the Assignees to the `alert_group` of every event, this one included.
 - **Log events, metrics**: none new; the deliveries of webhook events keep their own.
 - **Documentation**: `docs/outgoing-webhooks/events.md` — `escalation_webhook` with an example and the note that only
   the step's Destination receives it; Concepts → Escalation chains — the step.

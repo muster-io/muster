@@ -96,6 +96,7 @@ make dev > dev.log 2>&1 &
 # As in S-121: A, the Integration "sev" with NOTIFY, PUTA and AG, DEST, TPUT, ROOTS and FMM; the Destinations IC, IN,
 # PC, PN and SN, the Teams "payments" (TP, with PC critical and PN below critical) and "search" (TS, with SN), and the
 # Route "Infrastructure" (R) with IC critical, IN below critical and deliver_to_teams on.
+API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake; FMM=127.0.0.1:18065/_fake
 RPUT() { E=$(curl -s "${A[@]}" $API/routes/$R | jq -r .etag); curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/routes/$R \
   -d "$(curl -s "${A[@]}" $API/routes/$R | jq -c "del(.id, .etag, .position, .is_default, .destinations, .storm_active,
   .open_alert_group_count, .created_at, .urgent, .destination_ids, .owning_team) | $1")" > /dev/null; sleep 1; }

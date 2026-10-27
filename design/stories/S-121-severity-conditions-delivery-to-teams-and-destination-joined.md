@@ -26,6 +26,8 @@ files_touched:
   - internal/groups/reach_test.go
   - internal/groups/dispatcher.go
   - internal/groups/events.go
+  - internal/groups/events_test.go
+  - internal/groups/read.go
   - internal/groups/query.sql
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
@@ -33,6 +35,8 @@ files_touched:
   - internal/delivery/storm_test.go
   - internal/delivery/query.sql
   - internal/api/alertgroups.go
+  - internal/webhooks/body.go
+  - internal/webhooks/body_test.go
   - internal/api/destinations.go
   - internal/destinations/destinations.go
   - internal/destinations/query.sql
@@ -53,7 +57,7 @@ acceptance:
   - "[C-26.FR-5, C-11.FR-6] During a Storm of the Route, a Team Destination counts a non-Urgent Alert Group in its own Storm summary, and an Urgent one is published there on its own (`storm_test.go`)."
   - "[C-26.FR-7, C-26.AC-10] A Route owned by \"payments\" without `deliver_to_teams` delivers an Alert Group of `team=\"payments\"` only to its own Destinations (`reach_test.go`)."
   - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined`: a reached Destination without a delivery after a system transition of a change of configuration gets a Quiet Publication (`enqueue_test.go`, `routing_teams_test.go`)."
-  - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined; `webhook_events_event_v3_check` accepts it (`db_test.go`, `routing_teams_test.go`)."
+  - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined in the event's optional `destination` {`id`, `name`, `type`}, which no other event carries; `webhook_events_event_v3_check` accepts it (`body_test.go`, `db_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-13] The documentation has the page Concepts → Routing to Teams with the operations and team channels by Severity, the note that the feature is optional, one status in every channel, the Team label in the Group key for teams that want their own Alert Groups, and a Route for test clusters; the upgrade notes of 0.2.0 say that `destination_ids` is derived from `destination_entries` until 0.3.0; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -108,13 +112,16 @@ issue: null
   - `DestinationReadFields` gains `teams` (`TeamRef`[]): the Teams that name it as a Destination of the Team.
   - `AlertGroupDelivery` gains `entries` (`DeliveryEntry`[], required).
   - `LifecycleEvent` gains `destination_joined` (`x-event-kinds` `system`); `WebhookEventName` gains it;
-    `TimelineSystemEntry` gains `destination` (`DestinationRef`).
+    `TimelineSystemEntry` gains `destination` (`DestinationRef`), which `internal/groups/read.go` builds from
+    `timeline_entries.destination_id`; `OutgoingWebhookEvent` gains the optional `destination` {`id`, `name`, `type`
+    (`DestinationType`)}, the Destination the Alert Group joined, set on `destination_joined` only, as S-148's `page` is
+    on its own event (`internal/webhooks/body.go`).
 - **Schema** (migration `0027_destination_entries_and_teams`, expand only; `schema.md` §4.8, §4.9, §4.11, §4.15):
   - `route_destinations.severity_condition text NOT NULL DEFAULT 'any' CHECK (severity_condition IN ('any',
     'critical', 'below_critical'))`; `routes.deliver_to_teams boolean NOT NULL DEFAULT false` and
     `routes.run_team_chains boolean NOT NULL DEFAULT true`.
-  - `team_destinations`: `org_id`, `team_id`, `destination_id`, `severity_condition` (same CHECK), `added_at`; primary key
-    `(team_id, destination_id)`, index `(org_id, destination_id)`.
+  - `team_destinations`: `org_id`, `team_id`, `destination_id`, `severity_condition` (same CHECK), `added_at`; primary
+    key `(team_id, destination_id)`, index `(org_id, destination_id)`.
   - `deliveries.entries jsonb NOT NULL DEFAULT '[]'` — the entries that reached the delivery, appended, never removed:
     `{"kind": "route"}` or `{"kind": "team", "team_id": N}`, with the condition at that time.
   - `timeline_entries.destination_id`; the CHECKs of events, event kinds, system events and the system rule are
@@ -133,20 +140,23 @@ issue: null
   `new_alert_group` when it is firing, Quiet when it is acknowledged or snoozed; the reach goes to the re-render step in
   `Rendering`. A system transition of a configuration change (S-111's `MinimumSeverityChanged`, S-163's
   `TeamsEvaluated`, S-170's `team_destinations`) records none.
-- **Delivery** (`enqueue.go`, `storm.go`): `Enqueue` delivers to the reached Destinations instead of
-  the Route's list: a missing delivery is created as the Publication of `destination_joined` (Loud or Quiet by its
-  row), as part of the first Publication, or as a Quiet Publication of a configuration change, within the limiters,
-  and its `entries` are appended; a Destination no longer reached keeps its delivery and is kept current until its
-  final state (C-26.FR-4). Storms: the summary of a Route's Storm is rendered in each Destination its Alert Groups reach, Team
-  Destinations included, and an Urgent Alert Group is published there on its own (C-11.FR-6). Events-mode outgoing
-  webhooks reached through a Team receive their events.
+- **Delivery** (`enqueue.go`, `storm.go`): `Enqueue` delivers to the reached Destinations instead of the Route's list: a
+  missing delivery is created as the Publication of `destination_joined` (Loud or Quiet by its row), as part of the
+  first Publication, or as a Quiet Publication of a configuration change, within the limiters, and its `entries` are
+  appended; a Destination no longer reached keeps its delivery and is kept current until its final state (C-26.FR-4).
+  Storms: the summary of a Route's Storm is rendered in each Destination its Alert Groups reach, Team Destinations
+  included, and an Urgent Alert Group is published there on its own (C-11.FR-6). Events-mode outgoing webhooks reached
+  through a Team receive their events.
+- **Groups tests** (`events_test.go`): `TestLifecycleEventTable` fails on a row of `events.go` without its case, so it
+  gains `destination_joined`, Loud and Quiet.
 - **Teams** (`internal/teams/destinations.go`): the entries in the Team's input, view and Audit log diff; the row that
   a save of them writes, and the deletion of a Team's entries, are S-170's.
 - **Fake Mattermost server** (`internal/fakes/fakemattermost`): the channels `ch-infra-critical`, `ch-infra-notice`,
   `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice`, with the bot a member, for the checks of this
   capability.
-- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `teams` (`[]`), so `make generate` leaves the TypeScript check of the web tests green; the builder of delivery reads in
-  `web/src/test/fixtures/alert-groups.ts` sets `entries` to `[]` for the same reason.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the
+  neutral value of `teams` (`[]`), so `make generate` leaves the TypeScript check of the web tests green; the builder of
+  delivery reads in `web/src/test/fixtures/alert-groups.ts` sets `entries` to `[]` for the same reason.
 - **AGENTS.md**: the paragraph on development mode names the channels `ch-infra-critical`, `ch-infra-notice`,
   `ch-payments-critical`, `ch-payments-notice` and `ch-search-notice` of the fake Mattermost server.
 - **Settings**: `route.deliver_to_teams`, `route.run_team_chains`, the Severity condition of a Route's or a Team's
@@ -228,6 +238,8 @@ None.
 ## Notes
 
 - Suggested commit: `feat(routing): deliver to the teams of an alert group with severity conditions per destination`.
+- With 42 files the story is at the edge of the size signal; S-170 was split from it, and the files that the review
+  added are tests and readers of what it adds.
 - One rule decides Loud or Quiet (ADR-0018, C-26.FR-5): Alerts publish in a newly reached Destination with
   `destination_joined`; a change of configuration — a saved Team, a Route option, a condition, the Minimum severity —
   publishes Quietly without it. The dispatcher knows which of the two caused a transition, so it alone records the

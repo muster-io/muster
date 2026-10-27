@@ -77,8 +77,9 @@ issue: null
   entries.
 - **Alert handling** (`admin.organization.alert-handling.tsx`): the switch and its texts leave the page and the form
   schema; the request leaves the field out.
-- **Documentation links** (`docs-links.json`): `field.minimum_severity` → `concepts/routes-and-group-keys.md#minimum-severity`;
-  `field.urgent` is removed with the switch, and `docs-links-forms.spec.ts` checks the new link instead of "Urgent".
+- **Documentation links** (`docs-links.json`): `field.minimum_severity` →
+  `concepts/routes-and-group-keys.md#minimum-severity`; `field.urgent` is removed with the switch, and
+  `docs-links-forms.spec.ts` checks the new link instead of "Urgent".
 - **Texts** (EN / RU): "Severity, Escalation chains and owner" / «Важность, эскалация и владелец», "Minimum severity"
   / «Минимальная важность маршрута», "None" / «Нет», the hint / «Только поднимает важность групп маршрута. Вместо
   прежнего «Срочный»: срочная группа — это critical.», "Minimum severity: {{level}}" / «Минимальная важность:

@@ -52,7 +52,8 @@ issue: null
 - **Screenshots** (`web/e2e/screenshots/schedules.spec.ts`, Playwright on `muster dev`): the Schedule page with the
   two-week view, a gap and a warning; the Override form in the mode "I give my Shift to…"; "On call now" on the Home
   page; the images go to `docs/assets/screenshots/concepts/schedules/` and are never listed.
-- **llms.txt** (`docs/llms.txt.tmpl`): a scenario "Set up who is On-call" with Concepts → Teams and Concepts → Schedules.
+- **llms.txt** (`docs/llms.txt.tmpl`): a scenario "Set up who is On-call" with Concepts → Teams and Concepts →
+  Schedules.
 
 ## Steps
 
@@ -66,8 +67,8 @@ issue: null
    anchor resolves, and `docslinkcheck` finds every anchor of `docs-links.json`.
 2. `make docs-serve` → Concepts → Schedules reads as the acceptance says; the worked example gives the same On-call as
    the check of C-27.AC-1 in S-131.
-3. On `muster dev` (`make dev`), "Guide" next to the Schedule page's title and "Learn more" next to the gap alert and the
-   iCal section open the page at its sections.
+3. On `muster dev` (`make dev`), "Guide" next to the Schedule page's title and "Learn more" next to the gap alert and
+   the iCal section open the page at its sections.
 
 ## Open questions
 

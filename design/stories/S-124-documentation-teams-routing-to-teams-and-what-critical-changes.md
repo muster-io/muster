@@ -44,8 +44,8 @@ issue: null
 
 - Team mentions per messenger, and whom a message mentions: S-144. Schedules: S-137. Escalation chains, Notification
   rules and "How an alert reaches people": S-161.
-- The sections that the BE stories already wrote (S-111, S-115, S-117, S-118, S-121, S-170, S-122), which this story keeps and
-  joins into the pages.
+- The sections that the BE stories already wrote (S-111, S-115, S-117, S-118, S-121, S-170, S-122), which this story
+  keeps and joins into the pages.
 
 ## Contracts
 

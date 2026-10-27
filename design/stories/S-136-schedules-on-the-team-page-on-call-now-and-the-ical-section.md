@@ -110,8 +110,8 @@ Schedule; the Admin in "devops" only. Then in Playwright at 1280 × 800, in Engl
 3. Teams → each row shows the On-call: "@ivan", "@petr", "No Schedule" for search.
 4. Teams → "payments" → "On call now" shows its row; "Schedules" shows "Main" with "main", two Rotation layers, "@petr"
    and its warnings, "New Schedule" and the hint.
-5. "Main" → "iCal subscription" → "New link" → the link `http://localhost:8080/ical/mstr_cal_…` and "Copy the link now: it
-   will not be shown again"; reload → no link, "New link" and "Revoke"; "Revoke" → only "New link".
+5. "Main" → "iCal subscription" → "New link" → the link `http://localhost:8080/ical/mstr_cal_…` and "Copy the link now:
+   it will not be shown again"; reload → no link, "New link" and "Revoke"; "Revoke" → only "New link".
 6. At 360 × 740, the Home page has no horizontal scrolling.
 
 `make e2e` runs these steps in `home.spec.ts`, `teams.spec.ts` and `schedules.spec.ts`; `navigation.spec.ts` checks the

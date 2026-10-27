@@ -110,8 +110,8 @@ issue: null
     `Organization` requires them and gains the read-only `working_hours` (`WorkingHours`).
   - `RouteInput` gains `owning_team_id` (`NullablePublicId`, optional; `null` clears); `Route` gains `owning_team`
     (`TeamRef` or null). Every messenger `*DestinationInput` and `WebhookDestinationBase` gain `owning_team_id`, and the
-    reads `owning_team`. The name is `owning_team_id`, not `team_id`, because `MattermostDestinationInput.team_id` is the
-    Mattermost team.
+    reads `owning_team`. The name is `owning_team_id`, not `team_id`, because `MattermostDestinationInput.team_id` is
+    the Mattermost team.
   - `listRoutes` and `listDestinations` gain the query parameter `team` (a Team `public_id` or `mine`).
   - `Permission` gains `teams:read` and `teams:write`; `HintEvent.type` gains `team`; `PublicId` and `api/README.md`
     gain the prefix `TM` (Team).
@@ -155,7 +155,8 @@ issue: null
 - **Shared tables**: reference.md moves `teams:read` and `teams:write` from "Permissions added in L2" into the main
   table and the `Permission` schema; defaults.md marks `team.slug_format` and the rule of P-63 decided; L2.md §5.3
   moves P-63 and P-74 to "Decided since they were first listed".
-- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the neutral value of `owning_team` (null), so `make generate` leaves the TypeScript check of the web tests green.
+- **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the
+  neutral value of `owning_team` (null), so `make generate` leaves the TypeScript check of the web tests green.
 - **Settings**: `team.slug_format` (P-74), `team.working_hours`, `organization.working_hours`,
   `organization.workday_start`, `organization.time_zone`.
 - **Documentation**: the new page `docs/concepts/teams.md` — "What a Team is", "People" and "Working hours" — in the
@@ -228,7 +229,8 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
 
 ## Open questions
 
-1. **The end of the Organization's working day where the start is late.** Settled: the migration sets `workday_end` to
+1. **The end of the Organization's working day where the start is late.** Settled by the maintainer (review of PR
+   #399), from P-63 — Working hours end later than they start on the same day: the migration sets `workday_end` to
    `23:59` where `workday_start` is 18:00 or later, and from then on the end must be later than the start — an update
    that breaks it is refused with `422` `out_of_range` at the field it changes. The contract above follows it, and the
    upgrade notes of 0.2.0 name the Organizations it changes.
@@ -245,8 +247,9 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 44 files (the builder of S-166 and the Role matrix test included) the story is at the edge of the size signal; the Working hours of the Organization and of a Team are
-  one rule (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
+- With 44 files (the builder of S-166 and the Role matrix test included) the story is at the edge of the size signal;
+  the Working hours of the Organization and of a Team are one rule (C-25.FR-9), and the owning Team of Routes and
+  Destinations is needed by the filter that checks it.
 - Migration `0023` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
 

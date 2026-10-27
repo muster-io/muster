@@ -73,12 +73,13 @@ issue: null
   Mattermost and of the Slack Team mention), `listTeams`, `listUserDirectory` ("Person…"), `getConnection` (the Slack
   scope, the bridge's `info`), `getAlertGroupTimeline` (`mention_not_delivered`), `checkConnection`.
 - **Components**: `mention-entries-editor.tsx` — the grid, with `mention-target-picker.tsx` for "Add" and
-  `lib/mention-entries.ts` for what each Destination type offers and the text of each `MentionUnavailableReason`
-  (S-139) — the server's `available` and `unavailable_reason` decide, the form only words them; `mention-support-table.tsx` — "What each messenger supports"; `mention-warnings.tsx` — the
-  warnings above the grid; `mention-settings.tsx` keeps only `defaultMentions`, the L1 form that reads stay with until
-  0.3.0, which the existing test fixtures use, and loses its editor; `team-mentions-editor.tsx` — "How to mention the
-  Team"; `timeline.tsx` — the delivery event with its person, entry, event and reason; `connection-check.tsx` — "Group
-  mentions" and "Mentions of everyone: {tokens}" among the bridge's features.
+  `lib/mention-entries.ts` for what each Destination type offers and the text of each `MentionUnavailableReason` (S-139)
+  — the server's `available` and `unavailable_reason` decide, the form only words them; `mention-support-table.tsx` —
+  "What each messenger supports"; `mention-warnings.tsx` — the warnings above the grid; `mention-settings.tsx` keeps
+  only `defaultMentions`, the L1 form that reads stay with until 0.3.0, which the existing test fixtures use, and loses
+  its editor; `team-mentions-editor.tsx` — "How to mention the Team"; `timeline.tsx` — the delivery event with its
+  person, entry, event and reason; `connection-check.tsx` — "Group mentions" and "Mentions of everyone: {tokens}" among
+  the bridge's features.
 - **Documentation links** (`docs-links.json`): `field.mentions` moves to `concepts/mentions.md#mention-entries`,
   `field.mention_support` → `concepts/mentions.md#what-each-messenger-supports`, `field.team_mentions` →
   `concepts/teams.md#team-mentions`; the anchors exist from S-139 and S-140.
@@ -90,15 +91,15 @@ issue: null
   "Add" / «Добавить», "Group…" / «Группа…», "Person…" / «Человек…», "Team…" / «Команда…», "Team from the label" /
   «Команда из метки», "On-call of a Team…" / «Дежурный команды…», "On-call of the Team from the label" / «Дежурный
   команды из метки», "now: {{who}}" / «сейчас: {{who}}», "Nobody is mentioned: messages arrive without Mentions." /
-  «Никого не упоминаем: сообщения приходят без упоминаний.», the notes / «„Команда“ — это упоминание команды для
-  этого подключения, если оно задано; иначе никого. Дежурного вместо команды не зовём.», «Человека без привязки не упоминаем;
-  об этом скажут хронология группы и эта страница.», «Напоминания и автоматическая отмена подтверждения всегда
-  упоминают владельца, а перехват — прежнего владельца.», the warnings of reference.md / «Упоминание не доставлено:
-  @{{login}}, {{entry}}, нет привязки к {{messenger}}», «… мост не умеет упоминать людей», "What each messenger
-  supports" / «Поддержка мессенджерами», the reasons of reference.md / «Нужно право usergroups:read», «Мост не объявил
-  групповые упоминания», «В Telegram нет упоминания всех и групп», "How to mention the Team" / «Как упоминать команду»,
-  its hint / «Строка „Команда“ в упоминаниях места доставки — это упоминание команды для этого подключения. Если его нет, команду не
-  упоминают и дежурного вместо неё не зовут.», "no Team mention" / «упоминания нет».
+  «Никого не упоминаем: сообщения приходят без упоминаний.», the notes / «„Команда“ — это упоминание команды для этого
+  подключения, если оно задано; иначе никого. Дежурного вместо команды не зовём.», «Человека без привязки не упоминаем;
+  об этом скажут хронология группы и эта страница.», «Напоминания и автоматическая отмена подтверждения всегда упоминают
+  владельца, а перехват — прежнего владельца.», the warnings of reference.md / «Упоминание не доставлено: @{{login}},
+  {{entry}}, нет привязки к {{messenger}}», «… мост не умеет упоминать людей», "What each messenger supports" /
+  «Поддержка мессенджерами», the reasons of reference.md / «Нужно право usergroups:read», «Мост не объявил групповые
+  упоминания», «В Telegram нет упоминания всех и групп», "How to mention the Team" / «Как упоминать команду», its hint /
+  «Строка „Команда“ в упоминаниях места доставки — это упоминание команды для этого подключения. Если его нет, команду
+  не упоминают и дежурного вместо неё не зовут.», "no Team mention" / «упоминания нет».
 
 ## Steps
 

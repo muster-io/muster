@@ -75,10 +75,10 @@ issue: null
 - **Audit log** (`audit-diff.tsx`): `/buttons` → "Buttons".
 - **Documentation links**: `field.buttons` → `concepts/statuses-and-commands.md#button-sets`, next to both sections.
 - **Texts** (EN / RU), from C-28's UI and the approved mockups: "Buttons" / «Кнопки», the hint / «Какие кнопки
-  показывать в корневом сообщении. Скрытые действия остаются в Muster и в текстовых командах мостов.», "As in the Organization" /
-  «Как в Организации», "Own for this Destination" / «Свои для этого места доставки», "What {{destination}} shows" / «Так
-  увидят в {{destination}}», "Buttons of Root messages" / «Кнопки корневых сообщений», "All buttons" / «Все кнопки»,
-  "Firing" and "Acknowledged" as the status words of the preview.
+  показывать в корневом сообщении. Скрытые действия остаются в Muster и в текстовых командах мостов.», "As in the
+  Organization" / «Как в Организации», "Own for this Destination" / «Свои для этого места доставки», "What
+  {{destination}} shows" / «Так увидят в {{destination}}», "Buttons of Root messages" / «Кнопки корневых сообщений»,
+  "All buttons" / «Все кнопки», "Firing" and "Acknowledged" as the status words of the preview.
 - **Documentation**: Statuses and commands — steps for the Destination's set with a screenshot; Organization settings
   — the set under Alert handling with its screenshot. The screenshot specs `organization.spec.ts` and
   `mattermost.spec.ts` take the two images.
@@ -95,8 +95,8 @@ issue: null
 ## Verification
 
 Run `make dev`, sign in as `admin@example.org` / `muster-dev-password`, and from a terminal create, as in S-113, the
-Paging Route "t" with the Mattermost Destinations "alerts" (`ch-alerts`) and "alerts-prod" (`ch-alerts-prod`) and one firing Alert Group. Then in Playwright
-at 1280 × 800, in English and in Russian:
+Paging Route "t" with the Mattermost Destinations "alerts" (`ch-alerts`) and "alerts-prod" (`ch-alerts-prod`) and one
+firing Alert Group. Then in Playwright at 1280 × 800, in English and in Russian:
 
 1. Destinations → "alerts" → "Buttons": "As in the Organization" is chosen; the preview shows for Firing "Ack",
    "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00".

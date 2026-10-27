@@ -87,6 +87,7 @@ None; the spike answers them.
 
 ## Notes
 
+- Suggested commit: `docs: record how telegram answers getchatmember for people and rings muted discussion groups`.
 - The maintainer performs the checks (operator attention): they need the test channel, its discussion group, the bot
   and three test accounts with clients. An agent may write the scripts of step 2 outside the repository and run them on
   the maintainer's instructions.

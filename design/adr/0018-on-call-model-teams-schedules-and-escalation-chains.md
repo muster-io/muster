@@ -12,7 +12,8 @@
   person who takes an Override may not be disabled either; the iCal feed shows the times when each person is On-call,
   not the whole Shifts of the Rotation layers
 - Amended: 2026-10-27 — with the review of the L2 story contracts: the Assignees of a chain that has run out stay until
-  Acknowledge, Snooze or Resolve clears them
+  Acknowledge, Snooze or Resolve clears them; and the Destinations of a Team mention the Team by default except a
+  Telegram Destination, which cannot mention a Team
 
 ## Context
 

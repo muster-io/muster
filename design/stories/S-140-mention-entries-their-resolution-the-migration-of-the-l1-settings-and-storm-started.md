@@ -156,8 +156,8 @@ issue: null
 - **Log events, metrics**: none new.
 - **Documentation**: the new page `docs/concepts/mentions.md` ("Whom a message mentions") — "Mention entries", "What
   each messenger supports" (the table of C-28.FR-2), "Teams and the On-call" (no fallback from a Team to its On-call),
-  "Start of a Storm" and "Upgrading from 0.1" — under Concepts; `docs/install/versions.md` — the migration of the Mention
-  settings and the read-only `mentions` until 0.3.0.
+  "Start of a Storm" and "Upgrading from 0.1" — under Concepts; `docs/install/versions.md` — the migration of the
+  Mention settings and the read-only `mentions` until 0.3.0.
 
 ## Steps
 

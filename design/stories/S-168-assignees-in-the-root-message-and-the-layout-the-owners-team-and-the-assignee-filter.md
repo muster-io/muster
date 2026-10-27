@@ -51,6 +51,7 @@ acceptance:
   - "[C-32.FR-12, C-32.AC-2, C-10.FR-1, C-09.FR-22, C-32.AC-11] Each change of the Assignees records the Quiet `assignees_changed` (Timeline kind `escalation`) with the Assignees after it; Acknowledge, Snooze and Resolve clear them with `assignees_changed`; they change only through system transitions of the dispatcher, and no operation sets them (`assignees_test.go`, `events_test.go`)."
   - "[C-29.FR-1, C-32.AC-13, C-12.FR-12, C-11.FR-20, C-12.FR-3] Before an acknowledgement, item 7 of the Root message is \"Assignees: @ivan (devops), @petr (payments)\", each a Mention where the person has an Account link in the Destination's Identity space and their plain name otherwise; `assignees_changed` edits the Root messages Quietly; a new Quiet message carries them as Mentions; after an Acknowledge that stopped running chains, item 7 reads \"Acknowledged by @ivan (devops) · Escalation chains stopped\", and without chains as in L1, with the Owner's Team (`default_test.go`)."
   - "[C-32.FR-12, C-32.AC-13] The `layout` sent to a bridge names each Assignee in `assignees` with the `ref` of their entry in the envelope's `mentions` where the message carries their Mention — a new message to a bridge with `native_mentions` — and `null` otherwise, each Assignee and the Owner with their Team in the optional `team` of `LayoutPerson` (S-126) (`layout_test.go`, `envelope_test.go`)."
+  - "[C-32.FR-12, C-32.AC-10] The Assignees of a chain that has run out stay: after every chain of an Alert Group has run out and it records `unclaimed`, its Assignees and `assignees_changed` history are unchanged, `listAlertGroups?assignee=me` still returns it for each of them, and only Acknowledge, Snooze or Resolve clears them (`assignees_test.go`, `list_integration_test.go`)."
   - "[C-32.FR-12] The Owner is named with the Teams they are in among the Teams of the Alert Group, its Route's owning Team and its chains' owning Teams, and with none when there is no such Team (P-89) (`default_test.go`, `assignees_test.go`)."
   - "[C-32.FR-18, C-32.AC-10, C-09.FR-1, C-09.FR-13] `getAlertGroup` and `listAlertGroups` read `assignees` ({`user`, `team`, `chain`, `since`}[]) and `owner_teams`; `listAlertGroups` takes `assignee` — a User's `public_id` or `me`, `422` for a Service account token — and returns the open Alert Groups where that User is an Assignee, which leave it once acknowledged (`list_integration_test.go`)."
   - "[C-15.FR-2] The `alert_group` of every outgoing webhook event carries `assignees` and the Owner's `teams` (`body_test.go`)."
@@ -65,8 +66,8 @@ issue: null
 
 **IN**
 
-- Assignees per running chain from the outcomes of Pages by Mention, `assignees_changed`, and their clearing by
-  Acknowledge, Snooze and Resolve, only through the dispatcher (C-32.FR-12; C-10.FR-1 revised).
+- Assignees per chain started on the Alert Group from the outcomes of Pages by Mention, `assignees_changed`, and their
+  clearing by Acknowledge, Snooze and Resolve, only through the dispatcher (C-32.FR-12; C-10.FR-1 revised).
 - Item 7 of the Root message before and after an acknowledgement — "Assignees: …" with their Teams, "Acknowledged by
   {user} ({Team}) · Escalation chains stopped" — as Mentions where linked, and the people of `layout` (C-29.FR-1,
   C-29.FR-8; C-12.FR-12 revised).

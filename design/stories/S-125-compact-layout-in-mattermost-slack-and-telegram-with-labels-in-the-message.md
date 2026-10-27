@@ -92,16 +92,16 @@ issue: null
     required when `own_message_labels`); `Route` requires both, `message_labels` being the effective list (computed
     while not own).
   - `listRouteLabelSuggestions` (`GET /routes/{route_id}/label-suggestions`, tag Routes, `routes:read`) →
-    `RouteLabelSuggestionList` {`items` — {`label`, `example_value`, `alert_group_count`}}, from the common labels of the
-    Route's Alert Groups of `routing.group_key_preview_period`, most frequent first, at most 50.
+    `RouteLabelSuggestionList` {`items` — {`label`, `example_value`, `alert_group_count`}}, from the common labels of
+    the Route's Alert Groups of `routing.group_key_preview_period`, most frequent first, at most 50.
   - New schema `MessageLayout` — `number`, `title`, `status` {`key`, `word`}, `fields` ({`name`, `value`}[], `summary`,
     `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`},
-    `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`, and the optional `team` {`name`}}), `links` ({`label`, `url`}[]) — the same
-    content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains `layout` (for `root_message`), `length` and
-    `messenger_limit`.
+    `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`, and the optional `team` {`name`}}), `links`
+    ({`label`, `url`}[]) — the same content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains `layout`
+    (for `root_message`), `length` and `messenger_limit`.
 - **Schema** (migration `0028_route_message_labels`, expand only; `schema.md` §4.8): `routes.message_labels text[]`
-  (null = computed); `open_group_updates_kind_v5_check` lists every kind of `_v4` and `route_message_labels` (`NOT VALID`,
-  validated, the old one dropped).
+  (null = computed); `open_group_updates_kind_v5_check` lists every kind of `_v4` and `route_message_labels` (`NOT
+  VALID`, validated, the old one dropped).
 - **Messages** (`internal/messages`): `Message` gains `StatusWord`, `Fields`, `Description`, `KeyLabels`, `AlertsLine`
   (the distinguishing label, its values with their state, the total) and keeps `Footer`, `Notices`, `Buttons`,
   `Links`; the default body no longer fills `Environment`, `GroupLabels`, `CommonLabels` and `CommonAnnotations`, which

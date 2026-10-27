@@ -77,6 +77,7 @@ None; the spike answers them.
 
 ## Notes
 
+- Suggested commit: `docs: record which tokens carry gitlab's role claims`.
 - The maintainer performs the checks (operator attention): they need the test GitLab, its admin account and three test
   users. An agent may write the script of step 3 outside the repository and run it on the maintainer's instructions.
 - `covers` names C-25.FR-4 and C-03.FR-5 in part: the spike settles which token carries the claims that their entries

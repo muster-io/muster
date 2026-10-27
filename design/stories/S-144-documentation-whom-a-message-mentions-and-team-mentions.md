@@ -76,8 +76,8 @@ issue: null
 
 1. `make docs-check` passes: every page builds strictly, every image exists and has its alternative text, every link and
    anchor resolves, and `docslinkcheck` finds every anchor of `docs-links.json`.
-2. `make docs-serve` → Concepts → Whom a message mentions reads as the acceptance says; its worked example gives the same
-   Mentions as the check of C-28.AC-1 in S-140.
+2. `make docs-serve` → Concepts → Whom a message mentions reads as the acceptance says; its worked example gives the
+   same Mentions as the check of C-28.AC-1 in S-140.
 3. On `muster dev` (`make dev`), "Learn more" next to "Mentions" on a Destination and next to "How to mention the Team"
    on a Team opens the pages at their sections.
 

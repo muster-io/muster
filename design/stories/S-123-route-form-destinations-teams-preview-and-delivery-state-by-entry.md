@@ -100,10 +100,10 @@ issue: null
   условие по важности.», "Any severity" / «любая важность», "Severity = critical" / «важность = critical», "Severity <
   critical" / «важность < critical», "Also to the Teams from the label {{label}}" / «Ещё командам из метки {{label}}»,
   its hint / «Группа приходит и в места доставки команд, чьи значения {{label}} есть в её алертах, с их условиями
-  важности. Новая команда добавляет места доставки, ничего не убирает.», "Run the Teams' Escalation chains" / «Запускать цепочки
-  эскалации команд», "Add {{label}} to the key" / «Добавить {{label}} в ключ», "Where alerts go" / «Куда придут
-  алерты», "Destinations of the Team" / «Места доставки команды», the Team line / «Сюда приходят группы команды
-  {{team}} из маршрутов, где отмечено «ещё командам из метки {{label}}»: {{routes}}.».
+  важности. Новая команда добавляет места доставки, ничего не убирает.», "Run the Teams' Escalation chains" / «Запускать
+  цепочки эскалации команд», "Add {{label}} to the key" / «Добавить {{label}} в ключ», "Where alerts go" / «Куда придут
+  алерты», "Destinations of the Team" / «Места доставки команды», the Team line / «Сюда приходят группы команды {{team}}
+  из маршрутов, где отмечено «ещё командам из метки {{label}}»: {{routes}}.».
 
 ## Steps
 

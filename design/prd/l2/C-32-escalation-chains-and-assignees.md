@@ -155,8 +155,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-32.FR-18** The Alert Group page shows its running chains — each with its current step and when its next step is
   due — and its Assignees with their Teams, and the Timeline shows each Page, skipped step and undelivered Page. The
   Alert Group list gains the column Assignees and the filter Assignee, a User or "me". The Home page lists, under "I am
-  an Assignee", the Alert Groups where the signed-in User is an Assignee — "Alert Groups that a running Escalation chain
-  Paged you about. They leave this list once acknowledged." — with their status, Assignees, the chain and its step, and
+  an Assignee", the Alert Groups where the signed-in User is an Assignee — "Alert Groups that an Escalation chain Paged
+  you about. They leave this list once acknowledged." — with their status, Assignees, the chain and its step, and
   Acknowledge and Snooze.
 - **C-32.FR-19** Chains use optimistic locking and are recorded in the Audit log with a before/after diff. Each chain
   exports `muster_escalation_chain_info{chain,name}`; Pages are counted by `muster_pages_total{chain,kind,outcome}`,

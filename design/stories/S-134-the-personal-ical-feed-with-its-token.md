@@ -117,8 +117,8 @@ issue: null
 
 ```sh
 make dev > dev.log 2>&1 &
-# As in S-131: A and the Schedule "Main" (SC) of "payments" with the two Rotation layers from MON; petr's session
-# headers HP (cookie and X-CSRF-Token, as in S-051) and his token P.
+# As in S-131: A, TP, PETR, MON, AT and DAY, and the Schedule "Main" (SC) of "payments" with the two Rotation layers
+# from MON; petr's session headers HP (cookie and X-CSRF-Token, as in S-051) and his token P.
 API=localhost:8080/api/v1
 F=$(curl -s "${HP[@]}" -X POST $API/me/ical-feed); URL=$(jq -r .url <<<"$F"); echo "$URL" | grep -c '/ical/mstr_cal_'   # 1
 curl -s "${P[@]}" -o /dev/null -w '%{http_code}\n' -X POST $API/me/ical-feed                                       # 403
@@ -130,6 +130,15 @@ curl -s "$URL" -D - -o feed.ics | grep -i '^content-type'                       
 W1=$(date -u -d "$MON" +%Y%m%d); W2=$(date -u -d "$MON +7 days" +%Y%m%d)
 grep '^DTSTART:' feed.ics | cut -d: -f2 | awk -v a=$W1 -v b=$W2 '$0 >= a && $0 < b' | wc -l                        # 6
 grep -m1 '^SUMMARY' feed.ics                                                                                        # SUMMARY:payments · Main
+
+# C-27.FR-2, C-27.FR-10: a Rotation layer of Friday 19:00–09:00 is one event from Friday 19:00 to Saturday 09:00
+curl -s "${A[@]}" $API/schedules -d "{\"team_id\":\"$TP\",\"name\":\"Nights\",\"time_zone\":\"Europe/Berlin\",\"rotation_layers\":[
+  {\"name\":\"Friday night\",\"user_ids\":[\"$PETR\"],\"shift_length\":\"week\",\"handover_time\":\"10:00\",\"handover_day\":\"monday\",
+  \"start_date\":\"$MON\",\"limits\":{\"days\":[\"friday\"],\"start\":\"19:00\",\"end\":\"09:00\"}}]}" > /dev/null
+curl -s "$URL" | tr -d '\r' | awk '/^BEGIN:VEVENT/{e=""} {e=e $0 "\n"} /^END:VEVENT/{if (e ~ /SUMMARY:payments · Nights/) printf "%s", e}' |
+  grep -E '^DT(START|END):' | head -2
+echo "DTSTART:$(date -u -d "$(AT "$(DAY 4) 19:00")" +%Y%m%dT%H%M%SZ)"; echo "DTEND:$(date -u -d "$(AT "$(DAY 5) 09:00")" +%Y%m%dT%H%M%SZ)"
+# the two lines above, printed again: Friday 19:00 and Saturday 09:00 of week 1, Berlin time, in UTC
 
 # the old link stops working after a new one, the new one after revoking
 URL2=$(curl -s "${HP[@]}" -X POST $API/me/ical-feed | jq -r .url)

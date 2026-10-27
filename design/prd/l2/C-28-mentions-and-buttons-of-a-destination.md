@@ -106,8 +106,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 
 ### Settings
 
-- **C-28.FR-10** The Mentions and the button set are part of the Destination form of every type (C-13.FR-9); the
-  Organization's button set is on the Organization's page Alert handling (C-20). Changes are recorded in the Audit log
+- **C-28.FR-10** The Mentions are part of the Destination form of every type, and the button set of the form of every
+  messenger type — an outgoing webhook sends no buttons and has no button set (C-13.FR-9); the Organization's button
+  set is on the Organization's page Alert handling (C-20). Changes are recorded in the Audit log
   with a before/after diff and use optimistic locking.
 - **C-28.FR-11** The documentation's page on whom a message mentions describes the entries, the table of FR-2, Team
   mentions without a fallback to the On-call, and the migration of FR-5; the page on buttons describes the sets.

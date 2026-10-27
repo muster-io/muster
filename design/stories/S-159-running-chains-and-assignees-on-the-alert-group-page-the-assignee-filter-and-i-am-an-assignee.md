@@ -34,7 +34,7 @@ acceptance:
   - "[C-32.FR-18, C-32.AC-14, C-09.FR-11, C-09.FR-14] In a real browser the Alert Group page shows its running chains — each with its name, its current step and when its next step is due, or \"ran out\" or \"stopped\" — and its Assignees with their Teams, \"Assignees: @ivan (devops), @petr (payments)\", and after an acknowledgement \"Acknowledged by @ivan (devops) · Escalation chains stopped\"; at 360 CSS pixels wide the page has no horizontal scrolling; in English and in Russian (`alert-group-chains.test.tsx`, `alert-group-header.test.tsx`, `alert-group-page.spec.ts`, `phone-width.spec.ts`)."
   - "[C-32.FR-18, C-09.FR-14] The Timeline shows each Page — \"Step 1 · payments: Paged @petr, normal\", a call through \"Example Gateway\" —, each undelivered Page with its reason, each skipped step with its reason, the Assignees' changes and `escalation_webhook`, under the kind filter \"Escalation chains\", and an acknowledgement with the Transport `gateway` as \"from a call through Example Gateway\" (`timeline.test.tsx`)."
   - "[C-32.FR-18, C-09.FR-13] The Alert Group list gains the column Assignees and the filter Assignee — a User or \"me\" — kept in the URL; the filter returns the Alert Groups where that User is an Assignee; at 360 CSS pixels the list with the column and the filter has no horizontal scrolling of the page (NFR-15) (`alert-group-filters.test.tsx`, `alert-group-list.spec.ts`, `phone-width.spec.ts`)."
-  - "[C-32.FR-18, C-32.AC-10] The Home page lists, under \"I am an Assignee\" with \"Alert Groups that a running Escalation chain Paged you about. They leave this list once acknowledged.\", the Alert Groups where the signed-in User is an Assignee, with their status, Assignees, the chain and its step, and \"Acknowledge\" and \"Snooze…\"; acknowledging one removes it from the list; the section fits 360 CSS pixels (`i-am-an-assignee.test.tsx`, `home.spec.ts`)."
+  - "[C-32.FR-18, C-32.AC-10] The Home page lists, under \"I am an Assignee\" with \"Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged.\", the Alert Groups where the signed-in User is an Assignee, with their status, Assignees, the chain and its step, and \"Acknowledge\" and \"Snooze…\"; acknowledging one removes it from the list; the section fits 360 CSS pixels (`i-am-an-assignee.test.tsx`, `home.spec.ts`)."
   - "Every new text exists in English and Russian; the running chains have \"Learn more\" to Concepts → Escalation chains; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
@@ -70,8 +70,8 @@ issue: null
 - **Documentation links** (`docs-links.json`): `field.alert_group_chains` → `concepts/escalation-chains.md#assignees`;
   the section exists from S-168.
 - **Texts** (EN / RU), from C-32's UI and the approved Home and Lifecycle mockups: "I am an Assignee" / «Назначено мне»,
-  "Alert Groups that a running Escalation chain Paged you about. They leave this list once acknowledged." / «Группы,
-  куда вас позвала идущая цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Назначенные», "Chain" /
+  "Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged." / «Группы,
+  куда вас позвала цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Назначенные», "Chain" /
   «Цепочка», "step {{n}}" / «шаг {{n}}», "next step at {{time}}" / «следующий шаг в {{time}}», "ran out" /
   «закончилась», "stopped" / «остановлена», "Escalation chains" / «Цепочки эскалации» (the Timeline kind `escalation`),
   "Paged" / «Позвала», "Page not delivered" / «Призыв не доставлен», "skipped" / «пропущен», "Escalation chains stopped"

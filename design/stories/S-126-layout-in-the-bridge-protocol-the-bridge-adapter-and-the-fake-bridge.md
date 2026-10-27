@@ -58,11 +58,11 @@ issue: null
 ## Contracts
 
 - **Protocol** (`api/bridge.yaml`, MIT): new schemas `Layout`, `LayoutStatus`, `LayoutField`, `LayoutLabel`,
-  `LayoutAlerts`, `LayoutAlertValue`, `LayoutPerson` (`name`, `ref`, and the optional `team` {`name`} that stays
-  absent until S-168 names the Teams of the Assignees and the Owner), `LayoutLink`; `MessageContent` gains the optional `layout`, so
-  that `postMessage` and `editMessage` carry it; the description of `MessageContent` says that a bridge renders either
-  `body` or `layout` and that a bridge that ignores `layout` is unaffected. The shape is the `MessageLayout` of
-  `openapi.yaml` (S-125). `protocol_version` stays 1.
+  `LayoutAlerts`, `LayoutAlertValue`, `LayoutPerson` (`name`, `ref`, and the optional `team` {`name`} that stays absent
+  until S-168 names the Teams of the Assignees and the Owner), `LayoutLink`; `MessageContent` gains the optional
+  `layout`, so that `postMessage` and `editMessage` carry it; the description of `MessageContent` says that a bridge
+  renders either `body` or `layout` and that a bridge that ignores `layout` is unaffected. The shape is the
+  `MessageLayout` of `openapi.yaml` (S-125). `protocol_version` stays 1.
 - **Messages** (`internal/messages/layout.go`): `LayoutOf(Message)` — the structured content of a laid-out message,
   plain text, from the same fields the adapters use, with the references of its people left for the Bridge adapter.
 - **Bridge adapter** (`internal/bridge/envelope.go`, `delivery.go`, `testmsg.go`): `content` adds `layout` to Root

@@ -57,8 +57,8 @@ issue: null
   everyone targets out (S-140's Notes).
 - **Slack** (`internal/slack/layout.go`): `<!subteam^{id}>` and `<!everyone>`, as the facts of S-138 say, in the first
   line of a Loud message; Quiet messages and edits carry no Mentions (ADR-0005).
-- **Bridge** (`internal/bridge/envelope.go`): `mentions` entries of the kind `group` or `everyone`, each with its ref and
-  marker, beside the `user` entries of C-22.FR-16.
+- **Bridge** (`internal/bridge/envelope.go`): `mentions` entries of the kind `group` or `everyone`, each with its ref
+  and marker, beside the `user` entries of C-22.FR-16.
 - **Fake bridge** (`internal/fakes/fakebridge/messages.go`): each recorded message keeps the `kind` of its `mentions`.
 - **AGENTS.md**: the paragraph on development mode says that the fake bridge records the `kind` of each Mention.
 - **Settings, log events, metrics**: none new.

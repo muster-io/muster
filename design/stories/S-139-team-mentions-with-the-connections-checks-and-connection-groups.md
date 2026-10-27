@@ -75,8 +75,8 @@ issue: null
   declares group mentions; none on Telegram; refused with `group_mentions_unsupported` otherwise (C-25.FR-8, after the
   spike S-138).
 - The Connections' checks that find these abilities: the optional scope `usergroups:read` of a Slack Connection
-  (C-24.FR-1, FR-2 revised), the groups a Mattermost bot may read, and the group mentions and mentions of everyone in the
-  chat that a bridge declares in `info` (C-22.FR-2 revised).
+  (C-24.FR-1, FR-2 revised), the groups a Mattermost bot may read, and the group mentions and mentions of everyone in
+  the chat that a bridge declares in `info` (C-22.FR-2 revised).
 - `connections/{id}/groups` for the Team mention and the group entries of S-140.
 - The fake Mattermost server's groups, the fake Slack server's `usergroups.list`, the fake bridge's new `info` fields.
 
@@ -150,8 +150,9 @@ issue: null
 - **Fake servers**: the fake Mattermost server answers `GET /api/v4/groups` with the groups `payments_team` (alice) and
   `devops_team` (bob), and `PUT /_fake/config` with `groups_forbidden` makes it answer `403`; the fake Slack server
   answers `usergroups.list` with the user group `S0FAKEPAYTEAM` (`payments-team`, with `U0FAKEALICE`) to a token whose
-  scopes include `usergroups:read`, and `missing_scope` otherwise, and `/_fake/config` takes `usergroups` by app key; the fake bridge's `/_fake/config` takes
-  `capabilities.group_mentions` and `capabilities.everyone_mentions` through the generated types, with no change of its code.
+  scopes include `usergroups:read`, and `missing_scope` otherwise, and `/_fake/config` takes `usergroups` by app key;
+  the fake bridge's `/_fake/config` takes `capabilities.group_mentions` and `capabilities.everyone_mentions` through the
+  generated types, with no change of its code.
 - **AGENTS.md**: the paragraph on development mode names the groups of the fake Mattermost server, the user groups and
   scopes of the fake Slack server set through `/_fake/config`, and the group mentions and mentions of everyone that the
   fake bridge's `info` declares.

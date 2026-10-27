@@ -52,8 +52,8 @@ issue: null
 **IN**
 
 - The Schedule page (C-27 UI): its header, "On call now" with the unreachable mark and what comes next, "Warnings", the
-  two-week view with the row "Result", "Rotation layers" with their editor for Admins, "Overrides" with the Override form
-  in its two modes, and the gap alert setting.
+  two-week view with the row "Result", "Rotation layers" with their editor for Admins, "Overrides" with the Override
+  form in its two modes, and the gap alert setting.
 - The new Schedule form, and the Schedules list with the filter by Team and "My Teams" (C-25 UI).
 
 **OUT**
@@ -71,21 +71,21 @@ issue: null
   controls, and whether the caller is in the Team).
 - **Routes** (file-based): `/schedules` (`schedules.index.tsx`, with the search parameter `team`), `/schedules/new`
   (`schedules.new.tsx`, with `team`), `/schedules/$scheduleId` (`schedules.$scheduleId.tsx`); the Teams page links to
-  the list as "All Schedules" (Open question 1).
+  the list as "All Schedules" (settled 1).
 - **Components**:
   - `schedule-view.tsx` — the two-week view from `getScheduleOnCall`: columns per day in the Schedule's time zone, a row
     per Rotation layer (top first) with its Shifts and skipped people hatched, a row of Overrides, the row "Result — who
     is On-call" whose gaps are red and whose segments are buttons that the Override form takes, a mark for now, and
     "Previous week", "Today", "Next week"; keyboard reachable, each segment with an accessible name "{person}, {from} –
     {to}" or "Gap, {from} – {to}".
-  - `schedule-on-call-now.tsx` — the person, the Rotation layer, "until {time}", the unreachable marks and "Next: {person}
-    from {time}" or "Next: gap from {time}".
-  - `schedule-warnings.tsx` — the texts of reference.md: "Gap: {from} – {to}", "Disabled: @{login} in {Rotation
-    layer}", "@{login} is a Viewer", "@{login} is not in the Team", "Unreachable in {messenger}: no linked account.", and
-    the texts of Open question 2 for the other reasons.
+  - `schedule-on-call-now.tsx` — the person, the Rotation layer, "until {time}", the unreachable marks and "Next:
+    {person} from {time}" or "Next: gap from {time}".
+  - `schedule-warnings.tsx` — the texts of reference.md: "Gap: {from} – {to}", "Disabled: @{login} in {Rotation layer}",
+    "@{login} is a Viewer", "@{login} is not in the Team", "Unreachable in {messenger}: no linked account.", and the
+    texts of settled 2 for the other reasons.
   - `rotation-layers-editor.tsx` — each Rotation layer with name, people in turn (ordered, from the Team), Shift length
-    (a day, a week, hours), handover time and day, start date, limits (days, from, to — a "to" earlier than "from" reads "until {to} the next day" / «до {to} следующего дня», C-27.FR-2); "Add Rotation layer"; the order
-    top first.
+    (a day, a week, hours), handover time and day, start date, limits (days, from, to — a "to" earlier than "from" reads
+    "until {to} the next day" / «до {to} следующего дня», C-27.FR-2); "Add Rotation layer"; the order top first.
   - `schedule-form.tsx` — name, time zone (the picker of `time-zone-picker.tsx`), "main", the gap alert "By default"
     ("On while this is the Team's main Schedule"), "On", "Off".
   - `schedule-overrides.tsx` — "Overrides" with the hint "Any Responder of the Team; no messages.", each with who gives
@@ -108,14 +108,14 @@ issue: null
   расписание», "Team {{team}} · Schedule {{name}}" / «Команда {{team}} · Расписание {{name}}», "main" / «главное»,
   "{{count}} Rotation layers: the upper, narrower one wins. Overrides send no messages." with plural forms / «{{count}}
   слоя ротации: верхний, более узкий, побеждает. Замены не рассылают уведомлений.», "On call now" / «Сейчас дежурит»,
-  "until {{time}}" / «до {{time}}», "Next: {{who}}" / «Дальше: {{who}}», "Warnings" / «Предупреждения», "Gap: {{from}} – {{to}}" / «Дыра: {{from}} – {{to}}»
-  («дыра» is the one Russian word for a gap, as in "next: gap" / «дальше дыра» of S-136), "Result — who is
-  On-call" / «Итог — кто дежурит», "Previous week" / «Предыдущая неделя», "Today" / «Сегодня», "Next week" /
-  «Следующая неделя», "Rotation layers" / «Слои ротации», "Add Rotation layer" / «Добавить слой», "Overrides" /
-  «Замены», "Add Override" / «Добавить замену», "Any Responder of the Team; no messages." / «Любой Исполнитель команды;
-  уведомлений нет.», "I take the Shift of…" / «Возьму смену за…», "I give my Shift to…" / «Отдам смену…», the hint of
-  the form / «Выберите отрезок в строке „Итог“ и того, кто его берёт; с {{from}} до {{to}} он дежурит поверх всех
-  слоёв.», "All Schedules" / «Все расписания».
+  "until {{time}}" / «до {{time}}», "Next: {{who}}" / «Дальше: {{who}}», "Warnings" / «Предупреждения», "Gap: {{from}} –
+  {{to}}" / «Дыра: {{from}} – {{to}}» («дыра» is the one Russian word for a gap, as in "next: gap" / «дальше дыра» of
+  S-136), "Result — who is On-call" / «Итог — кто дежурит», "Previous week" / «Предыдущая неделя», "Today" / «Сегодня»,
+  "Next week" / «Следующая неделя», "Rotation layers" / «Слои ротации», "Add Rotation layer" / «Добавить слой»,
+  "Overrides" / «Замены», "Add Override" / «Добавить замену», "Any Responder of the Team; no messages." / «Любой
+  Исполнитель команды; уведомлений нет.», "I take the Shift of…" / «Возьму смену за…», "I give my Shift to…" / «Отдам
+  смену…», the hint of the form / «Выберите отрезок в строке „Итог“ и того, кто его берёт; с {{from}} до {{to}} он
+  дежурит поверх всех слоёв.», "All Schedules" / «Все расписания».
 
 ## Steps
 
@@ -144,11 +144,11 @@ English and in Russian:
    falls in the two weeks shown, and its red gaps outside 11:00–19:00 on weekdays and his hatched Shifts are drawn in
    the second week of the view.
 3. "Next week" moves the view by seven days; "Today" returns.
-4. Sign in as petr, who is On-call now: "On call now" shows "@petr", "Around the clock", "until 11:00" and "Unreachable in
-   Mattermost: no linked account.".
-5. Sign in as olga: "Add Override" → "I give my Shift to…" → click olga's segment of Wednesday 11:00–19:00 of week 1 in "Result" →
-   "petr" → the hint reads "… from 11:00 to 19:00 they are On-call on top of every Rotation layer." → "Save"; the row of
-   Overrides shows "@olga → @petr", Wednesday 11:00–19:00, made by olga, and "Result" shows petr then.
+4. Sign in as petr, who is On-call now: "On call now" shows "@petr", "Around the clock", "until 11:00" and "Unreachable
+   in Mattermost: no linked account.".
+5. Sign in as olga: "Add Override" → "I give my Shift to…" → click olga's segment of Wednesday 11:00–19:00 of week 1 in
+   "Result" → "petr" → the hint reads "… from 11:00 to 19:00 they are On-call on top of every Rotation layer." → "Save";
+   the row of Overrides shows "@olga → @petr", Wednesday 11:00–19:00, made by olga, and "Result" shows petr then.
 6. As olga, "Rotation layers" has no "Add Rotation layer" and no "Save".
 7. As the Admin, "New Schedule" from the Team page link → name "Second line", one Rotation layer with olga → "Save";
    its page shows no "main" and the gap alert "By default".

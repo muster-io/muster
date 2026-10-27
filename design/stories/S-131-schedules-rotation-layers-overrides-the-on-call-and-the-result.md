@@ -191,13 +191,14 @@ issue: null
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up on PostgreSQL 14 and 17;
    the Permissions of each Role read from `role_permissions` as in the acceptance.
 2. Write the Shifts of a Rotation layer and the Result. Check: `rotation_test.go` covers a day, a week and 12 hours,
-   limits with and without a time, a window across midnight with and without days of the week, a start date in the future, both changes of the clocks in Europe/Berlin and a
-   zone without them; `result_test.go` covers every row of C-27.FR-4 and FR-5 with a manual clock.
+   limits with and without a time, a window across midnight with and without days of the week, a start date in the
+   future, both changes of the clocks in Europe/Berlin and a zone without them; `result_test.go` covers every row of
+   C-27.FR-4 and FR-5 with a manual clock.
 3. Write the Schedules and Overrides with their Permissions, precondition, Audit log, metric and hint; add the spec.
    Check: `make generate-check`; `schedules_test.go`, `overrides_test.go`, `schedules_integration_test.go`.
 4. Refuse the deletion of a Team with Schedules. Check: `teams_test.go`.
-5. Move the shared rows and update the counts of `TestIntegrationRoleMatrix`, confirm the provisional values, write the documentation and `test/e2e/schedules_test.go`.
-   Check: `make docs-check`; the Verification below.
+5. Move the shared rows and update the counts of `TestIntegrationRoleMatrix`, confirm the provisional values, write the
+   documentation and `test/e2e/schedules_test.go`. Check: `make docs-check`; the Verification below.
 
 ## Verification
 
@@ -292,8 +293,8 @@ None open. Settled:
    runs until Saturday 09:00 (C-27.FR-2, amended). P-63 is about Working hours and stays as it is.
 3. **Settled: an Override that has ended may be neither changed nor deleted** (`409` `override_ended`), and creating
    and changing check the new end (P-91), so the past Result stays as it was.
-4. **Settled: a Schedule stays in its Team**: `team_id` is set on creation only, and a different one on update is
-   refused with `422` `unsupported` at `/team_id`.
+4. **Settled by the maintainer (review of PR #399): a Schedule stays in its Team**: `team_id` is set on creation only,
+   and a different one on update is refused with `422` `unsupported` at `/team_id`.
 5. **Settled: the main Schedule cannot be unmarked**: `main` false on it is refused with `422` `unsupported` at `/main`;
    an Admin marks another Schedule main, and a Team is without one only after its main Schedule is deleted (P-66).
 6. **Settled: a save validates only the people it adds to a Rotation layer**, compared with the stored version, and

@@ -631,46 +631,46 @@ show the links.
 | [S-161](S-161-documentation-escalation-chains-notification-rules-and-how-an-alert-reaches-people.md) | C-32 | Documentation: Escalation chains, Notification rules and How an alert reaches people | docs | S-124, S-137, S-151, S-153, S-157, S-159, S-160 |
 
 S-162, S-163, S-166 and S-170 were split or added when the contracts of the stage "L2 Teams" were written and reviewed.
-S-162, the Route profile Paging, was split from S-111, because the profile's id appears in thirteen web end-to-end
-specs and together with the Minimum severity the story touched about 55 files; it follows S-111, and S-112 depends on
-it. S-163 was split from S-118, which with it touched about 50 files: S-118 keeps the Team label, the Team matchers and
-the Teams of Alerts and Alert Groups, and S-163 takes the values of the Team label seen without a Team and the
-evaluation of open Alert Groups when a Team is saved; it follows S-118, and S-121 and S-120 depend on it. S-170 was split from S-121 by
-the review of the contracts: S-121 keeps the Destination entries, the reach, `destination_joined` and the Storms with
+S-162, the Route profile Paging, was split from S-111, because the profile's id appears in thirteen web end-to-end specs
+and together with the Minimum severity the story touched about 55 files; it follows S-111, and S-112 depends on it.
+S-163 was split from S-118, which with it touched about 50 files: S-118 keeps the Team label, the Team matchers and the
+Teams of Alerts and Alert Groups, and S-163 takes the values of the Team label seen without a Team and the evaluation of
+open Alert Groups when a Team is saved; it follows S-118, and S-121 and S-120 depend on it. S-170 was split from S-121
+by the review of the contracts: S-121 keeps the Destination entries, the reach, `destination_joined` and the Storms with
 Team Destinations, and S-170 takes the changes of configuration that move the reach of open Alert Groups — a Route's
 entries, conditions and option, a Team's Destinations and its deletion — with their Quiet Publications and the final
-edits; it follows S-121, needs no migration of its own, and S-124 depends on it. S-121 and
-S-122 come before S-119, whose Team page shows the Destinations of a Team. S-166 was added by the review of those
-contracts: the web tests build Destination, Connection and Alert Group reads by hand, so every backend story that adds a required
-field to them would break the TypeScript check of its own pull request; S-166 moves those reads into shared builders
-that later stories extend, and it comes first. In the stage "L2 On call", S-164 was split from S-133 at the contract
-boundary of C-27.FR-8 — the gaps, the gap scan and "On call now" need no messenger, while the warnings about
-unreachable On-calls need every Destination type — and S-165 from S-140, at the boundary between whom a message
-mentions and what is recorded when it cannot; each follows the story it was split from. S-171 was split from S-140 by
-the review of the contracts: S-140 keeps the entries, their migration and their resolution, and S-171 takes writing
-group mentions and mentions of everyone in Slack and through bridges, with the `kind` of a Mention in `api/bridge.yaml`;
-it follows S-140, needs no migration of its own, and the bridge libraries S-141 and S-142, which copy `api/bridge.yaml`,
-and S-155, which writes Team mentions and tokens in the Threads of chains, depend on it.
+edits; it follows S-121, needs no migration of its own, and S-124 depends on it. S-121 and S-122 come before S-119,
+whose Team page shows the Destinations of a Team. S-166 was added by the review of those contracts: the web tests build
+Destination, Connection and Alert Group reads by hand, so every backend story that adds a required field to them would
+break the TypeScript check of its own pull request; S-166 moves those reads into shared builders that later stories
+extend, and it comes first. In the stage "L2 On call", S-164 was split from S-133 at the contract boundary of C-27.FR-8
+— the gaps, the gap scan and "On call now" need no messenger, while the warnings about unreachable On-calls need every
+Destination type — and S-165 from S-140, at the boundary between whom a message mentions and what is recorded when it
+cannot; each follows the story it was split from. S-171 was split from S-140 by the review of the contracts: S-140 keeps
+the entries, their migration and their resolution, and S-171 takes writing group mentions and mentions of everyone in
+Slack and through bridges, with the `kind` of a Mention in `api/bridge.yaml`; it follows S-140, needs no migration of
+its own, and the bridge libraries S-141 and S-142, which copy `api/bridge.yaml`, and S-155, which writes Team mentions
+and tokens in the Threads of chains, depend on it.
 
 In the stage "L2 Paging", S-167, S-168 and S-169 were split when the contracts were written, each because its story
-would have touched about 45 to 50 files. S-167 was split from S-145: S-145 keeps the protocol of the role `gateway`,
-its check and the fake gateway, which the bridge libraries need, and S-167 takes the contacts with their code, their
-limits, their erasure with a User and their masking in the Request log; it follows S-145 and comes before the
-libraries, S-146 and S-147, which need only S-145. S-169 was split from S-154: S-154 keeps the chains as
-configuration — their steps, naming them on Routes and Teams and the refusals that protect them — and S-169 takes
-their lifecycle on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps; it follows S-154.
-S-168 was split from S-155: S-155 keeps the Pages by Mention, the runs of Notification rules and undelivered Pages, and
-S-168 takes the Assignees, item 7 of the Root message and `layout`, the Owner's Team and the Assignee filter; it
-follows S-155, and S-157 and S-159 depend on it. The runs of Notification rules, which the first plan gave
-S-152, moved to S-155 (Mentions) and S-157 (calls), because a run only Pages people once Escalation steps Page them;
-S-152 keeps the rules, their defaults and their states. S-172 was split from S-155 by the review of the contracts, when the Telegram
-discussion group check had to cover the people that chains Page and the Timeline read path joined S-155, which would
-then have touched about 47 files: S-155 keeps the Pages, and S-172 takes the chains' Destinations in the warnings about
-unreachable On-calls and that check; it follows S-155. S-173 was split from S-148 in the same review, when the Timeline read path and the exhaustive
-switches of the SPA joined S-148, which would then have touched about 47 files: S-148 keeps the queue of calls, and
-S-173 takes the Acknowledge of the Transport `gateway` with its answers; it follows S-148, and S-151 and S-157 depend
-on it. The spike on the push of Mentions, S-160, depends on nothing
-and may run at any time; only the documentation of S-161 waits for it.
+would have touched about 45 to 50 files. S-167 was split from S-145: S-145 keeps the protocol of the role `gateway`, its
+check and the fake gateway, which the bridge libraries need, and S-167 takes the contacts with their code, their limits,
+their erasure with a User and their masking in the Request log; it follows S-145 and comes before the libraries, S-146
+and S-147, which need only S-145. S-169 was split from S-154: S-154 keeps the chains as configuration — their steps,
+naming them on Routes and Teams and the refusals that protect them — and S-169 takes their lifecycle on Alert Groups,
+with the ack timeout, Unclaimed, waits, repeats and skipped steps; it follows S-154. S-168 was split from S-155: S-155
+keeps the Pages by Mention, the runs of Notification rules and undelivered Pages, and S-168 takes the Assignees, item 7
+of the Root message and `layout`, the Owner's Team and the Assignee filter; it follows S-155, and S-157 and S-159 depend
+on it. The runs of Notification rules, which the first plan gave S-152, moved to S-155 (Mentions) and S-157 (calls),
+because a run only Pages people once Escalation steps Page them; S-152 keeps the rules, their defaults and their states.
+S-172 was split from S-155 by the review of the contracts, when the Telegram discussion group check had to cover the
+people that chains Page and the Timeline read path joined S-155, which would then have touched about 47 files: S-155
+keeps the Pages, and S-172 takes the chains' Destinations in the warnings about unreachable On-calls and that check; it
+follows S-155. S-173 was split from S-148 in the same review, when the Timeline read path and the exhaustive switches of
+the SPA joined S-148, which would then have touched about 47 files: S-148 keeps the queue of calls, and S-173 takes the
+Acknowledge of the Transport `gateway` with its answers; it follows S-148, and S-151 and S-157 depend on it. The spike
+on the push of Mentions, S-160, depends on nothing and may run at any time; only the documentation of S-161 waits for
+it.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

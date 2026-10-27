@@ -87,7 +87,7 @@ issue: null
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): after its steps of C-14.FR-14 pass, on save, on
   "Check" and in `muster doctor` — never as the Broken probe — the step `discussion_group_members` calls `getChatMember`
   of the discussion group for each User with a Telegram Account link for the Connection who is in a Team that names the
-  Destination (Open question 1), through the interactive client class like the other steps, and stores the people whose
+  Destination (settled 1), through the interactive client class like the other steps, and stores the people whose
   status is `left` or `kicked`, or whom the answer does not know, as the facts of S-132 say; the step always passes.
   `internal/destinations` stores the result.
 - **Fake Telegram server** (`internal/fakes/faketelegram/chats.go`): `getChatMember` answers a person who never joined
@@ -155,7 +155,8 @@ None open. Settled:
 1. **Settled: the Telegram Destination check looks at the people with a Telegram Account link for the Connection who
    are in a Team that names the Destination**, at each check on save, on "Check" and in `muster doctor`, so the
    warning may be as old as the last check, which its time shows; the On-call of a Schedule is always in its Team
-   (C-27.FR-2, FR-6), and the Leader adds only the gap scan and the gauges (L2.md NFR-2, NFR-4).
+   (C-27.FR-2, FR-6), and the Leader adds only the gap scan and the gauges (L2.md NFR-2, NFR-4). S-172 widens the
+   check to the people of the Schedules that Escalation chains Page in the Destination, once chains Page.
 
 ## Notes
 

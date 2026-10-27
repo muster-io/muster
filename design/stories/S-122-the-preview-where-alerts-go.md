@@ -19,7 +19,7 @@ files_touched:
   - test/e2e/routing_preview_test.go
   - docs/concepts/routing-to-teams.md
 acceptance:
-  - "[C-26.FR-12] `previewGroupKey` takes, besides the Matchers and the proposed Group key, the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of the Route — the saved Route's when a field is absent and `route_id` is given — and answers `delivery`: the `routing.group_key_preview_examples` largest Alert Groups that the Alerts of the period would form under the proposed key, each with its Group key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams by the Team label and Team matchers as saved, and the Destinations it would reach with the entries that reach each; and `destination_counts`, for every Destination any of those Alert Groups reaches, how many reach it (`preview_test.go`)."
+  - "[C-26.FR-12] `previewGroupKey` takes, besides the Matchers and the proposed Group key, the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of the Route — the saved Route's when a field is absent and `route_id` is given — and answers `delivery`: the `routing.group_key_preview_examples` largest Alert Groups that the Alerts of the period would form under the proposed key, each with its Group key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams by the Team label and Team matchers as saved, and the Destinations it would reach with the entries that reach each; and `destination_counts`, for every Destination that any Alert Group the Alerts would form reaches — the listed ones and the others — how many of all those Alert Groups reach it (`preview_test.go`)."
   - "[C-26.FR-12] With the settings of S-121's Route \"Infrastructure\" sent unsaved, Alerts of `team=\"payments\"` (warning) and `team=\"devops\"` (critical) in the period, and the Team \"payments\" with `payments-notice` below critical, the preview lists the Alert Group of payments reaching `infra-notice` (the Route) and `payments-notice` (the Team), and that of devops reaching `infra-critical` only; with `deliver_to_teams` false the first reaches `infra-notice` only; the preview writes nothing (`routing_preview_test.go`)."
   - "[C-26.FR-12] A preview without a Team label value in the proposed Group key and `deliver_to_teams` true answers `shared_key_warning` true, so that the form can show the hint of reference.md and offer to add the Team label (`preview_test.go`)."
   - "[C-26.FR-13] Routing to Teams has the section \"Preview where alerts go\"; `make docs-check` passes."
@@ -61,7 +61,8 @@ issue: null
   current classification of S-118 (`teams.Classifier`, read outside a Snapshot), and its reach by the rule of S-121 —
   the Route's proposed entries whose condition the level meets and, with `deliver_to_teams`, the saved entries of each
   of its Teams. The preview reads only; it writes nothing, records no Audit log entry and sends no hint. The
-  `routing.group_key_preview_examples` largest groups are listed; `destination_counts` covers every group.
+  `routing.group_key_preview_examples` largest groups are listed; `destination_counts` covers every Alert Group the
+  Alerts would form, not only the listed ones.
 - **Teams** (`internal/teams/classify.go`): the classifier answers outside the Snapshot's transaction too, from a
   read of the Team label, slugs and matchers.
 - **Settings**: `routing.group_key_preview_period`, `routing.group_key_preview_examples`,
@@ -104,9 +105,9 @@ curl -s "${A[@]}" $API/group-key-previews -d "{\"matchers\":[{\"label\":\"catego
 
 ## Open questions
 
-1. **How many Alert Groups the preview lists.** Settled: the `routing.group_key_preview_examples` largest Alert Groups
-   (5), with `destination_counts` for every Alert Group the Alerts would form, as C-26.FR-12 now says; the contract
-   above follows it.
+1. **How many Alert Groups the preview lists.** Settled by the maintainer (review of PR #399): the
+   `routing.group_key_preview_examples` largest Alert Groups (5), and `destination_counts` over every Alert Group the
+   Alerts would form, listed or not, as C-26.FR-12 now says; the contract above follows it.
 
 ## Notes
 

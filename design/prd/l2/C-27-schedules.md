@@ -43,10 +43,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Monday to Friday 11:00–19:00: outside the limits it has no Shift, and the person whose turn it is takes only the
   limited times. A time of day whose end is earlier than its start crosses midnight and runs until the end on the next
   day, such as 19:00–09:00; with days of the week, each window belongs to the day it starts on, so Friday 19:00–09:00
-  runs until Saturday 09:00. Times are wall-clock times in the Schedule's time zone, by its rules on each day, so a handover at
-  10:00 stays at 10:00 across a change of the clocks. Saving a Rotation layer with a Viewer, a disabled User or a User
-  who is not in the Team is refused with `422` and a pointer to the person; the warnings of FR-5 are for people who
-  became one of these later.
+  runs until Saturday 09:00. Times are wall-clock times in the Schedule's time zone, by its rules on each day, so a
+  handover at 10:00 stays at 10:00 across a change of the clocks. Saving a Rotation layer with a Viewer, a disabled User
+  or a User who is not in the Team is refused with `422` and a pointer to the person; the warnings of FR-5 are for
+  people who became one of these later.
 - **C-27.FR-3** An Override says that from one time to another one person is On-call, on top of every Rotation layer:
   within its span it wins over all of them, and so it also closes gaps. It may name the person whose Shift it takes,
   which the Schedule shows, but that changes nothing in the On-call. The two modes of the form — "I take the Shift of…"

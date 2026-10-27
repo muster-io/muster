@@ -36,7 +36,8 @@ issue: null
 
 **OUT**
 
-- Team mentions and the Connections' checks: S-139. The Mention entries: S-140; how Slack and bridges write group mentions: S-171.
+- Team mentions and the Connections' checks: S-139. The Mention entries: S-140; how Slack and bridges write group
+  mentions: S-171.
 - Telegram: S-132. Push of Mentions in Thread replies: S-160. GitLab's claims: S-116.
 
 ## Contracts
@@ -46,17 +47,18 @@ issue: null
   the items "Mattermost groups" and "Slack user groups" leave Pending.
 - **Story contracts**: S-139 assumes that a Mattermost bot reads groups with `GET /api/v4/groups` (and reports in the
   check whether it may), that a Slack bot with `usergroups:read` reads user groups with `usergroups.list`, and that
-  `x-oauth-scopes` reports the scope only after a reinstall; S-140 (Mattermost) and S-171 (Slack) assume that `@<group>` in a Mattermost message and
-  `<!subteam^ID>` in a Slack one notify the group's members, and `<!everyone>` everyone of the workspace in its general
-  channel. Each differing fact corrects the contract, or the pull request proposes the change of the requirement.
+  `x-oauth-scopes` reports the scope only after a reinstall; S-140 (Mattermost) and S-171 (Slack) assume that `@<group>`
+  in a Mattermost message and `<!subteam^ID>` in a Slack one notify the group's members, and `<!everyone>` everyone of
+  the workspace in its general channel. Each differing fact corrects the contract, or the pull request proposes the
+  change of the requirement.
 
 ## Steps
 
 1. The maintainer runs the checks of Verification on the test stands, with scripts an agent may prepare outside the
    repository. Check: the observations of each step are written down with the raw answers, tokens removed.
 2. Write the facts and move the items out of Pending. Check: `make lint`.
-3. Correct S-139's, S-140's, S-171's and S-143's contracts and add the citations to S-144. Check: `scripts/stories-sync --dry-run`
-   parses the files.
+3. Correct S-139's, S-140's, S-171's and S-143's contracts and add the citations to S-144. Check: `scripts/stories-sync
+   --dry-run` parses the files.
 
 ## Verification
 
@@ -73,8 +75,8 @@ On the maintainer's Mattermost test server (record the version, the edition and 
 3. Slack: an app whose manifest has `usergroups:read` added after installation — call `auth.test` and record
    `x-oauth-scopes`; reinstall and record it again. Create the user group `payments-team` with `alice`; call
    `usergroups.list` with and without the scope; record the answer and the error.
-4. Slack: the bot posts a Root message whose blocks start with `<!subteam^S…>` and a Thread reply with it; record whether
-   `alice` gets a notification and `bob` none.
+4. Slack: the bot posts a Root message whose blocks start with `<!subteam^S…>` and a Thread reply with it; record
+   whether `alice` gets a notification and `bob` none.
 5. Slack: the bot posts `<!everyone>` in the general channel and in another channel; record who is notified and how the
    message renders in each.
 
@@ -86,6 +88,7 @@ None; the spike answers them.
 
 ## Notes
 
+- Suggested commit: `docs: record how mattermost groups and slack user groups are read and mentioned`.
 - The maintainer performs the checks (operator attention): they need the test servers, an admin account on each and two
   test accounts with clients. An agent may write the scripts outside the repository and run them on the maintainer's
   instructions.

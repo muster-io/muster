@@ -19,6 +19,7 @@ files_touched:
   - internal/routing/routes_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/alertgroups.go
   - internal/organization/organization.go
   - internal/organization/settings.go
   - internal/organization/query.sql
@@ -77,7 +78,8 @@ issue: null
 - The rename of the Route profile On-call to Paging (`paging`) with every client that names it: S-162.
 - The Minimum severity on the Route form and the retired urgent mark and "critical is Urgent" on the pages: S-112.
 - Severity conditions of Destinations, and the Quiet publication of the Alert Groups that a raised Minimum severity
-  brings into a Destination's condition (the second half of C-26.FR-9 and of C-26.AC-11): S-121.
+  brings into a Destination's condition, which S-121's reach makes through this story's transition (the second half of
+  C-26.FR-9 and of C-26.AC-11): S-121. The publications and final edits of changed Route and Team Destinations: S-170.
 - Escalation chains, which a change of the Minimum severity never starts: S-169. The page "What critical changes":
   S-124.
 - 0.3.0 removes `urgent`, `critical_is_urgent` and their columns; not in 0.2.x.
@@ -100,7 +102,8 @@ issue: null
     `required`.
   - `NullableStatusChangeReason` gains `minimum_severity` ("raised by the Minimum severity of the Route");
     `TimelineAlertsEntry` gains `reason_code` (`NullableStatusChangeReason`), so that `severity_raised` carries it as
-    `urgency_raised` does on `TimelineStatusEntry`.
+    `urgency_raised` does on `TimelineStatusEntry`; the alerts branch of the Timeline mapper in
+    `internal/api/alertgroups.go` sets it.
   - The descriptions of `AgUrgent`, `AlertGroup.urgent`, `AlertGroup.severity_level` and `WebhookAlertGroup.urgent` say
     the new rule. No operation is added.
 - **SPA type check** (`web/src/components/timeline.tsx`): `changeReason` switches over every
@@ -116,13 +119,13 @@ issue: null
     gives it — raised to its Route's Minimum severity, and `urgent` =
     `severity_level = 'critical'`; the same `urgent` on its `pending` deliveries. Nothing else is written — no Timeline
     entry, no delivery, no change of a Snooze or an Owner.
-  - New table `open_group_updates`: `id`, `org_id`, `kind text NOT NULL` with `open_group_updates_kind_check` (`kind IN ('route_minimum_severity')`; later stories
-    replace it by `_v2`, `_v3`, … in story-map order),
-    `route_id` (nullable, foreign key), `requested_at` (business clock), `after_alert_group_id bigint NOT NULL DEFAULT
-    0` (the cursor of a run that a lost lease interrupted), `lease_until` and `leased_by` (real clock); a CHECK that
-    `route_minimum_severity` names a Route; the index `open_group_updates_due_idx (org_id, requested_at, id)` serves
-    the claim. A row is deleted in the transaction of its last batch, so the table holds only work still to do. The
-    schema's §5 "Queues and claims" describes the claim.
+  - New table `open_group_updates`: `id`, `org_id`, `kind text NOT NULL` with `open_group_updates_kind_check` (`kind IN
+    ('route_minimum_severity')`; later stories replace it by `_v2`, `_v3`, … in story-map order), `route_id` (nullable,
+    foreign key), `requested_at` (business clock), `after_alert_group_id bigint NOT NULL DEFAULT 0` (the cursor of a run
+    that a lost lease interrupted), `lease_until` and `leased_by` (real clock); a CHECK that `route_minimum_severity`
+    names a Route; the index `open_group_updates_due_idx (org_id, requested_at, id)` serves the claim. A row is deleted
+    in the transaction of its last batch, so the table holds only work still to do. The schema's §5 "Queues and claims"
+    describes the claim.
   - The down migration drops the table and the column and leaves `routes.urgent` and `critical_is_urgent` as the up
     migration left them.
 - **Rolling update**: 0.2.0 writes `routes.urgent` = (`minimum_severity` = `critical`) on every create and update, and
@@ -256,7 +259,7 @@ None.
 | C-26.FR-13 | partial | the Minimum severity section and the upgrade notes; the routing page and "What critical changes" are S-124 |
 | C-26.AC-7 | full | |
 | C-26.AC-8 | partial | the migration, `urgent` and `critical_is_urgent`; the profile ids are S-162 |
-| C-26.AC-11 | partial | the Quiet `urgency_raised` without removing the acknowledgement; the Quiet publication in critical Destinations is S-121 |
+| C-26.AC-11 | partial | the Quiet `urgency_raised` without removing the acknowledgement; the Quiet publication in critical Destinations is S-121's, through this transition |
 | C-08.FR-1 | partial | revised for L2: the Minimum severity replaces the urgent mark; Destination entries, Teams, chains, owner and labels follow in S-115, S-121, S-125 and later stories |
 | C-08.FR-6 | full | revised for L2 |
 | C-09.FR-1 | partial | revised for L2: urgency from the Severity level; the Teams are S-118, the running chains S-169 and the Assignees S-168 |

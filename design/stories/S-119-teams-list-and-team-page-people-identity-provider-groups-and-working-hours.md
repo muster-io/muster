@@ -93,7 +93,10 @@ issue: null
 - **Forms**: "Owning Team" (a select of the Teams with "None") in the section "Severity, Escalation chains and owner"
   of `route-severity-and-owner.tsx` and in `destination-form.tsx`, with the hint above; the Audit log names
   `/owning_team_id` "Owning Team", `/idp_entries` "Identity provider groups", `/working_hours` "Working hours".
-- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, new): `teamRead` builds a complete `Team` read with neutral values, overridable field by field, as S-166's builders do for Destinations and Connections; this story's tests and every later one build Team reads only through it, and a later story that adds a required field to the Team read (S-139) sets its neutral value there. This story waits for S-118 and S-121, which add Team fields before it.
+- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, new): `teamRead` builds a complete `Team` read with neutral
+  values, overridable field by field, as S-166's builders do for Destinations and Connections; this story's tests and
+  every later one build Team reads only through it, and a later story that adds a required field to the Team read
+  (S-139) sets its neutral value there. This story waits for S-118 and S-121, which add Team fields before it.
 - **Documentation links** (`docs-links.json`): `page.teams` → `concepts/teams.md`, `field.team_idp` →
   `concepts/teams.md#membership-from-the-identity-provider`, `field.working_hours` → `concepts/teams.md#working-hours`;
   the anchors exist from S-115 and S-117.

@@ -65,9 +65,9 @@ issue: null
   `window_days`, `items` — `TeamLabelValue` {`value`, `last_seen_at`, `alert_count`, `valid_slug`}}, the most recently
   seen first, at most 500, like `listSeverityValues`.
 - **Schema** (migration `0026_team_evaluation`, expand only; `schema.md` §4.15 and §5): `open_group_updates.team_id`
-  (nullable foreign key to `teams`) and `open_group_updates_kind_v3_check` with every kind of `_v2` and `team_evaluation`, `NOT VALID` and validated in a second
-  transaction. The values are read from `alerts` through `alerts_org_last_seen_idx`, as the severity values are; no
-  table is added for them.
+  (nullable foreign key to `teams`) and `open_group_updates_kind_v3_check` with every kind of `_v2` and
+  `team_evaluation`, `NOT VALID` and validated in a second transaction. The values are read from `alerts` through
+  `alerts_org_last_seen_idx`, as the severity values are; no table is added for them.
 - **Teams** (`internal/teams`): `labelvalues.go` — the values, their last time seen, their count and `valid_slug`,
   leaving out the slugs of Teams that are not deleted. `createTeam`, and `updateTeam` when the slug or the matchers
   change, insert the `team_evaluation` row with the Team in the save's transaction.
