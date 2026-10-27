@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/logging"
@@ -387,7 +388,7 @@ func destinationInputOf(body gen.DestinationInput) (destinations.Input, error) {
 	if err != nil {
 		return destinations.Input{}, err
 	}
-	return destinations.Input{Type: kind, Name: m.Name, Mentions: set,
+	return destinations.Input{Type: kind, Name: m.Name, Mentions: set, Buttons: destinationButtonsInputOf(m.Buttons),
 		Limiter: destinations.Limiter{Limit: int64(m.Limiter.Limit), PerSeconds: int64(m.Limiter.PerSeconds)},
 		Mattermost: &destinations.MattermostInput{Connection: m.ConnectionId, TeamID: m.TeamId,
 			ChannelID: m.ChannelId}, OwningTeamID: owningTeamOf(m.OwningTeamId)}, nil
@@ -405,6 +406,7 @@ func telegramDestinationInputOf(body gen.DestinationInput) (destinations.Input, 
 		return destinations.Input{}, err
 	}
 	return destinations.Input{Type: destinations.TypeTelegram, Name: t.Name, Mentions: set,
+		Buttons:      destinationButtonsInputOf(t.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(t.Limiter.Limit), PerSeconds: int64(t.Limiter.PerSeconds)},
 		Telegram:     &destinations.TelegramInput{Connection: t.ConnectionId, ChannelID: t.ChannelId},
 		OwningTeamID: owningTeamOf(t.OwningTeamId)}, nil
@@ -423,6 +425,7 @@ func bridgeDestinationInputOf(body gen.DestinationInput) (destinations.Input, er
 		return destinations.Input{}, err
 	}
 	return destinations.Input{Type: destinations.TypeBridge, Name: b.Name, Mentions: set,
+		Buttons:      destinationButtonsInputOf(b.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(b.Limiter.Limit), PerSeconds: int64(b.Limiter.PerSeconds)},
 		Bridge:       &destinations.BridgeInput{Connection: b.ConnectionId, ChannelID: b.ChannelId},
 		OwningTeamID: owningTeamOf(b.OwningTeamId)}, nil
@@ -440,6 +443,7 @@ func slackDestinationInputOf(body gen.DestinationInput) (destinations.Input, err
 		return destinations.Input{}, err
 	}
 	return destinations.Input{Type: destinations.TypeSlack, Name: sl.Name, Mentions: set,
+		Buttons:      destinationButtonsInputOf(sl.Buttons),
 		Limiter:      destinations.Limiter{Limit: int64(sl.Limiter.Limit), PerSeconds: int64(sl.Limiter.PerSeconds)},
 		Slack:        &destinations.SlackInput{Connection: sl.ConnectionId, ChannelID: sl.ChannelId},
 		OwningTeamID: owningTeamOf(sl.OwningTeamId)}, nil
@@ -497,6 +501,23 @@ func requestTemplateOf(r gen.RequestTemplate) webhooks.RequestTemplate {
 		}
 	}
 	return out
+}
+
+// destinationButtonsInputOf is the button set of a messenger Destination's body, nil when it is omitted.
+func destinationButtonsInputOf(b *gen.DestinationButtonSet) *destinations.ButtonSetInput {
+	if b == nil {
+		return nil
+	}
+	return &destinations.ButtonSetInput{Own: b.Source == gen.DestinationButtonSetSourceOwn, Items: itemInputsOf(b.Items)}
+}
+
+// destinationButtonsOf is the button set of a messenger Destination as the API shows it.
+func destinationButtonsOf(o buttons.Own) gen.DestinationButtonSet {
+	if !o.Set {
+		return gen.DestinationButtonSet{Source: gen.DestinationButtonSetSourceOrganization}
+	}
+	items := buttonItemsOf(o.Items)
+	return gen.DestinationButtonSet{Source: gen.DestinationButtonSetSourceOwn, Items: &items}
 }
 
 // mentionSettingsOf is the Mention settings of a body, keyed by kind, with empty lists for missing ones.
@@ -560,6 +581,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 		return gen.Destination{}, fmt.Errorf("read the mention settings of %s: %w", d.PublicID, err)
 	}
 	limiter := gen.Limiter{Limit: int(d.LimiterLimit), PerSeconds: int(d.LimiterPerSeconds)}
+	buttonSet := destinationButtonsOf(d.Buttons)
 	routes := make([]gen.EntityRef, 0, len(d.Routes))
 	for _, r := range d.Routes {
 		routes = append(routes, gen.EntityRef{Id: r.PublicID, Name: r.Name})
@@ -581,7 +603,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			Type: gen.MattermostDestinationTypeMattermost, ConnectionId: deref(d.Connection),
 			TeamId: deref(d.MattermostTeamID), ChannelId: deref(d.MattermostChannelID),
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
-			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeTelegram:
@@ -591,21 +613,21 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			ChannelChatId:        nullableString(d.TelegramChannelChatID),
 			DiscussionGroupId:    nullableString(d.TelegramDiscussionGroupID),
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
-			Mentions:             mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions:             mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeBridge:
 		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
-			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeSlack:
 		err = out.FromSlackDestination(gen.SlackDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.SlackDestinationTypeSlack, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.SlackChannelID), ChannelName: nullableString(d.SlackChannelName),
-			Mentions: mentions, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
+			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
 			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeWebhook:

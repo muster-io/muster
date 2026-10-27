@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
@@ -77,7 +78,9 @@ type TemplateError struct {
 // Destination is a Destination of any type as read. The fields of the other types are empty: Mattermost has its
 // team and channel, Telegram its channel and the discussion group a Destination check found, a Bridge and Slack their
 // channel id and the channel's name their Destination check read, an outgoing webhook its mode, request templates,
-// proxy and Signing secret. Mentions, EventsConfig and TemplateConfig are the stored JSON.
+// proxy and Signing secret. Mentions, EventsConfig and TemplateConfig are the stored JSON. Buttons is the button set of
+// a messenger Destination, its own or "As in the Organization", and OrganizationButtons the Organization's set, which
+// the latter follows (C-28.FR-8).
 type Destination struct {
 	ID         int64
 	PublicID   string
@@ -111,14 +114,16 @@ type Destination struct {
 	// SigningSecretOnce is the first Signing secret of an outgoing webhook, set only by Create, which returns it once.
 	SigningSecretOnce logging.Secret
 
-	Mentions          json.RawMessage
-	LimiterLimit      int64
-	LimiterPerSeconds int64
-	Health            Health
-	Routes            []RouteRef
-	TemplateError     *TemplateError
-	CreatedAt         time.Time
-	Version           int64
+	Mentions            json.RawMessage
+	Buttons             buttons.Own
+	OrganizationButtons buttons.Set
+	LimiterLimit        int64
+	LimiterPerSeconds   int64
+	Health              Health
+	Routes              []RouteRef
+	TemplateError       *TemplateError
+	CreatedAt           time.Time
+	Version             int64
 	// OwningTeam is the Team that owns the Destination (C-25.FR-2), nil when none does.
 	OwningTeam *TeamRef
 }
@@ -388,7 +393,18 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 		d.OwningTeam = &TeamRef{ID: r.OwningTeamID.Int64, PublicID: r.OwningTeamPublicID.String,
 			Name: r.OwningTeamName.String, Slug: r.OwningTeamSlug.String, Deleted: r.OwningTeamDeleted}
 	}
+	// The CHECKs keep the sets an array and an object; another shape reads as "As in the Organization" and all.
+	d.Buttons, _ = buttons.ParseOwn(r.Buttons)
+	d.OrganizationButtons = buttons.All()
+	if set, err := buttons.ParseSet(r.OrganizationButtons); err == nil {
+		d.OrganizationButtons = set
+	}
 	return d
+}
+
+// EffectiveButtons is the button set the Root messages of d show: its own, else the Organization's (C-28.FR-8).
+func (d Destination) EffectiveButtons() buttons.Set {
+	return d.Buttons.Effective(d.OrganizationButtons)
 }
 
 // routeID is the canonical public_id of a Route, false when s cannot name one.

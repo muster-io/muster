@@ -407,7 +407,8 @@ func (c committed) run(ctx context.Context) {
 // recorded in their order, and ReceivedAt, the receipt time of the Stored Snapshot behind it, nil when a Command, a
 // timer or a person's change made it. After queues a function, such as a log line, to run once the transaction
 // committed, never when it rolls back; Fallback reports a Route template that failed, which the dispatcher records
-// in the Timeline once the re-render step returned. Both are nil outside the dispatcher.
+// in the Timeline once the re-render step returned. Both are nil outside the dispatcher. Changed, when set, is called
+// for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
 type Rendering struct {
 	Group      *Group
 	Actor      Actor
@@ -415,6 +416,7 @@ type Rendering struct {
 	ReceivedAt *time.Time
 	After      func(f func(ctx context.Context))
 	Fallback   func(f TemplateFailure)
+	Changed    func()
 }
 
 // TemplateFailure is a Route template that failed while the re-render step rendered a message of the Alert Group,
@@ -544,14 +546,8 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
 	if d.rerender != nil {
-		received, err := d.receivedAt(ctx, q)
+		failures, _, err := d.render(ctx, q, g, actor, recorded, after)
 		if err != nil {
-			return err
-		}
-		var failures []TemplateFailure
-		if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded,
-			ReceivedAt: received, After: after.add,
-			Fallback: func(f TemplateFailure) { failures = append(failures, f) }}); err != nil {
 			return err
 		}
 		if err := d.recordFallbacks(ctx, q, g, failures, now); err != nil {
@@ -570,6 +566,26 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		}
 	}
 	return nil
+}
+
+// render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
+// and returns the Route templates that failed, which the caller records (recordFallbacks), and whether it changed a
+// Desired state; after collects what runs once the transaction committed. The dispatcher calls it for every change,
+// and the re-render of a changed button set without a lifecycle event (updates.go).
+func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Actor, recorded []Recorded,
+	after *committed) ([]TemplateFailure, bool, error) {
+	received, err := d.receivedAt(ctx, q)
+	if err != nil {
+		return nil, false, err
+	}
+	var failures []TemplateFailure
+	changed := false
+	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
+		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
+		Changed: func() { changed = true }}); err != nil {
+		return nil, false, err
+	}
+	return failures, changed, nil
 }
 
 // recordFallbacks records, as the system, one system entry fallback_template_used per Route template the re-render

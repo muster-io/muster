@@ -1016,8 +1016,8 @@ WHERE org_id = @org_id AND id = @id;
 -- by id in batches, and is deleted with its last batch.
 
 -- ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
--- the public_id of its Route, if any, for its log lines; another claimer skips the row this one locked. A row of a kind
--- that a later version adds waits for a replica that handles it.
+-- the public_id of its Route or its Destination, if any, for its log lines; another claimer skips the row this one
+-- locked. A row of a kind that a later version adds waits for a replica that handles it.
 -- name: ClaimOpenGroupUpdate :many
 WITH due AS MATERIALIZED (
     SELECT d.id
@@ -1035,12 +1035,16 @@ WHERE u.org_id = @org_id AND u.id = due.id
 RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
           coalesce((SELECT r.public_id
                     FROM routes r
-                    WHERE r.org_id = @org_id AND r.id = u.route_id), '')::text AS route_public_id;
+                    WHERE r.org_id = @org_id AND r.id = u.route_id), '')::text AS route_public_id,
+          u.destination_id,
+          coalesce((SELECT d.public_id
+                    FROM destinations d
+                    WHERE d.org_id = @org_id AND d.id = u.destination_id), '')::text AS destination_public_id;
 
 -- LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
 -- now, and reads where its run stands; no row when the lease was lost.
 -- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = @org_id AND id = @id AND leased_by = @owner::text AND lease_until > @now::timestamptz
 FOR NO KEY UPDATE;
@@ -1075,6 +1079,34 @@ FROM alert_group_alerts m
 JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
 WHERE m.org_id = @org_id AND m.alert_group_id = ANY(@alert_group_ids::bigint[]) AND m.state = 'firing'
 GROUP BY m.alert_group_id;
+
+-- ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
+-- Destination that is not being retired, whose Root messages its button set re-renders (C-28.FR-9).
+-- name: ListOpenGroupsOfDestinationAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
+  AND EXISTS (SELECT 1
+              FROM deliveries d
+              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND d.destination_id = @destination_id
+                AND NOT d.desired_retire)
+ORDER BY g.id
+LIMIT @lim;
+
+-- ListOpenGroupsFollowingOrganizationAfter lists, by id after a cursor, a batch of the open Alert Groups with a
+-- delivery that is not being retired in a messenger Destination that is not deleted and follows the Organization's
+-- button set, whose Root messages a change of that set re-renders (C-28.FR-9).
+-- name: ListOpenGroupsFollowingOrganizationAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
+  AND EXISTS (SELECT 1
+              FROM deliveries d
+              JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
+              WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND NOT d.desired_retire AND x.buttons IS NULL
+                AND x.type <> 'webhook' AND x.deleted_at IS NULL)
+ORDER BY g.id
+LIMIT @lim;
 
 -- ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
 -- it included.

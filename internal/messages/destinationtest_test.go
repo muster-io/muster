@@ -5,6 +5,7 @@ package messages
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/muster-io/muster/internal/buttons"
@@ -60,5 +61,67 @@ func TestTestRoot(t *testing.T) {
 	}
 	if TestMark("en") != "🧪 Test message" || TestMark("ru") != "🧪 Тестовое сообщение" {
 		t.Errorf("marks %q %q", TestMark("en"), TestMark("ru"))
+	}
+}
+
+// TestTestRootButtonSet is C-16.FR-4 revised for L2 and C-28.FR-9: the test message of a Destination with its own set
+// shows exactly the buttons of the set, signed, in the order of reference.md; Unsnooze always on a snoozed one; a set
+// of every button or none at all shows them all; ShownButtons leaves a Thread reply and a Storm summary as they are,
+// and a set without any shown button leaves an empty list, never null.
+func TestTestRootButtonSet(t *testing.T) {
+	r := newRenderer(t)
+	ac7 := &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemSnoozePreset, Preset: buttons.PresetTomorrow},
+		{Button: buttons.ItemSnooze, SnoozeSeconds: 86400}, {Button: buttons.ItemAcknowledge}}}
+	src := source("firing", 2)
+	src.Buttons = ac7
+	for _, markup := range []Markup{MarkupMarkdown, MarkupHTML, MarkupCommonMark, MarkupMrkdwn} {
+		rd := r.TestRoot(src, markup, "DSAAAAAAAAAAA1")
+		if got := labels(rd.Message.Buttons); !slices.Equal(got, []string{"Ack", "Snooze 24 h", "Until tomorrow 09:00"}) {
+			t.Errorf("%s: %v", markup, got)
+		}
+		for _, b := range rd.Message.Buttons {
+			if a, err := buttons.Verify(fakeKeys{}, b.ActionID, b.KeyID); err != nil || a.Subject != buttons.SubjectTest {
+				t.Errorf("%s: button %+v: %v", markup, b, err)
+			}
+		}
+		if markup == MarkupMrkdwn && !slices.Equal(rd.Message.SnoozeSeconds, []int64{3600, 14400, 86400}) {
+			t.Errorf("the durations a button names by index: %v", rd.Message.SnoozeSeconds)
+		}
+	}
+	src = source("acknowledged", 2)
+	src.Buttons = ac7
+	if got := labels(r.TestRoot(src, MarkupMarkdown, "").Message.Buttons); !slices.Equal(got, []string{"Unack", "Snooze 24 h",
+		"Until tomorrow 09:00"}) {
+		t.Errorf("acknowledged: %v", got)
+	}
+	src = source("snoozed", 2)
+	src.Buttons = &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemResolve}}}
+	if got := labels(r.TestRoot(src, MarkupMarkdown, "").Message.Buttons); !slices.Equal(got, []string{"Unsnooze", "Resolve"}) {
+		t.Errorf("snoozed: %v", got)
+	}
+	src = source("firing", 2)
+	all := len(r.TestRoot(src, MarkupMarkdown, "").Message.Buttons)
+	src.Buttons = &buttons.Set{All: true}
+	if n := len(r.TestRoot(src, MarkupMarkdown, "").Message.Buttons); n != all || all != 7 {
+		t.Errorf("every button: %d of %d", n, all)
+	}
+	src.Buttons = &buttons.Set{}
+	if m := r.TestRoot(src, MarkupMarkdown, "").Message; m.Buttons == nil || len(m.Buttons) != 0 {
+		t.Errorf("no button: %#v", m.Buttons)
+	}
+	// The commands line of a bridge without buttons names the Text commands of the shown buttons only (C-28.FR-9).
+	src = source("firing", 2)
+	src.Buttons = ac7
+	if got := CommandsLine(r.TestRoot(src, MarkupCommonMark, "").Message, false); got !=
+		"Reply in the Thread: ack · snooze 24h" {
+		t.Errorf("the commands line of the set: %q", got)
+	}
+	src.Buttons = &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemResolve}}}
+	if got := CommandsLine(r.TestRoot(src, MarkupCommonMark, "").Message, false); got != "Reply in the Thread: resolve" {
+		t.Errorf("the commands line of resolve only: %q", got)
+	}
+	reply := Message{Kind: KindReply, Buttons: []Button{{Command: buttons.CommandStillOnIt}}}
+	if got := ShownButtons(reply, &buttons.Set{}, nil); len(got.Buttons) != 1 {
+		t.Errorf("a reply lost its buttons: %+v", got)
 	}
 }

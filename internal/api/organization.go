@@ -11,6 +11,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
@@ -31,7 +32,8 @@ func (s *Server) GetOrganization(ctx context.Context, _ gen.GetOrganizationReque
 }
 
 // UpdateOrganization is updateOrganization with If-Match: it changes every setting of the Organization (C-20.FR-1,
-// FR-8, C-04.FR-8), the start of the working day and the first day of the week, kept when omitted (C-20.FR-9), the TOTP
+// FR-8, C-04.FR-8), the start of the working day and the first day of the week, kept when omitted (C-20.FR-9), the
+// button set, kept when omitted (C-28.FR-8, FR-10), the TOTP
 // policy (C-03.FR-20) and the outgoing heartbeat, its write-only URL (null clears it) and its proxy (C-19.FR-7); an
 // invalid field is 422 at its full JSON pointer.
 func (s *Server) UpdateOrganization(ctx context.Context, req gen.UpdateOrganizationRequestObject) (
@@ -88,6 +90,11 @@ func organizationOf(o organization.Organization) gen.Organization {
 		},
 		TotpRequired: gen.TotpPolicy(o.TOTPRequired), OidcTokenGraceSeconds: int(o.OIDCTokenGrace / time.Second),
 		Etag: &tag, WorkdayEnd: o.WorkdayEnd, WorkingDays: make([]gen.Weekday, 0, len(o.WorkingDays)),
+		Buttons: gen.OrganizationButtonSet{All: o.Buttons.All},
+	}
+	if !o.Buttons.All {
+		items := buttonItemsOf(o.Buttons.Items)
+		out.Buttons.Items = &items
 	}
 	for _, d := range o.WorkingDays {
 		out.WorkingDays = append(out.WorkingDays, gen.Weekday(d))
@@ -159,6 +166,9 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 		w := string(*b.WeekStart)
 		in.WeekStart = &w
 	}
+	if b.Buttons != nil {
+		in.Buttons = &organization.ButtonSetInput{All: b.Buttons.All, Items: itemInputsOf(b.Buttons.Items)}
+	}
 	if in.InstanceLabels == nil {
 		in.InstanceLabels = []string{}
 	}
@@ -182,6 +192,38 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 		in.HeartbeatProxy.Username = &u
 	}
 	return in
+}
+
+// buttonItemsOf are the items of a button set as the API shows them.
+func buttonItemsOf(items []buttons.Item) []gen.ButtonSetItem {
+	out := make([]gen.ButtonSetItem, 0, len(items))
+	for _, it := range items {
+		g := gen.ButtonSetItem{Button: gen.ButtonSetItemButton(it.Button)}
+		if it.Button == buttons.ItemSnooze {
+			g.SnoozeSeconds = new(it.SnoozeSeconds)
+		}
+		if it.Button == buttons.ItemSnoozePreset {
+			g.Preset = new(gen.SnoozePreset(it.Preset))
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// itemInputsOf are the items of a button set of a request body, nil when they are missing.
+func itemInputsOf(items *[]gen.ButtonSetItem) []buttons.ItemInput {
+	if items == nil {
+		return nil
+	}
+	out := make([]buttons.ItemInput, 0, len(*items))
+	for _, it := range *items {
+		in := buttons.ItemInput{Button: string(it.Button), SnoozeSeconds: it.SnoozeSeconds}
+		if it.Preset != nil {
+			in.Preset = new(string(*it.Preset))
+		}
+		out = append(out, in)
+	}
+	return out
 }
 
 // secretInputOf is a write-only Secret field of the request body: omitted keeps it, null clears it.

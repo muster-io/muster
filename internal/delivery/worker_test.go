@@ -68,6 +68,8 @@ type (
 		// without "reply in thread".
 		templateError *string
 		noReplies     bool
+		// buttons is its own button set as destinations.buttons stores it, nil for "As in the Organization".
+		buttons []byte
 	}
 	fakeRoute struct {
 		language  string
@@ -162,7 +164,9 @@ type (
 // fakeDB is the database of the package in memory, with the semantics of its queries: due on the business clock,
 // leased on the real clock, the token buckets of the limiters and the head-of-line order of Thread replies.
 type fakeDB struct {
-	mu         sync.Mutex
+	mu sync.Mutex
+	// orgButtons is the Organization's button set as organizations.buttons stores it, nil for every button.
+	orgButtons []byte
 	dests      map[int64]*fakeDest
 	routes     map[int64]fakeRoute
 	routeDests map[int64][]int64
@@ -355,7 +359,8 @@ func (f *fakeDB) ListRouteDestinations(_ context.Context, arg dbgen.ListRouteDes
 			out = append(out, dbgen.ListRouteDestinationsRow{ID: d.id, PublicID: d.publicID, Name: d.name,
 				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health,
 				WebhookMode:    pgtype.Text{String: d.mode, Valid: d.mode != ""},
-				WebhookReplies: d.typ == delivery.TypeWebhook && !d.noReplies})
+				WebhookReplies: d.typ == delivery.TypeWebhook && !d.noReplies, Buttons: d.buttons,
+				OrganizationButtons: f.orgButtons})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListRouteDestinationsRow) int { return cmp.Compare(a.ID, b.ID) })
@@ -427,7 +432,10 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
-	if arg.Open && (d.state == "withheld" || (d.lateNote && d.publishedAt == nil)) {
+	switch {
+	case arg.Quiet && d.state == "not_delivered" && d.publishedAt == nil:
+		d.loud = pgtype.Bool{Bool: false, Valid: true}
+	case arg.Open && (d.state == "withheld" || (d.lateNote && d.publishedAt == nil)):
 		d.loud = pgtype.Bool{Bool: arg.Firing, Valid: true}
 	}
 	if arg.Open {

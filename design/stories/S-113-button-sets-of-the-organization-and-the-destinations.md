@@ -8,8 +8,8 @@ depends_on: [S-111, S-166]
 covers: [C-28.FR-8, C-28.FR-9, C-28.FR-10, C-28.AC-7, C-10.AC-23, C-16.FR-4, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0022_button_sets.up.sql
-  - internal/db/migrations/0022_button_sets.down.sql
+  - internal/db/migrations/0023_button_sets.up.sql
+  - internal/db/migrations/0023_button_sets.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -21,6 +21,7 @@ files_touched:
   - internal/organization/settings.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
+  - internal/archlint/secretleak.go
   - internal/api/organization.go
   - internal/api/organization_test.go
   - internal/destinations/destinations.go
@@ -32,8 +33,13 @@ files_touched:
   - internal/api/destinations.go
   - internal/api/destinations_test.go
   - internal/delivery/delivery.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/membership.go
+  - internal/delivery/rerender.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/rerender_test.go
   - internal/delivery/query.sql
   - internal/messages/render.go
   - internal/messages/default.go
@@ -41,10 +47,14 @@ files_touched:
   - internal/slack/layout_test.go
   - internal/groups/updates.go
   - internal/groups/updates_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/groups_integration_test.go
   - internal/groups/query.sql
   - test/e2e/button_sets_test.go
   - web/src/test/fixtures/destinations.ts
   - docs/concepts/statuses-and-commands.md
+  - docs/install/versions.md
 acceptance:
   - "[C-28.FR-8, C-28.FR-10] `getOrganization` carries `buttons` `{\"all\": true}` on a new database and after the migration; `updateOrganization` takes `{\"all\": false, \"items\": [...]}` whose items are `{\"button\": \"acknowledge\"}`, `{\"button\": \"resolve\"}`, `{\"button\": \"snooze\", \"snooze_seconds\": N}` or `{\"button\": \"snooze_preset\", \"preset\": \"tomorrow\" | \"week_start\"}`, records the change in the diff of `organization.updated` and keeps the set when the field is omitted; a duplicate item, a `snooze` without `snooze_seconds` above 0 and a `snooze_preset` without `preset` are refused with 422 (`duplicate`, `required`, `out_of_range`) at the item's pointer (`organization_test.go`)."
   - "[C-28.FR-8, C-28.FR-10] Every messenger Destination — Mattermost, Telegram, Bridge and Slack — reads `buttons` `{\"source\": \"organization\"}` until an update sends `{\"source\": \"own\", \"items\": [...]}`, with the same items and refusals; the change is in the diff of `destination.updated`, and an update with a stale `If-Match` gets 412 (`write_test.go`)."
@@ -97,7 +107,7 @@ issue: 402
     `preset` twice), `required` (`snooze_seconds` or `preset` missing, `items` missing with `own` or `all: false`),
     `out_of_range` (`snooze_seconds` below 1). An item of a duration that no Route has is accepted and simply never
     shown.
-- **Schema** (migration `0022_button_sets`, expand only; `schema.md` §4.2 and §4.5): `organizations.buttons jsonb NOT
+- **Schema** (migration `0023_button_sets`, expand only; `schema.md` §4.2 and §4.5): `organizations.buttons jsonb NOT
   NULL DEFAULT '{"all": true}'` with `CHECK (jsonb_typeof(buttons) = 'object')`; `destinations.buttons jsonb` (null =
   "As in the Organization") with `CHECK (buttons IS NULL OR jsonb_typeof(buttons) = 'array')`; the CHECK of
   `open_group_updates.kind` is replaced by `open_group_updates_kind_v2_check`, which lists every kind present —
@@ -187,7 +197,7 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $(curl -s "${A[@]}" $API/organization | j
   | jq -c '{status, p: .errors[0].pointer, c: .errors[0].code}'           # {"status":422,"p":"/buttons/items/1","c":"duplicate"}
 
 # C-16.FR-4: the test message shows the set
-curl -s "${A[@]}" -X POST $API/destinations/$D/tests -d '{}' > /dev/null; sleep 1
+curl -s "${A[@]}" -X POST $API/destinations/$D/tests -d '{"source":{"kind":"example"}}' > /dev/null; sleep 1
 curl -s $FMM/posts | jq -c '[.[] | select(.channel_id == "ch-alerts" and (.props.attachments[0].text // "" | test("Test message")))] | last | [.props.attachments[0].actions[].name]'
 # ["Ack","Resolve"]
 ```
@@ -209,9 +219,23 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
   and a set can name a duration that no Route has yet.
 - A press on a button that a set no longer shows still runs its Command: the action id stays valid, and the Command is
   checked as any other (C-28.FR-9).
+- `ButtonSetItem` deliberately leaves `snooze_seconds` without `minimum: 1` and leaves the conditional rules —
+  `snooze_seconds` with `snooze`, `preset` with `snooze_preset`, `items` with `own` or `all: false` — out of the schema,
+  stating them in the descriptions instead: the request validation would answer them with `400` `invalid_format`
+  or `required`, where this contract asks for `422` `out_of_range` and `required` at the item's pointer, which the
+  domain validation gives.
 - Depends on S-111 for `open_group_updates`; it needs neither Teams nor Schedules.
-- Migration `0022` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+- A re-render without lifecycle events — a changed button set, as a changed Minimum severity of S-111 — is a change
+  of configuration and publishes Quietly: a delivery it revives that was never published (Not delivered) is published
+  Quiet, and an Urgent Alert Group it releases from a Storm is released Quiet. The worker walks the Alert Groups of a
+  batch in the order (Route, id), the order in which the deletion of a Destination takes the membership locks of its
+  Routes. The upgrade notes (`docs/install/versions.md`) give the recovery of a failed 0023 and what a rolling update
+  from 0.1 means for button sets.
+- The commands line of a Bridge without buttons lists the Text commands of the shown buttons only, as it lists those
+  of the buttons of the status (C-22.FR-5); every other Text command still works (C-28.FR-9).
+- Migration `0023`: the story map gave it `0022`, which S-115 (`0022_teams`) took by merging first, so it takes the
+  next free number as §4 of the stories README says; a story merged out of that order renumbers its migration to the
+  next free number in its own pull request and re-versions the CHECKs it replaces, listing every value present
   when it merges (S-131's Notes).
 
 ## Coverage

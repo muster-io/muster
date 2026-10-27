@@ -319,7 +319,8 @@ func TestIntegrationOpenGroupUpdates(t *testing.T) {
 
 		// A row of a kind a later version adds, as its migration would widen the CHECK, waits: no replica of this
 		// version claims it or waits for it.
-		if _, err := e.d.Pool.Exec(ctx, `ALTER TABLE open_group_updates DROP CONSTRAINT open_group_updates_kind_check`); err != nil {
+		if _, err := e.d.Pool.Exec(ctx, `ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS
+			open_group_updates_kind_check, DROP CONSTRAINT IF EXISTS open_group_updates_kind_v2_check`); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, requested_at)

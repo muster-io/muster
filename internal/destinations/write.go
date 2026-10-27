@@ -4,6 +4,7 @@
 package destinations
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/bridge"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/keyring"
@@ -44,6 +46,14 @@ const (
 
 // maxBridgeChannelLength is the longest channel id of a Bridge Destination (api/bridge.yaml ChannelId).
 const maxBridgeChannelLength = 512
+
+// KindDestinationButtons is the kind of the open_group_updates row that a changed button set of a Destination writes
+// (C-28.FR-9), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which
+// claim it.
+const (
+	KindDestinationButtons  = "destination_buttons"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
 
 // The Audit log actions of saved Destinations (C-03.FR-14).
 const (
@@ -158,11 +168,21 @@ type WebhookInput struct {
 	Proxy    proxyconf.Input
 }
 
-// Input is what createDestination and updateDestination write: the common fields and those of its type.
+// ButtonSetInput is the button set of a messenger Destination as a request writes it (DestinationButtonSet): its own,
+// with the items, which Items nil leaves missing, or "As in the Organization".
+type ButtonSetInput struct {
+	Own   bool
+	Items []buttons.ItemInput
+}
+
+// Input is what createDestination and updateDestination write: the common fields and those of its type. Buttons is the
+// button set of a messenger Destination, nil when the request omits it: "As in the Organization" on a creation, the
+// stored set on an update; an outgoing webhook has none.
 type Input struct {
 	Type       string
 	Name       string
 	Mentions   mentions.Settings
+	Buttons    *ButtonSetInput
 	Limiter    Limiter
 	Mattermost *MattermostInput
 	Telegram   *TelegramInput
@@ -350,6 +370,8 @@ type writeQueries interface {
 	UpdateSlackDestination(ctx context.Context, arg dbgen.UpdateSlackDestinationParams) error
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
 	SetDestinationOwningTeam(ctx context.Context, arg dbgen.SetDestinationOwningTeamParams) error
+	InsertDestinationButtonsUpdate(ctx context.Context, arg dbgen.InsertDestinationButtonsUpdateParams) error
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 }
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
@@ -363,6 +385,7 @@ type view struct {
 	Template   *webhooks.TemplateConfig `json:"template,omitempty"`
 	Proxy      *proxyconf.Config        `json:"proxy,omitempty"`
 	Mentions   mentions.Settings        `json:"mentions"`
+	Buttons    json.RawMessage          `json:"buttons,omitempty"`
 	Limiter    Limiter                  `json:"limiter"`
 	// OwningTeam is the public_id of the Team that owns the Destination, null for none.
 	OwningTeam *string `json:"owning_team_id"`
@@ -381,6 +404,9 @@ func viewOf(d Destination) (view, error) {
 		v.ChannelID = d.BridgeChannelID
 	case TypeSlack:
 		v.ChannelID = d.SlackChannelID
+	}
+	if d.Type != TypeWebhook {
+		v.Buttons = buttonsView(d.Buttons)
 	}
 	if len(d.Mentions) > 0 {
 		if err := json.Unmarshal(d.Mentions, &v.Mentions); err != nil {
@@ -408,6 +434,68 @@ func viewOf(d Destination) (view, error) {
 	return v, nil
 }
 
+// buttonsView is the button set of a Destination as the diff shows it, one value at /buttons: {"source":
+// "organization"} or {"source": "own", "items": [...]}, as the API writes it.
+func buttonsView(o buttons.Own) json.RawMessage {
+	v := struct {
+		Source string         `json:"source"`
+		Items  []buttons.Item `json:"items,omitempty"`
+	}{Source: "organization"}
+	if o.Set {
+		v.Source, v.Items = "own", o.Items
+		if v.Items == nil {
+			v.Items = []buttons.Item{}
+		}
+	}
+	b, _ := json.Marshal(v) // strings and numbers only
+	return b
+}
+
+// buttonsOf validates the button set of a request into in.Buttons' stored form (C-28.FR-8): own without items is
+// required at /buttons/items, an invalid item is refused at /buttons/items/{i}. ok is false when the request omits it.
+func buttonsOf(in *ButtonSetInput) (own buttons.Own, ok bool, err error) {
+	switch {
+	case in == nil:
+		return buttons.Own{}, false, nil
+	case !in.Own:
+		return buttons.Own{}, true, nil
+	case in.Items == nil:
+		return buttons.Own{}, false, &FieldError{Pointer: "/buttons/items", Code: CodeRequired,
+			Detail: "An own button set lists its items."}
+	}
+	items, ie := buttons.Validate(in.Items)
+	if ie != nil {
+		return buttons.Own{}, false, &FieldError{Pointer: ie.Pointer("/buttons"), Code: ie.Code, Detail: ie.Detail}
+	}
+	return buttons.Own{Set: true, Items: items}, true, nil
+}
+
+// withButtons sets the button set of d from in, already validated: the set in sends, or d's when it sends none.
+func withButtons(d *Destination, in Input) {
+	if own, ok, _ := buttonsOf(in.Buttons); ok {
+		d.Buttons = own
+	}
+}
+
+// buttonsChanged, in the transaction of the save of d, asks the workers of internal/groups to re-render the open Root
+// messages of d when its button set changed (C-28.FR-9): one open_group_updates row destination_buttons, requested at
+// the business time of the save, and a notification that wakes them once the transaction commits.
+func (s *Service) buttonsChanged(ctx context.Context, q TxQueries, before, d Destination) error {
+	if bytes.Equal(before.Buttons.JSON(), d.Buttons.JSON()) {
+		return nil
+	}
+	if err := q.InsertDestinationButtonsUpdate(ctx, dbgen.InsertDestinationButtonsUpdateParams{OrgID: s.orgID,
+		Kind:          KindDestinationButtons,
+		DestinationID: pgtype.Int8{Int64: d.ID, Valid: true},
+		RequestedAt:   s.writer.Business.Now().UTC()}); err != nil {
+		return fmt.Errorf("re-render the root messages of the destination %s: %w", d.PublicID, err)
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
+}
+
 // proxyOf is the stored proxy object of a Destination as read.
 func proxyOf(p Proxy) proxyconf.Config {
 	c := proxyconf.Config{Enabled: p.Enabled, Username: p.Username}
@@ -420,9 +508,22 @@ func proxyOf(p Proxy) proxyconf.Config {
 	return c
 }
 
-// validate checks the common fields of in and the fields of its type, before the Destination check; stored is nil on a
-// creation.
+// validate checks the common fields of in, the fields of its type and the button set of a messenger Destination,
+// before the Destination check; stored is nil on a creation.
 func (s *Service) validate(ctx context.Context, in *Input, stored *Destination) error {
+	if err := s.validateFields(ctx, in, stored); err != nil {
+		return err
+	}
+	if in.Type == TypeWebhook {
+		in.Buttons = nil
+		return nil
+	}
+	_, _, err := buttonsOf(in.Buttons)
+	return err
+}
+
+// validateFields checks the common fields of in and the fields of its type.
+func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destination) error {
 	switch {
 	case stored != nil && stored.Type != in.Type:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The type of a Destination cannot change."}
@@ -838,6 +939,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -853,6 +955,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
 			TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: set,
+			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
@@ -919,6 +1022,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		&in.Mattermost.ChannelID
 	d.MattermostTeamName, d.MattermostChannelName = &checked.Check.TeamName, &checked.Check.ChannelName
 	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
 		return Destination{}, err
@@ -954,11 +1058,15 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				TeamID: text(d.MattermostTeamID), ChannelID: text(d.MattermostChannelID),
 				TeamName: text(d.MattermostTeamName), ChannelName: text(d.MattermostChannelName), Mentions: set,
+				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
@@ -1206,6 +1314,7 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 		TelegramChannelID: &channel, Mentions: set, LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
+	withButtons(&d, in)
 	telegramFound(&d, checked.Check)
 	planOwner(in, &d)
 	after, err := viewOf(d)
@@ -1224,7 +1333,8 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.TelegramChannelID), ChannelChatID: pgtype.Int8{Int64: c.ChannelID, Valid: true},
 			DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
-			DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set, LimiterLimit: d.LimiterLimit,
+			DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set,
+			Buttons: d.Buttons.JSON(), LimiterLimit: d.LimiterLimit,
 			LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
@@ -1258,6 +1368,7 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 	conn, channel := in.Telegram.Connection, in.Telegram.ChannelID
 	d.Name, d.Connection, d.TelegramChannelID = in.Name, &conn, &channel
 	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	withButtons(&d, in)
 	telegramFound(&d, checked.Check)
 	old, err := viewOf(before)
 	if err != nil {
@@ -1296,13 +1407,16 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				ChannelID: text(d.TelegramChannelID), ChannelChatID: pgtype.Int8{Int64: c.ChannelID, Valid: true},
 				DiscussionChatID: pgtype.Int8{Int64: c.GroupID, Valid: true}, ChannelTitle: text(d.TelegramChannelTitle),
-				DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set,
+				DiscussionGroupTitle: text(d.TelegramDiscussionGroupTitle), Mentions: set, Buttons: d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
@@ -1410,6 +1524,7 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1424,6 +1539,7 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		id, err := q.InsertBridgeDestination(ctx, dbgen.InsertBridgeDestinationParams{OrgID: s.orgID,
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
@@ -1457,6 +1573,7 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 	conn, channel, name := in.Bridge.Connection, in.Bridge.ChannelID, checked.Check.Name
 	d.Name, d.Connection, d.BridgeChannelID, d.BridgeChannelName = in.Name, &conn, &channel, &name
 	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
 		return Destination{}, err
@@ -1488,12 +1605,16 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 			if err := q.UpdateBridgeDestination(ctx, dbgen.UpdateBridgeDestinationParams{OrgID: s.orgID,
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				ChannelID: text(d.BridgeChannelID), ChannelName: text(d.BridgeChannelName), Mentions: set,
+				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
@@ -1602,6 +1723,7 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	planOwner(in, &d)
+	withButtons(&d, in)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1616,6 +1738,7 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		id, err := q.InsertSlackDestination(ctx, dbgen.InsertSlackDestinationParams{OrgID: s.orgID,
 			PublicID: d.PublicID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 			ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+			Buttons:      d.Buttons.JSON(),
 			LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
@@ -1649,6 +1772,7 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 	conn, channel, name := in.Slack.Connection, in.Slack.ChannelID, checked.Check.Name
 	d.Name, d.Connection, d.SlackChannelID, d.SlackChannelName = in.Name, &conn, &channel, &name
 	d.Mentions, d.LimiterLimit, d.LimiterPerSeconds = set, in.Limiter.Limit, in.Limiter.PerSeconds
+	withButtons(&d, in)
 	old, err := viewOf(before)
 	if err != nil {
 		return Destination{}, err
@@ -1680,12 +1804,16 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 			if err := q.UpdateSlackDestination(ctx, dbgen.UpdateSlackDestinationParams{OrgID: s.orgID,
 				ID: before.ID, Name: d.Name, ConnectionID: pgtype.Int8{Int64: checked.ConnectionID, Valid: true},
 				ChannelID: text(d.SlackChannelID), ChannelName: text(d.SlackChannelName), Mentions: set,
+				Buttons:      d.Buttons.JSON(),
 				LimiterLimit: d.LimiterLimit, LimiterPerSeconds: d.LimiterPerSeconds,
 				Now: s.writer.Business.Now().UTC()}); err != nil {
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
+			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
 			if err := s.renamed(ctx, q, before, d); err != nil {

@@ -46,7 +46,10 @@
   (`routes.minimum_severity` and the queue `open_group_updates`, C-26.FR-8 to FR-10) and
   [`0022_teams`](../../internal/db/migrations/0022_teams.up.sql)
   (Teams, the people in them, the owning Team of Routes and Destinations and the Organization's Working hours, C-25,
-  S-115), in
+  S-115) and
+  [`0023_button_sets`](../../internal/db/migrations/0023_button_sets.up.sql)
+  (`organizations.buttons`, `destinations.buttons` and the re-render of their open Root messages through
+  `open_group_updates`, C-28.FR-8 to FR-10), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -155,7 +158,7 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences` | ingest, routing | 90 days after resolution, batched delete |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
-| Open Alert Group updates | `open_group_updates` | routing inserts, `groups` claims and deletes | deleted with the last batch of its run |
+| Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, **`timeline_entries`**, `notes` | `groups` only | summaries and their Notes 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
@@ -443,6 +446,7 @@ erDiagram
     connections ||--o{ telegram_post_copies : buffers
     connections ||--o{ bridge_events_seen : "handled events"
     routes ||--o{ open_group_updates : "changed for its open Alert Groups"
+    destinations |o--o{ open_group_updates : "button set changed"
 
     routes {
         bigint id PK
@@ -559,6 +563,7 @@ erDiagram
         bigint retention_alert_details_days
         bigint oidc_token_grace_seconds
         bytea outgoing_heartbeat_url_ciphertext "Secret"
+        jsonb buttons "button set, all by default"
         bigint version "ETag"
     }
     audit_log {
@@ -649,6 +654,13 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   VALID` and validated them in a second transaction, after giving an Organization whose working day started at 18:00
   or later the end `23:59` (and the start `23:58` where it was `23:59`); the API refuses an update that breaks the order
   with `422` `out_of_range` at the field it changes.
+  `buttons` (migration 0023, C-28.FR-8, `organization.buttons`) is the Organization's button set, the buttons the Root
+  messages of the Destinations that follow it show: `{"all": true}`, the default, for every button — durations a Route
+  gains later included — or `{"all": false, "items": [...]}` with the items of the API's `ButtonSetItem`
+  (`{"button": "acknowledge" | "resolve"}`, `{"button": "snooze", "snooze_seconds": N}`,
+  `{"button": "snooze_preset", "preset": "tomorrow" | "week_start"}`); a `CHECK` keeps it an object. A change of it
+  inserts a row `organization_buttons` of `open_group_updates` in the same transaction
+  ([section 5](#5-queues-and-claims)).
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.
@@ -793,7 +805,12 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   Destination (C-25.FR-2, migration 0022), with the partial index `destinations_owning_team_idx` on
   `(org_id, owning_team_id)` for the filters by Team; it never makes the Destination one of the Team's Destinations.
   **Health**: `health`, `broken_since`, `broken_cause` (`fatal` or `unavailable`), `broken_reason` (masked) and
-  `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event. The
+  `next_probe_at`; the `CHECK` keeps them consistent. `mentions` holds the Mention settings per kind of Loud event.
+  `buttons` (migration 0023, C-28.FR-8, `destination.buttons`) is the Destination's own button set, an array of the
+  items of `organizations.buttons`, or null — the default, which a replica of 0.1 writes — for "As in the
+  Organization"; a `CHECK` keeps it an array. Only messenger Destinations set it: an outgoing webhook sends no buttons.
+  A change of it inserts a row `destination_buttons` of `open_group_updates`, with the Destination in
+  `destination_id`, in the same transaction ([section 5](#5-queues-and-claims)). The
   template error state of an outgoing webhook request is kept here (`MusterTemplateError`). **Deletion** is soft:
   `deleted_at` is set and the Destination leaves its Routes; its open Root messages get their final edit
   (`deliveries.desired_retire`), and then its secrets — the Signing secrets, the proxy password and its
@@ -1426,9 +1443,11 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 `oidc_checks`, also with `org_id = $1`. All of these were checked to use their indexes (section 8).
 
 **Open Alert Group updates** (C-26.FR-9): a change of configuration that must reach the open Alert Groups of its
-scope after the save — the Minimum severity of a Route (`route_minimum_severity`) from 0.2.0, more kinds as later
-stories add them to `open_group_updates_kind_check` — is one row of `open_group_updates`, inserted in the transaction
-of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
+scope after the save — the Minimum severity of a Route (`route_minimum_severity`, with its Route in `route_id`), the
+button set of a Destination (`destination_buttons`, with its Destination in `destination_id`) and that of the
+Organization (`organization_buttons`) from 0.2.0, more kinds as later stories add them to the kind `CHECK`, versioned
+`open_group_updates_kind_v2_check` since migration 0023 — is one row of `open_group_updates`, inserted in the
+transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
 at start, by that notification and by the development clock, and claims one row at a time:
 
 ```sql
@@ -1438,7 +1457,7 @@ WITH due AS MATERIALIZED (
      ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
   FROM due WHERE u.org_id = $1 AND u.id = due.id
-RETURNING u.id, u.kind, u.route_id, u.after_alert_group_id;
+RETURNING u.id, u.kind, u.route_id, u.destination_id, u.after_alert_group_id;
 ```
 
 A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows
@@ -1447,7 +1466,10 @@ one transaction that checks the lease, locks the Alert Groups, applies the chang
 transition, and moves `after_alert_group_id` and the lease (60 s, real clock) on; the transaction of the last batch
 deletes the row. A lost lease leaves the row to any replica, which resumes after the last committed batch; an Alert
 Group already as the change wants it is skipped, so a batch that runs twice records nothing the second time
-(ADR-0007). `requested_at` is on the business clock, the lease on the real clock.
+(ADR-0007). `requested_at` is on the business clock, the lease on the real clock. A row of a button set walks the open
+Alert Groups with a delivery in its Destination, or in any messenger Destination that follows the Organization, and
+runs the dispatcher's re-render step without a lifecycle event: a Root message whose Desired state the set changed is
+edited, Quietly, and the others keep their hashes, so a second run changes nothing.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

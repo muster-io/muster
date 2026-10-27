@@ -21,10 +21,12 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/bridge"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -106,6 +108,12 @@ func (f *fakeWriter) SetDestinationOwningTeam(context.Context, dbgen.SetDestinat
 	return errBoom
 }
 
+func (f *fakeWriter) InsertDestinationButtonsUpdate(context.Context, dbgen.InsertDestinationButtonsUpdateParams) error {
+	return errBoom
+}
+
+func (f *fakeWriter) NotifyOpenGroupUpdates(context.Context, string) error { return errBoom }
+
 // saveWriter is the database of the saves in memory: the Mattermost Connections that are not deleted, the inserted
 // and updated rows, the versions the locks read, the Audit log and the hints.
 type saveWriter struct {
@@ -128,6 +136,9 @@ type saveWriter struct {
 	// teams are the Teams that are not deleted by public_id, and owners the owning Teams written.
 	teams  map[string]dbgen.LockOwningTeamRow
 	owners []dbgen.SetDestinationOwningTeamParams
+	// buttonUpdates are the open_group_updates rows destination_buttons, and woken the notifications on their channel.
+	buttonUpdates []dbgen.InsertDestinationButtonsUpdateParams
+	woken         []string
 }
 
 func (w *saveWriter) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
@@ -147,6 +158,23 @@ func (w *saveWriter) SetDestinationOwningTeam(_ context.Context, arg dbgen.SetDe
 		return err
 	}
 	w.owners = append(w.owners, arg)
+	return nil
+}
+
+func (w *saveWriter) InsertDestinationButtonsUpdate(_ context.Context,
+	arg dbgen.InsertDestinationButtonsUpdateParams) error {
+	if err := w.fail["InsertDestinationButtonsUpdate"]; err != nil {
+		return err
+	}
+	w.buttonUpdates = append(w.buttonUpdates, arg)
+	return nil
+}
+
+func (w *saveWriter) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := w.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	w.woken = append(w.woken, channel)
 	return nil
 }
 
@@ -732,6 +760,160 @@ func TestUpdateMattermost(t *testing.T) {
 	store.rows[0].ID, store.rows[0].Health = 99, "broken"
 	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, mattermostInput("z", "chan")); !errors.Is(err, errBoom) {
 		t.Errorf("a failed end of the broken state = %v", err)
+	}
+}
+
+// TestButtonSets is C-28.FR-8, FR-9 and FR-10 on the service, for every messenger type: a Destination created without
+// a set is "As in the Organization", stored as null, and one created with its own set stores its items, both in the
+// diff of destination.created; an invalid set is refused at the item's pointer — duplicate, required, out_of_range —
+// and so is own without items, saving nothing; an update with a stale version is ErrVersionMismatch; an update to its
+// own set records /buttons in the diff of destination.updated and requests the re-render of its open Root messages —
+// one open_group_updates row destination_buttons with the Destination, at the business time of the save, and a
+// notification on muster_open_group_updates; an update that omits the set keeps it and requests nothing; back to the
+// Organization's set requests the re-render again. An outgoing webhook takes no set.
+func TestButtonSets(t *testing.T) {
+	day, tomorrow, zero := int64(86400), buttons.PresetTomorrow, int64(0)
+	own := &ButtonSetInput{Own: true, Items: []buttons.ItemInput{{Button: buttons.ItemAcknowledge},
+		{Button: buttons.ItemSnooze, SnoozeSeconds: &day}, {Button: buttons.ItemSnoozePreset, Preset: &tomorrow}}}
+	const stored = `[{"button":"acknowledge"},{"button":"snooze","snooze_seconds":86400},` +
+		`{"button":"snooze_preset","preset":"tomorrow"}]`
+	for _, c := range []struct {
+		typ, id  string
+		dbID     int64
+		input    func(name string) Input
+		setup    func(*fakeStore, *saveWriter) *dbgen.GetDestinationRow
+		inserted func(*saveWriter) []byte
+		updated  func(*saveWriter) []byte
+	}{
+		{TypeMattermost, "DSAAAAAAAAAAA1", 1, func(n string) Input { return mattermostInput(n, "chan") },
+			func(f *fakeStore, _ *saveWriter) *dbgen.GetDestinationRow { return &f.rows[0] },
+			func(w *saveWriter) []byte { return w.inserted[len(w.inserted)-1].Buttons },
+			func(w *saveWriter) []byte { return w.updated[len(w.updated)-1].Buttons }},
+		{TypeTelegram, "DSAAAAAAAAAAA2", 2, func(n string) Input { return telegramInput(n, "@muster_alerts") },
+			func(f *fakeStore, w *saveWriter) *dbgen.GetDestinationRow {
+				w.versions["DSAAAAAAAAAAA2"] = 1
+				return &f.rows[1]
+			},
+			func(w *saveWriter) []byte { return w.tgIns[len(w.tgIns)-1].Buttons },
+			func(w *saveWriter) []byte { return w.tgSets[len(w.tgSets)-1].Buttons }},
+		{TypeBridge, "DSAAAAAAAAAAA4", 4, func(n string) Input { return bridgeInput(n, "ch-alerts") }, withBridge,
+			func(w *saveWriter) []byte { return w.brIns[len(w.brIns)-1].Buttons },
+			func(w *saveWriter) []byte { return w.brSets[len(w.brSets)-1].Buttons }},
+		{TypeSlack, "DSAAAAAAAAAAA5", 5, func(n string) Input { return slackInput(n, "C0FAKEALERTS") }, withSlack,
+			func(w *saveWriter) []byte { return w.slIns[len(w.slIns)-1].Buttons },
+			func(w *saveWriter) []byte { return w.slSets[len(w.slSets)-1].Buttons }},
+	} {
+		t.Run(c.typ, func(t *testing.T) {
+			s, store, w, _, _ := newSaver(t)
+			ctx := t.Context()
+			row := c.setup(store, w)
+			d, err := s.Create(ctx, saver, c.input("bs-follows"))
+			if err != nil || d.Buttons.Set || c.inserted(w) != nil ||
+				!bytes.Contains(w.audit[0].Diff, []byte(`{"pointer":"/buttons","after":{"source":"organization"}}`)) {
+				t.Fatalf("created as in the organization = %+v, %v, stored %s, diff %s", d.Buttons, err, c.inserted(w),
+					w.audit[0].Diff)
+			}
+			in := c.input("bs-own")
+			in.Buttons = own
+			d, err = s.Create(ctx, saver, in)
+			if err != nil || !d.Buttons.Set || len(d.Buttons.Items) != 3 || string(c.inserted(w)) != stored ||
+				!bytes.Contains(w.audit[1].Diff, []byte(`"after":{"source":"own","items":`+stored+`}`)) {
+				t.Fatalf("created with its own set = %+v, %v, stored %s, diff %s", d.Buttons, err, c.inserted(w),
+					w.audit[1].Diff)
+			}
+			for _, r := range []struct {
+				pointer, code string
+				set           *ButtonSetInput
+			}{
+				{"/buttons/items", CodeRequired, &ButtonSetInput{Own: true}},
+				{"/buttons/items/1", buttons.CodeDuplicate, &ButtonSetInput{Own: true, Items: []buttons.ItemInput{
+					{Button: buttons.ItemResolve}, {Button: buttons.ItemResolve}}}},
+				{"/buttons/items/0", CodeRequired, &ButtonSetInput{Own: true, Items: []buttons.ItemInput{
+					{Button: buttons.ItemSnooze}}}},
+				{"/buttons/items/0", buttons.CodeOutOfRange, &ButtonSetInput{Own: true, Items: []buttons.ItemInput{
+					{Button: buttons.ItemSnooze, SnoozeSeconds: &zero}}}},
+				{"/buttons/items/1", CodeRequired, &ButtonSetInput{Own: true, Items: []buttons.ItemInput{
+					{Button: buttons.ItemResolve}, {Button: buttons.ItemSnoozePreset}}}},
+			} {
+				in := c.input("bs-refused")
+				in.Buttons = r.set
+				assertField(t, "create "+r.pointer+" "+r.code, func() error {
+					_, err := s.Create(ctx, saver, in)
+					return err
+				}, r.pointer, r.code)
+				assertField(t, "update "+r.pointer+" "+r.code, func() error {
+					_, err := s.Update(ctx, saver, c.id, nil, in)
+					return err
+				}, r.pointer, r.code)
+			}
+			if len(w.audit) != 2 || len(w.buttonUpdates) != 0 {
+				t.Fatalf("a refused set was saved: %d entries, %d re-renders", len(w.audit), len(w.buttonUpdates))
+			}
+
+			version := row.Version
+			in = c.input(row.Name)
+			in.Buttons = own
+			if _, err := s.Update(ctx, saver, c.id, new(version+1), in); !errors.Is(err, ErrVersionMismatch) {
+				t.Errorf("a stale If-Match = %v", err)
+			}
+			if _, err := s.Update(ctx, saver, c.id, new(version), in); err != nil {
+				t.Fatal(err)
+			}
+			if string(c.updated(w)) != stored || !bytes.Contains(w.audit[2].Diff,
+				[]byte(`{"pointer":"/buttons","before":{"source":"organization"},"after":{"source":"own","items":`+
+					stored+`}}`)) {
+				t.Errorf("updated to its own set: stored %s, diff %s", c.updated(w), w.audit[2].Diff)
+			}
+			if len(w.buttonUpdates) != 1 || w.buttonUpdates[0] != (dbgen.InsertDestinationButtonsUpdateParams{
+				OrgID: 1, Kind: "destination_buttons", DestinationID: pgtype.Int8{Int64: c.dbID, Valid: true}, RequestedAt: t0}) ||
+				!slices.Equal(w.woken, []string{OpenGroupUpdatesChannel}) {
+				t.Errorf("re-render requested %+v, woken %v", w.buttonUpdates, w.woken)
+			}
+
+			row.Buttons, row.Version, row.Health = []byte(stored), version+1, "healthy"
+			w.versions[c.id] = version + 1
+			in = c.input("bs-renamed")
+			if _, err := s.Update(ctx, saver, c.id, nil, in); err != nil || string(c.updated(w)) != stored ||
+				len(w.buttonUpdates) != 1 || bytes.Contains(w.audit[len(w.audit)-1].Diff, []byte("/buttons")) {
+				t.Errorf("an update that omits the set: %v, stored %s, %d re-renders", err, c.updated(w),
+					len(w.buttonUpdates))
+			}
+			row.Name, row.Version = "bs-renamed", version+2
+			w.versions[c.id] = version + 2
+			in.Buttons = &ButtonSetInput{Items: own.Items}
+			if _, err := s.Update(ctx, saver, c.id, nil, in); err != nil || c.updated(w) != nil ||
+				len(w.buttonUpdates) != 2 {
+				t.Errorf("back to the organization's set: %v, stored %s, %d re-renders", err, c.updated(w),
+					len(w.buttonUpdates))
+			}
+			row.Buttons, row.Version = nil, version+3
+			w.versions[c.id] = version + 3
+			in.Buttons = own
+			w.fail["NotifyOpenGroupUpdates"] = errBoom
+			if _, err := s.Update(ctx, saver, c.id, nil, in); !errors.Is(err, errBoom) {
+				t.Errorf("a failed wake = %v", err)
+			}
+			w.fail = map[string]error{"InsertDestinationButtonsUpdate": errBoom}
+			if _, err := s.Update(ctx, saver, c.id, nil, in); !errors.Is(err, errBoom) {
+				t.Errorf("a failed request = %v", err)
+			}
+		})
+	}
+	s, _, w, _, _ := newSaver(t)
+	in := webhookInput("hook-bs", "https://example.org/hook")
+	in.Buttons = own
+	if _, err := s.Create(t.Context(), saver, in); err != nil ||
+		bytes.Contains(w.audit[0].Diff, []byte("/buttons")) {
+		t.Errorf("an outgoing webhook with a set: %v, diff %s", err, w.audit[0].Diff)
+	}
+}
+
+// TestOpenGroupUpdateNames: destinations, which inserts the rows of its button sets and wakes the workers, and groups,
+// which claims them, name the kind and the channel alike.
+func TestOpenGroupUpdateNames(t *testing.T) {
+	if KindDestinationButtons != groups.KindDestinationButtons ||
+		OpenGroupUpdatesChannel != groups.OpenGroupUpdatesChannel {
+		t.Error("destinations and groups name the open alert group updates differently")
 	}
 }
 

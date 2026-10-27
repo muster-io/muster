@@ -287,7 +287,8 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		how.heldBy = &st.id
 	}
 	for _, d := range dests {
-		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
+		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID),
+			Buttons: buttonSetOf(d.Buttons, d.OrganizationButtons)}
 		h := how
 		if sendsRequests(d.Type) && !d.WebhookReplies {
 			h.replies = nil // an outgoing webhook without a "reply in thread" request has no Thread
@@ -367,9 +368,9 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	}
 	held := row.HeldByStormID.Valid
 	if held && g.Urgent {
-		// A raised Minimum severity is a change of configuration, which publishes Quietly (C-26.FR-9, ADR-0018).
+		// A change of configuration publishes Quietly (C-26.FR-9, ADR-0018).
 		if err := q.ReleaseHeld(ctx, dbgen.ReleaseHeldParams{OrgID: s.orgID, ID: row.ID, Now: now,
-			Loud: !minimumOnly(r.Events)}); err != nil {
+			Loud: !configurationOnly(r.Events)}); err != nil {
 			return fmt.Errorf("release the urgent alert group #%d from its storm: %w", g.Number, err)
 		}
 		held = false
@@ -387,8 +388,11 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 			DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), ReceivedAt: received,
 			Open:   g.Status != groups.StatusResolved,
 			Firing: deliveryEvent(DeliveryAfterRecovery).loud(g.Status == groups.StatusFiring), Urgent: g.Urgent,
-			Now: now}); err != nil {
+			Quiet: configurationOnly(r.Events), Now: now}); err != nil {
 			return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
+		if r.Changed != nil {
+			r.Changed()
 		}
 	} else if err := q.SetDeliveryUrgent(ctx, dbgen.SetDeliveryUrgentParams{OrgID: s.orgID, ID: row.ID,
 		Urgent: g.Urgent, Now: now}); err != nil {
@@ -419,16 +423,17 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	return nil
 }
 
-// minimumOnly reports whether the lifecycle events of a rendering are all rises that the Route's Minimum severity
-// made (groups.ReasonMinimumSeverity): a change of configuration, not an Alert or a Command.
-func minimumOnly(events []groups.Recorded) bool {
+// configurationOnly reports whether a rendering comes from a change of configuration, not from an Alert or a
+// Command: it has no lifecycle event, as the re-render of a changed button set, or only rises that the Route's Minimum
+// severity made (groups.ReasonMinimumSeverity). Such a change publishes Quietly.
+func configurationOnly(events []groups.Recorded) bool {
 	for _, e := range events {
 		if e.Reason != groups.ReasonMinimumSeverity ||
 			(e.Event != groups.EventUrgencyRaised && e.Event != groups.EventSeverityRaised) {
 			return false
 		}
 	}
-	return len(events) > 0
+	return true
 }
 
 // ended reports whether a delivery is in a state that a change of the Desired state does not revive: withheld,

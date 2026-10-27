@@ -15,6 +15,7 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/organization"
 )
@@ -42,7 +43,7 @@ func newFakeOrganization() *fakeOrganization {
 		WeekStart: d.WeekStart, WorkingDays: d.WorkingDays, WorkdayEnd: d.WorkdayEnd, SeverityLabel: d.SeverityLabel,
 		SeverityMapping: d.SeverityMapping, SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
 		InstanceLabels: d.InstanceLabels, Retention: d.Retention, TOTPRequired: d.TOTPRequired,
-		OIDCTokenGrace: d.OIDCTokenGrace, Version: 3,
+		OIDCTokenGrace: d.OIDCTokenGrace, Version: 3, Buttons: buttons.All(),
 		OutgoingHeartbeat: organization.OutgoingHeartbeat{
 			URL:   organization.SecretState{Set: true, UpdatedAt: &at},
 			Proxy: organization.Proxy{Enabled: true, Type: "http", Address: "proxy:3128", Username: &user},
@@ -80,6 +81,17 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 	}
 	if in.WeekStart != nil {
 		f.org.WeekStart = *in.WeekStart
+	}
+	if b := in.Buttons; b != nil {
+		f.org.Buttons = buttons.Set{All: b.All}
+		if !b.All {
+			items, ie := buttons.Validate(b.Items)
+			if ie != nil {
+				return organization.Organization{}, &organization.FieldError{Pointer: ie.Pointer("/buttons"),
+					Code: ie.Code, Detail: ie.Detail}
+			}
+			f.org.Buttons.Items = items
+		}
 	}
 	if in.HeartbeatURL.Given {
 		f.org.OutgoingHeartbeat.URL.Set = !in.HeartbeatURL.Null
@@ -324,6 +336,80 @@ func TestUpdateOrganizationSnoozePresetSettings(t *testing.T) {
 	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, read, nil), "If-Match", "*")
 	if a.status != http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"pointer":"/week_start"`) {
 		t.Errorf("the service's refusal = %d %s", a.status, a.body)
+	}
+}
+
+// TestUpdateOrganizationButtons is C-28.FR-8 and FR-10 on the API: the read carries the Organization's button set,
+// {"all": true} by default; an update takes its items — acknowledge, resolve, a snooze with its snooze_seconds and a
+// snooze_preset with its preset — and reads them back, an omitted set is kept, all true ignores the items, an unknown
+// button is a 400 of the request validation, and the refusals of the set are 422 at the item's pointer.
+func TestUpdateOrganizationButtons(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	r := x.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie)
+	if got, _ := json.Marshal(r.json(t)["buttons"]); string(got) != `{"all":true}` {
+		t.Fatalf("the default set = %s", got)
+	}
+	items := []any{map[string]any{"button": "acknowledge"}, map[string]any{"button": "snooze", "snooze_seconds": 86400},
+		map[string]any{"button": "snooze_preset", "preset": "tomorrow"}}
+	a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
+		m["buttons"] = map[string]any{"all": false, "items": items}
+	}), "If-Match", "*")
+	want := `{"all":false,"items":[{"button":"acknowledge"},{"button":"snooze","snooze_seconds":86400},` +
+		`{"button":"snooze_preset","preset":"tomorrow"}]}`
+	if got, _ := json.Marshal(a.json(t)["buttons"]); a.status != http.StatusOK || string(got) != want {
+		t.Fatalf("an own list = %d %s", a.status, a.body)
+	}
+	in := f.inputs[0].Buttons
+	if in == nil || in.All || len(in.Items) != 3 || *in.Items[1].SnoozeSeconds != 86400 || in.Items[1].Preset != nil ||
+		*in.Items[2].Preset != buttons.PresetTomorrow || in.Items[0].SnoozeSeconds != nil {
+		t.Errorf("input %+v", in)
+	}
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
+		delete(m, "buttons")
+	}), "If-Match", "*")
+	if got, _ := json.Marshal(a.json(t)["buttons"]); a.status != http.StatusOK || string(got) != want ||
+		f.inputs[1].Buttons != nil {
+		t.Errorf("an update that omits the set = %d %s", a.status, a.body)
+	}
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
+		m["buttons"] = map[string]any{"all": false}
+	}), "If-Match", "*")
+	if a.status != http.StatusOK || f.inputs[2].Buttons == nil || f.inputs[2].Buttons.Items != nil {
+		t.Errorf("all false without items = %d, input %+v", a.status, f.inputs[2].Buttons)
+	}
+	a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body, func(m map[string]any) {
+		m["buttons"] = map[string]any{"all": true, "items": items}
+	}), "If-Match", "*")
+	if got, _ := json.Marshal(a.json(t)["buttons"]); a.status != http.StatusOK || string(got) != `{"all":true}` {
+		t.Errorf("all again = %d %s", a.status, a.body)
+	}
+	for _, c := range []struct {
+		name    string
+		items   []any
+		status  int
+		pointer string
+		code    string
+	}{
+		{"an unknown button", []any{map[string]any{"button": "unsnooze"}}, http.StatusBadRequest,
+			"/buttons/items/0/button", fieldInvalidFormat},
+		{"a duplicate", []any{map[string]any{"button": "resolve"}, map[string]any{"button": "resolve"}},
+			http.StatusUnprocessableEntity, "/buttons/items/1", "duplicate"},
+		{"a snooze without seconds", []any{map[string]any{"button": "snooze"}}, http.StatusUnprocessableEntity,
+			"/buttons/items/0", "required"},
+		{"a snooze of 0 seconds", []any{map[string]any{"button": "snooze", "snooze_seconds": 0}},
+			http.StatusUnprocessableEntity, "/buttons/items/0", "out_of_range"},
+		{"a preset without its preset", []any{map[string]any{"button": "resolve"},
+			map[string]any{"button": "snooze_preset"}}, http.StatusUnprocessableEntity, "/buttons/items/1", "required"},
+	} {
+		a := x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, r.body,
+			func(m map[string]any) { m["buttons"] = map[string]any{"all": false, "items": c.items} }), "If-Match", "*")
+		var p struct {
+			Errors []struct{ Pointer, Code string }
+		}
+		_ = json.Unmarshal(a.body, &p)
+		if a.status != c.status || len(p.Errors) != 1 || p.Errors[0].Pointer != c.pointer || p.Errors[0].Code != c.code {
+			t.Errorf("%s = %d %s", c.name, a.status, a.body)
+		}
 	}
 }
 

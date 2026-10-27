@@ -9,12 +9,15 @@
 -- NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
 
 -- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
--- outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
+-- outgoing webhook and whether it has a "reply in thread" request, and their button set with the Organization's, which
+-- a Destination without its own follows, in id order, for Enqueue.
 -- name: ListRouteDestinations :many
 SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
-       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND d.deleted_at IS NULL
 ORDER BY d.id;
 
@@ -49,7 +52,9 @@ RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_
 -- buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
 -- now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
 -- so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
--- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+-- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
+-- change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
+-- severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 -- before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 -- name: SetDesired :one
 UPDATE deliveries
@@ -65,6 +70,7 @@ SET desired_version     = desired_version + 1,
                               ELSE 'pending'
                           END,
     publication_loud    = CASE
+                              WHEN @quiet::boolean AND state = 'not_delivered' AND published_at IS NULL THEN false
                               WHEN (state = 'withheld' OR (late_note AND published_at IS NULL)) AND @open::boolean
                                   THEN @firing::boolean
                               ELSE publication_loud
@@ -1866,12 +1872,14 @@ WHERE org_id = @org_id AND id = @id AND status <> 'resolved'
 FOR NO KEY UPDATE SKIP LOCKED;
 
 -- LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
--- the order Enqueue locks them (by Destination), with their Destination.
+-- the order Enqueue locks them (by Destination), with their Destination and its button set with the Organization's.
 -- name: LockRerenderDeliveries :many
 SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
-       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id
+       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id, ds.buttons,
+       o.buttons AS organization_buttons
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE d.org_id = @org_id AND d.alert_group_id = @alert_group_id::bigint
   AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> @active_key_id::text AND NOT d.desired_retire
   AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))

@@ -127,11 +127,13 @@ func (s *Service) tester(ctx context.Context, publicID string) (Destination, Tes
 	return d, t, nil
 }
 
-// input is the test or preview of d from the source src: an Alert Group that is not of one of the Destination's
-// Routes is unknown_id at /source/alert_group_id, as one that does not exist.
+// input is the test or preview of d from the source src, which shows the buttons of d's button set (C-16.FR-4,
+// C-28.FR-9): an Alert Group that is not of one of the Destination's Routes is unknown_id at /source/alert_group_id,
+// as one that does not exist.
 func (s *Service) input(ctx context.Context, d Destination, src Source) (delivery.TestInput, error) {
+	set := d.EffectiveButtons()
 	in := delivery.TestInput{Destination: delivery.Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name,
-		Type: d.Type}}
+		Type: d.Type, Buttons: &set}}
 	var err error
 	switch src.Kind {
 	case SourceExample:
@@ -155,6 +157,7 @@ func (s *Service) input(ctx context.Context, d Destination, src Source) (deliver
 	if err != nil {
 		return delivery.TestInput{}, fmt.Errorf("read the source of the test: %w", err)
 	}
+	in.Source.Buttons = &set
 	return in, nil
 }
 

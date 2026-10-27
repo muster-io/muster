@@ -105,8 +105,13 @@ type fakeDB struct {
 	received map[int64]time.Time
 	// problems are the Alert Groups with a Delivery problem, by id.
 	problems map[int64]bool
-	// updates are the open_group_updates rows (updates_test.go).
-	updates []*fakeUpdate
+	// updates are the open_group_updates rows (updates_test.go), delivered the Destinations each Alert Group has a
+	// delivery in, by its id, and following the Destinations that follow the Organization's button set.
+	updates   []*fakeUpdate
+	delivered map[int64][]int64
+	following []int64
+	// retired are the deliveries being retired, by Alert Group and Destination.
+	retired map[[2]int64]bool
 }
 
 func newDB() *fakeDB {

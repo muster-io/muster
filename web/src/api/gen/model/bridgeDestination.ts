@@ -4,10 +4,12 @@
  */
 import type { BridgeDestinationInput } from './bridgeDestinationInput';
 import type { BridgeDestinationType } from './bridgeDestinationType';
+import type { DestinationButtonSet } from './destinationButtonSet';
 import type { DestinationReadFields } from './destinationReadFields';
 
 export type BridgeDestination = BridgeDestinationInput & DestinationReadFields & ({
   type: BridgeDestinationType;
+  buttons: DestinationButtonSet;
   /**
      * The channel's name as the bridge's `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.
      * @nullable

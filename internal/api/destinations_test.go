@@ -18,6 +18,7 @@ import (
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/logging"
@@ -81,6 +82,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 			SigningSecret: destinations.SigningSecret{Set: true, UpdatedAt: &t0}, SigningSecretOnce: "whsec_once",
 			Mentions: set, LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds,
 			Health: destinations.Health{State: "healthy"}, Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		d.Buttons = fakeButtons(in, d.Buttons)
 		f.list = append(f.list, d)
 		return d, nil
 	}
@@ -90,6 +92,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 			BridgeChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		d.Buttons = fakeButtons(in, d.Buttons)
 		f.list = append(f.list, d)
 		return d, nil
 	}
@@ -99,6 +102,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 			SlackChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		d.Buttons = fakeButtons(in, d.Buttons)
 		f.list = append(f.list, d)
 		return d, nil
 	}
@@ -110,6 +114,7 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 			TelegramDiscussionGroupTitle: ptr("Muster alerts Chat"), Mentions: set, LimiterLimit: in.Limiter.Limit,
 			LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 			Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+		d.Buttons = fakeButtons(in, d.Buttons)
 		f.list = append(f.list, d)
 		return d, nil
 	}
@@ -119,8 +124,21 @@ func (f *fakeDestinations) Create(_ context.Context, r destinations.Requester, i
 		MattermostChannelName: ptr("alerts"), Mentions: set, LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: destinations.Health{State: "healthy"},
 		Routes: []destinations.RouteRef{}, CreatedAt: t0, Version: 1}
+	d.Buttons = fakeButtons(in, d.Buttons)
 	f.list = append(f.list, d)
 	return d, nil
+}
+
+// fakeButtons is the button set of a save of in over the stored one: the stored one when in sends none.
+func fakeButtons(in destinations.Input, stored buttons.Own) buttons.Own {
+	if in.Buttons == nil || in.Webhook != nil {
+		return stored
+	}
+	if !in.Buttons.Own {
+		return buttons.Own{}
+	}
+	items, _ := buttons.Validate(in.Buttons.Items)
+	return buttons.Own{Set: true, Items: items}
 }
 
 func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, id string, version *int64,
@@ -148,6 +166,7 @@ func (f *fakeDestinations) Update(_ context.Context, r destinations.Requester, i
 	case in.Slack != nil:
 		d.SlackChannelID = &in.Slack.ChannelID
 	}
+	d.Buttons = fakeButtons(in, d.Buttons)
 	d.Version++
 	return *d, nil
 }
@@ -626,6 +645,99 @@ func TestUpdateDestinationAPI(t *testing.T) {
 		"If-Match", `"1"`); a.status != http.StatusNotFound {
 		t.Errorf("unknown = %d", a.status)
 	}
+}
+
+// TestDestinationButtonsAPI is C-28.FR-8 and FR-10 on the API: every messenger Destination reads its button set,
+// {"source": "organization"} until a save sends its own; a create or an update takes {"source": "own", "items": [...]}
+// with the items of ButtonSetItem and reads them back, an omitted set is nil for the service — "As in the
+// Organization" on a creation, kept on an update — and an update with a stale If-Match is 412. An outgoing webhook
+// reads no set. An unknown source is a 400 of the request validation, and the service's refusals are 422 at the
+// item's pointer.
+func TestDestinationButtonsAPI(t *testing.T) {
+	x, fd, _ := newDestinationsAPI(t)
+	if a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+mattermostID, ""); a.status !=
+		http.StatusOK || mustJSON(t, a.json(t)["buttons"]) != `{"source":"organization"}` {
+		t.Errorf("the default set = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsReader, http.MethodGet, "/api/v1/destinations/"+webhookID, ""); a.status !=
+		http.StatusOK || a.json(t)["buttons"] != nil {
+		t.Errorf("an outgoing webhook = %d %s", a.status, a.body)
+	}
+	const items = `[{"button":"acknowledge"},{"button":"snooze","snooze_seconds":86400},` +
+		`{"button":"snooze_preset","preset":"tomorrow"}]`
+	body := func(typ string, set string) string {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(mattermostBody), &m); err != nil {
+			t.Fatal(err)
+		}
+		m["type"] = typ
+		if typ != "mattermost" {
+			delete(m, "team_id")
+		}
+		if set != "" {
+			m["buttons"] = json.RawMessage(set)
+		}
+		b, _ := json.Marshal(m)
+		return string(b)
+	}
+	for _, typ := range []string{"mattermost", "telegram", "bridge", "slack"} {
+		a := x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations", body(typ, ""))
+		if a.status != http.StatusCreated || fd.saved[len(fd.saved)-1].Buttons != nil ||
+			mustJSON(t, a.json(t)["destination"].(map[string]any)["buttons"]) != `{"source":"organization"}` {
+			t.Errorf("%s without a set = %d %s", typ, a.status, a.body)
+		}
+		a = x.as(t, destinationsWriter, http.MethodPost, "/api/v1/destinations",
+			body(typ, `{"source":"own","items":`+items+`}`))
+		in := fd.saved[len(fd.saved)-1].Buttons
+		if a.status != http.StatusCreated || in == nil || !in.Own || len(in.Items) != 3 ||
+			*in.Items[1].SnoozeSeconds != 86400 || *in.Items[2].Preset != buttons.PresetTomorrow ||
+			mustJSON(t, a.json(t)["destination"].(map[string]any)["buttons"]) != `{"items":`+items+`,"source":"own"}` {
+			t.Errorf("%s with its own set = %d %s, input %+v", typ, a.status, a.body, in)
+		}
+	}
+	path := "/api/v1/destinations/" + mattermostID
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost", `{"source":"own","items":[]}`),
+		"If-Match", `"1"`); a.status != http.StatusPreconditionFailed {
+		t.Errorf("a stale If-Match = %d %s", a.status, a.body)
+	}
+	a := x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost", `{"source":"own","items":`+items+`}`),
+		"If-Match", `"2"`)
+	if a.status != http.StatusOK || mustJSON(t, a.json(t)["buttons"]) != `{"items":`+items+`,"source":"own"}` {
+		t.Errorf("an update to its own set = %d %s", a.status, a.body)
+	}
+	a = x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost", ""), "If-Match", `"3"`)
+	if a.status != http.StatusOK || fd.saved[len(fd.saved)-1].Buttons != nil ||
+		mustJSON(t, a.json(t)["buttons"]) != `{"items":`+items+`,"source":"own"}` {
+		t.Errorf("an update that omits the set = %d %s", a.status, a.body)
+	}
+	a = x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost", `{"source":"organization","items":[]}`),
+		"If-Match", `"4"`)
+	if in := fd.saved[len(fd.saved)-1].Buttons; a.status != http.StatusOK || in == nil || in.Own ||
+		mustJSON(t, a.json(t)["buttons"]) != `{"source":"organization"}` {
+		t.Errorf("back to the organization's set = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost", `{"source":"team"}`), "If-Match",
+		`"5"`); a.status != http.StatusBadRequest || problemErrors(t, a)[0]["pointer"] != "/buttons/source" {
+		t.Errorf("an unknown source = %d %s", a.status, a.body)
+	}
+	fd.saveErr = &destinations.FieldError{Pointer: "/buttons/items/1", Code: buttons.CodeDuplicate,
+		Detail: "The item appears twice."}
+	if a := x.as(t, destinationsWriter, http.MethodPut, path, body("mattermost",
+		`{"source":"own","items":[{"button":"resolve"},{"button":"resolve"}]}`), "If-Match", `"5"`); a.status !=
+		http.StatusUnprocessableEntity || problemErrors(t, a)[0]["pointer"] != "/buttons/items/1" ||
+		problemErrors(t, a)[0]["code"] != "duplicate" {
+		t.Errorf("a duplicate = %d %s", a.status, a.body)
+	}
+}
+
+// mustJSON is v as compact JSON with sorted keys.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 // TestCheckDestinationAPI is checkDestination (C-13.FR-10) with destinations:test: each check with its result and the

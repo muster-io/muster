@@ -4,6 +4,7 @@
 package delivery_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -233,6 +234,308 @@ func TestBridgeMarkup(t *testing.T) {
 	if !slices.Equal(replies, []messages.Markup{messages.MarkupCommonMark}) || len(calls) != 1 ||
 		calls[0].Method != deliverytest.MethodReply {
 		t.Errorf("reply markups %v, calls to the bridge %+v", replies, calls)
+	}
+}
+
+// setRenderer renders the Root messages of the stub with the buttons of their status as messages.Renderer lays them
+// out, on a Route with the Snooze durations 1 h, 4 h and 24 h, each signed by *key.
+type setRenderer struct {
+	stubRenderer
+	key *string
+}
+
+// setDurations are the Snooze durations of the Route of setRenderer.
+var setDurations = []int64{3600, 14400, 86400}
+
+func (r setRenderer) Roots(ctx context.Context, db messages.DBTX, g delivery.GroupView, markups []messages.Markup) (
+	delivery.Roots, error) {
+	out, err := r.stubRenderer.Roots(ctx, db, g, markups)
+	if err != nil {
+		return out, err
+	}
+	labels := map[string]string{buttons.CommandAcknowledge: "Ack", buttons.CommandUnacknowledge: "Unack",
+		buttons.CommandResolve: "Resolve", buttons.CommandUnsnooze: "Unsnooze"}
+	var bs []messages.Button
+	for _, b := range buttons.ForStatus(string(g.Status), len(setDurations)) {
+		label := labels[b.Command]
+		switch {
+		case b.Argument == buttons.ArgumentTomorrow:
+			label = "Until tomorrow 09:00"
+		case b.Argument == buttons.ArgumentWeekStart:
+			label = "Until Monday 09:00"
+		case b.Command == buttons.CommandSnooze:
+			label = fmt.Sprintf("Snooze %d h", setDurations[b.Argument]/3600)
+		}
+		bs = append(bs, messages.Button{Command: b.Command, Argument: b.Argument, Label: label,
+			ActionID: fmt.Sprintf("%s.%d@%s", b.Command, b.Argument, *r.key), KeyID: *r.key})
+	}
+	for mk, rd := range out.Messages {
+		rd.Message.Buttons, rd.KeyID = slices.Clone(bs), *r.key
+		out.Messages[mk] = rd
+	}
+	out.SnoozeSeconds = setDurations
+	return out, nil
+}
+
+// desiredLabels are the labels of the buttons of the Desired state of the Alert Group in the Destination dest.
+func (e *env) desiredLabels(t *testing.T, dest int64) []string {
+	t.Helper()
+	var m messages.Message
+	if err := json.Unmarshal(e.deliveryTo(t, dest).payload, &m); err != nil {
+		t.Fatal(err)
+	}
+	out := []string{}
+	for _, b := range m.Buttons {
+		out = append(out, b.Label)
+	}
+	return out
+}
+
+// TestButtonSets is C-28.FR-8, FR-9 and AC-7 on delivery: a Mattermost Destination whose own set is Acknowledge,
+// "Snooze 24 h" and "Until tomorrow" stores and publishes on a firing Root message exactly Ack, "Snooze 24 h" and
+// "Until tomorrow 09:00" in the order of reference.md, on an acknowledged one Unack, "Snooze 24 h" and "Until tomorrow
+// 09:00", and on a snoozed one Ack and Unsnooze, which is not part of the set; a second Destination of the Route that
+// follows the Organization's set of every button shows every button, with the hash of a Desired state without any
+// set. A Reminder in the Thread keeps "Still on it" and "Unack". A change of the Organization's set re-renders, as an
+// edit, only the Destinations that follow it, and a re-render that changes no set changes no hash; the re-render after
+// a key rotation keeps each Destination's set; a set that shows no button stores no key.
+func TestButtonSets(t *testing.T) {
+	e := newEnv(t)
+	key := "k-1"
+	conn := int64(connID)
+	e.db.dests[destMM2] = &fakeDest{id: destMM2, publicID: "DSAAAAAAAAAA13", name: "ops-prod",
+		typ: delivery.TypeMattermost, connection: &conn, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destMM].limit = 600
+	e.db.dests[destMM].buttons = []byte(`[{"button": "acknowledge"}, {"button": "snooze", "snooze_seconds": 86400},
+		{"button": "snooze_preset", "preset": "tomorrow"}]`)
+	e.db.routeDests[routeID] = []int64{destMM, destWH, destMM2}
+	r := setRenderer{key: &key}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: e.w.Log,
+		Renderer: r})
+	e.w.Renderer = r
+
+	every := []string{"Ack", "Resolve", "Snooze 1 h", "Snooze 4 h", "Snooze 24 h", "Until tomorrow 09:00",
+		"Until Monday 09:00"}
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Ack", "Snooze 24 h", "Until tomorrow 09:00"}) {
+		t.Errorf("firing, its own set: %v", got)
+	}
+	if got := e.desiredLabels(t, destMM2); !slices.Equal(got, every) {
+		t.Errorf("firing, the organization's set: %v", got)
+	}
+	if e.deliveryTo(t, destMM).buttonKeyID != "k-1" {
+		t.Errorf("the key of the shown buttons: %q", e.deliveryTo(t, destMM).buttonKeyID)
+	}
+	e.round(t)
+	for _, c := range e.callsTo(destMM) {
+		if c.Method != deliverytest.MethodPublish || len(c.Message.Buttons) != 3 {
+			t.Errorf("published to its own set: %+v", c)
+		}
+	}
+	allHash := e.deliveryTo(t, destMM2).hash
+	e.db.orgButtons = []byte(`{"all": true}`)
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+	if !bytes.Equal(e.deliveryTo(t, destMM2).hash, allHash) {
+		t.Error("the organization's set of every button changed the hash")
+	}
+
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, groups.Recorded{Seq: 2,
+		Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Unack", "Snooze 24 h",
+		"Until tomorrow 09:00"}) {
+		t.Errorf("acknowledged, its own set: %v", got)
+	}
+	e.round(t)
+	e.rec.Reset()
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, reminder(3))
+	e.round(t)
+	var reminders int
+	for _, c := range e.callsTo(destMM) {
+		if c.Method == deliverytest.MethodReply {
+			reminders++
+			if len(c.Message.Buttons) != 2 || c.Message.Buttons[0].Label != "Still on it" {
+				t.Errorf("the reminder in its thread: %+v", c.Message.Buttons)
+			}
+		}
+	}
+	if reminders != 1 {
+		t.Errorf("%d reminders in its thread", reminders)
+	}
+	e.enqueue(t, e.group(groups.StatusSnoozed, "disk full"), groups.System)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Ack", "Unsnooze"}) {
+		t.Errorf("snoozed, its own set: %v", got)
+	}
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System)
+	e.round(t)
+
+	// The Organization's set changes: only the Destination that follows it is edited.
+	e.rec.Reset()
+	own := e.deliveryTo(t, destMM).hash
+	e.db.orgButtons = []byte(`{"all": false, "items": [{"button": "acknowledge"}, {"button": "snooze",
+		"snooze_seconds": 86400}]}`)
+	changed := 0
+	rerender := func() {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+			"disk full"), Actor: groups.System, Changed: func() { changed++ }}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rerender()
+	if changed != 1 {
+		t.Errorf("the re-render changed %d desired states, want 1", changed)
+	}
+	if got := e.desiredLabels(t, destMM2); !slices.Equal(got, []string{"Unack", "Snooze 24 h"}) ||
+		!bytes.Equal(e.deliveryTo(t, destMM).hash, own) {
+		t.Errorf("the organization's set: %v", got)
+	}
+	e.round(t)
+	if calls := e.callsTo(destMM2); len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate ||
+		calls[0].Loudness != groups.Quiet || len(e.callsTo(destMM)) != 0 {
+		t.Errorf("the re-render of the organization's set: %+v, %+v", calls, e.callsTo(destMM))
+	}
+	e.rec.Reset()
+	changed = 0
+	rerender()
+	e.round(t)
+	if len(e.rec.Calls()) != 0 || changed != 0 {
+		t.Errorf("a second re-render changed %d desired states and called %+v", changed, e.rec.Calls())
+	}
+
+	// A key rotation re-renders with each Destination's set.
+	key = "k-2"
+	if _, err := e.svc.RerenderOpen(t.Context(), "k-2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Unack", "Snooze 24 h", "Until tomorrow 09:00"}) ||
+		e.deliveryTo(t, destMM).buttonKeyID != "k-2" {
+		t.Errorf("after the rotation, its own set: %v", got)
+	}
+	if got := e.desiredLabels(t, destMM2); !slices.Equal(got, []string{"Unack", "Snooze 24 h"}) {
+		t.Errorf("after the rotation, the organization's set: %v", got)
+	}
+
+	// A set that shows no button of the status stores no key.
+	e.db.dests[destMM].buttons = []byte(`[{"button": "resolve"}]`)
+	e.db.orgButtons = nil
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Resolve"}) {
+		t.Errorf("resolve only: %v", got)
+	}
+	e.db.dests[destMM].buttons = []byte(`[]`)
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+	if got := e.desiredLabels(t, destMM); len(got) != 0 || e.deliveryTo(t, destMM).buttonKeyID != "" ||
+		!bytes.Contains(e.deliveryTo(t, destMM).payload, []byte(`"buttons":[]`)) {
+		t.Errorf("no button: %v, key %q", got, e.deliveryTo(t, destMM).buttonKeyID)
+	}
+	e.db.dests[destMM].buttons = []byte(`not json`)
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, every) {
+		t.Errorf("a set that cannot be read shows every button: %v", got)
+	}
+	e.db.dests[destMM].buttons, e.db.orgButtons = nil, []byte(`[]`)
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, every) {
+		t.Errorf("an organization's set that cannot be read shows every button: %v", got)
+	}
+}
+
+// TestQuietConfigurationRerender is ADR-0018 for the re-render without lifecycle events: a change of configuration —
+// a changed button set, or a rise that the Route's Minimum severity made — that revives a Not delivered Publication
+// which was never published publishes it Quietly, while an Alert that revives it keeps its Loud Publication; and an
+// Urgent Alert Group that a Storm holds is released Quietly by a re-render without events.
+func TestQuietConfigurationRerender(t *testing.T) {
+	notDelivered := func(t *testing.T) *env {
+		t.Helper()
+		e := newEnv(t)
+		e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+		d := e.only(t)
+		if !d.loud.Bool {
+			t.Fatalf("the first publication is not loud: %+v", d.loud)
+		}
+		d.state, d.publishedAt = "not_delivered", nil
+		return e
+	}
+	for _, c := range []struct {
+		name   string
+		render func(e *env)
+		want   groups.Loudness
+	}{
+		{"a changed button set", func(e *env) {
+			e.db.dests[destMM].buttons = []byte(`[{"button": "resolve"}]`)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+		}, groups.Quiet},
+		{"a raised Minimum severity", func(e *env) {
+			g := e.group(groups.StatusFiring, "disk full")
+			g.Urgent = true
+			e.enqueue(t, g, groups.System, groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised,
+				Variant: groups.VariantRemovesNone, Loudness: groups.Quiet, Reason: groups.ReasonMinimumSeverity})
+		}, groups.Quiet},
+		{"new Alerts", func(e *env) {
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full again"), groups.System, groups.Recorded{Seq: 2,
+				Event: groups.EventAlertsAdded, Variant: groups.VariantFiring, Loudness: groups.Loud,
+				Mentions: []groups.Mention{groups.MentionNewAlerts}})
+		}, groups.Loud},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := notDelivered(t)
+			c.render(e)
+			if d := e.only(t); d.state != "pending" {
+				t.Fatalf("the delivery is %s", d.state)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != c.want {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+
+	e := stormEnv(t)
+	r := e.db.routes[routeID]
+	r.threshold = 2
+	e.db.routes[routeID] = r
+	id := int64(5000)
+	for range 4 {
+		id++
+		e.addGroup(t, id, false)
+	}
+	e.onlyStorm(t)
+	e.round(t)
+	e.rec.Reset()
+	g := e.view(id, groups.StatusFiring)
+	g.Urgent = true
+	e.db.groups[id].urgent = true
+	e.enqueue(t, g, groups.System)
+	e.round(t)
+	if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet ||
+		!strings.HasPrefix(textOf(p[0]), fmt.Sprintf("#%d ", id)) {
+		t.Errorf("released without events %+v", p)
+	}
+}
+
+// TestJoinedDestinationButtonSet is C-28.FR-8 for a Destination added to a Route: the Route's open Alert Groups are
+// published into it with its own button set, and into a second added Destination that follows the Organization with
+// every button.
+func TestJoinedDestinationButtonSet(t *testing.T) {
+	e := newEnv(t)
+	key := "k-1"
+	r := setRenderer{key: &key}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: e.w.Log,
+		Renderer: r})
+	e.w.Renderer = r
+	e.db.routeDests[routeID] = nil
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+	conn := int64(connID)
+	e.db.dests[destMM2] = &fakeDest{id: destMM2, publicID: "DSAAAAAAAAAA13", name: "ops-prod",
+		typ: delivery.TypeMattermost, connection: &conn, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destMM].buttons = []byte(`[{"button": "acknowledge"}, {"button": "snooze", "snooze_seconds": 3600}]`)
+	e.db.routeDests[routeID] = []int64{destMM, destMM2}
+	e.changed(t, routeID, []int64{destMM, destMM2}, nil)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Ack", "Snooze 1 h"}) {
+		t.Errorf("the added destination with its own set: %v", got)
+	}
+	if got := e.desiredLabels(t, destMM2); len(got) != 7 {
+		t.Errorf("the added destination that follows the organization: %v", got)
 	}
 }
 
