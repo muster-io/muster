@@ -108,7 +108,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
 
     1. Check whether the migration took effect:
-       `SELECT count(*) FROM information_schema.columns WHERE table_name = 'routes' AND column_name = 'minimum_severity';`
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'routes' AND column_name = 'minimum_severity';
+        ```
+
     2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 20, dirty = false;`. If it
        returns 1, the migration committed and only its record failed: `UPDATE schema_migrations SET dirty = false;`.
     3. Start the 0.2.0 replica again, or run `muster migrate`, at a quieter time; it applies migration 0021 again.

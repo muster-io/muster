@@ -48,6 +48,8 @@ files_touched:
   - internal/groups/list_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - design/prd/l1/defaults.md
+  - design/stories/S-169-the-lifecycle-of-escalation-chains-with-the-ack-timeout-unclaimed-and-skipped-steps.md
   - internal/delivery/enqueue.go
   - internal/delivery/query.sql
   - internal/delivery/storm_test.go
@@ -86,9 +88,10 @@ issue: 400
 
 - The Route setting `route.minimum_severity` and the rule of C-26.FR-8: an Alert Group's Severity level is the highest
   of its firing Alerts raised to it, and it is Urgent exactly when that level is critical.
-- The expand step of C-26.FR-10: `route.urgent` and `organization.critical_is_urgent` stop acting, stay in the API as
-  read-only or ignored fields until 0.3.0, and are written so that a 0.1 replica of a rolling update computes the same
-  urgency; the migration that converts urgent Routes and recomputes the open Alert Groups once.
+- The expand step of C-26.FR-10: `route.urgent` and `organization.critical_is_urgent` stop acting, stay in the API until
+  0.3.0, derived on reads; `urgent: true` without a Minimum severity is converted to the Minimum severity critical, and
+  `critical_is_urgent` is ignored in requests; both are written so that a 0.1 replica of a rolling update computes the
+  same urgency; the migration that converts urgent Routes and recomputes the open Alert Groups once.
 - Applying a changed Minimum severity to the open Alert Groups of the Route (C-26.FR-9), through a durable row that any
   replica claims with a lease — the `open_group_updates` mechanism that S-113, S-163, S-121 (with S-170) and S-125
   reuse with kinds of their own.
@@ -105,8 +108,9 @@ issue: 400
 - Escalation chains, which a change of the Minimum severity never starts: S-169. The page "What critical changes":
   S-124.
 - 0.3.0 removes `urgent`, `critical_is_urgent` and their columns; not in 0.2.x.
-- Interim state until S-112: the Route form still shows the urgent switch, whose value the server now ignores, and the
-  Alert handling page still shows "critical is Urgent".
+- Interim state until S-112: the Route form still shows the urgent switch and sends `urgent` without
+  `minimum_severity` (`web/src/components/route-form.tsx`), so turning it on sets the Minimum severity critical and
+  turning it off changes nothing; the Alert handling page still shows "critical is Urgent", which is ignored.
 
 ## Contracts
 
@@ -114,8 +118,10 @@ issue: 400
   - New schema `MinimumSeverity`: `none`, `warning`, `critical`, described as `route.minimum_severity`, "only raises
     the Severity level of the Route's Alert Groups; an Urgent Alert Group is a critical one".
   - `RouteInput` gains `minimum_severity` (optional; omitted on create is `none`, omitted on update keeps it) and loses
-    `urgent` from its `required`; `urgent` becomes `deprecated: true` with the description "Read-only from 0.2.0: true
-    exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0." `Route` lists
+    `urgent` from its `required`; `urgent` becomes `deprecated: true` with the description "From 0.2.0 a read gives
+    true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as
+    `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes
+    nothing. Removed in 0.3.0." `Route` lists
     `minimum_severity` and `urgent` in its `required`, so every read carries both.
   - `RouteProfile` gains `minimum_severity` (required, `none` for both profiles); its `urgent` stays, `false`, and is
     deprecated as on `RouteInput`.
@@ -241,11 +247,17 @@ BODY() { curl -s "${A[@]}" $API/routes/$1 | jq -c "del(.id, .etag, .position, .i
   .open_alert_group_count, .created_at) | $2"; }
 PUTR() { curl -s "${A[@]}" -X PUT -H "If-Match: $(curl -s "${A[@]}" $API/routes/$1 | jq -r .etag)" $API/routes/$1 -d "$(BODY $1 "$2")"; }
 
-# C-26.FR-10, C-26.AC-8: urgent is derived and ignored; a Route without urgent in its input is accepted
+# C-26.FR-10, C-26.AC-8: urgent is derived on reads; urgent false changes nothing; a Route without urgent in its input
+# is accepted; urgent true without minimum_severity, as a 0.1 client sends it, is converted to critical
 R1=$(ROUTE hb critical | jq -r .id); curl -s "${A[@]}" $API/routes/$R1 | jq -c '{minimum_severity, urgent}'
 # {"minimum_severity":"critical","urgent":true}
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT urgent FROM routes WHERE public_id = '$R1'"                        # t
 PUTR $R1 '.urgent = false' | jq -c '{minimum_severity, urgent}'                 # {"minimum_severity":"critical","urgent":true}
+curl -s "${A[@]}" $API/routes -d "{\"name\":\"old\",\"matchers\":[],\"urgent\":true,\"group_key\":[\"alertname\"],
+  \"destination_ids\":[],\"policy\":$P}" | jq -c '{minimum_severity, urgent}'  # {"minimum_severity":"critical","urgent":true}
+R0=$(ROUTE none0 none | jq -r .id)
+PUTR $R0 'del(.minimum_severity) | .urgent = true' | jq -c '{minimum_severity, urgent}'
+# {"minimum_severity":"critical","urgent":true}
 O=$(curl -s "${A[@]}" $API/organization)
 curl -s "${A[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization \
   -d "$(jq -c 'del(.id, .etag) | .critical_is_urgent = false' <<<"$O")" | jq .critical_is_urgent           # true
@@ -290,7 +302,9 @@ None.
   the level follows the Route's Minimum severity after a move; the list oracle read `critical_is_urgent`);
   `docs/configure/organization.md` (it must not contradict the 0.2.0 upgrade notes until S-112 rewrites the page);
   `internal/delivery/enqueue.go`, `query.sql` and `storm_test.go` (C-26.FR-9: a raised Minimum severity publishes a
-  held Alert Group Quietly); C-26.FR-10 and C-26.AC-8 of the PRD (a 0.1 client's `urgent: true` is converted, the expand
+  held Alert Group Quietly; the release still starts its ack timeout, as C-17.FR-1 says); `design/prd/l1/defaults.md`
+  (the row `route.urgent` follows the amended C-26.FR-10); the S-169 file (cross-reference for S-169: a Quiet release by
+  a minimum-severity raise starts no chain); C-26.FR-10 and C-26.AC-8 of the PRD (a 0.1 client's `urgent: true` is converted, the expand
   and contract rule of L2 §2); the claim of `open_group_updates` filters by the kinds a replica handles.
 - Suggested commit: `feat(routing): replace the urgent mark with a minimum severity on routes`.
 - `open_group_updates` is the one mechanism for changes of configuration that must reach the open Alert Groups after

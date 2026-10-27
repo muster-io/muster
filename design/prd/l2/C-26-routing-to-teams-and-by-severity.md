@@ -91,12 +91,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   Groups it raises into a Destination's condition reach that Destination Quietly (FR-6).
 - **C-26.FR-10** In 0.2.0 the Route's urgent mark (`route.urgent`) and the Organization's switch "critical is Urgent"
   (`organization.critical_is_urgent`) no longer act, in expand and contract steps. The 0.2.0 migration gives every Route
-  marked urgent the Minimum severity critical. Until 0.3.0 the API keeps `urgent` on Routes and on Route profiles as a
-  read-only field — `true` exactly when the Minimum severity is critical — and `critical_is_urgent` on the Organization
-  as a read-only `true`. Requests that send them are accepted: by the expand and contract rule of
+  marked urgent the Minimum severity critical. Until 0.3.0 the API keeps `urgent` on Routes and on Route profiles,
+  derived on reads — `true` exactly when the Minimum severity is critical — and `critical_is_urgent` on the
+  Organization, derived on reads as `true`. Requests that send them are accepted: by the expand and contract rule of
   [L2 §2](../L2.md#2-conventions), a Route request with `urgent: true` and no Minimum severity, as a 0.1 client sends
-  it, is read as the Minimum severity critical; `urgent: false`, and `urgent` beside a Minimum severity, change nothing;
-  `critical_is_urgent`, which the new form cannot express, is ignored. 0.3.0 removes the fields and their columns. The upgrade notes of 0.2.0 say: Routes marked urgent got the Minimum severity critical, which also makes
+  it, is read as the Minimum severity critical; `urgent: false`, and `urgent` beside a Minimum severity, change
+  nothing; `critical_is_urgent`, which the new form cannot express, is ignored. 0.3.0 removes the fields and their
+  columns. The upgrade notes of 0.2.0 say: Routes marked urgent got the Minimum severity critical, which also makes
   their Alert Groups critical for Severity conditions, and an Organization that had turned "critical is Urgent" off now
   sees its critical Alert Groups as Urgent — a rise to critical ends their Snoozes and, where
   `route.urgent_rise_removes_ack` is on, their acknowledgements. The migration and the API also do this:
