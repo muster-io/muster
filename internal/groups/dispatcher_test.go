@@ -63,8 +63,9 @@ type fakeEntry struct {
 // fakeDB is the database of the package in memory, with the semantics of its queries: the routes, Alerts, Alert
 // Groups, memberships, Timeline, timers and counter of one Organization.
 type fakeDB struct {
-	mu       sync.Mutex
-	settings dbgen.GetGroupingSettingsRow
+	mu sync.Mutex
+	// instance are the Instance labels of the Organization.
+	instance []string
 	routes   map[int64]*fakeRoute
 	alerts   map[int64]*dbgen.ListChangedAlertsRow
 	groups   map[int64]*dbgen.LockGroupsRow
@@ -104,11 +105,12 @@ type fakeDB struct {
 	received map[int64]time.Time
 	// problems are the Alert Groups with a Delivery problem, by id.
 	problems map[int64]bool
+	// updates are the open_group_updates rows (updates_test.go).
+	updates []*fakeUpdate
 }
 
 func newDB() *fakeDB {
-	return &fakeDB{settings: dbgen.GetGroupingSettingsRow{CriticalIsUrgent: true,
-		InstanceLabels: []string{"pod", "instance", "container", "endpoint"}}, routes: map[int64]*fakeRoute{},
+	return &fakeDB{instance: []string{"pod", "instance", "container", "endpoint"}, routes: map[int64]*fakeRoute{},
 		alerts: map[int64]*dbgen.ListChangedAlertsRow{}, groups: map[int64]*dbgen.LockGroupsRow{},
 		timers: map[string]time.Time{}, notices: map[string]int64{}, upserts: map[string]int{},
 		users:    map[int64]dbgen.ListUserRefsRow{},
@@ -152,10 +154,10 @@ func (f *fakeDB) GetSnapshotReceivedAt(_ context.Context, arg dbgen.GetSnapshotR
 	return at, nil
 }
 
-func (f *fakeDB) GetGroupingSettings(context.Context, int64) (dbgen.GetGroupingSettingsRow, error) {
+func (f *fakeDB) GetGroupingSettings(context.Context, int64) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.settings, f.call("GetGroupingSettings")
+	return f.instance, f.call("GetGroupingSettings")
 }
 
 func (f *fakeDB) ListChangedAlerts(_ context.Context, arg dbgen.ListChangedAlertsParams) (
@@ -713,9 +715,10 @@ func (f *fakeDB) GetGroupID(_ context.Context, arg dbgen.GetGroupIDParams) (dbge
 	return dbgen.GetGroupIDRow{}, pgx.ErrNoRows
 }
 
-// urgent is the urgency of an Alert Group as the reads derive it from its Route and critical is Urgent.
+// urgent is the urgency of an Alert Group as the reads derive it: Urgent exactly when its stored Severity level is
+// critical (C-26.FR-8).
 func (f *fakeDB) urgent(g *dbgen.LockGroupsRow) bool {
-	return f.routes[g.RouteID].Urgent || (g.SeverityLevel == "critical" && f.settings.CriticalIsUrgent)
+	return g.SeverityLevel == "critical"
 }
 
 func (f *fakeDB) ListIntegrationRefs(_ context.Context, arg dbgen.ListIntegrationRefsParams) (
@@ -997,7 +1000,8 @@ func newHarness(t *testing.T) *harness {
 
 // route adds a Route with the policy of the On-call profile.
 func (h *harness) route(id int64, publicID, name string, isDefault bool, key []string) {
-	h.db.routes[id] = &fakeRoute{LockRoutesRow: dbgen.LockRoutesRow{ID: id, PublicID: publicID, IsDefault: isDefault, GroupKey: key,
+	h.db.routes[id] = &fakeRoute{LockRoutesRow: dbgen.LockRoutesRow{ID: id, PublicID: publicID, IsDefault: isDefault,
+		MinimumSeverity: "none", GroupKey: key,
 		ReopenWindowSeconds: 900, GracePeriodSeconds: 900, UrgentRiseRemovesAck: true}, name: name}
 }
 

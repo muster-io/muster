@@ -168,8 +168,10 @@ func (s *Server) ListRouteProfiles(context.Context, gen.ListRouteProfilesRequest
 	profiles := routing.Profiles()
 	out := gen.RouteProfileList{Items: make([]gen.RouteProfile, 0, len(profiles))}
 	for _, p := range profiles {
-		out.Items = append(out.Items, gen.RouteProfile{Id: gen.RouteProfileId(p.ID), Name: p.Name, Urgent: p.Urgent,
-			GroupKey: p.GroupKey, Policy: routePolicyOf(p.Policy)})
+		out.Items = append(out.Items, gen.RouteProfile{Id: gen.RouteProfileId(p.ID), Name: p.Name,
+			MinimumSeverity: gen.MinimumSeverity(p.MinimumSeverity),
+			Urgent:          p.MinimumSeverity == routing.MinimumCritical, GroupKey: p.GroupKey,
+			Policy: routePolicyOf(p.Policy)})
 	}
 	return gen.ListRouteProfiles200JSONResponse(out), nil
 }
@@ -281,13 +283,19 @@ func (s *Server) DismissRouteSuggestion(ctx context.Context, req gen.DismissRout
 	return gen.DismissRouteSuggestion204Response{}, nil
 }
 
-// routeInputFor is the API form of a Route to create.
+// routeInputFor is the API form of a Route to create, with its Minimum severity and the urgent mark that follows it.
 func routeInputFor(in routing.Input) gen.RouteInput {
 	description := ""
 	if in.Description != nil {
 		description = *in.Description
 	}
-	out := gen.RouteInput{Name: in.Name, Description: &description, Urgent: in.Urgent, GroupKey: in.GroupKey,
+	minimum := gen.MinimumSeverityNone
+	if in.MinimumSeverity != nil {
+		minimum = gen.MinimumSeverity(*in.MinimumSeverity)
+	}
+	urgent := minimum == gen.MinimumSeverityCritical
+	out := gen.RouteInput{Name: in.Name, Description: &description, MinimumSeverity: &minimum, Urgent: &urgent,
+		GroupKey:       in.GroupKey,
 		DestinationIds: in.DestinationIDs, Matchers: make([]gen.Matcher, 0, len(in.Matchers)),
 		Policy: routePolicyOf(in.Policy)}
 	if out.DestinationIds == nil {
@@ -317,7 +325,7 @@ func routeOf(rt routing.Route) gen.Route {
 	}
 	out := gen.Route{
 		Id: rt.PublicID, Name: rt.Name, Description: &description, Position: rt.Position, IsDefault: rt.IsDefault,
-		Urgent: rt.Urgent, GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
+		MinimumSeverity: gen.MinimumSeverity(rt.MinimumSeverity), Urgent: rt.Urgent, GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
 		Etag: &tag,
@@ -355,12 +363,17 @@ func routePolicyOf(p routing.Policy) gen.RoutePolicy {
 	}
 }
 
+// routeInputOf is the Route a request writes; urgent is ignored, as the urgent mark follows the Minimum severity
+// (C-26.FR-10).
 func routeInputOf(in gen.RouteInput) routing.Input {
 	t := in.Policy.Templates
-	out := routing.Input{Name: in.Name, Description: in.Description, Urgent: in.Urgent, GroupKey: in.GroupKey,
+	out := routing.Input{Name: in.Name, Description: in.Description, GroupKey: in.GroupKey,
 		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
 			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}}
+	if in.MinimumSeverity != nil {
+		out.MinimumSeverity = new(string(*in.MinimumSeverity))
+	}
 	for _, m := range in.Matchers {
 		out.Matchers = append(out.Matchers, routing.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value})
 	}

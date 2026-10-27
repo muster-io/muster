@@ -4,7 +4,7 @@
 -- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
 -- error and their active Storm.
 -- name: ListRoutes :many
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -19,7 +19,7 @@ ORDER BY r.is_default, r.position, r.id;
 -- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
 -- active Storm.
 -- name: GetRoute :one
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.urgent, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -65,11 +65,13 @@ FROM organizations
 WHERE id = @org_id;
 
 -- InsertRoute creates a Route at the last position before the Default route, or with @first at the top of the list.
+-- urgent is written as minimum_severity = 'critical', which a 0.1 replica of a rolling update still reads (C-26.FR-10).
 -- name: InsertRoute :one
 INSERT INTO routes (
-    org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-    grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-    storm_threshold, language, template_root_message, template_line, template_ack_timeout_notice,
+    org_id, public_id, name, description, position, is_default, minimum_severity, urgent, group_key,
+    reopen_window_seconds, grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds,
+    thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
+    template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
     reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
@@ -77,7 +79,8 @@ SELECT @org_id, @public_id, @name, @description,
        coalesce((SELECT CASE WHEN @first::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
                  FROM routes p
                  WHERE p.org_id = @org_id AND NOT p.is_default AND p.deleted_at IS NULL), 0),
-       false, @urgent, @group_key::text[], @reopen_window_seconds, @grace_period_seconds, @urgent_rise_removes_ack,
+       false, @minimum_severity, @minimum_severity = 'critical', @group_key::text[], @reopen_window_seconds,
+       @grace_period_seconds, @urgent_rise_removes_ack,
        @snooze_durations_seconds::bigint[], @thread_batching_window_seconds, @storm_threshold, @language,
        sqlc.narg('template_root_message'), sqlc.narg('template_line'), sqlc.narg('template_ack_timeout_notice'),
        @ack_timeout_enabled, @ack_timeout_first_interval_seconds, @reminders_enabled,
@@ -88,13 +91,14 @@ RETURNING id;
 -- when it created it.
 -- name: EnsureDefaultRoute :one
 INSERT INTO routes (
-    org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-    grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-    storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
-    reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
+    org_id, public_id, name, description, position, is_default, minimum_severity, urgent, group_key,
+    reopen_window_seconds, grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds,
+    thread_batching_window_seconds, storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds,
+    reminders_enabled, reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
 VALUES (
-    @org_id, @public_id, @name, @description, 0, true, @urgent, @group_key::text[], @reopen_window_seconds,
+    @org_id, @public_id, @name, @description, 0, true, @minimum_severity, @minimum_severity = 'critical',
+    @group_key::text[], @reopen_window_seconds,
     @grace_period_seconds, @urgent_rise_removes_ack, @snooze_durations_seconds::bigint[],
     @thread_batching_window_seconds, @storm_threshold, @language, @ack_timeout_enabled,
     @ack_timeout_first_interval_seconds, @reminders_enabled, @reminders_first_interval_seconds, @reminders_cap_seconds,
@@ -103,10 +107,12 @@ VALUES (
 ON CONFLICT (org_id) WHERE is_default DO NOTHING
 RETURNING public_id;
 
--- UpdateRoute replaces the configured fields of a Route and bumps its version.
+-- UpdateRoute replaces the configured fields of a Route and bumps its version; urgent is written as minimum_severity =
+-- 'critical', which a 0.1 replica of a rolling update still reads (C-26.FR-10).
 -- name: UpdateRoute :exec
 UPDATE routes
-SET name = @name, description = @description, urgent = @urgent, group_key = @group_key::text[],
+SET name = @name, description = @description, minimum_severity = @minimum_severity,
+    urgent = @minimum_severity = 'critical', group_key = @group_key::text[],
     reopen_window_seconds = @reopen_window_seconds, grace_period_seconds = @grace_period_seconds,
     urgent_rise_removes_ack = @urgent_rise_removes_ack, snooze_durations_seconds = @snooze_durations_seconds::bigint[],
     thread_batching_window_seconds = @thread_batching_window_seconds, storm_threshold = @storm_threshold,
@@ -280,3 +286,22 @@ FROM (SELECT x.id
       FOR NO KEY UPDATE OF x) AS locked
 WHERE r.org_id = @org_id AND r.id = locked.id
 RETURNING r.id, r.public_id;
+
+-- HasOpenAlertGroups reports whether a Route has open Alert Groups, read-only (only groups writes alert_groups),
+-- those moved to it included: a changed Minimum severity reaches them through open_group_updates.
+-- name: HasOpenAlertGroups :one
+SELECT EXISTS (
+    SELECT 1
+    FROM alert_groups
+    WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved'
+)::boolean AS open;
+
+-- InsertOpenGroupUpdate requests that a change of configuration reach the open Alert Groups of its scope (C-26.FR-9):
+-- the worker of any replica claims the row.
+-- name: InsertOpenGroupUpdate :exec
+INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+VALUES (@org_id, @kind, @route_id, @requested_at);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

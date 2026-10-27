@@ -212,10 +212,17 @@ func TestIntegrationRoutes(t *testing.T) {
 			t.Errorf("the name of a deleted route = %v", err)
 		}
 		in := input("A2", routing.Matcher{Label: "team", Op: "!~", Value: "db|web"})
-		in.Urgent = true
+		in.MinimumSeverity = new(routing.MinimumCritical)
 		u, err := e.svc.Update(ctx, by, a.PublicID, nil, in)
-		if err != nil || u.Name != "A2" || !u.Urgent || u.Version != 2 || len(u.Matchers) != 1 || u.Matchers[0].Op != "!~" {
+		if err != nil || u.Name != "A2" || !u.Urgent || u.MinimumSeverity != routing.MinimumCritical || u.Version != 2 ||
+			len(u.Matchers) != 1 || u.Matchers[0].Op != "!~" {
 			t.Errorf("update %+v %v", u, err)
+		}
+		// routes.urgent is written as the Minimum severity critical, for the 0.1 replicas of a rolling update.
+		var urgent bool
+		if err := e.d.Pool.QueryRow(ctx, `SELECT urgent FROM routes WHERE public_id = $1`, a.PublicID).Scan(
+			&urgent); err != nil || !urgent {
+			t.Errorf("routes.urgent = %v, %v", urgent, err)
 		}
 		var entries int64
 		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action LIKE 'route.%'`).Scan(

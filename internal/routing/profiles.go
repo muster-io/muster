@@ -10,12 +10,14 @@ const (
 )
 
 // Profile is a Route profile: a starting set of Route settings that only pre-fills a new Route and is never stored.
+// Neither profile sets a Minimum severity (C-26.FR-11); Urgent, the deprecated urgent mark, follows it.
 type Profile struct {
-	ID       string
-	Name     string
-	Urgent   bool
-	GroupKey []string
-	Policy   Policy
+	ID              string
+	Name            string
+	MinimumSeverity string
+	Urgent          bool
+	GroupKey        []string
+	Policy          Policy
 }
 
 // The values of the "Routing and lifecycle" table of defaults.md.
@@ -27,7 +29,8 @@ const (
 // onCall is the On-call profile, which the Default route also takes.
 func onCall() Profile {
 	return Profile{
-		ID: ProfileOnCall, Name: "On-call", GroupKey: []string{"alertname", "severity", "cluster"},
+		ID: ProfileOnCall, Name: "On-call", MinimumSeverity: MinimumNone,
+		GroupKey: []string{"alertname", "severity", "cluster"},
 		Policy: Policy{
 			ReopenWindowSeconds: 15 * 60, GracePeriodSeconds: 15 * 60, UrgentRiseRemovesAck: true,
 			SnoozeDurationsSeconds: []int64{hour, 4 * hour, day}, ThreadBatchingWindowSeconds: 60, StormThreshold: 20,

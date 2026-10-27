@@ -264,6 +264,7 @@ export * from './mentionSettingEveryone';
 export * from './mentionSettings';
 export * from './messenger';
 export * from './meUpdate';
+export * from './minimumSeverity';
 export * from './movedAlertGroups';
 export * from './nextNotice';
 export * from './nextNoticeKind';

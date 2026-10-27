@@ -312,11 +312,13 @@ const (
 
 // StatusReasonCode is the code of the reason of an automatic status change, as the API gives it beside the reason
 // (reason_code): the reason itself where it is one already — why an Alert resolved, why an Owner was released — and
-// ReasonCodeNoAnswer for ReasonNoAnswer; "" for any other reason.
+// ReasonCodeNoAnswer for ReasonNoAnswer, ReasonCodeMinimumSeverity for ReasonMinimumSeverity; "" for any other reason.
 func StatusReasonCode(reason string) string {
 	switch {
 	case reason == ReasonNoAnswer:
 		return ReasonCodeNoAnswer
+	case reason == ReasonMinimumSeverity:
+		return ReasonCodeMinimumSeverity
 	case reason == ReasonOwnerDisabled, reason == ReasonOwnerDeleted, slices.Contains(ingest.ResolveReasons, reason):
 		return reason
 	}

@@ -437,6 +437,23 @@ var TimerFired = newEvent("timer_fired", LevelInfo, "C-17",
 		"how many overdue ones collapsed into one notices_missed, 0 when none did.",
 	"kind", "group", "notice", "missed")
 
+// OpenGroupUpdateDone is logged when a change of configuration reached every open Alert Group of its scope
+// (C-26.FR-9).
+var OpenGroupUpdateDone = newEvent("open_group_update_done", LevelInfo, "C-26",
+	"A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as "+
+		"route_minimum_severity; the scope is named by route, destination or team, the public_id of the Route, the "+
+		"Destination or the Team, whichever the kind has, and by none for the Organization; alert_groups is how many "+
+		"open Alert Groups it changed.",
+	"kind", "route", "destination", "team", "alert_groups")
+
+// OpenGroupUpdateFailed is logged when a change of configuration could not reach the open Alert Groups of its scope;
+// any replica runs it again from where it stopped once its lease runs out (C-26.FR-9).
+var OpenGroupUpdateFailed = newEvent("open_group_update_failed", LevelWarn, "C-26",
+	"A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, "+
+		"route, destination or team names its scope as in open_group_update_done, and error is what failed. Any "+
+		"replica runs it again from the last Alert Group it reached once its lease runs out.",
+	"kind", "route", "destination", "team", "error")
+
 // ReminderSkipped is logged when a Reminder came due on an Alert Group that no longer wants it (C-17.FR-4).
 var ReminderSkipped = newEvent("reminder_skipped", LevelInfo, "C-17",
 	"A Reminder came due and was dropped with its timer: group is the public_id of the Alert Group and reason "+

@@ -61,23 +61,18 @@ func (t *snapshotChange) apply(ctx context.Context, q Queries, g *Group, c *chan
 	}
 	if s := t.b.slot; s != nil && s.reopen {
 		// A reopened Alert Group fires only its new Alerts: its level is theirs, and the Reopen records it.
-		if err := t.level(ctx, g, levelOf(s.joins)); err != nil {
-			return err
-		}
-	} else if err := t.rise(ctx, g, before, c); err != nil {
-		return err
+		t.level(g, levelOf(s.joins))
+	} else {
+		t.rise(g, before, c)
 	}
 	return t.resolutions(ctx, q, g, c)
 }
 
-// level sets the Severity level of g and the urgency it gives on its Route (C-08.FR-6).
-func (t *snapshotChange) level(ctx context.Context, g *Group, level organization.SeverityLevel) error {
-	st, err := t.e.grouping(ctx)
-	if err != nil {
-		return err
-	}
-	g.Severity, g.Urgent = level, urgentOf(t.route, level, st.CriticalIsUrgent)
-	return nil
+// level sets the Severity level of g from the level of its firing Alerts, raised to its Route's Minimum severity, and
+// the urgency it gives (C-26.FR-8).
+func (t *snapshotChange) level(g *Group, alerts organization.SeverityLevel) {
+	g.Severity = t.route.raise(alerts)
+	g.Urgent = urgentOf(g.Severity)
 }
 
 // levelOf is the highest Severity level of Alerts, info for none.
@@ -101,7 +96,7 @@ func (t *snapshotChange) joins(ctx context.Context, q Queries, g *Group, s *slot
 	if s.reopen {
 		return t.reopen(ctx, q, g, s, c)
 	}
-	st, err := t.e.grouping(ctx)
+	instance, err := t.e.instanceLabels(ctx)
 	if err != nil {
 		return err
 	}
@@ -109,7 +104,7 @@ func (t *snapshotChange) joins(ctx context.Context, q Queries, g *Group, s *slot
 	for _, a := range s.joins {
 		label := ""
 		for _, m := range t.e.members[g.ID] {
-			if label = replacedLabelOf(a, m, st.InstanceLabels); label != "" {
+			if label = replacedLabelOf(a, m, instance); label != "" {
 				break
 			}
 		}
@@ -219,24 +214,32 @@ func (t *snapshotChange) members(ctx context.Context, q Queries, g *Group, c *ch
 	return nil
 }
 
-// rise records a rise in Severity level (C-08.FR-6, C-09.FR-9). Urgency is judged on the Route and the settings as
-// they are now, before and after the rise: a rise that makes the Alert Group Urgent ends a Snooze, unless it was set
-// while Urgent, and removes the acknowledgement when the Route says so; any other rise — urgency unchanged, also
-// after a configuration edit made it Urgent already — is a Quiet severity_raised that removes nothing.
-func (t *snapshotChange) rise(ctx context.Context, g *Group, before organization.SeverityLevel, c *change) error {
-	level := higher(before, levelOf(t.b.slot.joinsOrNil()))
+// rise records a rise in Severity level (C-26.FR-8, C-09.FR-9): the level of the Alerts that joined, raised to the
+// Route's Minimum severity. A rise that makes the Alert Group Urgent — critical — ends a Snooze, unless it was set
+// while Urgent, and removes the acknowledgement when the Route says so; any other rise is a Quiet severity_raised that
+// removes nothing. A rise that the Minimum severity makes rather than an Alert — one that the worker of
+// open_group_updates has not applied yet — is a configuration edit: Quiet, removing nothing, with the reason
+// ReasonMinimumSeverity, as that worker records it.
+func (t *snapshotChange) rise(g *Group, before organization.SeverityLevel, c *change) {
+	alerts := higher(before, levelOf(t.b.slot.joinsOrNil()))
+	level := t.route.raise(alerts)
 	if rank(level) <= rank(before) {
-		return nil
+		return
 	}
-	st, err := t.e.grouping(ctx)
-	if err != nil {
-		return err
-	}
-	was, now := urgentOf(t.route, before, st.CriticalIsUrgent), urgentOf(t.route, level, st.CriticalIsUrgent)
+	was, now := urgentOf(before), urgentOf(level)
 	g.Severity, g.Urgent = level, now
-	if was || !now {
-		c.add(entry{Event: EventSeverityRaised})
-		return nil
+	reason := ""
+	if rank(alerts) < rank(level) {
+		reason = ReasonMinimumSeverity
+	}
+	switch {
+	case was || !now:
+		c.add(entry{Event: EventSeverityRaised, Reason: reason})
+		return
+	case reason != "":
+		c.add(entry{Event: EventUrgencyRaised, Variant: VariantRemovesNone, From: g.Status, To: g.Status,
+			Reason: reason})
+		return
 	}
 	from := g.Status
 	var previous *int64
@@ -256,7 +259,6 @@ func (t *snapshotChange) rise(ctx context.Context, g *Group, before organization
 		c.reason = string(EventUrgencyRaised)
 	}
 	c.add(entry{Event: EventUrgencyRaised, Variant: variant, From: from, To: g.Status, PreviousOwner: previous})
-	return nil
 }
 
 // joinsOrNil are the Alerts of a slot, none for a batch without one.
@@ -302,7 +304,8 @@ func (t *snapshotChange) resolutions(ctx context.Context, q Queries, g *Group, c
 		for _, r := range rows {
 			level = higher(level, severityOf(r.SeverityLevel))
 		}
-		return t.level(ctx, g, level)
+		t.level(g, level)
+		return nil
 	}
 	last := t.b.resolved[len(t.b.resolved)-1]
 	return t.e.resolve(ctx, q, g, t.route, last.reason, last.text, fingerprints(alerts), c)

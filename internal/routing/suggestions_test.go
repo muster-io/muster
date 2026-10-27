@@ -84,8 +84,9 @@ func heartbeat(id, name, static string) dbgen.ListHeartbeatIntegrationsRow {
 
 // TestSuggestions is C-08.FR-11 and C-08.AC-8: heartbeat_lost applies while an Integration has its Heartbeat on
 // and its MusterHeartbeatLost, with the Static labels the Heartbeat check adds, would go to the Default route; it
-// suggests the urgent Route for alertname="MusterHeartbeatLost" grouped by alertname and integration, with the
-// On-call policy and no Destinations. internal_alerts never applies before Destinations exist.
+// suggests the Route for alertname="MusterHeartbeatLost" with the Minimum severity critical, so that its Alert Groups
+// are critical and Urgent (C-26.FR-8), grouped by alertname and integration, with the On-call policy and no
+// Destinations. internal_alerts never applies before Destinations exist.
 func TestSuggestions(t *testing.T) {
 	svc, store, _ := newService(t)
 	ctx := t.Context()
@@ -99,7 +100,8 @@ func TestSuggestions(t *testing.T) {
 	}
 	in := list[0].Route
 	if list[0].ID != SuggestionHeartbeatLost || in.Name != "Muster: Heartbeat lost" ||
-		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=", Value: "MusterHeartbeatLost"}}) || !in.Urgent ||
+		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=", Value: "MusterHeartbeatLost"}}) ||
+		in.MinimumSeverity == nil || *in.MinimumSeverity != MinimumCritical ||
 		!slices.Equal(in.GroupKey, []string{"alertname", "integration"}) || in.DestinationIDs == nil ||
 		len(in.DestinationIDs) != 0 || in.Description != nil || in.Policy.StormThreshold != onCall().Policy.StormThreshold ||
 		!in.Policy.AckTimeout.Enabled {
@@ -180,7 +182,8 @@ func TestAcceptSuggestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	if names(after) != "Muster: Heartbeat lost,second,Default" || after.Version != before.Version+1 ||
-		rt.Position != 0 || !rt.Urgent || rt.Name != HeartbeatLostRouteName || svc.router.cached != cached {
+		rt.Position != 0 || !rt.Urgent || rt.MinimumSeverity != MinimumCritical || rt.Name != HeartbeatLostRouteName ||
+		svc.router.cached != cached {
 		t.Errorf("accepted %+v, list %s v%d", rt, names(after), after.Version)
 	}
 	entry := store.audit[audits]
@@ -312,7 +315,8 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 	}
 	in := list[0].Route
 	if list[0].ID != SuggestionInternalAlerts || in.Name != "Muster internal alerts" ||
-		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=~", Value: "Muster.*"}}) || in.Urgent ||
+		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=~", Value: "Muster.*"}}) ||
+		in.MinimumSeverity != nil ||
 		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route"}) ||
 		in.DestinationIDs == nil || len(in.DestinationIDs) != 0 || !in.Policy.AckTimeout.Enabled {
 		t.Errorf("suggested %+v", in)
@@ -425,7 +429,8 @@ func TestAcceptInternalAlertsSuggestion(t *testing.T) {
 				t.Fatal(err)
 			}
 			if names(list) != c.want || rt.Name != InternalAlertsRouteName ||
-				!slices.Equal(rt.DestinationIDs, []string{"DSAAAAAAAAAAA1"}) || rt.Urgent {
+				!slices.Equal(rt.DestinationIDs, []string{"DSAAAAAAAAAAA1"}) || rt.Urgent ||
+				rt.MinimumSeverity != MinimumNone {
 				t.Errorf("accepted %+v, list %s", rt, names(list))
 			}
 			if got := suggestionIDs(t, svc, nil); len(got) != 0 {

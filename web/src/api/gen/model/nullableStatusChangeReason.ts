@@ -4,7 +4,7 @@
  */
 
 /**
- * The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.
+ * The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.
  * @nullable
  */
 export type NullableStatusChangeReason = typeof NullableStatusChangeReason[keyof typeof NullableStatusChangeReason] | null;
@@ -18,4 +18,5 @@ export const NullableStatusChangeReason = {
   owner_disabled: 'owner_disabled',
   owner_deleted: 'owner_deleted',
   reminders_unanswered: 'reminders_unanswered',
+  minimum_severity: 'minimum_severity',
 } as const;

@@ -499,12 +499,8 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 		}
 		return unresolve{newer: newer, routeDeleted: routeDeleted, orgID: s.orgID}, nil
 	case CommandSnooze:
-		urgent, err := s.urgentNow(ctx, q, g)
-		if err != nil {
-			return nil, err
-		}
 		user, account := c.person()
-		return snooze{end: *a.end, user: user, account: account, urgent: urgent}, nil
+		return snooze{end: *a.end, user: user, account: account, urgent: urgentOf(g.Severity)}, nil
 	case CommandUnsnooze:
 		return unsnooze{}, nil
 	case CommandStillOnIt:
@@ -574,19 +570,6 @@ func (s *Service) newerOpen(ctx context.Context, q Queries, g *Group) (*GroupRef
 		return nil, fmt.Errorf("read alert group %d: %w", id, err)
 	}
 	return &GroupRef{PublicID: r.PublicID, Number: r.Number}, nil
-}
-
-// urgentNow is the urgency of g as its Route and organization.critical_is_urgent give it now (C-08.FR-6).
-func (s *Service) urgentNow(ctx context.Context, q Queries, g *Group) (bool, error) {
-	policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: g.RouteID})
-	if err != nil {
-		return false, fmt.Errorf("read route %d: %w", g.RouteID, err)
-	}
-	st, err := q.GetGroupingSettings(ctx, s.orgID)
-	if err != nil {
-		return false, fmt.Errorf("read the grouping settings: %w", err)
-	}
-	return urgentOf(&routeInfo{Urgent: policy.Urgent}, g.Severity, st.CriticalIsUrgent), nil
 }
 
 // clearSnooze ends the Snooze of g.

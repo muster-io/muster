@@ -33,6 +33,9 @@ files_touched:
   - internal/groups/transitions.go
   - internal/groups/transitions_test.go
   - internal/groups/commands.go
+  - internal/groups/commands_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/timers.go
   - internal/groups/read.go
   - internal/groups/events.go
   - internal/groups/query.sql
@@ -43,11 +46,17 @@ files_touched:
   - internal/groups/list_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
+  - internal/routing/routing_integration_test.go
+  - internal/organization/heartbeat_integration_test.go
   - web/src/components/timeline.tsx
+  - web/src/components/route-form.tsx
   - test/e2e/routing_test.go
   - test/e2e/minimum_severity_test.go
   - test/e2e/routing_preview_test.go
+  - test/e2e/lifecycle_test.go
   - docs/concepts/routes-and-group-keys.md
+  - docs/concepts/alert-groups.md
   - docs/install/versions.md
 acceptance:
   - "[C-26.FR-8, C-08.FR-6, C-09.FR-1, C-08.FR-1] The Severity level of an Alert Group is the highest Severity level of its firing Alerts raised to its Route's `minimum_severity` (`none`, `warning`, `critical`), and `urgent` is true exactly when that level is critical, whatever `routes.urgent` and `organizations.critical_is_urgent` hold; a Route with the Minimum severity critical makes a warning Alert's Alert Group critical and Urgent, while `listIntegrationAlerts`, `listAlertGroupAlerts` and the `alerts[]` of its `created` webhook event show the Alert as warning (`transitions_test.go`, `minimum_severity_test.go`)."
@@ -223,7 +232,7 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization
 curl -s -X PUT $FAM/groups/h1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"Lag"}}' > /dev/null
 PUTA h1 a '{"labels":{"svc":"hb","severity":"warning"}}'; NOTIFY h1 '{"reason":"first notification"}'
 G=$(AG 'svc%3D%22hb%22'); GET $G | jq -c '{severity_level, urgent}'          # {"severity_level":"critical","urgent":true}
-curl -s "${A[@]}" "$API/alert-groups/$G/alerts" | jq -r '.items[0].severity_level'                         # warning
+curl -s "${A[@]}" "$API/alert-groups/$G/alerts" | jq -r '.items[0].labels.severity'                         # warning
 
 # C-26.FR-9, C-26.AC-11, C-09.AC-8: raising the Minimum severity of a Route with an acknowledged warning Alert Group
 R2=$(ROUTE db none | jq -r .id)

@@ -16,4 +16,4 @@ export type Organization = OrganizationBase & {
   outgoing_heartbeat: OrganizationOutgoingHeartbeat;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}, 'workday_start' | 'week_start'>>;
+}, 'workday_start' | 'week_start' | 'critical_is_urgent'>>;

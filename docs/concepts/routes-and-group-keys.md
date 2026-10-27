@@ -24,7 +24,7 @@ A Route has:
 - a **name**, unique in the Organization, and a description;
 - **Matchers**, which pick the Alerts;
 - a **position** in the list;
-- an **urgent** mark;
+- a [**Minimum severity**](#minimum-severity);
 - a **Group key**;
 - the **Destinations** that receive its Alert Groups;
 - policy fields for how its Alert Groups are handled: the Reopen window and the Grace period, whether a rise to Urgent
@@ -92,15 +92,38 @@ Choose **Informational** for alerts nobody needs to act on at once, such as a ce
 notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and
 commands](statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) for what the timers do.
 
-### Urgent
+### Minimum severity
 
-An Alert Group is **Urgent** when its Route is marked urgent, or when its Severity level is critical and the Organization
-has `organization.critical_is_urgent` on (the default). An Urgent Alert Group is posted first when many arrive at once,
-and a rise to Urgent can end a Snooze or remove an acknowledgement.
+The **Minimum severity** of a Route (`route.minimum_severity`: none, `warning` or `critical`; none by default) is the
+lowest Severity level of its Alert Groups. An Alert Group's Severity level is the highest Severity level of its firing
+Alerts, raised to the Minimum severity of its Route. The Minimum severity only raises: it never lowers an Alert Group,
+and it never changes the level of an Alert, which the Alerts of the Alert Group page, the Alerts view and the `alerts[]`
+of outgoing webhook events still show as received.
+
+Use it for a Route whose Alerts all matter as much as a critical one, whatever their `severity` label says: with the
+Minimum severity critical, a warning Alert of the Route starts a critical, and so [Urgent](#urgent), Alert Group. The
+Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical.
+
+A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
+`severity_raised`, or the Quiet `urgency_raised` of an Alert Group it makes critical, with the reason "Minimum severity
+of the Route"; it never removes an acknowledgement or a Snooze. A lowered one records nothing and lowers their level,
+as a falling Severity level does. The Root messages show the new level.
 
 By default the `severity` label maps to a Severity level: `critical` is critical, `warning` is warning, `info` and
 `none` are info, any other value counts as warning and is shown as received, and an Alert without the label counts as
 info. The Organization can change the label and the mapping.
+
+### Urgent
+
+An Alert Group is **Urgent** when its Severity level is critical — from its Alerts, or from the
+[Minimum severity](#minimum-severity) of its Route. An Urgent Alert Group is posted first when many arrive at once, is
+published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
+Route's "rise to Urgent removes the acknowledgement" is on.
+
+From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
+got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
+`critical_is_urgent` on the Organization as read-only fields until 0.3.0, and ignores them in requests. See the
+[upgrade notes of 0.2.0](../install/versions.md#upgrade-notes).
 
 ## Group keys
 
@@ -181,9 +204,8 @@ labels](../integrations/alertmanager.md#static-labels).
 
     ![Create route: the choice between the profiles On-call and Informational](../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
 
-2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](#matchers), turn on **Urgent** if every
-   Alert Group of the Route is [Urgent](#urgent), and check the [Group key](#group-keys) with its
-   [preview](#preview-before-you-save).
+2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](#matchers) and check the
+   [Group key](#group-keys) with its [preview](#preview-before-you-save).
 
     ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](../assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
 
@@ -213,9 +235,9 @@ Destination to the Default route and everything reaches one place. This is the s
 plus a messenger.
 
 **Pages for payments.** Create the Route `payments-critical` with the Matchers `team="payments"` and
-`severity="critical"`, the On-call profile, the urgent mark on, and a Destination that is the payments team's channel.
-Put it above the Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other
-alerts fall through to the Default route.
+`severity="critical"`, the On-call profile and a Destination that is the payments team's channel. Put it above the
+Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
+to the Default route.
 
 **Certificates.** Create the Route `certificates` with the Matcher `alertname=~"Cert.*"`, the Informational profile and a
 Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer
@@ -233,6 +255,7 @@ alerts](../reference/internal-alerts.md).
   messages are brought up to date.
 - A new Group key or new Matchers apply to Alerts that start firing afterwards. A fingerprint already in an open Alert
   Group stays there until that Alert Group is resolved.
+- A changed [Minimum severity](#minimum-severity) raises or lowers the Severity level of the open Alert Groups, Quietly.
 - No edit changes the status of any Alert Group.
 - Adding a Destination to a Route gives it the Route's open Alert Groups, Quietly. Removing one gives each open Root
   message one last edit that says it is no longer updated and links to Muster.

@@ -52,11 +52,11 @@ Route
 :   The [Route](routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers.
 
 Severity level
-:   The highest Severity level of its firing Alerts: critical, warning or info.
+:   The highest Severity level of its firing Alerts — critical, warning or info — raised to the
+    [Minimum severity](routes-and-group-keys.md#minimum-severity) of its Route.
 
 Urgent
-:   Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as
-    Urgent (`organization.critical_is_urgent`, on by default).
+:   Set exactly when its Severity level is critical. See [Urgent](routes-and-group-keys.md#urgent).
 
 Reopen count
 :   How many times Muster reopened it.

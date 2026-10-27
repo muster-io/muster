@@ -530,9 +530,11 @@ type process struct {
 	signals   *heartbeat.Service
 	worker    *ingest.Worker
 	scanner   *ingest.Processor
-	// groups is the Alert Group lifecycle, which groups the Alerts after routing, and timers fires its timers.
-	groups *groups.Service
-	timers *timers.Worker
+	// groups is the Alert Group lifecycle, which groups the Alerts after routing, timers fires its timers, and openUpdates
+	// applies the changes of configuration that reach the open Alert Groups (C-26.FR-9).
+	groups      *groups.Service
+	timers      *timers.Worker
+	openUpdates *groups.UpdateWorker
 	// delivery is the delivery of the Organization, which the dispatcher's re-render step fills, and deliverer the
 	// delivery worker of this replica; destinations reads the Destinations, and connections holds the Connections
 	// that the Mattermost adapter posts through.
@@ -652,14 +654,15 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	p.partitions = partitions.New(d.PartitionSession, clocks.Business, log)
 	p.worker = &ingest.Worker{Log: log, Real: clocks.Real}
 	p.timers = &timers.Worker{Log: log}
+	p.openUpdates = &groups.UpdateWorker{Log: log}
 	p.deliverer = &delivery.Worker{Log: log}
 	if opts.Development {
 		// The development clock comes before anything reads the business clock, the partitions among them. A move
-		// wakes the processing worker, the timer worker and the delivery worker, which re-read their due times at the
-		// new time.
+		// wakes the processing worker, the timer worker, the open Alert Group update worker and the delivery worker,
+		// which re-read their due times at the new time.
 		p.devClock = devmode.NewClock(d.ClockStore(), business, func(ctx context.Context, at time.Time) error {
 			return partitions.New(d.PartitionSession, clock.NewManual(at), log).Maintain(ctx)
-		}, p.worker.Wake, p.timers.Wake, p.deliverer.Wake)
+		}, p.worker.Wake, p.timers.Wake, p.openUpdates.Wake, p.deliverer.Wake)
 		if err := p.devClock.Load(ctx); err != nil {
 			d.Close()
 			return nil, failed(ctx, log, err)
@@ -1349,6 +1352,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	// LISTEN in place does both, in case a notification was missed.
 	p.listener.Listen(ingest.SnapshotChannel, func(string) { p.worker.Wake() })
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
+	p.listener.Listen(groups.OpenGroupUpdatesChannel, func(string) { p.openUpdates.Wake() })
 	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
 	p.listener.Listen(mattermost.TestPressChannel, p.testPresses.Arrived)
 	// A change of the outbound address policy, maybe on another replica, applies here at once (C-20.FR-3).
@@ -1398,11 +1402,13 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			}
 			p.worker.Wake()
 			p.timers.Wake()
+			p.openUpdates.Wake()
 			p.deliverer.Wake()
 		})
 	})
 	wg.Go(func() { p.worker.Run(ctx) })
 	wg.Go(func() { p.timers.Run(ctx) })
+	wg.Go(func() { p.openUpdates.Run(ctx) })
 	wg.Go(func() { p.deliverer.Run(ctx) })
 	wg.Go(func() { p.rechecker().Run(ctx) })
 	wg.Go(func() { p.integrations.RunTouches(ctx) })
@@ -1464,6 +1470,9 @@ func (p *process) configureWorker() {
 	p.timers.Store = p.db.TimersStore()
 	p.timers.Lease = db.Lease{Owner: p.replica.ID(), Duration: timers.Lease, Clocks: p.clocks}
 	p.timers.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }
+	// The open Alert Group updates run on every replica, under leases of their own; they are not a Leader task.
+	p.openUpdates.Service = p.groups
+	p.openUpdates.Lease = db.Lease{Owner: p.replica.ID(), Duration: groups.UpdateLease, Clocks: p.clocks}
 	p.deliverer.Store = p.db.DeliveryStore()
 	p.deliverer.Lease = db.Lease{Owner: p.replica.ID(), Duration: delivery.Lease, Clocks: p.clocks}
 	p.deliverer.Organizations = func(context.Context) ([]int64, error) { return []int64{p.orgID}, nil }

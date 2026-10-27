@@ -70,12 +70,13 @@ func (s *Server) GetKeyring(ctx context.Context, _ gen.GetKeyringRequestObject) 
 	return gen.GetKeyring200JSONResponse(out), nil
 }
 
-// organizationOf is the API form of the organization resource.
+// organizationOf is the API form of the organization resource; critical_is_urgent is always true from 0.2.0
+// (C-26.FR-10).
 func organizationOf(o organization.Organization) gen.Organization {
 	tag := etag(o.Version)
 	out := gen.Organization{
 		Id: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart,
-		WeekStart: gen.Weekday(o.WeekStart), SeverityLabel: o.SeverityLabel, CriticalIsUrgent: o.CriticalIsUrgent,
+		WeekStart: gen.Weekday(o.WeekStart), SeverityLabel: o.SeverityLabel, CriticalIsUrgent: true,
 		InstanceLabels:  o.InstanceLabels,
 		SeverityMapping: make([]gen.SeverityMappingEntry, 0, len(o.SeverityMapping)),
 		SeverityStyles:  make([]gen.SeverityLevelStyle, 0, len(o.SeverityStyles)),
@@ -123,11 +124,12 @@ func secretStatusOf(st organization.SecretState) gen.SecretStatus {
 	return out
 }
 
-// inputOf is an update of the organization resource as internal/organization takes it.
+// inputOf is an update of the organization resource as internal/organization takes it; critical_is_urgent is
+// ignored from 0.2.0 (C-26.FR-10).
 func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 	in := organization.Input{
 		Name: b.Name, TimeZone: b.TimeZone, WorkdayStart: b.WorkdayStart, SeverityLabel: b.SeverityLabel,
-		CriticalIsUrgent: b.CriticalIsUrgent, InstanceLabels: b.InstanceLabels,
+		InstanceLabels:        b.InstanceLabels,
 		TOTPRequired:          organization.TOTPPolicy(b.TotpRequired),
 		OIDCTokenGraceSeconds: int64(b.OidcTokenGraceSeconds),
 		Retention: organization.Retention{

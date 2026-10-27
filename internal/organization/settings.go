@@ -78,10 +78,12 @@ type Settings struct {
 	// WorkdayStart is organization.workday_start, HH:MM on the 24-hour clock.
 	WorkdayStart string
 	// WeekStart is organization.week_start, monday to sunday.
-	WeekStart        string
-	SeverityLabel    string
-	SeverityMapping  []SeverityMapping
-	SeverityStyles   []SeverityStyle
+	WeekStart       string
+	SeverityLabel   string
+	SeverityMapping []SeverityMapping
+	SeverityStyles  []SeverityStyle
+	// CriticalIsUrgent is organization.critical_is_urgent: true when the Organization is created, true from 0.2.0
+	// whatever the column holds, and never written again (C-26.FR-10).
 	CriticalIsUrgent bool
 	InstanceLabels   []string
 	Retention        Retention
@@ -122,7 +124,7 @@ func Current(ctx context.Context, s Store) (Settings, error) {
 		WorkdayStart:     org.WorkdayStart,
 		WeekStart:        org.WeekStart,
 		SeverityLabel:    org.SeverityLabel,
-		CriticalIsUrgent: org.CriticalIsUrgent,
+		CriticalIsUrgent: true,
 		InstanceLabels:   org.InstanceLabels,
 		Retention: Retention{
 			StoredSnapshotsDays:     org.RetentionStoredSnapshotsDays,

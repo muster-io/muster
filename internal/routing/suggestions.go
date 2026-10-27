@@ -40,8 +40,10 @@ type Suggestion struct {
 	Route Input
 }
 
-// suggested is the Route the suggestion id creates. The Route for Internal alerts takes every one of them, one Alert
-// Group per Internal alert and entity, urgent only for a critical one; its Destinations are chosen on acceptance.
+// suggested is the Route the suggestion id creates. The Route for MusterHeartbeatLost has the Minimum severity
+// critical, so its Alert Groups are critical and Urgent (C-26.FR-8, C-26 scenario 6). The Route for Internal alerts
+// takes every one of them, one Alert Group per Internal alert and entity, Urgent only for a critical one; its
+// Destinations are chosen on acceptance.
 func suggested(id string) (Input, error) {
 	switch id {
 	case SuggestionHeartbeatLost:
@@ -49,7 +51,8 @@ func suggested(id string) (Input, error) {
 			Name: HeartbeatLostRouteName,
 			Matchers: []Matcher{{Label: "alertname", Op: string(matchers.Equal),
 				Value: internalalerts.HeartbeatLost.Name}},
-			Urgent: true, GroupKey: []string{"alertname", internalalerts.EntityIntegration},
+			MinimumSeverity: new(MinimumCritical), Urgent: true,
+			GroupKey:       []string{"alertname", internalalerts.EntityIntegration},
 			DestinationIDs: []string{}, Policy: onCall().Policy,
 		}, nil
 	case SuggestionInternalAlerts:

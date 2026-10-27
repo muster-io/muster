@@ -129,6 +129,8 @@ function changeReason(
     case "stale":
     case "integration_deleted":
       return reasonLabel(t, code);
+    case "minimum_severity":
+      return reason ? reason : null;
     case null:
     case undefined:
       return reason ? reason : null;

@@ -205,7 +205,7 @@ func (s *Service) groupID(ctx context.Context, publicID string) (int64, bool, er
 }
 
 // Get reads the Alert Group publicID (C-09.FR-1, FR-10, FR-14): its status, Route, Integrations, title and summary,
-// Severity level, urgency as its Route and organization.critical_is_urgent give it now, counts, the resolution, its
+// Severity level, urgency as that level gives it (critical, C-26.FR-8), counts, the resolution, its
 // Owner and Snooze, its labels, its links and the notices of its page — newer_alert_group_exists for a person-resolved one whose
 // key another open Alert Group took (C-10.FR-7); once its details are removed, the notice details_removed with the
 // period (C-09.FR-16).

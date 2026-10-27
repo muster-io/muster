@@ -36,7 +36,8 @@ export const ListRoutesResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(listRoutesResponseItemsItemOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -121,7 +122,8 @@ export const CreateRouteBody = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).optional().describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().optional().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(createRouteBodyDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -176,7 +178,8 @@ export const CreateRouteResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(createRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -268,7 +271,8 @@ export const GetRouteResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(getRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -363,7 +367,8 @@ export const UpdateRouteBody = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).optional().describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().optional().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(updateRouteBodyDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -418,7 +423,8 @@ export const UpdateRouteResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(updateRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -533,7 +539,8 @@ export const ReorderRoutesResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(reorderRoutesResponseItemsItemOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -626,7 +633,8 @@ export const ListRouteProfilesResponse = zod.object({
   "items": zod.array(zod.object({
   "id": zod.enum(['on_call', 'informational']),
   "name": zod.string(),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('`none` for both profiles: neither sets a Minimum severity.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`, so `false` for both profiles; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(listRouteProfilesResponseItemsItemPolicyReopenWindowSecondsMin),
@@ -725,7 +733,8 @@ export const ListRouteSuggestionsResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).optional().describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().optional().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(listRouteSuggestionsResponseItemsItemRouteDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({
@@ -797,7 +806,8 @@ export const AcceptRouteSuggestionResponse = zod.object({
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
 }).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).describe('Combined with AND. The Default route has none.'),
-  "urgent": zod.boolean(),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route\'s open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.'),
+  "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0.'),
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(acceptRouteSuggestionResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "policy": zod.object({

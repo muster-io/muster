@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Package routing holds the Routes of C-08 and routes Alerts with them. A Route has a name, Matchers, the urgent mark,
-// a Group key and every policy field, each in its typed column; the Default route exists from the first start, has no
+// Package routing holds the Routes of C-08 and routes Alerts with them. A Route has a name, Matchers, the Minimum
+// severity, a Group key and every policy field, each in its typed column; the Default route exists from the first start, has no
 // Matchers and is always last. Routes are evaluated `ORDER BY is_default, position, id` and the first one whose
 // Matchers all match takes a newly firing Alert (Router). Reordering replaces the positions under the list ETag,
 // organizations.route_order_version, which creating, deleting and reordering bump; deletion is soft. Every change is
@@ -49,6 +49,21 @@ const (
 
 // DefaultName is the name the Default route is created with.
 const DefaultName = "Default"
+
+// The Minimum severities of a Route (route.minimum_severity, C-26.FR-8): none, or the lowest Severity level of its
+// Alert Groups.
+const (
+	MinimumNone     = "none"
+	MinimumWarning  = "warning"
+	MinimumCritical = "critical"
+)
+
+// KindMinimumSeverity is the kind of the open_group_updates row that a changed Minimum severity writes (C-26.FR-9),
+// and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+const (
+	KindMinimumSeverity     = "route_minimum_severity"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
 
 // The Audit log actions and resource type, and the live hint, of Routes (C-03.FR-14).
 const (
@@ -209,21 +224,24 @@ type Reminders struct {
 // Route is a Route as the API reads it; Position is its zero-based place in evaluation order, DestinationIDs the
 // public_ids of its Destinations that are not deleted, in order, and Storm its active Storm, nil when there is none.
 type Route struct {
-	ID             int64
-	PublicID       string
-	Name           string
-	Description    string
-	Position       int
-	IsDefault      bool
-	Urgent         bool
-	Matchers       []Matcher
-	GroupKey       []string
-	Policy         Policy
-	DestinationIDs []string
-	Storm          *Storm
-	TemplateError  *TemplateError
-	CreatedAt      time.Time
-	Version        int64
+	ID          int64
+	PublicID    string
+	Name        string
+	Description string
+	Position    int
+	IsDefault   bool
+	// MinimumSeverity is route.minimum_severity; Urgent, the deprecated urgent mark, is true exactly when it is
+	// critical (C-26.FR-10).
+	MinimumSeverity string
+	Urgent          bool
+	Matchers        []Matcher
+	GroupKey        []string
+	Policy          Policy
+	DestinationIDs  []string
+	Storm           *Storm
+	TemplateError   *TemplateError
+	CreatedAt       time.Time
+	Version         int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
 	OpenAlertGroupCount int64
 }
@@ -249,16 +267,18 @@ func (e *OpenAlertGroupsError) Error() string {
 	return fmt.Sprintf("the route has %d open alert groups", e.Count)
 }
 
-// Input is what createRoute and updateRoute write. A nil Description keeps the stored value on an update and is empty
-// on a creation; Matchers replace the stored ones as a whole.
+// Input is what createRoute and updateRoute write. A nil Description or MinimumSeverity keeps the stored value on an
+// update, and is empty or none on a creation; Matchers replace the stored ones as a whole. Urgent is ignored: the
+// urgent mark follows the Minimum severity (C-26.FR-10).
 type Input struct {
-	Name           string
-	Description    *string
-	Matchers       []Matcher
-	Urgent         bool
-	GroupKey       []string
-	DestinationIDs []string
-	Policy         Policy
+	Name            string
+	Description     *string
+	Matchers        []Matcher
+	MinimumSeverity *string
+	Urgent          bool
+	GroupKey        []string
+	DestinationIDs  []string
+	Policy          Policy
 	// Keep are the templates an update leaves as they are stored.
 	Keep KeepTemplates
 }
@@ -298,6 +318,9 @@ type Queries interface {
 	ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListHeartbeatIntegrationsRow, error)
 	ListAlertingIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingIntegrationsRow, error)
 	ListAlertingDestinations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingDestinationsRow, error)
+	HasOpenAlertGroups(ctx context.Context, arg dbgen.HasOpenAlertGroupsParams) (bool, error)
+	InsertOpenGroupUpdate(ctx context.Context, arg dbgen.InsertOpenGroupUpdateParams) error
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	ListRouteSuggestionDismissals(ctx context.Context, arg dbgen.ListRouteSuggestionDismissalsParams) ([]string,
 		error)
 	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
@@ -465,7 +488,8 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 	out := List{Version: version, Routes: make([]Route, len(rows))}
 	for i, r := range rows {
 		out.Routes[i] = routeOf(dbgen.GetRouteRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
-			Description: r.Description, Position: r.Position, IsDefault: r.IsDefault, Urgent: r.Urgent,
+			Description: r.Description, Position: r.Position, IsDefault: r.IsDefault,
+			MinimumSeverity: r.MinimumSeverity, Urgent: r.Urgent,
 			GroupKey: r.GroupKey, ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
 			UrgentRiseRemovesAck: r.UrgentRiseRemovesAck, SnoozeDurationsSeconds: r.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: r.ThreadBatchingWindowSeconds, StormThreshold: r.StormThreshold,
@@ -733,8 +757,9 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		id := publicid.New(publicid.Route)
 		p := in.Policy
 		routeID, err := q.InsertRoute(ctx, dbgen.InsertRouteParams{
-			OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, First: how.first, Urgent: in.Urgent,
-			GroupKey: in.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
+			OrgID: s.orgID, PublicID: id, Name: in.Name, Description: description, First: how.first,
+			MinimumSeverity: minimumOf(in.MinimumSeverity),
+			GroupKey:        in.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
 			UrgentRiseRemovesAck: p.UrgentRiseRemovesAck, SnoozeDurationsSeconds: p.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: p.ThreadBatchingWindowSeconds, StormThreshold: p.StormThreshold,
 			Language: p.Language, TemplateRootMessage: text(p.Templates.RootMessage),
@@ -861,8 +886,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			return err
 		}
 		next := before
-		next.Name, next.Matchers, next.Urgent, next.GroupKey, next.Policy = in.Name, in.Matchers, in.Urgent,
-			in.GroupKey, in.Policy
+		next.Name, next.Matchers, next.GroupKey, next.Policy = in.Name, in.Matchers, in.GroupKey, in.Policy
+		if in.MinimumSeverity != nil {
+			next.MinimumSeverity = *in.MinimumSeverity
+		}
+		next.Urgent = next.MinimumSeverity == MinimumCritical
 		next.DestinationIDs = dests.publicIDs()
 		if in.Description != nil {
 			next.Description = *in.Description
@@ -874,8 +902,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		p := next.Policy
 		if err := q.UpdateRoute(ctx, dbgen.UpdateRouteParams{
-			OrgID: s.orgID, ID: before.ID, Name: next.Name, Description: next.Description, Urgent: next.Urgent,
-			GroupKey: next.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
+			OrgID: s.orgID, ID: before.ID, Name: next.Name, Description: next.Description,
+			MinimumSeverity: next.MinimumSeverity,
+			GroupKey:        next.GroupKey, ReopenWindowSeconds: p.ReopenWindowSeconds, GracePeriodSeconds: p.GracePeriodSeconds,
 			UrgentRiseRemovesAck: p.UrgentRiseRemovesAck, SnoozeDurationsSeconds: p.SnoozeDurationsSeconds,
 			ThreadBatchingWindowSeconds: p.ThreadBatchingWindowSeconds, StormThreshold: p.StormThreshold,
 			Language: p.Language, TemplateRootMessage: text(p.Templates.RootMessage),
@@ -907,6 +936,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
+		if before.MinimumSeverity != next.MinimumSeverity {
+			if err := s.requestOpenGroupUpdate(ctx, q, before); err != nil {
+				return err
+			}
+		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
 			return err
 		}
@@ -925,6 +959,29 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		s.exportInfo(updated.PublicID, updated.Name)
 	}
 	return updated, nil
+}
+
+// requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity, asks the workers of
+// internal/groups to apply it to the open Alert Groups of r (C-26.FR-9): one open_group_updates row, when r has any,
+// and a notification that wakes them once the transaction commits. The row is requested at the business time of the
+// change.
+func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route) error {
+	open, err := q.HasOpenAlertGroups(ctx, dbgen.HasOpenAlertGroupsParams{OrgID: s.orgID, RouteID: r.ID})
+	if err != nil {
+		return fmt.Errorf("look for the open alert groups of the route %s: %w", r.PublicID, err)
+	}
+	if !open {
+		return nil
+	}
+	if err := q.InsertOpenGroupUpdate(ctx, dbgen.InsertOpenGroupUpdateParams{OrgID: s.orgID,
+		Kind: KindMinimumSeverity, RouteID: pgtype.Int8{Int64: r.ID, Valid: true},
+		RequestedAt: s.clock.Now().UTC()}); err != nil {
+		return fmt.Errorf("apply the minimum severity of the route %s to its open alert groups: %w", r.PublicID, err)
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
 }
 
 // Delete deletes the Route publicID; a non-nil version must be its current one. It leaves every list and the
@@ -1074,13 +1131,13 @@ func newOrder(current []dbgen.ListRoutesRow, ids []string) ([]string, []int64, e
 }
 
 // EnsureDefault creates the Default route of the Organization once (C-08.FR-3), as a start-up ensure step: "Default",
-// without Matchers, with the values of the On-call profile. It changes nothing when the Default route exists; a Route
+// without Matchers, with the values of the On-call profile, which sets no Minimum severity. It changes nothing when the Default route exists; a Route
 // that is not deleted and already has its name stops the start with ErrNameTaken.
 func EnsureDefault(ctx context.Context, q Queries, orgID int64, now time.Time) error {
 	p := onCall()
 	_, err := q.EnsureDefaultRoute(ctx, dbgen.EnsureDefaultRouteParams{
 		OrgID: orgID, PublicID: publicid.New(publicid.Route), Name: DefaultName,
-		Description: "Takes every Alert no other Route took.", Urgent: p.Urgent, GroupKey: p.GroupKey,
+		Description: "Takes every Alert no other Route took.", MinimumSeverity: p.MinimumSeverity, GroupKey: p.GroupKey,
 		ReopenWindowSeconds: p.Policy.ReopenWindowSeconds, GracePeriodSeconds: p.Policy.GracePeriodSeconds,
 		UrgentRiseRemovesAck: p.Policy.UrgentRiseRemovesAck, SnoozeDurationsSeconds: p.Policy.SnoozeDurationsSeconds,
 		ThreadBatchingWindowSeconds: p.Policy.ThreadBatchingWindowSeconds, StormThreshold: p.Policy.StormThreshold,
@@ -1111,6 +1168,10 @@ func check(in Input) error {
 		if err := checkMatcher(i, m); err != nil {
 			return err
 		}
+	}
+	if m := in.MinimumSeverity; m != nil && !slices.Contains([]string{MinimumNone, MinimumWarning, MinimumCritical}, *m) {
+		return &FieldError{Pointer: "/minimum_severity", Code: CodeInvalidFormat,
+			Detail: "The Minimum severity is none, warning or critical."}
 	}
 	if err := checkGroupKey("/group_key", in.GroupKey); err != nil {
 		return err
@@ -1253,13 +1314,14 @@ func resourceOf(r Route) audit.Resource {
 
 // view is a Route as its Audit log diff shows it.
 type view struct {
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	Matchers       []Matcher `json:"matchers"`
-	Urgent         bool      `json:"urgent"`
-	GroupKey       []string  `json:"group_key"`
-	DestinationIDs []string  `json:"destination_ids"`
-	Policy         Policy    `json:"policy"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	Matchers        []Matcher `json:"matchers"`
+	MinimumSeverity string    `json:"minimum_severity"`
+	Urgent          bool      `json:"urgent"`
+	GroupKey        []string  `json:"group_key"`
+	DestinationIDs  []string  `json:"destination_ids"`
+	Policy          Policy    `json:"policy"`
 }
 
 func viewOf(r Route) view {
@@ -1278,8 +1340,8 @@ func viewOf(r Route) view {
 	if p.SnoozeDurationsSeconds == nil {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
-	return view{Name: r.Name, Description: r.Description, Matchers: ms, Urgent: r.Urgent, GroupKey: key,
-		DestinationIDs: dests, Policy: p}
+	return view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
+		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, Policy: p}
 }
 
 func routeOf(r dbgen.GetRouteRow) Route {
@@ -1293,7 +1355,8 @@ func routeOf(r dbgen.GetRouteRow) Route {
 	}
 	return Route{Storm: st, TemplateError: te,
 		ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
-		IsDefault: r.IsDefault, Urgent: r.Urgent, GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
+		IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity, Urgent: r.MinimumSeverity == MinimumCritical,
+		GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
 		Version: r.Version,
 		Policy: Policy{
 			ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
@@ -1402,6 +1465,14 @@ func (s *Service) RunInfo(ctx context.Context, ticks <-chan time.Time) {
 		case <-ticks:
 		}
 	}
+}
+
+// minimumOf is the Minimum severity a new Route takes: the one written, none when omitted.
+func minimumOf(m *string) string {
+	if m == nil {
+		return MinimumNone
+	}
+	return *m
 }
 
 func text(s *string) pgtype.Text {

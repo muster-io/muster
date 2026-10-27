@@ -12,12 +12,108 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceOpenGroupUpdate = `-- name: AdvanceOpenGroupUpdate :exec
+UPDATE open_group_updates
+SET after_alert_group_id = $1, lease_until = $2::timestamptz
+WHERE org_id = $3 AND id = $4
+`
+
+type AdvanceOpenGroupUpdateParams struct {
+	AfterAlertGroupID int64
+	LeaseUntil        time.Time
+	OrgID             int64
+	ID                int64
+}
+
+// AdvanceOpenGroupUpdate records the last Alert Group a batch reached and renews the lease.
+func (q *Queries) AdvanceOpenGroupUpdate(ctx context.Context, arg AdvanceOpenGroupUpdateParams) error {
+	_, err := q.db.Exec(ctx, advanceOpenGroupUpdate,
+		arg.AfterAlertGroupID,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+	)
+	return err
+}
+
+const claimOpenGroupUpdate = `-- name: ClaimOpenGroupUpdate :many
+
+WITH due AS MATERIALIZED (
+    SELECT d.id
+    FROM open_group_updates d
+    WHERE d.org_id = $3 AND (d.lease_until IS NULL OR d.lease_until <= $4::timestamptz)
+    ORDER BY d.requested_at, d.id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE open_group_updates u
+SET leased_by = $1::text, lease_until = $2::timestamptz
+FROM due
+WHERE u.org_id = $3 AND u.id = due.id
+RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
+          coalesce((SELECT r.public_id
+                    FROM routes r
+                    WHERE r.org_id = $3 AND r.id = u.route_id), '')::text AS route_public_id
+`
+
+type ClaimOpenGroupUpdateParams struct {
+	Owner      string
+	LeaseUntil time.Time
+	OrgID      int64
+	Now        time.Time
+}
+
+type ClaimOpenGroupUpdateRow struct {
+	ID                int64
+	Kind              string
+	RouteID           pgtype.Int8
+	RequestedAt       time.Time
+	AfterAlertGroupID int64
+	RoutePublicID     string
+}
+
+// The queue of the changes of configuration that reach the open Alert Groups after the save (open_group_updates,
+// schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
+// by id in batches, and is deleted with its last batch.
+// ClaimOpenGroupUpdate leases the earliest row whose lease is free or ran out, with the public_id of its Route, if any,
+// for its log lines; another claimer skips the row this one locked.
+func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUpdateParams) ([]ClaimOpenGroupUpdateRow, error) {
+	rows, err := q.db.Query(ctx, claimOpenGroupUpdate,
+		arg.Owner,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.Now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimOpenGroupUpdateRow{}
+	for rows.Next() {
+		var i ClaimOpenGroupUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.RouteID,
+			&i.RequestedAt,
+			&i.AfterAlertGroupID,
+			&i.RoutePublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countGroups = `-- name: CountGroups :many
 SELECT g.status, (CASE WHEN $1::boolean THEN g.common_labels END)::jsonb AS common_labels,
        count(*)::bigint AS count
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
-JOIN organizations o ON o.id = g.org_id
 JOIN LATERAL (SELECT EXISTS (SELECT 1
                              FROM deliveries d
                              JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
@@ -34,7 +130,7 @@ WHERE g.org_id = $2
   AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
   AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
   AND ($9::boolean IS NULL
-       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+       OR (g.severity_level = 'critical') = $9::boolean)
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
@@ -255,6 +351,22 @@ func (q *Queries) DeleteExpiredMemberships(ctx context.Context, arg DeleteExpire
 	return result.RowsAffected(), nil
 }
 
+const deleteOpenGroupUpdate = `-- name: DeleteOpenGroupUpdate :exec
+DELETE FROM open_group_updates
+WHERE org_id = $1 AND id = $2
+`
+
+type DeleteOpenGroupUpdateParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// DeleteOpenGroupUpdate removes a row with its last batch: the table holds only work still to do.
+func (q *Queries) DeleteOpenGroupUpdate(ctx context.Context, arg DeleteOpenGroupUpdateParams) error {
+	_, err := q.db.Exec(ctx, deleteOpenGroupUpdate, arg.OrgID, arg.ID)
+	return err
+}
+
 const deleteTimer = `-- name: DeleteTimer :exec
 DELETE FROM timers
 WHERE org_id = $1 AND alert_group_id = $2::bigint AND kind = $3
@@ -352,7 +464,7 @@ func (q *Queries) GetDefaultRouteID(ctx context.Context, orgID int64) (int64, er
 
 const getGroup = `-- name: GetGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
-       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.group_key_values,
+       (g.severity_level = 'critical')::boolean AS urgent, g.group_key_values,
        g.common_labels, g.common_annotations, g.integration_ids, g.reopen_count, g.firing_alert_count,
        g.resolved_alert_count, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
        g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text, g.created_at, g.last_changed_at,
@@ -452,10 +564,9 @@ type GetGroupRow struct {
 // GetGroup reads an Alert Group by public_id with its Route, the #N of the Alert Group it fires again after, the
 // label of its latest Replacement, the Alerts still firing in it, retention.alert_details, its Owner and Snooze, and,
 // when a person resolved it, the open Alert Group of the same Route and key that takes part in grouping (C-10.FR-7),
-// and whether its Route was deleted, which Unresolve needs. Urgency is derived from
-// the Route and organization.critical_is_urgent as they are now (C-08.FR-6), so that marking a Route urgent or
-// changing the setting shows on open Alert Groups at once without changing them. It has a Delivery problem
-// (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
+// and whether its Route was deleted, which Unresolve needs. Urgency is derived from the Severity level alone, Urgent
+// exactly when critical (C-26.FR-8), whatever routes.urgent and organizations.critical_is_urgent hold, which a 0.1
+// replica of a rolling update may still write. It has a Delivery problem (C-13.FR-12) when a delivery of it is Not delivered or deleted in the messenger, waits for a Broken Destination, or
 // has a Thread not attached. Its next notice is the earliest of its ack_timeout and reminder timers (C-17.FR-9): an
 // empty kind and the zero time 0001-01-01 when it has none. A Reminder waits for its Owner's answer while it is
 // acknowledged, a Reminder was sent and the Owner has not answered since the last one (C-17.FR-10).
@@ -608,26 +719,21 @@ func (q *Queries) GetGroupTimer(ctx context.Context, arg GetGroupTimerParams) (t
 const getGroupingSettings = `-- name: GetGroupingSettings :one
 
 
-SELECT critical_is_urgent, instance_labels
+SELECT instance_labels
 FROM organizations
 WHERE id = $1
 `
-
-type GetGroupingSettingsRow struct {
-	CriticalIsUrgent bool
-	InstanceLabels   []string
-}
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // The queries of the Alert Group lifecycle. Only this package writes alert_groups, alert_group_alerts,
 // timeline_entries, notes and alert_group_counters (lint 2). Times are business times passed in from Go.
-// GetGroupingSettings reads the Organization settings grouping needs: critical is Urgent and the Instance labels.
-func (q *Queries) GetGroupingSettings(ctx context.Context, orgID int64) (GetGroupingSettingsRow, error) {
+// GetGroupingSettings reads the Organization settings grouping needs: the Instance labels.
+func (q *Queries) GetGroupingSettings(ctx context.Context, orgID int64) ([]string, error) {
 	row := q.db.QueryRow(ctx, getGroupingSettings, orgID)
-	var i GetGroupingSettingsRow
-	err := row.Scan(&i.CriticalIsUrgent, &i.InstanceLabels)
-	return i, err
+	var instance_labels []string
+	err := row.Scan(&instance_labels)
+	return instance_labels, err
 }
 
 const getLastReminderSeq = `-- name: GetLastReminderSeq :one
@@ -705,7 +811,7 @@ func (q *Queries) GetRetentionPeriods(ctx context.Context, orgID int64) (GetRete
 }
 
 const getRoutePolicy = `-- name: GetRoutePolicy :one
-SELECT id, public_id, is_default, urgent, group_key, reopen_window_seconds, grace_period_seconds,
+SELECT id, public_id, is_default, minimum_severity, group_key, reopen_window_seconds, grace_period_seconds,
        urgent_rise_removes_ack
 FROM routes
 WHERE org_id = $1 AND id = $2
@@ -720,7 +826,7 @@ type GetRoutePolicyRow struct {
 	ID                   int64
 	PublicID             string
 	IsDefault            bool
-	Urgent               bool
+	MinimumSeverity      string
 	GroupKey             []string
 	ReopenWindowSeconds  int64
 	GracePeriodSeconds   int64
@@ -735,7 +841,7 @@ func (q *Queries) GetRoutePolicy(ctx context.Context, arg GetRoutePolicyParams) 
 		&i.ID,
 		&i.PublicID,
 		&i.IsDefault,
-		&i.Urgent,
+		&i.MinimumSeverity,
 		&i.GroupKey,
 		&i.ReopenWindowSeconds,
 		&i.GracePeriodSeconds,
@@ -1475,7 +1581,7 @@ func (q *Queries) ListGroupFiringAlerts(ctx context.Context, arg ListGroupFiring
 
 const listGroupsChangedAsc = `-- name: ListGroupsChangedAsc :many
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
-       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       (g.severity_level = 'critical')::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
@@ -1488,7 +1594,6 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
         AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
-JOIN organizations o ON o.id = g.org_id
 LEFT JOIN LATERAL (SELECT n.public_id, n.number
                    FROM alert_groups n
                    WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
@@ -1516,7 +1621,7 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
   AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
   AND ($9::boolean IS NULL
-       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+       OR (g.severity_level = 'critical') = $9::boolean)
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
@@ -1680,7 +1785,7 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 
 const listGroupsChangedDesc = `-- name: ListGroupsChangedDesc :many
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
-       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       (g.severity_level = 'critical')::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
@@ -1693,7 +1798,6 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
         AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
-JOIN organizations o ON o.id = g.org_id
 LEFT JOIN LATERAL (SELECT n.public_id, n.number
                    FROM alert_groups n
                    WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
@@ -1721,7 +1825,7 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
   AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
   AND ($9::boolean IS NULL
-       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+       OR (g.severity_level = 'critical') = $9::boolean)
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
@@ -1885,7 +1989,7 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 
 const listGroupsStartedAsc = `-- name: ListGroupsStartedAsc :many
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
-       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       (g.severity_level = 'critical')::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
@@ -1898,7 +2002,6 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
         AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
-JOIN organizations o ON o.id = g.org_id
 LEFT JOIN LATERAL (SELECT n.public_id, n.number
                    FROM alert_groups n
                    WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
@@ -1926,7 +2029,7 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
   AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
   AND ($9::boolean IS NULL
-       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+       OR (g.severity_level = 'critical') = $9::boolean)
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
@@ -2091,7 +2194,7 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 const listGroupsStartedDesc = `-- name: ListGroupsStartedDesc :many
 
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
-       (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent))::boolean AS urgent, g.common_labels,
+       (g.severity_level = 'critical')::boolean AS urgent, g.common_labels,
        g.integration_ids, g.reopen_count, g.firing_alert_count, g.resolved_alert_count, g.resolved_at,
        g.resolved_by_kind, g.resolved_by_user_id, g.resolved_by_service_account_id, g.resolve_reason,
        g.resolve_reason_text, g.created_at, g.last_changed_at, r.public_id AS route_public_id, r.name AS route_name,
@@ -2104,7 +2207,6 @@ SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_lev
         AND (g.owner_answered_at IS NULL OR g.owner_answered_at < g.last_reminder_at))::boolean AS reminder_pending
 FROM alert_groups g
 JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id
-JOIN organizations o ON o.id = g.org_id
 LEFT JOIN LATERAL (SELECT n.public_id, n.number
                    FROM alert_groups n
                    WHERE g.resolved_by_kind = 'user' AND g.moved_from_route_id IS NULL AND n.org_id = g.org_id
@@ -2132,7 +2234,7 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND (cardinality($7::bigint[]) = 0 OR g.integration_ids && $7::bigint[])
   AND (cardinality($8::text[]) = 0 OR g.severity_level = ANY($8::text[]))
   AND ($9::boolean IS NULL
-       OR (r.urgent OR (g.severity_level = 'critical' AND o.critical_is_urgent)) = $9::boolean)
+       OR (g.severity_level = 'critical') = $9::boolean)
   AND ($10::text IS NULL OR g.resolved_by_kind = $10::text)
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
@@ -2470,6 +2572,48 @@ type ListOpenGroupsOfRouteParams struct {
 // ListOpenGroupsOfRoute lists the open Alert Groups of a Route.
 func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsOfRouteParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfRoute, arg.OrgID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenGroupsOfRouteAfter = `-- name: ListOpenGroupsOfRouteAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND route_id = $2 AND status <> 'resolved' AND id > $3
+ORDER BY id
+LIMIT $4
+`
+
+type ListOpenGroupsOfRouteAfterParams struct {
+	OrgID   int64
+	RouteID int64
+	AfterID int64
+	Lim     int32
+}
+
+// ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
+// it included.
+func (q *Queries) ListOpenGroupsOfRouteAfter(ctx context.Context, arg ListOpenGroupsOfRouteAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfRouteAfter,
+		arg.OrgID,
+		arg.RouteID,
+		arg.AfterID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -3314,7 +3458,7 @@ func (q *Queries) LockCounter(ctx context.Context, orgID int64) (int64, error) {
 }
 
 const lockDefaultRoute = `-- name: LockDefaultRoute :one
-SELECT id, public_id, is_default, urgent, group_key, reopen_window_seconds, grace_period_seconds,
+SELECT id, public_id, is_default, minimum_severity, group_key, reopen_window_seconds, grace_period_seconds,
        urgent_rise_removes_ack
 FROM routes
 WHERE org_id = $1 AND is_default
@@ -3325,7 +3469,7 @@ type LockDefaultRouteRow struct {
 	ID                   int64
 	PublicID             string
 	IsDefault            bool
-	Urgent               bool
+	MinimumSeverity      string
 	GroupKey             []string
 	ReopenWindowSeconds  int64
 	GracePeriodSeconds   int64
@@ -3340,7 +3484,7 @@ func (q *Queries) LockDefaultRoute(ctx context.Context, orgID int64) (LockDefaul
 		&i.ID,
 		&i.PublicID,
 		&i.IsDefault,
-		&i.Urgent,
+		&i.MinimumSeverity,
 		&i.GroupKey,
 		&i.ReopenWindowSeconds,
 		&i.GracePeriodSeconds,
@@ -3510,6 +3654,46 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 	return items, nil
 }
 
+const lockOpenGroupUpdate = `-- name: LockOpenGroupUpdate :one
+SELECT id, kind, route_id, after_alert_group_id
+FROM open_group_updates
+WHERE org_id = $1 AND id = $2 AND leased_by = $3::text AND lease_until > $4::timestamptz
+FOR NO KEY UPDATE
+`
+
+type LockOpenGroupUpdateParams struct {
+	OrgID int64
+	ID    int64
+	Owner string
+	Now   time.Time
+}
+
+type LockOpenGroupUpdateRow struct {
+	ID                int64
+	Kind              string
+	RouteID           pgtype.Int8
+	AfterAlertGroupID int64
+}
+
+// LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
+// now, and reads where its run stands; no row when the lease was lost.
+func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpdateParams) (LockOpenGroupUpdateRow, error) {
+	row := q.db.QueryRow(ctx, lockOpenGroupUpdate,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+		arg.Now,
+	)
+	var i LockOpenGroupUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.RouteID,
+		&i.AfterAlertGroupID,
+	)
+	return i, err
+}
+
 const lockRouteForMove = `-- name: LockRouteForMove :one
 SELECT id, public_id, name, is_default
 FROM routes
@@ -3544,7 +3728,7 @@ func (q *Queries) LockRouteForMove(ctx context.Context, arg LockRouteForMovePara
 }
 
 const lockRoutes = `-- name: LockRoutes :many
-SELECT id, public_id, is_default, urgent, group_key, reopen_window_seconds, grace_period_seconds,
+SELECT id, public_id, is_default, minimum_severity, group_key, reopen_window_seconds, grace_period_seconds,
        urgent_rise_removes_ack
 FROM routes
 WHERE org_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
@@ -3561,7 +3745,7 @@ type LockRoutesRow struct {
 	ID                   int64
 	PublicID             string
 	IsDefault            bool
-	Urgent               bool
+	MinimumSeverity      string
 	GroupKey             []string
 	ReopenWindowSeconds  int64
 	GracePeriodSeconds   int64
@@ -3584,7 +3768,7 @@ func (q *Queries) LockRoutes(ctx context.Context, arg LockRoutesParams) ([]LockR
 			&i.ID,
 			&i.PublicID,
 			&i.IsDefault,
-			&i.Urgent,
+			&i.MinimumSeverity,
 			&i.GroupKey,
 			&i.ReopenWindowSeconds,
 			&i.GracePeriodSeconds,
@@ -3638,6 +3822,28 @@ func (q *Queries) NextNumber(ctx context.Context, orgID int64) (int64, error) {
 	var last_number int64
 	err := row.Scan(&last_number)
 	return last_number, err
+}
+
+const nextOpenGroupUpdate = `-- name: NextOpenGroupUpdate :one
+SELECT coalesce(min(CASE WHEN lease_until IS NULL OR lease_until <= $1::timestamptz THEN $1::timestamptz
+                         ELSE lease_until END),
+                '0001-01-01 00:00:00+00')::timestamptz AS next
+FROM open_group_updates
+WHERE org_id = $2
+`
+
+type NextOpenGroupUpdateParams struct {
+	Now   time.Time
+	OrgID int64
+}
+
+// NextOpenGroupUpdate is when the next row can be claimed: now when one is free at the real time now, else the
+// earliest end of a lease still held; the zero time 0001-01-01 when the table holds no row.
+func (q *Queries) NextOpenGroupUpdate(ctx context.Context, arg NextOpenGroupUpdateParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, nextOpenGroupUpdate, arg.Now, arg.OrgID)
+	var next time.Time
+	err := row.Scan(&next)
+	return next, err
 }
 
 const notifyTimers = `-- name: NotifyTimers :exec

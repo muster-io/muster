@@ -75,6 +75,29 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
 ## Upgrade notes
 
+0.2.0
+:   The urgent mark of a Route (`route.urgent`) and the Organization's "critical is Urgent"
+    (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is
+    critical, and a Route raises the level of its Alert Groups with its
+    [Minimum severity](../concepts/routes-and-group-keys.md#minimum-severity).
+
+    - Routes marked urgent got the Minimum severity critical, which also makes their Alert Groups critical, also for
+      Severity conditions.
+    - An Organization that had turned "critical is Urgent" off now sees its critical Alert Groups as Urgent: a rise to
+      critical ends their Snoozes and, where `route.urgent_rise_removes_ack` is on, their acknowledgements.
+    - Migration 0021 computes the Severity level and the urgency of the open Alert Groups and of their deliveries once,
+      by the new rule: without lifecycle events or Mentions, without ending a Snooze or an acknowledgement, and without
+      publishing anywhere new.
+    - `urgent` in the input of a Route and `critical_is_urgent` in the input of the Organization are optional, and the
+      values sent are ignored. Reads keep both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum
+      severity is critical, and `critical_is_urgent` is always `true`.
+
+    **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
+    replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
+    level on the Alert Groups it changes, while `urgent` agrees, since 0.2.0 writes `routes.urgent`. The window lasts as
+    long as the rollout; an Alert Group that a 0.1 replica changed meanwhile keeps the lower level until a later change
+    of its Alerts, or of the Route's Minimum severity, computes it again.
+
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
     are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back

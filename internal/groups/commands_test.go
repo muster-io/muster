@@ -425,8 +425,8 @@ func TestSnooze(t *testing.T) {
 	if err != nil || res.Group.Status != StatusFiring || res.Group.SnoozedBy != nil || g.SnoozedByServiceAccountID.Valid {
 		t.Fatalf("unsnooze = %v %+v", err, res.Group)
 	}
-	// Urgent now: the Route is urgent.
-	h.db.routes[2].Urgent = true
+	// Urgent now: its Severity level is critical (C-26.FR-8).
+	g.SeverityLevel = "critical"
 	if _, err := h.svc.Snooze(t.Context(), alice, g.PublicID, SnoozeEnd{NoEnd: true}); err != nil ||
 		!g.SnoozedWhileUrgent {
 		t.Errorf("snooze while urgent = %v %v", err, g.SnoozedWhileUrgent)
@@ -491,7 +491,6 @@ func TestCommandFailures(t *testing.T) {
 		{"GetGroup", CommandAcknowledge, nil},
 		{"GetRoutePolicy", CommandResolve, nil},
 		{"UpsertTimer", CommandResolve, nil},
-		{"GetGroupingSettings", CommandSnooze, nil},
 		{"GetRoutePolicy", CommandSnooze, nil},
 		{"EnsureCounter", CommandUnresolve, nil},
 		{"LockCounter", CommandUnresolve, nil},

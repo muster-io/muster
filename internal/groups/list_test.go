@@ -1126,28 +1126,27 @@ func TestHints(t *testing.T) {
 	}
 }
 
-// TestUrgencyFollowsConfiguration is the decision on stale urgency: reads derive it from the Route and
-// organization.critical_is_urgent as they are now, so marking a Route urgent shows at once on its open Alert Groups,
-// without changing their status, and the urgent filter follows.
-func TestUrgencyFollowsConfiguration(t *testing.T) {
+// TestUrgencyIsCritical is C-26.FR-8 and C-09.FR-1 for the reads: an Alert Group is Urgent exactly when its stored
+// Severity level is critical, whatever the urgent column a 0.1 replica wrote holds; a Route's Minimum severity reaches
+// the reads only through the level that the worker of open_group_updates writes, and the urgent filter follows.
+func TestUrgencyIsCritical(t *testing.T) {
 	h := newHarness(t)
 	g := h.summary(1, 2, t0.Add(-time.Hour), time.Time{}, "A", nil)
-	urgent := true
-	if v, _ := h.svc.Get(t.Context(), g.PublicID); v.Urgent {
-		t.Fatal("urgent before the route is")
+	urgent, notUrgent := true, false
+	h.db.routes[2].MinimumSeverity = "critical"
+	g.Urgent = true
+	if v, _ := h.svc.Get(t.Context(), g.PublicID); v.Urgent || v.Severity != "warning" {
+		t.Fatalf("a warning alert group read %+v", v)
 	}
-	h.db.routes[2].Urgent = true
+	if got := numbers(h.list(t, ListRequest{Filter: Filter{Urgent: &notUrgent}})); !slices.Equal(got, []int64{1}) {
+		t.Errorf("not urgent filter = %v", got)
+	}
+	g.SeverityLevel, g.Urgent = "critical", false
 	if v, _ := h.svc.Get(t.Context(), g.PublicID); !v.Urgent || v.Status != StatusFiring {
-		t.Errorf("after the route became urgent %+v", v)
+		t.Errorf("a critical alert group read %+v", v)
 	}
 	if got := numbers(h.list(t, ListRequest{Filter: Filter{Urgent: &urgent}})); !slices.Equal(got, []int64{1}) {
 		t.Errorf("urgent filter = %v", got)
-	}
-	h.db.routes[2].Urgent = false
-	g.SeverityLevel = "critical"
-	h.db.settings.CriticalIsUrgent = false
-	if v, _ := h.svc.Get(t.Context(), g.PublicID); v.Urgent {
-		t.Error("critical is urgent is off")
 	}
 }
 

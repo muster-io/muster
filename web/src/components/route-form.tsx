@@ -127,7 +127,7 @@ function formValues(base: RouteInput): FormValues {
   return {
     name: base.name,
     description: base.description ?? "",
-    urgent: base.urgent,
+    urgent: base.urgent ?? false,
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
     destination_ids: [...base.destination_ids],

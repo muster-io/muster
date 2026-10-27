@@ -7482,7 +7482,8 @@ components:
     AgUrgent:
       name: urgent
       in: query
-      description: Only Urgent (true) or non-Urgent (false) Alert Groups.
+      description: Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity
+        level is critical.
       schema:
         type: boolean
     AgResolvedBy:
@@ -8557,6 +8558,15 @@ components:
       - critical
       - warning
       - info
+    MinimumSeverity:
+      type: string
+      description: '`route.minimum_severity` (default `none`): the lowest Severity level of the Route''s Alert Groups. It
+        only raises the Severity level of the Route''s Alert Groups — never the level of an Alert, and never lowers one;
+        an Urgent Alert Group is a critical one.'
+      enum:
+      - none
+      - warning
+      - critical
     AlertGroupStatus:
       type: string
       enum:
@@ -8605,8 +8615,9 @@ components:
       - 'null'
       description: 'The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group
         resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`,
-        `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was
-        unacknowledged automatically. Null when the entry has no reason or its reason has no code.'
+        `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was
+        unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of
+        the Route. Null when the entry has no reason or its reason has no code.'
       enum:
       - resolved
       - gone
@@ -8615,6 +8626,7 @@ components:
       - owner_disabled
       - owner_deleted
       - reminders_unanswered
+      - minimum_severity
       - null
     Language:
       type: string
@@ -9676,7 +9688,6 @@ components:
       - severity_label
       - severity_mapping
       - severity_styles
-      - critical_is_urgent
       - instance_labels
       - retention
       - totp_required
@@ -9711,6 +9722,8 @@ components:
             $ref: '#/components/schemas/SeverityLevelStyle'
         critical_is_urgent:
           type: boolean
+          deprecated: true
+          description: 'Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.'
         instance_labels:
           type: array
           items:
@@ -9736,6 +9749,7 @@ components:
         - id
         - workday_start
         - week_start
+        - critical_is_urgent
         - outgoing_heartbeat
         - etag
         properties:
@@ -10505,7 +10519,6 @@ components:
       required:
       - name
       - matchers
-      - urgent
       - group_key
       - destination_ids
       - policy
@@ -10521,8 +10534,15 @@ components:
           description: Combined with AND. The Default route has none.
           items:
             $ref: '#/components/schemas/Matcher'
+        minimum_severity:
+          $ref: '#/components/schemas/MinimumSeverity'
+          description: Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's
+            open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
         urgent:
           type: boolean
+          deprecated: true
+          description: 'Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`. Ignored in requests;
+            removed in 0.3.0.'
         group_key:
           type: array
           description: Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty
@@ -10580,6 +10600,8 @@ components:
       - type: object
         required:
         - id
+        - minimum_severity
+        - urgent
         - position
         - is_default
         - destinations
@@ -10657,6 +10679,7 @@ components:
       required:
       - id
       - name
+      - minimum_severity
       - urgent
       - group_key
       - policy
@@ -10668,8 +10691,14 @@ components:
           - informational
         name:
           type: string
+        minimum_severity:
+          $ref: '#/components/schemas/MinimumSeverity'
+          description: '`none` for both profiles: neither sets a Minimum severity.'
         urgent:
           type: boolean
+          deprecated: true
+          description: 'Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`, so `false` for both
+            profiles; removed in 0.3.0.'
         group_key:
           type: array
           items:
@@ -10999,8 +11028,11 @@ components:
           $ref: '#/components/schemas/ActorRef'
         severity_level:
           $ref: '#/components/schemas/SeverityLevel'
+          description: The highest Severity level of the firing Alerts, raised to the Route's Minimum severity
+            (`minimum_severity`); each Alert keeps its own level.
         urgent:
           type: boolean
+          description: True exactly when `severity_level` is `critical`.
         route:
           $ref: '#/components/schemas/EntityRef'
         integrations:
@@ -11500,6 +11532,10 @@ components:
             type:
             - string
             - 'null'
+            description: Why the Severity level rose, as text, for a `severity_raised` that no Alert caused; clients
+              translate `reason_code` and show this text only when there is no code.
+          reason_code:
+            $ref: '#/components/schemas/NullableStatusChangeReason'
           label_conflicts:
             type: array
             description: Static labels the added Alerts already carried.
@@ -15278,8 +15314,11 @@ components:
           $ref: '#/components/schemas/EntityRef'
         urgent:
           type: boolean
+          description: True exactly when `severity_level` is `critical`.
         severity_level:
           $ref: '#/components/schemas/SeverityLevel'
+          description: The highest Severity level of the firing Alerts, raised to the Route's Minimum severity; each Alert
+            of `alerts[]` keeps its own level.
         started_at:
           type: string
           format: date-time
