@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/destinations/dbgen"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -904,6 +905,15 @@ func TestButtonSets(t *testing.T) {
 	if _, err := s.Create(t.Context(), saver, in); err != nil ||
 		bytes.Contains(w.audit[0].Diff, []byte("/buttons")) {
 		t.Errorf("an outgoing webhook with a set: %v, diff %s", err, w.audit[0].Diff)
+	}
+}
+
+// TestOpenGroupUpdateNames: destinations, which inserts the rows of its button sets and wakes the workers, and groups,
+// which claims them, name the kind and the channel alike.
+func TestOpenGroupUpdateNames(t *testing.T) {
+	if KindDestinationButtons != groups.KindDestinationButtons ||
+		OpenGroupUpdatesChannel != groups.OpenGroupUpdatesChannel {
+		t.Error("destinations and groups name the open alert group updates differently")
 	}
 }
 

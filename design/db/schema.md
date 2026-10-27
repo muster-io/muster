@@ -1457,7 +1457,7 @@ WITH due AS MATERIALIZED (
      ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
   FROM due WHERE u.org_id = $1 AND u.id = due.id
-RETURNING u.id, u.kind, u.route_id, u.after_alert_group_id;
+RETURNING u.id, u.kind, u.route_id, u.destination_id, u.after_alert_group_id;
 ```
 
 A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows

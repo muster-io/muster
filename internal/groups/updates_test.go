@@ -6,6 +6,7 @@ package groups
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -26,10 +27,19 @@ import (
 // fakeUpdate is an open_group_updates row.
 type fakeUpdate struct {
 	id, routeID, after int64
+	destinationID      int64
 	kind               string
 	requested          time.Time
 	leasedBy           string
 	leaseUntil         *time.Time
+}
+
+// destinationPublicID is the public_id of the Destination id in the fake.
+func destinationPublicID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return fmt.Sprintf("DS%012d", id)
 }
 
 func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGroupUpdateParams) (
@@ -54,7 +64,9 @@ func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGrou
 			route = r.PublicID
 		}
 		return []dbgen.ClaimOpenGroupUpdateRow{{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
-			Valid: u.routeID != 0}, RequestedAt: u.requested, AfterAlertGroupID: u.after, RoutePublicID: route}}, nil
+			Valid: u.routeID != 0}, RequestedAt: u.requested, AfterAlertGroupID: u.after, RoutePublicID: route,
+			DestinationID:       pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
+			DestinationPublicID: destinationPublicID(u.destinationID)}}, nil
 	}
 	return nil, nil
 }
@@ -80,11 +92,15 @@ func (f *fakeDB) ListFiringLevels(_ context.Context, arg dbgen.ListFiringLevelsP
 	return out, nil
 }
 
-// TestUpdateNames: routing, which inserts the rows and wakes the workers, and groups, which claims them, name the
-// kind and the channel alike.
+// TestUpdateNames: routing and organization, which insert the rows and wake the workers, and groups, which claims them,
+// name the kinds and the channel alike; destinations checks its own names against groups (write_test.go).
 func TestUpdateNames(t *testing.T) {
 	if routing.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || routing.KindMinimumSeverity != KindRouteMinimumSeverity {
 		t.Error("routing and groups name the open alert group updates differently")
+	}
+	if organization.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel ||
+		organization.KindOrganizationButtons != KindOrganizationButtons {
+		t.Error("organization and groups name the open alert group updates differently")
 	}
 }
 
@@ -110,7 +126,8 @@ func (f *fakeDB) LockOpenGroupUpdate(_ context.Context, arg dbgen.LockOpenGroupU
 		return dbgen.LockOpenGroupUpdateRow{}, pgx.ErrNoRows
 	}
 	return dbgen.LockOpenGroupUpdateRow{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
-		Valid: u.routeID != 0}, AfterAlertGroupID: u.after}, nil
+		Valid: u.routeID != 0}, DestinationID: pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
+		AfterAlertGroupID: u.after}, nil
 }
 
 func (f *fakeDB) AdvanceOpenGroupUpdate(_ context.Context, arg dbgen.AdvanceOpenGroupUpdateParams) error {
@@ -175,6 +192,41 @@ func (f *fakeDB) ListOpenGroupsOfRouteAfter(_ context.Context, arg dbgen.ListOpe
 		}
 	}
 	return out[:min(len(out), int(arg.Lim))], nil
+}
+
+func (f *fakeDB) ListOpenGroupsOfDestinationAfter(_ context.Context,
+	arg dbgen.ListOpenGroupsOfDestinationAfterParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsOfDestinationAfter"); err != nil {
+		return nil, err
+	}
+	return f.openDelivered(arg.OrgID, arg.AfterID, arg.Lim, func(dest int64) bool { return dest == arg.DestinationID }),
+		nil
+}
+
+func (f *fakeDB) ListOpenGroupsFollowingOrganizationAfter(_ context.Context,
+	arg dbgen.ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsFollowingOrganizationAfter"); err != nil {
+		return nil, err
+	}
+	return f.openDelivered(arg.OrgID, arg.AfterID, arg.Lim, func(dest int64) bool {
+		return slices.Contains(f.following, dest)
+	}), nil
+}
+
+// openDelivered are the open Alert Groups after the id after with a delivery in a Destination that matches, by id, at
+// most lim.
+func (f *fakeDB) openDelivered(org, after int64, lim int32, match func(dest int64) bool) []int64 {
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if g.Status != "resolved" && g.ID > after && org == orgID && slices.ContainsFunc(f.delivered[g.ID], match) {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(lim))]
 }
 
 // updates is the harness of the open Alert Group updates: Alert Groups of the Route db (2) — acknowledged, snoozed
@@ -402,6 +454,83 @@ func TestUpdateFailures(t *testing.T) {
 	cancel()
 	if _, err := u.worker.Round(ctx); err != nil || strings.Contains(u.log.String(), "open_group_update_failed") {
 		t.Errorf("canceled: %v, log %s", err, u.log)
+	}
+}
+
+// TestButtonsUpdate is C-28.FR-9 on the worker: a row destination_buttons runs the dispatcher's re-render step,
+// without a lifecycle event, on each open Alert Group with a delivery in its Destination — whatever its Route — and a
+// row organization_buttons on each with a delivery in a Destination that follows the Organization; neither records a
+// Timeline entry or changes an Alert Group, both are deleted with their last batch and logged as open_group_update_done
+// with their scope, and a second run renders again and records nothing. An Alert Group resolved after the batch
+// listed it is left alone, and the batches walk by id.
+func TestButtonsUpdate(t *testing.T) {
+	u := newUpdates(t)
+	var rendered []int64
+	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		if len(r.Events) != 0 || r.Actor != System {
+			t.Errorf("a re-render with events %+v as %+v", r.Events, r.Actor)
+		}
+		rendered = append(rendered, r.Group.ID)
+		return nil
+	})
+	u.db.delivered = map[int64][]int64{u.acked.ID: {21}, u.firing.ID: {21, 22}, u.snoozed.ID: {22},
+		u.elsewhere.ID: {21}}
+	u.db.following = []int64{22}
+	before := []dbgen.LockGroupsRow{*u.acked, *u.snoozed, *u.firing, *u.elsewhere}
+	entries := len(u.db.entries)
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if want := []int64{u.acked.ID, u.firing.ID, u.elsewhere.ID}; !slices.Equal(rendered, want) {
+		t.Errorf("rendered %v, want %v", rendered, want)
+	}
+	if len(u.db.updates) != 0 || len(u.db.entries) != entries || !strings.Contains(u.log.String(),
+		`"event":"open_group_update_done","kind":"destination_buttons","destination":"DS000000000021",`+
+			`"alert_groups":3`) {
+		t.Errorf("rows %d, entries %d, log %s", len(u.db.updates), len(u.db.entries)-entries, u.log)
+	}
+	for i, g := range []*dbgen.LockGroupsRow{u.acked, u.snoozed, u.firing, u.elsewhere} {
+		if g.Status != before[i].Status || g.SeverityLevel != before[i].SeverityLevel ||
+			g.LastChangedAt != before[i].LastChangedAt || g.OwnerUserID != before[i].OwnerUserID {
+			t.Errorf("alert group %d changed: %+v", g.ID, g)
+		}
+	}
+
+	rendered = nil
+	u.worker.Batch = 1
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
+		requested: u.clock.Now()})
+	u.db.before["LockGroups"] = func() {
+		u.db.before["LockGroups"] = nil
+		u.firing.Status, u.firing.ResolvedAt = "resolved", ts(t0)
+	}
+	u.round(t, u.worker)
+	if want := []int64{u.snoozed.ID}; !slices.Equal(rendered, want) || len(u.db.updates) != 0 ||
+		!strings.Contains(u.log.String(), `"event":"open_group_update_done","kind":"organization_buttons",`+
+			`"alert_groups":1`) || u.db.calls["ListOpenGroupsFollowingOrganizationAfter"] != 2 {
+		t.Errorf("the organization's set: rendered %v, log %s, calls %v", rendered, u.log, u.db.calls)
+	}
+	rendered = nil
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if !slices.Equal(rendered, []int64{u.snoozed.ID}) || len(u.db.entries) != entries {
+		t.Errorf("a second run: rendered %v, %d entries", rendered, len(u.db.entries)-entries)
+	}
+
+	for kind, q := range map[string]string{KindDestinationButtons: "ListOpenGroupsOfDestinationAfter",
+		KindOrganizationButtons: "ListOpenGroupsFollowingOrganizationAfter"} {
+		for _, failing := range []string{q, "LockGroups", "SaveGroup"} {
+			u := newUpdates(t)
+			u.db.delivered, u.db.following = map[int64][]int64{u.acked.ID: {21}}, []int64{21}
+			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: kind, destinationID: 21,
+				requested: u.clock.Now()})
+			u.db.fail[failing] = errBoom
+			if u.round(t, u.worker); len(u.db.updates) != 1 || !strings.Contains(u.log.String(),
+				`"event":"open_group_update_failed","kind":"`+kind+`","destination":"DS000000000021","error":`) {
+				t.Errorf("%s with %s failing: log %s", kind, failing, u.log)
+			}
+		}
 	}
 }
 

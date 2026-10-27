@@ -54,7 +54,11 @@ WHERE u.org_id = $3 AND u.id = due.id
 RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
           coalesce((SELECT r.public_id
                     FROM routes r
-                    WHERE r.org_id = $3 AND r.id = u.route_id), '')::text AS route_public_id
+                    WHERE r.org_id = $3 AND r.id = u.route_id), '')::text AS route_public_id,
+          u.destination_id,
+          coalesce((SELECT d.public_id
+                    FROM destinations d
+                    WHERE d.org_id = $3 AND d.id = u.destination_id), '')::text AS destination_public_id
 `
 
 type ClaimOpenGroupUpdateParams struct {
@@ -66,20 +70,22 @@ type ClaimOpenGroupUpdateParams struct {
 }
 
 type ClaimOpenGroupUpdateRow struct {
-	ID                int64
-	Kind              string
-	RouteID           pgtype.Int8
-	RequestedAt       time.Time
-	AfterAlertGroupID int64
-	RoutePublicID     string
+	ID                  int64
+	Kind                string
+	RouteID             pgtype.Int8
+	RequestedAt         time.Time
+	AfterAlertGroupID   int64
+	RoutePublicID       string
+	DestinationID       pgtype.Int8
+	DestinationPublicID string
 }
 
 // The queue of the changes of configuration that reach the open Alert Groups after the save (open_group_updates,
 // schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
 // by id in batches, and is deleted with its last batch.
 // ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
-// the public_id of its Route, if any, for its log lines; another claimer skips the row this one locked. A row of a kind
-// that a later version adds waits for a replica that handles it.
+// the public_id of its Route or its Destination, if any, for its log lines; another claimer skips the row this one
+// locked. A row of a kind that a later version adds waits for a replica that handles it.
 func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUpdateParams) ([]ClaimOpenGroupUpdateRow, error) {
 	rows, err := q.db.Query(ctx, claimOpenGroupUpdate,
 		arg.Owner,
@@ -102,6 +108,8 @@ func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUp
 			&i.RequestedAt,
 			&i.AfterAlertGroupID,
 			&i.RoutePublicID,
+			&i.DestinationID,
+			&i.DestinationPublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -2589,6 +2597,93 @@ func (q *Queries) ListOpenGroupIDs(ctx context.Context, orgID int64) ([]int64, e
 	return items, nil
 }
 
+const listOpenGroupsFollowingOrganizationAfter = `-- name: ListOpenGroupsFollowingOrganizationAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+  AND EXISTS (SELECT 1
+              FROM deliveries d
+              JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
+              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND x.buttons IS NULL AND x.type <> 'webhook'
+                AND x.deleted_at IS NULL)
+ORDER BY g.id
+LIMIT $3
+`
+
+type ListOpenGroupsFollowingOrganizationAfterParams struct {
+	OrgID   int64
+	AfterID int64
+	Lim     int32
+}
+
+// ListOpenGroupsFollowingOrganizationAfter lists, by id after a cursor, a batch of the open Alert Groups with a
+// delivery in a messenger Destination that is not deleted and follows the Organization's button set, whose Root
+// messages a change of that set re-renders (C-28.FR-9).
+func (q *Queries) ListOpenGroupsFollowingOrganizationAfter(ctx context.Context, arg ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsFollowingOrganizationAfter, arg.OrgID, arg.AfterID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenGroupsOfDestinationAfter = `-- name: ListOpenGroupsOfDestinationAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+  AND EXISTS (SELECT 1
+              FROM deliveries d
+              WHERE d.org_id = $1 AND d.alert_group_id = g.id AND d.destination_id = $3)
+ORDER BY g.id
+LIMIT $4
+`
+
+type ListOpenGroupsOfDestinationAfterParams struct {
+	OrgID         int64
+	AfterID       int64
+	DestinationID int64
+	Lim           int32
+}
+
+// ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
+// Destination, whose Root messages its button set re-renders (C-28.FR-9).
+func (q *Queries) ListOpenGroupsOfDestinationAfter(ctx context.Context, arg ListOpenGroupsOfDestinationAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfDestinationAfter,
+		arg.OrgID,
+		arg.AfterID,
+		arg.DestinationID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupsOfRoute = `-- name: ListOpenGroupsOfRoute :many
 SELECT id
 FROM alert_groups
@@ -3687,7 +3782,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 }
 
 const lockOpenGroupUpdate = `-- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = $1 AND id = $2 AND leased_by = $3::text AND lease_until > $4::timestamptz
 FOR NO KEY UPDATE
@@ -3704,6 +3799,7 @@ type LockOpenGroupUpdateRow struct {
 	ID                int64
 	Kind              string
 	RouteID           pgtype.Int8
+	DestinationID     pgtype.Int8
 	AfterAlertGroupID int64
 }
 
@@ -3721,6 +3817,7 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 		&i.ID,
 		&i.Kind,
 		&i.RouteID,
+		&i.DestinationID,
 		&i.AfterAlertGroupID,
 	)
 	return i, err

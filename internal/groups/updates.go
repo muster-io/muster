@@ -28,16 +28,19 @@ import (
 // Group the change already reached is left as it is, so a row that runs twice changes nothing the second time
 // (ADR-0007). The worker is not a Leader task.
 
-// KindRouteMinimumSeverity is the kind of the row of a changed Minimum severity of a Route, and OpenGroupUpdatesChannel
-// the LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted; routing writes both.
+// The kinds of open_group_updates rows: a changed Minimum severity of a Route, which routing writes, and a changed
+// button set of a Destination or of the Organization (C-28.FR-9), which destinations and organization write; and
+// OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity = "route_minimum_severity"
+	KindDestinationButtons   = "destination_buttons"
+	KindOrganizationButtons  = "organization_buttons"
 	OpenGroupUpdatesChannel  = "muster_open_group_updates"
 )
 
 // updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
 // of a kind a later version adds waits for a replica that knows it.
-var updateKinds = []string{KindRouteMinimumSeverity}
+var updateKinds = []string{KindRouteMinimumSeverity, KindDestinationButtons, KindOrganizationButtons}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -59,16 +62,21 @@ type updateQueries interface {
 	DeleteOpenGroupUpdate(ctx context.Context, arg dbgen.DeleteOpenGroupUpdateParams) error
 	NextOpenGroupUpdate(ctx context.Context, arg dbgen.NextOpenGroupUpdateParams) (time.Time, error)
 	ListOpenGroupsOfRouteAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteAfterParams) ([]int64, error)
+	ListOpenGroupsOfDestinationAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfDestinationAfterParams) ([]int64,
+		error)
+	ListOpenGroupsFollowingOrganizationAfter(ctx context.Context,
+		arg dbgen.ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error)
 	ListFiringLevels(ctx context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow, error)
 }
 
-// update is a claimed open_group_updates row: its kind and the Route its kind names, with the Route's public_id for
-// the log lines.
+// update is a claimed open_group_updates row: its kind and the Route or the Destination its kind names, with their
+// public_ids for the log lines.
 type update struct {
-	id       int64
-	kind     string
-	routeID  int64
-	routePID string
+	id             int64
+	kind           string
+	routeID        int64
+	routePID       string
+	destinationPID string
 }
 
 // minimumSeverityChanged is the system transition of an open Alert Group whose Route's Minimum severity changed
@@ -163,6 +171,50 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 	return changed, nil
 }
 
+// buttonsChanged is the system transition of an open Alert Group whose Root messages a changed button set re-renders
+// (C-28.FR-9): it changes nothing of the Alert Group and records nothing, and the dispatcher's re-render step then runs
+// without a lifecycle event, which edits, Quietly, each Root message whose Desired state the set changed and leaves
+// the others, whose hashes are unchanged; a second run changes nothing.
+type buttonsChanged struct{}
+
+func (buttonsChanged) precondition(g *Group) error {
+	if g.Status == StatusResolved {
+		return errNotOpen
+	}
+	return nil
+}
+
+func (buttonsChanged) apply(_ context.Context, _ Queries, _ *Group, c *change) error {
+	c.written = true
+	return nil
+}
+
+// rerenderButtons runs the re-render step of the dispatcher on the open Alert Groups ids, locked in id order, in the
+// transaction of q, and returns how many it re-rendered; after collects what runs once the transaction committed.
+func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	locked, err := lock(ctx, q, s.orgID, ids)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, id := range ids {
+		g := locked[id]
+		if g == nil {
+			continue
+		}
+		if err := s.d.dispatch(ctx, q, g, System, buttonsChanged{}, after); errors.Is(err, errNotOpen) {
+			continue
+		} else if err != nil {
+			return 0, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // firingLevels are the highest Severity levels of the firing Alerts of the Alert Groups ids, info for one without any.
 func firingLevels(ctx context.Context, q Queries, orgID int64, ids []int64) (map[int64]organization.SeverityLevel,
 	error) {
@@ -198,7 +250,8 @@ func (s *Service) claimUpdate(ctx context.Context, l db.Lease) (update, bool, er
 		return update{}, false, nil
 	}
 	r := rows[0]
-	return update{id: r.ID, kind: r.Kind, routeID: r.RouteID.Int64, routePID: r.RoutePublicID}, true, nil
+	return update{id: r.ID, kind: r.Kind, routeID: r.RouteID.Int64, routePID: r.RoutePublicID,
+		destinationPID: r.DestinationPublicID}, true, nil
 }
 
 // batchOutcome is what one batch of a claimed row did: how many Alert Groups it changed, whether it was the last,
@@ -235,6 +288,24 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				return fmt.Errorf("list the open alert groups of route %d: %w", row.RouteID.Int64, err)
 			}
 			if out.changed, err = s.applyMinimumSeverity(ctx, q, row.RouteID.Int64, ids, &after); err != nil {
+				return err
+			}
+		case KindDestinationButtons:
+			if ids, err = q.ListOpenGroupsOfDestinationAfter(ctx, dbgen.ListOpenGroupsOfDestinationAfterParams{
+				OrgID: s.orgID, DestinationID: row.DestinationID.Int64, AfterID: row.AfterAlertGroupID,
+				Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups of destination %d: %w", row.DestinationID.Int64, err)
+			}
+			if out.changed, err = s.rerenderButtons(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindOrganizationButtons:
+			if ids, err = q.ListOpenGroupsFollowingOrganizationAfter(ctx,
+				dbgen.ListOpenGroupsFollowingOrganizationAfterParams{OrgID: s.orgID, AfterID: row.AfterAlertGroupID,
+					Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups that follow the organization's buttons: %w", err)
+			}
+			if out.changed, err = s.rerenderButtons(ctx, q, ids, &after); err != nil {
 				return err
 			}
 		default:
@@ -397,6 +468,9 @@ func scopeOf(u update) []logging.Field {
 	out := []logging.Field{logging.F("kind", u.kind)}
 	if u.routePID != "" {
 		out = append(out, logging.F("route", u.routePID))
+	}
+	if u.destinationPID != "" {
+		out = append(out, logging.F("destination", u.destinationPID))
 	}
 	return out
 }
