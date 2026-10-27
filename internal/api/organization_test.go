@@ -252,6 +252,29 @@ func TestUpdateOrganization(t *testing.T) {
 	}
 }
 
+// TestCriticalIsUrgentAPI is C-26.FR-10 and C-26.AC-8 at the API: getOrganization reads critical_is_urgent true even
+// where the stored resource says otherwise, and an update that sends false, or leaves the field out, is accepted
+// without passing it on.
+func TestCriticalIsUrgentAPI(t *testing.T) {
+	x, f := newOrganizationAPI(t)
+	f.org.CriticalIsUrgent = false
+	a := x.call(t, http.MethodGet, "/api/v1/organization", "", "Cookie", adminCookie)
+	if a.status != http.StatusOK || a.json(t)["critical_is_urgent"] != true {
+		t.Fatalf("read = %d %s", a.status, a.body)
+	}
+	for i, change := range []func(map[string]any){
+		func(m map[string]any) { m["critical_is_urgent"] = false },
+		func(m map[string]any) { delete(m, "critical_is_urgent") },
+	} {
+		a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/organization", updateBody(t, a.body, change),
+			"If-Match", "*")
+		if a.status != http.StatusOK || a.json(t)["critical_is_urgent"] != true || len(f.inputs) != i+1 ||
+			f.inputs[i].CriticalIsUrgent {
+			t.Errorf("update %d = %d %s", i, a.status, a.body)
+		}
+	}
+}
+
 // TestUpdateOrganizationSnoozePresetSettings is C-20.FR-9 and C-20.AC-7 on the API: an Admin sets the start of the
 // working day and the first day of the week, which the answer carries; an update that omits both keeps them; a value
 // outside the pattern or the days of the week is refused by the request validation with 400 invalid_format at the

@@ -153,7 +153,7 @@ func (q *Queries) CreateOutboundPolicy(ctx context.Context, arg CreateOutboundPo
 const getOrganization = `-- name: GetOrganization :one
 
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
-       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
 FROM organizations
 ORDER BY id
@@ -170,7 +170,6 @@ type GetOrganizationRow struct {
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
-	CriticalIsUrgent                 bool
 	InstanceLabels                   []string
 	RetentionStoredSnapshotsDays     int64
 	RetentionAlertDetailsDays        int64
@@ -195,7 +194,6 @@ func (q *Queries) GetOrganization(ctx context.Context) (GetOrganizationRow, erro
 		&i.SeverityLabel,
 		&i.SeverityMapping,
 		&i.SeverityStyles,
-		&i.CriticalIsUrgent,
 		&i.InstanceLabels,
 		&i.RetentionStoredSnapshotsDays,
 		&i.RetentionAlertDetailsDays,
@@ -286,7 +284,7 @@ func (q *Queries) GetOutgoingHeartbeatSecrets(ctx context.Context, orgID int64) 
 
 const getSettings = `-- name: GetSettings :one
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
-       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
@@ -306,7 +304,6 @@ type GetSettingsRow struct {
 	SeverityLabel                           string
 	SeverityMapping                         []byte
 	SeverityStyles                          []byte
-	CriticalIsUrgent                        bool
 	InstanceLabels                          []string
 	RetentionStoredSnapshotsDays            int64
 	RetentionAlertDetailsDays               int64
@@ -322,7 +319,8 @@ type GetSettingsRow struct {
 	Version                                 int64
 }
 
-// GetSettings reads the organization resource, with the state of its Secrets but not their values.
+// GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
+// is not read: it is true from 0.2.0 (C-26.FR-10).
 func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getSettings, orgID)
 	var i GetSettingsRow
@@ -336,7 +334,6 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.SeverityLabel,
 		&i.SeverityMapping,
 		&i.SeverityStyles,
-		&i.CriticalIsUrgent,
 		&i.InstanceLabels,
 		&i.RetentionStoredSnapshotsDays,
 		&i.RetentionAlertDetailsDays,
@@ -505,29 +502,28 @@ SET name                                         = $1,
     severity_label                               = $5,
     severity_mapping                             = $6,
     severity_styles                              = $7,
-    critical_is_urgent                           = $8,
-    instance_labels                              = $9,
-    retention_stored_snapshots_days              = $10,
-    retention_alert_details_days                 = $11,
-    retention_alert_group_summaries_days         = $12,
-    retention_audit_log_days                     = $13,
-    oidc_token_grace_seconds                     = $14,
-    totp_required                                = $15,
-    outgoing_heartbeat_url_ciphertext            = $16,
-    outgoing_heartbeat_url_key_id                = $17,
-    outgoing_heartbeat_url_updated_at            = $18,
-    outgoing_heartbeat_proxy                     = $19,
-    outgoing_heartbeat_proxy_password_ciphertext = $20,
-    outgoing_heartbeat_proxy_password_key_id     = $21,
-    outgoing_heartbeat_proxy_password_updated_at = $22,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $23::boolean THEN NULL
+    instance_labels                              = $8,
+    retention_stored_snapshots_days              = $9,
+    retention_alert_details_days                 = $10,
+    retention_alert_group_summaries_days         = $11,
+    retention_audit_log_days                     = $12,
+    oidc_token_grace_seconds                     = $13,
+    totp_required                                = $14,
+    outgoing_heartbeat_url_ciphertext            = $15,
+    outgoing_heartbeat_url_key_id                = $16,
+    outgoing_heartbeat_url_updated_at            = $17,
+    outgoing_heartbeat_proxy                     = $18,
+    outgoing_heartbeat_proxy_password_ciphertext = $19,
+    outgoing_heartbeat_proxy_password_key_id     = $20,
+    outgoing_heartbeat_proxy_password_updated_at = $21,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $22::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $23::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $23::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $22::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $22::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $24,
+    updated_at = $23,
     version = version + 1
-WHERE id = $25
+WHERE id = $24
 `
 
 type UpdateSettingsParams struct {
@@ -538,7 +534,6 @@ type UpdateSettingsParams struct {
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
-	CriticalIsUrgent                 bool
 	InstanceLabels                   []string
 	RetentionStoredSnapshotsDays     int64
 	RetentionAlertDetailsDays        int64
@@ -569,7 +564,6 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.SeverityLabel,
 		arg.SeverityMapping,
 		arg.SeverityStyles,
-		arg.CriticalIsUrgent,
 		arg.InstanceLabels,
 		arg.RetentionStoredSnapshotsDays,
 		arg.RetentionAlertDetailsDays,

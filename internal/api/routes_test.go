@@ -43,11 +43,12 @@ type fakeRoutes struct {
 func newFakeRoutes() *fakeRoutes {
 	p := routing.Profiles()[0]
 	return &fakeRoutes{list: routing.List{Version: 4, Routes: []routing.Route{
-		{ID: 2, PublicID: routeID, Name: "payments", Description: "Payments", Position: 0, Urgent: true,
+		{ID: 2, PublicID: routeID, Name: "payments", Description: "Payments", Position: 0,
+			MinimumSeverity: routing.MinimumCritical, Urgent: true,
 			Matchers: []routing.Matcher{{Label: "team", Op: "=", Value: "payments"}}, GroupKey: []string{"alertname"},
 			Policy: p.Policy, CreatedAt: t0, Version: 3},
-		{ID: 1, PublicID: defaultRouteID, Name: "Default", Position: 1, IsDefault: true, GroupKey: p.GroupKey,
-			Policy: p.Policy, CreatedAt: t0, Version: 1},
+		{ID: 1, PublicID: defaultRouteID, Name: "Default", Position: 1, IsDefault: true,
+			MinimumSeverity: routing.MinimumNone, GroupKey: p.GroupKey, Policy: p.Policy, CreatedAt: t0, Version: 1},
 	}}}
 }
 
@@ -146,7 +147,8 @@ func (f *fakeRoutes) Suggestions(_ context.Context, user *int64) ([]routing.Sugg
 		return nil, f.err
 	}
 	return []routing.Suggestion{{ID: routing.SuggestionHeartbeatLost, Route: routing.Input{
-		Name: routing.HeartbeatLostRouteName, Urgent: true, GroupKey: []string{"alertname", "integration"},
+		Name: routing.HeartbeatLostRouteName, MinimumSeverity: new(routing.MinimumCritical), Urgent: true,
+		GroupKey: []string{"alertname", "integration"},
 		Matchers: []routing.Matcher{{Label: "alertname", Op: "=", Value: "MusterHeartbeatLost"}},
 		Policy:   routing.Profiles()[0].Policy}}}, f.err
 }
@@ -222,7 +224,8 @@ func TestRoutesAPI(t *testing.T) {
 		t.Fatalf("list = %d %v %s", a.status, a.header, a.body)
 	}
 	p, d := list.Items[0], list.Items[1]
-	if p.Id != routeID || p.Position != 0 || p.IsDefault || !p.Urgent || *p.Etag != `"3"` || *p.Description != "Payments" ||
+	if p.Id != routeID || p.Position != 0 || p.IsDefault || !p.Urgent || p.MinimumSeverity != gen.MinimumSeverityCritical ||
+		d.Urgent || d.MinimumSeverity != gen.MinimumSeverityNone || *p.Etag != `"3"` || *p.Description != "Payments" ||
 		len(p.Matchers) != 1 || p.Matchers[0].Op != gen.MatcherOp("=") || len(p.Destinations) != 0 ||
 		len(p.DestinationIds) != 0 || p.StormActive || p.Storm != nil || p.TemplateError != nil ||
 		p.OpenAlertGroupCount != 0 || p.Policy.Language != gen.LanguageEn || !p.Policy.Templates.RootMessage.IsNull() ||
@@ -241,7 +244,8 @@ func TestRoutesAPI(t *testing.T) {
 	}
 	in := fr.inputs[0]
 	if in.Name != "payments" || len(in.Matchers) != 2 || in.Matchers[1] != (routing.Matcher{Label: "pod", Op: "=~",
-		Value: "api-.*"}) || !in.Urgent || !slices.Equal(in.GroupKey, []string{"alertname"}) || len(in.DestinationIDs) != 0 ||
+		Value: "api-.*"}) || !in.Urgent || in.MinimumSeverity != nil || !slices.Equal(in.GroupKey, []string{"alertname"}) ||
+		len(in.DestinationIDs) != 0 ||
 		in.Description != nil || in.Policy.Language != "ru" || in.Policy.Templates != (routing.Templates{}) ||
 		!slices.Equal(in.Policy.SnoozeDurationsSeconds, []int64{3600, 14400}) || in.Policy.Reminders.Enabled ||
 		in.Policy.Reminders.CapSeconds != 86400 || !in.Policy.AutoUnacknowledge || !in.Policy.AckTimeout.Enabled ||
@@ -401,6 +405,35 @@ func TestReorderRoutesAPI(t *testing.T) {
 	}
 }
 
+// TestRouteMinimumSeverityAPI is C-26.FR-8 and FR-10 at the API: minimum_severity reaches the Route's input, an
+// omitted one stays unset so that an update keeps it, urgent is no longer required and reaches the input as given, for
+// routing to read true without a Minimum severity as critical, and a value outside none, warning and critical is
+// refused by the specification.
+func TestRouteMinimumSeverityAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	withoutUrgent := strings.Replace(routeBody, `"urgent":true,`, ``, 1)
+	critical := strings.Replace(withoutUrgent, `"group_key"`, `"minimum_severity":"critical","group_key"`, 1)
+	if a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", critical); a.status != http.StatusCreated ||
+		len(fr.inputs) != 1 || fr.inputs[0].MinimumSeverity == nil ||
+		*fr.inputs[0].MinimumSeverity != routing.MinimumCritical || fr.inputs[0].Urgent {
+		t.Errorf("create with critical = %d %s %+v", a.status, a.body, fr.inputs)
+	}
+	if a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", withoutUrgent); a.status != http.StatusCreated ||
+		len(fr.inputs) != 2 || fr.inputs[1].MinimumSeverity != nil {
+		t.Errorf("create without urgent = %d %s", a.status, a.body)
+	}
+	notUrgent := strings.Replace(routeBody, `"urgent":true`, `"urgent":false`, 1)
+	if a := x.as(t, routesWriter, http.MethodPut, "/api/v1/routes/"+routeID, notUrgent, "If-Match", "*"); a.status !=
+		http.StatusOK || len(fr.inputs) != 3 || fr.inputs[2].MinimumSeverity != nil || fr.inputs[2].Urgent {
+		t.Errorf("update with urgent false = %d %s", a.status, a.body)
+	}
+	info := strings.Replace(withoutUrgent, `"group_key"`, `"minimum_severity":"info","group_key"`, 1)
+	if a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", info); a.status != http.StatusBadRequest ||
+		len(fr.inputs) != 3 {
+		t.Errorf("create with info = %d %s", a.status, a.body)
+	}
+}
+
 // TestListRouteProfilesAPI is C-08.FR-7 and C-08.AC-11: On-call and Informational with the values of defaults.md,
 // for routes:read.
 func TestListRouteProfilesAPI(t *testing.T) {
@@ -415,10 +448,12 @@ func TestListRouteProfilesAPI(t *testing.T) {
 	if on.Id != gen.OnCall || on.Name != "On-call" || !slices.Equal(on.Policy.SnoozeDurationsSeconds, []int{3600, 14400, 86400}) ||
 		!on.Policy.AckTimeout.Enabled || on.Policy.AckTimeout.FirstIntervalSeconds != 900 || !on.Policy.Reminders.Enabled ||
 		on.Policy.Reminders.FirstIntervalSeconds != 14400 || on.Policy.Reminders.CapSeconds != 86400 ||
-		!slices.Equal(on.GroupKey, []string{"alertname", "severity", "cluster"}) || on.Urgent {
+		!slices.Equal(on.GroupKey, []string{"alertname", "severity", "cluster"}) || on.Urgent ||
+		on.MinimumSeverity != gen.MinimumSeverityNone {
 		t.Errorf("on-call %+v", on)
 	}
-	if info.Id != gen.Informational || info.Name != "Informational" ||
+	if info.Id != gen.Informational || info.Name != "Informational" || info.Urgent ||
+		info.MinimumSeverity != gen.MinimumSeverityNone ||
 		!slices.Equal(info.Policy.SnoozeDurationsSeconds, []int{86400, 259200, 604800}) || info.Policy.AckTimeout.Enabled ||
 		info.Policy.Reminders.Enabled {
 		t.Errorf("informational %+v", info)
@@ -509,7 +544,8 @@ func TestRouteSuggestionsAPI(t *testing.T) {
 	var list gen.RouteSuggestionList
 	decodeInto(t, a, &list)
 	if a.status != http.StatusOK || len(list.Items) != 1 || list.Items[0].Id != gen.RouteSuggestionIdHeartbeatLost ||
-		list.Items[0].Route.Name != "Muster: Heartbeat lost" || !list.Items[0].Route.Urgent ||
+		list.Items[0].Route.Name != "Muster: Heartbeat lost" || !*list.Items[0].Route.Urgent ||
+		*list.Items[0].Route.MinimumSeverity != gen.MinimumSeverityCritical ||
 		list.Items[0].Route.DestinationIds == nil || *list.Items[0].Route.Description != "" ||
 		list.Items[0].Route.Matchers[0].Value != "MusterHeartbeatLost" || fr.users[0] == nil {
 		t.Errorf("list = %d %s", a.status, a.body)

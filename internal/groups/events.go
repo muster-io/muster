@@ -181,3 +181,10 @@ const (
 	SystemMusterUnavailable    SystemEvent = "muster_unavailable"
 	SystemFallbackTemplateUsed SystemEvent = "fallback_template_used"
 )
+
+// ReasonMinimumSeverity is the reason of a severity_raised, or of the Quiet urgency_raised that removes nothing, that
+// the Minimum severity of the Route made rather than an Alert (C-26.FR-9); ReasonCodeMinimumSeverity is its code.
+const (
+	ReasonMinimumSeverity     = "Minimum severity of the Route"
+	ReasonCodeMinimumSeverity = "minimum_severity"
+)

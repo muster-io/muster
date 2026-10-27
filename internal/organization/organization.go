@@ -84,11 +84,12 @@ type Organization struct {
 	Name     string
 	TimeZone string
 	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start (C-20.FR-9).
-	WorkdayStart      string
-	WeekStart         string
-	SeverityLabel     string
-	SeverityMapping   []SeverityMapping
-	SeverityStyles    []SeverityStyle
+	WorkdayStart    string
+	WeekStart       string
+	SeverityLabel   string
+	SeverityMapping []SeverityMapping
+	SeverityStyles  []SeverityStyle
+	// CriticalIsUrgent is organization.critical_is_urgent, always true from 0.2.0: critical is Urgent (C-26.FR-10).
 	CriticalIsUrgent  bool
 	InstanceLabels    []string
 	Retention         Retention
@@ -110,11 +111,12 @@ type Input struct {
 	Name     string
 	TimeZone string
 	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start; nil keeps the stored one.
-	WorkdayStart          *string
-	WeekStart             *string
-	SeverityLabel         string
-	SeverityMapping       []SeverityMapping
-	SeverityStyles        []SeverityStyle
+	WorkdayStart    *string
+	WeekStart       *string
+	SeverityLabel   string
+	SeverityMapping []SeverityMapping
+	SeverityStyles  []SeverityStyle
+	// CriticalIsUrgent is ignored from 0.2.0, which never writes organization.critical_is_urgent (C-26.FR-10).
 	CriticalIsUrgent      bool
 	InstanceLabels        []string
 	Retention             Retention
@@ -242,7 +244,7 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 	}
 	o := Organization{
 		PublicID: row.PublicID, Name: row.Name, TimeZone: row.TimeZone, WorkdayStart: row.WorkdayStart,
-		WeekStart: row.WeekStart, SeverityLabel: row.SeverityLabel, CriticalIsUrgent: row.CriticalIsUrgent,
+		WeekStart: row.WeekStart, SeverityLabel: row.SeverityLabel, CriticalIsUrgent: true,
 		InstanceLabels: row.InstanceLabels,
 		Retention: Retention{
 			StoredSnapshotsDays: row.RetentionStoredSnapshotsDays, AlertDetailsDays: row.RetentionAlertDetailsDays,
@@ -349,7 +351,6 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			SeverityLabel:                    after.SeverityLabel,
 			SeverityMapping:                  mapping,
 			SeverityStyles:                   styles,
-			CriticalIsUrgent:                 after.CriticalIsUrgent,
 			InstanceLabels:                   after.InstanceLabels,
 			RetentionStoredSnapshotsDays:     after.Retention.StoredSnapshotsDays,
 			RetentionAlertDetailsDays:        after.Retention.AlertDetailsDays,
@@ -412,7 +413,7 @@ func applyInput(before Organization, in Input) (Organization, error) {
 	if in.WeekStart != nil {
 		after.WeekStart = *in.WeekStart
 	}
-	after.SeverityLabel, after.CriticalIsUrgent = in.SeverityLabel, in.CriticalIsUrgent
+	after.SeverityLabel = in.SeverityLabel
 	after.SeverityMapping = append([]SeverityMapping{}, in.SeverityMapping...)
 	after.SeverityStyles = append([]SeverityStyle{}, in.SeverityStyles...)
 	after.InstanceLabels = append([]string{}, in.InstanceLabels...)
@@ -492,7 +493,6 @@ type view struct {
 	SeverityLabel         string            `json:"severity_label"`
 	SeverityMapping       []SeverityMapping `json:"severity_mapping"`
 	SeverityStyles        []SeverityStyle   `json:"severity_styles"`
-	CriticalIsUrgent      bool              `json:"critical_is_urgent"`
 	InstanceLabels        []string          `json:"instance_labels"`
 	Retention             retentionView     `json:"retention"`
 	TOTPRequired          string            `json:"totp_required"`
@@ -517,7 +517,7 @@ func viewOf(o Organization) view {
 	return view{
 		Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart, WeekStart: o.WeekStart,
 		SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles,
-		CriticalIsUrgent: o.CriticalIsUrgent, InstanceLabels: o.InstanceLabels,
+		InstanceLabels: o.InstanceLabels,
 		Retention: retentionView{
 			StoredSnapshotsDays: o.Retention.StoredSnapshotsDays, AlertDetailsDays: o.Retention.AlertDetailsDays,
 			AlertGroupSummariesDays: o.Retention.AlertGroupSummariesDays, AuditLogDays: o.Retention.AuditLogDays,

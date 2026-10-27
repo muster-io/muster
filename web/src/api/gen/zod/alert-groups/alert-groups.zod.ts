@@ -22,7 +22,7 @@ export const ListAlertGroupsQueryParams = zod.object({
   "route": zod.array(zod.string()).optional().describe('Only these Routes (`public_id`).'),
   "integration": zod.array(zod.string()).optional().describe('Only Alert Groups with Alerts from these Integrations (`public_id`).'),
   "severity": zod.array(zod.enum(['critical', 'warning', 'info'])).optional().describe('Only these Severity levels.'),
-  "urgent": zod.boolean().optional().describe('Only Urgent (true) or non-Urgent (false) Alert Groups.'),
+  "urgent": zod.boolean().optional().describe('Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.'),
   "resolved_by": zod.enum(['user', 'system']).optional().describe('Only Alert Groups resolved by a person or by the system.'),
   "resolve_reason": zod.enum(['resolved', 'gone', 'stale', 'integration_deleted']).optional().describe('With `resolved_by=system`: the reason.'),
   "reopened": zod.boolean().optional().describe('True: Reopen count above zero.'),
@@ -70,8 +70,8 @@ export const ListAlertGroupsResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(listAlertGroupsResponseItemsItemRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -139,7 +139,7 @@ export const GetAlertGroupCountsQueryParams = zod.object({
   "route": zod.array(zod.string()).optional().describe('Only these Routes (`public_id`).'),
   "integration": zod.array(zod.string()).optional().describe('Only Alert Groups with Alerts from these Integrations (`public_id`).'),
   "severity": zod.array(zod.enum(['critical', 'warning', 'info'])).optional().describe('Only these Severity levels.'),
-  "urgent": zod.boolean().optional().describe('Only Urgent (true) or non-Urgent (false) Alert Groups.'),
+  "urgent": zod.boolean().optional().describe('Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.'),
   "resolved_by": zod.enum(['user', 'system']).optional().describe('Only Alert Groups resolved by a person or by the system.'),
   "resolve_reason": zod.enum(['resolved', 'gone', 'stale', 'integration_deleted']).optional().describe('With `resolved_by=system`: the reason.'),
   "reopened": zod.boolean().optional().describe('True: Reopen count above zero.'),
@@ -259,8 +259,8 @@ export const GetAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(getAlertGroupResponseRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -427,7 +427,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "from_status": zod.union([zod.literal('firing'),zod.literal('acknowledged'),zod.literal('snoozed'),zod.literal('resolved'),zod.literal(null)]).nullish(),
   "to_status": zod.enum(['firing', 'acknowledged', 'snoozed', 'resolved']).optional(),
   "reason": zod.string().nullish().describe('Reason of an automatic status change, as text; clients translate `reason_code` and show this text only when there is no code.'),
-  "reason_code": zod.union([zod.literal('resolved'),zod.literal('gone'),zod.literal('stale'),zod.literal('integration_deleted'),zod.literal('owner_disabled'),zod.literal('owner_deleted'),zod.literal('reminders_unanswered'),zod.literal(null)]).nullish().describe('The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.'),
+  "reason_code": zod.union([zod.literal('resolved'),zod.literal('gone'),zod.literal('stale'),zod.literal('integration_deleted'),zod.literal('owner_disabled'),zod.literal('owner_deleted'),zod.literal('reminders_unanswered'),zod.literal('minimum_severity'),zod.literal(null)]).nullish().describe('The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.'),
   "owner": zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemOneThreeOwnerIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
@@ -465,7 +465,8 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "kind": zod.enum(['alerts']),
   "fingerprints": zod.array(zod.string()).optional(),
   "replaced_label": zod.string().nullish().describe('The Instance label that differs, for `alert_replaced`.'),
-  "reason": zod.string().nullish(),
+  "reason": zod.string().nullish().describe('Why the Severity level rose, as text, for a `severity_raised` that no Alert caused; clients translate `reason_code` and show this text only when there is no code.'),
+  "reason_code": zod.union([zod.literal('resolved'),zod.literal('gone'),zod.literal('stale'),zod.literal('integration_deleted'),zod.literal('owner_disabled'),zod.literal('owner_deleted'),zod.literal('reminders_unanswered'),zod.literal('minimum_severity'),zod.literal(null)]).nullish().describe('The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.'),
   "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the added Alerts already carried.')
 })).and(zod.object({
   "kind": zod.enum(['alerts'])
@@ -701,8 +702,8 @@ export const AcknowledgeAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(acknowledgeAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -804,8 +805,8 @@ export const UnacknowledgeAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(unacknowledgeAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -915,8 +916,8 @@ export const ResolveAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(resolveAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -1018,8 +1019,8 @@ export const UnresolveAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(unresolveAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -1128,8 +1129,8 @@ export const SnoozeAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(snoozeAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -1231,8 +1232,8 @@ export const UnsnoozeAlertGroupResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(unsnoozeAlertGroupResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
@@ -1413,8 +1414,8 @@ export const AnswerReminderResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).optional().describe('Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends.'),
-  "severity_level": zod.enum(['critical', 'warning', 'info']),
-  "urgent": zod.boolean(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the firing Alerts, raised to the Route\'s Minimum severity (`minimum_severity`); each Alert keeps its own level.'),
+  "urgent": zod.boolean().describe('True exactly when `severity_level` is `critical`.'),
   "route": zod.object({
   "id": zod.string().regex(answerReminderResponseAlertGroupRouteIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()

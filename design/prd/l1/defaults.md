@@ -100,7 +100,7 @@ From 0.2.0 the profile On-call is called Paging (C-26.FR-11).
 | Name | Paging (default) | Informational | Capability | Status |
 |---|---|---|---|---|
 | Matchers | none (the Default route) | — | C-08 | decided |
-| `route.urgent` | off; from 0.2.0 it no longer acts, reads `true` exactly when `route.minimum_severity` is critical and is ignored in requests, and 0.3.0 removes it (C-26.FR-10) | off | C-08, C-26 | decided |
+| `route.urgent` | off; from 0.2.0 it no longer acts and reads `true` exactly when `route.minimum_severity` is critical; a request with `true` and no `minimum_severity` sets it to critical, and `false`, or `urgent` beside a `minimum_severity`, changes nothing; 0.3.0 removes it (C-26.FR-10) | off | C-08, C-26 | decided |
 | `route.minimum_severity` | none | none | C-26 | decided |
 | `route.deliver_to_teams` | off ("Also to the Teams from the label") | off | C-26 | decided |
 | `route.run_team_chains` | on ("Run the Teams' Escalation chains", under `route.deliver_to_teams`) | on | C-26, C-32 | decided |

@@ -63,8 +63,9 @@ type fakeEntry struct {
 // fakeDB is the database of the package in memory, with the semantics of its queries: the routes, Alerts, Alert
 // Groups, memberships, Timeline, timers and counter of one Organization.
 type fakeDB struct {
-	mu       sync.Mutex
-	settings dbgen.GetGroupingSettingsRow
+	mu sync.Mutex
+	// instance are the Instance labels of the Organization.
+	instance []string
 	routes   map[int64]*fakeRoute
 	alerts   map[int64]*dbgen.ListChangedAlertsRow
 	groups   map[int64]*dbgen.LockGroupsRow
@@ -104,11 +105,12 @@ type fakeDB struct {
 	received map[int64]time.Time
 	// problems are the Alert Groups with a Delivery problem, by id.
 	problems map[int64]bool
+	// updates are the open_group_updates rows (updates_test.go).
+	updates []*fakeUpdate
 }
 
 func newDB() *fakeDB {
-	return &fakeDB{settings: dbgen.GetGroupingSettingsRow{CriticalIsUrgent: true,
-		InstanceLabels: []string{"pod", "instance", "container", "endpoint"}}, routes: map[int64]*fakeRoute{},
+	return &fakeDB{instance: []string{"pod", "instance", "container", "endpoint"}, routes: map[int64]*fakeRoute{},
 		alerts: map[int64]*dbgen.ListChangedAlertsRow{}, groups: map[int64]*dbgen.LockGroupsRow{},
 		timers: map[string]time.Time{}, notices: map[string]int64{}, upserts: map[string]int{},
 		users:    map[int64]dbgen.ListUserRefsRow{},
@@ -152,10 +154,10 @@ func (f *fakeDB) GetSnapshotReceivedAt(_ context.Context, arg dbgen.GetSnapshotR
 	return at, nil
 }
 
-func (f *fakeDB) GetGroupingSettings(context.Context, int64) (dbgen.GetGroupingSettingsRow, error) {
+func (f *fakeDB) GetGroupingSettings(context.Context, int64) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.settings, f.call("GetGroupingSettings")
+	return f.instance, f.call("GetGroupingSettings")
 }
 
 func (f *fakeDB) ListChangedAlerts(_ context.Context, arg dbgen.ListChangedAlertsParams) (
@@ -613,20 +615,6 @@ func (f *fakeDB) LockRouteForMove(_ context.Context, arg dbgen.LockRouteForMoveP
 	return dbgen.LockRouteForMoveRow{}, pgx.ErrNoRows
 }
 
-func (f *fakeDB) GetDefaultRouteID(context.Context, int64) (int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.call("GetDefaultRouteID"); err != nil {
-		return 0, err
-	}
-	for _, r := range f.routes {
-		if r.IsDefault {
-			return r.ID, nil
-		}
-	}
-	return 0, pgx.ErrNoRows
-}
-
 func (f *fakeDB) ListOpenGroupsOfRoute(_ context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -713,9 +701,10 @@ func (f *fakeDB) GetGroupID(_ context.Context, arg dbgen.GetGroupIDParams) (dbge
 	return dbgen.GetGroupIDRow{}, pgx.ErrNoRows
 }
 
-// urgent is the urgency of an Alert Group as the reads derive it from its Route and critical is Urgent.
+// urgent is the urgency of an Alert Group as the reads derive it: Urgent exactly when its stored Severity level is
+// critical (C-26.FR-8).
 func (f *fakeDB) urgent(g *dbgen.LockGroupsRow) bool {
-	return f.routes[g.RouteID].Urgent || (g.SeverityLevel == "critical" && f.settings.CriticalIsUrgent)
+	return g.SeverityLevel == "critical"
 }
 
 func (f *fakeDB) ListIntegrationRefs(_ context.Context, arg dbgen.ListIntegrationRefsParams) (
@@ -997,7 +986,8 @@ func newHarness(t *testing.T) *harness {
 
 // route adds a Route with the policy of the On-call profile.
 func (h *harness) route(id int64, publicID, name string, isDefault bool, key []string) {
-	h.db.routes[id] = &fakeRoute{LockRoutesRow: dbgen.LockRoutesRow{ID: id, PublicID: publicID, IsDefault: isDefault, GroupKey: key,
+	h.db.routes[id] = &fakeRoute{LockRoutesRow: dbgen.LockRoutesRow{ID: id, PublicID: publicID, IsDefault: isDefault,
+		MinimumSeverity: "none", GroupKey: key,
 		ReopenWindowSeconds: 900, GracePeriodSeconds: 900, UrgentRiseRemovesAck: true}, name: name}
 }
 
@@ -1166,7 +1156,7 @@ func TestDispatch(t *testing.T) {
 		rendered = append(rendered, r.Group.ID)
 		return nil
 	}
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); err != nil ||
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); err != nil ||
 		!slices.Equal(rendered, []int64{row.ID}) || row.RouteID != 1 {
 		t.Errorf("moved = %v, rendered %v", err, rendered)
 	}
@@ -1178,7 +1168,7 @@ func TestDispatch(t *testing.T) {
 	}
 	g.MovedFromRouteID, g.RouteID = nil, 2
 	entries := len(h.db.entries)
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, Actor{Kind: audit.ActorUser, Transport: audit.TransportUI, Person: alice.Actor}, moveToDefault{from: 2, to: 1}, &after); err != nil {
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, Actor{Kind: audit.ActorUser, Transport: audit.TransportUI, Person: alice.Actor}, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); err != nil {
 		t.Fatal(err)
 	}
 	if e := h.db.entries[len(h.db.entries)-1]; len(h.db.entries) != entries+2 || e.Kind != string(KindSystem) ||
@@ -1188,7 +1178,7 @@ func TestDispatch(t *testing.T) {
 	}
 	h.db.fail["InsertTimelineEntry"] = errBoom
 	g.MovedFromRouteID, g.RouteID = nil, 2
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed fallback entry = %v", err)
 	}
@@ -1196,7 +1186,7 @@ func TestDispatch(t *testing.T) {
 	h.svc.d.rerender = func(context.Context, Queries, Rendering) error { return errBoom }
 	g.MovedFromRouteID = nil
 	g.RouteID = 2
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed re-render = %v", err)
 	}
@@ -1330,14 +1320,47 @@ func TestMove(t *testing.T) {
 			t.Errorf("%s = %v", id, err)
 		}
 	}
-	for _, q := range []string{"LockRouteForMove", "GetDefaultRouteID", "ListOpenGroupsOfRoute", "LockGroups",
-		"InsertTimelineEntry", "InsertAuditEntry"} {
+	for _, q := range []string{"LockRouteForMove", "LockDefaultRoute", "ListOpenGroupsOfRoute", "LockGroups",
+		"ListFiringLevels", "InsertTimelineEntry", "InsertAuditEntry"} {
 		h := newHarness(t)
 		h.changes(t, ingest.ChangeFired, h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"}))
 		h.db.fail[q] = errBoom
 		if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); !errors.Is(err, errBoom) {
 			t.Errorf("%s failing = %v", q, err)
 		}
+	}
+}
+
+// TestMoveMinimumSeverity is C-26.FR-8 for a move to the Default route: the level of a moved Alert Group follows the
+// Default route's Minimum severity: a rise records the Quiet entry of the Minimum severity, a fall nothing.
+func TestMoveMinimumSeverity(t *testing.T) {
+	h := newHarness(t)
+	h.db.routes[2].MinimumSeverity = "critical"
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	by := Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	if g.SeverityLevel != "critical" {
+		t.Fatalf("before the move %+v", g)
+	}
+	if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); err != nil {
+		t.Fatal(err)
+	}
+	if g.RouteID != 1 || g.SeverityLevel != "warning" || g.Urgent || h.last(t, g).Event.String != "moved_to_default_route" {
+		t.Errorf("a fall: %+v %v", g, h.events(g))
+	}
+	h = newHarness(t)
+	h.db.routes[1].MinimumSeverity = "critical"
+	a = h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g = h.groupOf(t, a)
+	h.acknowledge(g)
+	if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.last(t, g); g.SeverityLevel != "critical" || !g.Urgent || g.Status != "acknowledged" ||
+		e.Event.String != "urgency_raised" || e.Loudness.String != "quiet" || e.Reason.String != ReasonMinimumSeverity {
+		t.Errorf("a rise: %+v %v", g, h.events(g))
 	}
 }
 

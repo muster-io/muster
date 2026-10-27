@@ -179,13 +179,14 @@ func (q *Queries) DismissRouteSuggestion(ctx context.Context, arg DismissRouteSu
 
 const ensureDefaultRoute = `-- name: EnsureDefaultRoute :one
 INSERT INTO routes (
-    org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-    grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-    storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
-    reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
+    org_id, public_id, name, description, position, is_default, minimum_severity, urgent, group_key,
+    reopen_window_seconds, grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds,
+    thread_batching_window_seconds, storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds,
+    reminders_enabled, reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
 VALUES (
-    $1, $2, $3, $4, 0, true, $5, $6::text[], $7,
+    $1, $2, $3, $4, 0, true, $5, $5 = 'critical',
+    $6::text[], $7,
     $8, $9, $10::bigint[],
     $11, $12, $13, $14,
     $15, $16, $17, $18,
@@ -200,7 +201,7 @@ type EnsureDefaultRouteParams struct {
 	PublicID                       string
 	Name                           string
 	Description                    string
-	Urgent                         bool
+	MinimumSeverity                string
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -226,7 +227,7 @@ func (q *Queries) EnsureDefaultRoute(ctx context.Context, arg EnsureDefaultRoute
 		arg.PublicID,
 		arg.Name,
 		arg.Description,
-		arg.Urgent,
+		arg.MinimumSeverity,
 		arg.GroupKey,
 		arg.ReopenWindowSeconds,
 		arg.GracePeriodSeconds,
@@ -249,7 +250,7 @@ func (q *Queries) EnsureDefaultRoute(ctx context.Context, arg EnsureDefaultRoute
 }
 
 const getRoute = `-- name: GetRoute :one
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -277,7 +278,7 @@ type GetRouteRow struct {
 	Description                    string
 	Position                       int64
 	IsDefault                      bool
-	Urgent                         bool
+	MinimumSeverity                string
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -316,7 +317,7 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.Description,
 		&i.Position,
 		&i.IsDefault,
-		&i.Urgent,
+		&i.MinimumSeverity,
 		&i.GroupKey,
 		&i.ReopenWindowSeconds,
 		&i.GracePeriodSeconds,
@@ -391,11 +392,58 @@ func (q *Queries) GetRoutingStamp(ctx context.Context, orgID int64) (GetRoutingS
 	return i, err
 }
 
+const hasOpenAlertGroups = `-- name: HasOpenAlertGroups :one
+SELECT EXISTS (
+    SELECT 1
+    FROM alert_groups
+    WHERE org_id = $1 AND route_id = $2 AND status <> 'resolved'
+)::boolean AS open
+`
+
+type HasOpenAlertGroupsParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+// HasOpenAlertGroups reports whether a Route has open Alert Groups, read-only (only groups writes alert_groups),
+// those moved to it included: a changed Minimum severity reaches them through open_group_updates.
+func (q *Queries) HasOpenAlertGroups(ctx context.Context, arg HasOpenAlertGroupsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenAlertGroups, arg.OrgID, arg.RouteID)
+	var open bool
+	err := row.Scan(&open)
+	return open, err
+}
+
+const insertOpenGroupUpdate = `-- name: InsertOpenGroupUpdate :exec
+INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertOpenGroupUpdateParams struct {
+	OrgID       int64
+	Kind        string
+	RouteID     pgtype.Int8
+	RequestedAt time.Time
+}
+
+// InsertOpenGroupUpdate requests that a change of configuration reach the open Alert Groups of its scope (C-26.FR-9):
+// the worker of any replica claims the row.
+func (q *Queries) InsertOpenGroupUpdate(ctx context.Context, arg InsertOpenGroupUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertOpenGroupUpdate,
+		arg.OrgID,
+		arg.Kind,
+		arg.RouteID,
+		arg.RequestedAt,
+	)
+	return err
+}
+
 const insertRoute = `-- name: InsertRoute :one
 INSERT INTO routes (
-    org_id, public_id, name, description, position, is_default, urgent, group_key, reopen_window_seconds,
-    grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
-    storm_threshold, language, template_root_message, template_line, template_ack_timeout_notice,
+    org_id, public_id, name, description, position, is_default, minimum_severity, urgent, group_key,
+    reopen_window_seconds, grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds,
+    thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
+    template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
     reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
 )
@@ -403,7 +451,8 @@ SELECT $1, $2, $3, $4,
        coalesce((SELECT CASE WHEN $5::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
                  FROM routes p
                  WHERE p.org_id = $1 AND NOT p.is_default AND p.deleted_at IS NULL), 0),
-       false, $6, $7::text[], $8, $9, $10,
+       false, $6, $6 = 'critical', $7::text[], $8,
+       $9, $10,
        $11::bigint[], $12, $13, $14,
        $15, $16, $17,
        $18, $19, $20,
@@ -417,7 +466,7 @@ type InsertRouteParams struct {
 	Name                           string
 	Description                    string
 	First                          bool
-	Urgent                         bool
+	MinimumSeverity                string
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -439,6 +488,7 @@ type InsertRouteParams struct {
 }
 
 // InsertRoute creates a Route at the last position before the Default route, or with @first at the top of the list.
+// urgent is written as minimum_severity = 'critical', which a 0.1 replica of a rolling update still reads (C-26.FR-10).
 func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64, error) {
 	row := q.db.QueryRow(ctx, insertRoute,
 		arg.OrgID,
@@ -446,7 +496,7 @@ func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64
 		arg.Name,
 		arg.Description,
 		arg.First,
-		arg.Urgent,
+		arg.MinimumSeverity,
 		arg.GroupKey,
 		arg.ReopenWindowSeconds,
 		arg.GracePeriodSeconds,
@@ -850,7 +900,7 @@ func (q *Queries) ListRouteSuggestionDismissals(ctx context.Context, arg ListRou
 
 const listRoutes = `-- name: ListRoutes :many
 
-SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.urgent, r.group_key,
+SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
        r.thread_batching_window_seconds, r.storm_threshold, r.language, r.template_root_message, r.template_line,
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
@@ -870,7 +920,7 @@ type ListRoutesRow struct {
 	Description                    string
 	Position                       int64
 	IsDefault                      bool
-	Urgent                         bool
+	MinimumSeverity                string
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -916,7 +966,7 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.Description,
 			&i.Position,
 			&i.IsDefault,
-			&i.Urgent,
+			&i.MinimumSeverity,
 			&i.GroupKey,
 			&i.ReopenWindowSeconds,
 			&i.GracePeriodSeconds,
@@ -986,6 +1036,16 @@ type LockRouteMembershipParams struct {
 // so that a change of the Destinations and an Enqueue on the Route serialize.
 func (q *Queries) LockRouteMembership(ctx context.Context, arg LockRouteMembershipParams) error {
 	_, err := q.db.Exec(ctx, lockRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
 	return err
 }
 
@@ -1096,7 +1156,8 @@ func (q *Queries) SetRoutePositions(ctx context.Context, arg SetRoutePositionsPa
 
 const updateRoute = `-- name: UpdateRoute :exec
 UPDATE routes
-SET name = $1, description = $2, urgent = $3, group_key = $4::text[],
+SET name = $1, description = $2, minimum_severity = $3,
+    urgent = $3 = 'critical', group_key = $4::text[],
     reopen_window_seconds = $5, grace_period_seconds = $6,
     urgent_rise_removes_ack = $7, snooze_durations_seconds = $8::bigint[],
     thread_batching_window_seconds = $9, storm_threshold = $10,
@@ -1112,7 +1173,7 @@ WHERE org_id = $22 AND id = $23
 type UpdateRouteParams struct {
 	Name                           string
 	Description                    string
-	Urgent                         bool
+	MinimumSeverity                string
 	GroupKey                       []string
 	ReopenWindowSeconds            int64
 	GracePeriodSeconds             int64
@@ -1135,12 +1196,13 @@ type UpdateRouteParams struct {
 	ID                             int64
 }
 
-// UpdateRoute replaces the configured fields of a Route and bumps its version.
+// UpdateRoute replaces the configured fields of a Route and bumps its version; urgent is written as minimum_severity =
+// 'critical', which a 0.1 replica of a rolling update still reads (C-26.FR-10).
 func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error {
 	_, err := q.db.Exec(ctx, updateRoute,
 		arg.Name,
 		arg.Description,
-		arg.Urgent,
+		arg.MinimumSeverity,
 		arg.GroupKey,
 		arg.ReopenWindowSeconds,
 		arg.GracePeriodSeconds,

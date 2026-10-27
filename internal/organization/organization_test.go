@@ -50,7 +50,7 @@ func (s *fakeStore) GetOrganization(context.Context) (dbgen.GetOrganizationRow, 
 	row := dbgen.GetOrganizationRow{
 		ID: 7, PublicID: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart,
 		WeekStart: o.WeekStart, SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping,
-		SeverityStyles: o.SeverityStyles, CriticalIsUrgent: o.CriticalIsUrgent,
+		SeverityStyles: o.SeverityStyles,
 		InstanceLabels: o.InstanceLabels, RetentionStoredSnapshotsDays: o.RetentionStoredSnapshotsDays,
 		RetentionAlertDetailsDays: o.RetentionAlertDetailsDays, RetentionAuditLogDays: o.RetentionAuditLogDays,
 		RetentionAlertGroupSummariesDays: o.RetentionAlertGroupSummariesDays, TotpRequired: o.TotpRequired,
@@ -236,7 +236,7 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 	return &fakeSettings{row: dbgen.GetSettingsRow{
 		ID: 7, PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
 		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel, SeverityMapping: mapping, SeverityStyles: styles,
-		CriticalIsUrgent: true, InstanceLabels: d.InstanceLabels,
+		InstanceLabels:               d.InstanceLabels,
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
 		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1,
@@ -280,7 +280,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.Name, s.row.TimeZone, s.row.SeverityLabel = arg.Name, arg.TimeZone, arg.SeverityLabel
 	s.row.WorkdayStart, s.row.WeekStart = arg.WorkdayStart, arg.WeekStart
 	s.row.SeverityMapping, s.row.SeverityStyles = arg.SeverityMapping, arg.SeverityStyles
-	s.row.CriticalIsUrgent, s.row.InstanceLabels = arg.CriticalIsUrgent, arg.InstanceLabels
+	s.row.InstanceLabels = arg.InstanceLabels
 	s.row.RetentionStoredSnapshotsDays = arg.RetentionStoredSnapshotsDays
 	s.row.RetentionAlertDetailsDays = arg.RetentionAlertDetailsDays
 	s.row.RetentionAlertGroupSummariesDays = arg.RetentionAlertGroupSummariesDays
@@ -477,8 +477,6 @@ func TestOrganizationUpdate(t *testing.T) {
 			in.SeverityStyles = slices.Clone(in.SeverityStyles)
 			in.SeverityStyles[1].Color = "#000000"
 		}, func(o Organization) bool { return o.SeverityStyles[1].Color == "#000000" }},
-		{"/critical_is_urgent", func(in *Input) { in.CriticalIsUrgent = false },
-			func(o Organization) bool { return !o.CriticalIsUrgent }},
 		{"/instance_labels", func(in *Input) { in.InstanceLabels = []string{"node"} },
 			func(o Organization) bool { return slices.Equal(o.InstanceLabels, []string{"node"}) }},
 		{"/retention/stored_snapshots_days", func(in *Input) { in.Retention.StoredSnapshotsDays = 1 },
@@ -511,6 +509,20 @@ func TestOrganizationUpdate(t *testing.T) {
 		// The change is stored: a new read shows it.
 		if read, err := svc.Get(t.Context()); err != nil || !c.check(read) {
 			t.Errorf("%s: read back %+v, %v", c.pointer, read, err)
+		}
+	}
+	// "critical is Urgent" is always on from 0.2.0: an update that turns it off, or leaves it out, changes nothing and
+	// is never in a diff (C-26.FR-10).
+	for _, off := range []bool{false, true} {
+		entries, version := len(s.audit), got.Version
+		in = inputOf(got)
+		in.CriticalIsUrgent = off
+		if got, err = svc.Update(t.Context(), actor, audit.TransportUI, netip.Addr{}, &version, in); err != nil ||
+			!got.CriticalIsUrgent || got.Version != version || len(s.audit) != entries {
+			t.Errorf("critical is Urgent %v: %+v, %v, %d entries", off, got, err, len(s.audit)-entries)
+		}
+		if read, err := svc.Get(t.Context()); err != nil || !read.CriticalIsUrgent {
+			t.Errorf("critical is Urgent %v: read back %+v, %v", off, read, err)
 		}
 	}
 	// Clearing Secrets that are not set and keeping the omitted ones change nothing.

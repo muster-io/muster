@@ -41,7 +41,9 @@
   [`0019_request_log_socket_envelopes`](../../internal/db/migrations/0019_request_log_socket_envelopes.up.sql)
   (`request_log_answer_check` takes the answer of an inbound record without a status, S-101) and
   [`0020_oidc_groups_claim_seen_at`](../../internal/db/migrations/0020_oidc_groups_claim_seen_at.up.sql)
-  (`oidc_settings.groups_claim_seen_at`, C-03.FR-6), in
+  (`oidc_settings.groups_claim_seen_at`, C-03.FR-6) and
+  [`0021_minimum_severity`](../../internal/db/migrations/0021_minimum_severity.up.sql)
+  (`routes.minimum_severity` and the queue `open_group_updates`, C-26.FR-8 to FR-10), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -135,8 +137,8 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 ## 2. Inventory
 
 57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
-indexes, one short-lived table, `bridge_events_seen` (0011), and the Request log, `request_log` (0013), which makes 59
-tables.
+indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `request_log` (0013), and the queue of
+changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), which makes 60 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -149,6 +151,7 @@ tables.
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences` | ingest, routing | 90 days after resolution, batched delete |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing | — |
+| Open Alert Group updates | `open_group_updates` | routing inserts, `groups` claims and deletes | deleted with the last batch of its run |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, **`timeline_entries`**, `notes` | `groups` only | summaries and their Notes 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
@@ -434,13 +437,15 @@ erDiagram
     alert_groups |o..o{ delivery_events : "merged into Timeline"
     connections ||--o{ telegram_post_copies : buffers
     connections ||--o{ bridge_events_seen : "handled events"
+    routes ||--o{ open_group_updates : "changed for its open Alert Groups"
 
     routes {
         bigint id PK
         text name UK "among non-deleted"
         bigint position
         boolean is_default "exactly one"
-        boolean urgent
+        text minimum_severity "none warning critical"
+        boolean urgent "minimum_severity = critical"
         text_array group_key
         bigint reopen_window_seconds
         bigint grace_period_seconds
@@ -933,7 +938,8 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
 [ADR-0004](../adr/0004-alert-group-state-machine.md).
 
 - **`routes`** — name (unique among non-deleted), `position`, `is_default` (exactly one per Organization through a
-  partial unique index; never deleted), `urgent`, `group_key text[]`, and every policy field as its own typed column
+  partial unique index; never deleted), `minimum_severity` (`none`, `warning` or `critical`, from migration 0021),
+  `urgent`, `group_key text[]`, and every policy field as its own typed column
   (Reopen window, Grace period, rise-to-Urgent rule, Snooze durations, Thread batching window, Storm threshold,
   language, the three templates, ack timeout, Reminders with `CHECK (cap >= first)`, auto-unacknowledge) — not a JSON
   blob, so every field has a `CHECK`. All of them exist from the first migration and every Route stores them from its
@@ -943,7 +949,12 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
   them; deletion with open Alert Groups is refused by the application (C-09.FR-19), using the open-key index of
   `alert_groups`. Evaluation order is `ORDER BY is_default, position, id`; a reorder rewrites `position` in one
   transaction and bumps `organizations.route_order_version`. `position` is deliberately not unique: a unique index
-  cannot be deferred, and a reorder would collide halfway.
+  cannot be deferred, and a reorder would collide halfway. `minimum_severity` raises the Severity level of the Route's
+  Alert Groups (C-26.FR-8); `urgent` no longer acts from 0.2.0 (C-26.FR-10): migration 0021 gave every Route marked
+  urgent the Minimum severity critical, and every create and update writes `urgent` as `minimum_severity =
+  'critical'`, so that a 0.1 replica of a rolling update, which still reads `urgent`, finds the same urgency; 0.3.0
+  drops the column. A change of `minimum_severity` on a Route with open Alert Groups inserts a row of
+  `open_group_updates` in the same transaction ([section 5](#5-queues-and-claims)).
 - **`route_matchers`** — Matchers of a Route, `op` checked against `=`, `!=`, `=~`, `!~`; replaced as a whole on update.
   The Default route has none (enforced by the routes package; a trigger was not worth it).
 - **`route_destinations`** — Destinations of a Route with `added_at`, which drives the Quiet publication of the Route's
@@ -1022,9 +1033,12 @@ resolved_at >= $from)`, written with the status that the resolution `CHECK` ties
 `alert_groups_resolved_idx` serve it. The list and count queries run as unnamed statements, planned with their
 parameters, so that the optional filters left unset fold away. A text of fewer than three characters cannot use the
 trigram indexes and is filtered row by row within the other conditions, and counts with Matchers other than `=` read
-one row per status and set of common labels in the range; both are bounded by the time range. `urgent` is the urgency judged at the last rise (S-028);
-the reads derive the urgency they show and filter by from the Route and `organizations.critical_is_urgent` as they are
-now (C-08.FR-6). "Delivery problem" is not a column (delivery may not write Alert Group tables): it is an
+one row per status and set of common labels in the range; both are bounded by the time range. `severity_level` is the
+highest level of the Alert Group's firing Alerts, info when none fires, raised to its Route's `minimum_severity`, and
+`urgent` is `severity_level = 'critical'` (C-26.FR-8); the reads derive the urgency they show and filter by from
+`severity_level` alone. Migration 0021 computed both once for every open Alert Group, and the urgency of its pending
+deliveries, by that rule, writing no Timeline entry; `organizations.critical_is_urgent` is `true` from it on and no
+longer read, kept for the 0.1 replicas of a rolling update until 0.3.0 drops it. "Delivery problem" is not a column (delivery may not write Alert Group tables): it is an
 `EXISTS` over `deliveries` of the Alert Group. "Details removed" is derived: `resolved_at` older than
 `retention.alert_details`.
 
@@ -1376,6 +1390,30 @@ SELECT e.id FROM webhook_events e
 **Broken probes**: the same claim over `destinations WHERE org_id = $1 AND health = 'broken' AND next_probe_at <= $business_now`,
 bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC re-checks**: the timer claim over
 `oidc_checks`, also with `org_id = $1`. All of these were checked to use their indexes (section 8).
+
+**Open Alert Group updates** (C-26.FR-9): a change of configuration that must reach the open Alert Groups of its
+scope after the save — the Minimum severity of a Route (`route_minimum_severity`) from 0.2.0, more kinds as later
+stories add them to `open_group_updates_kind_check` — is one row of `open_group_updates`, inserted in the transaction
+of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
+at start, by that notification and by the development clock, and claims one row at a time:
+
+```sql
+WITH due AS MATERIALIZED (
+    SELECT id FROM open_group_updates
+     WHERE org_id = $1 AND kind = ANY($kinds) AND (lease_until IS NULL OR lease_until <= $real_now)
+     ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
+UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
+  FROM due WHERE u.org_id = $1 AND u.id = due.id
+RETURNING u.id, u.kind, u.route_id, u.after_alert_group_id;
+```
+
+A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows
+it. It then walks the open Alert Groups of the row's scope by id after `after_alert_group_id`, 50 at a time, each batch in
+one transaction that checks the lease, locks the Alert Groups, applies the change through the dispatcher as a system
+transition, and moves `after_alert_group_id` and the lease (60 s, real clock) on; the transaction of the last batch
+deletes the row. A lost lease leaves the row to any replica, which resumes after the last committed batch; an Alert
+Group already as the change wants it is skipped, so a batch that runs twice records nothing the second time
+(ADR-0007). `requested_at` is on the business clock, the lease on the real clock.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

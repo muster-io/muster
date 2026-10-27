@@ -24,4 +24,20 @@ export type Route = RouteInput & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-};
+} & Required<Pick<RouteInput & {
+  id: PublicId;
+  /** Zero-based position in evaluation order; the Default route is last. */
+  position: number;
+  is_default: boolean;
+  /** The Route's Destinations with their health, for the Broken warning. */
+  destinations: DestinationRef[];
+  /** Set while a template of the Route keeps failing. */
+  template_error?: TemplateErrorState;
+  storm_active: boolean;
+  /** Set while the Route's Storm is active (`storm_active`), for the Storm banner. */
+  storm?: RouteStorm;
+  open_alert_group_count: number;
+  created_at: string;
+  /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
+  readonly etag: string;
+}, 'minimum_severity' | 'urgent'>>;

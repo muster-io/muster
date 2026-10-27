@@ -228,10 +228,11 @@ func TestRouting(t *testing.T) {
 	a := admin.do(http.MethodGet, "/api/v1/routes/"+ra.ID, "")
 	var full map[string]any
 	decode(t, a, &full)
-	body, _ := json.Marshal(map[string]any{"name": full["name"], "matchers": full["matchers"], "urgent": true,
-		"group_key": full["group_key"], "destination_ids": []string{}, "policy": full["policy"]})
+	body, _ := json.Marshal(map[string]any{"name": full["name"], "matchers": full["matchers"],
+		"minimum_severity": "critical", "group_key": full["group_key"], "destination_ids": []string{},
+		"policy": full["policy"]})
 	if a = admin.putWithIfMatch("/api/v1/routes/"+ra.ID, string(body), a.header.Get("ETag")); a.status != http.StatusOK ||
-		!strings.Contains(string(a.body), `"urgent":true`) {
+		!strings.Contains(string(a.body), `"urgent":true`) || !strings.Contains(string(a.body), `"minimum_severity":"critical"`) {
 		t.Errorf("update = %d %s", a.status, a.body)
 	}
 	if a = admin.putWithIfMatch("/api/v1/routes/"+ra.ID, string(body), full["etag"].(string)); a.status !=

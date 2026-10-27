@@ -39,6 +39,7 @@ import (
 	destdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/groups"
+	groupsdb "github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
@@ -441,8 +442,24 @@ func (fakeProcessStore) ListPendingIntegrations(context.Context, ingestdb.ListPe
 	return nil, nil
 }
 
-// GroupsStore is the Alert Group lifecycle without Alert Groups; nothing groups in these tests.
-func (f *fakeDB) GroupsStore() groups.Store { return nil }
+// GroupsStore is the Alert Group lifecycle without Alert Groups; nothing groups in these tests, and the open Alert
+// Group update worker finds no row to claim.
+func (f *fakeDB) GroupsStore() groups.Store { return fakeGroupsStore{} }
+
+// fakeGroupsStore answers only the claim of the open Alert Group update worker, with no row; any other query is a
+// nil-interface call, as nothing else reaches it here.
+type fakeGroupsStore struct{ groups.Store }
+
+func (s fakeGroupsStore) InTx(_ context.Context, f func(groups.Queries) error) error { return f(s) }
+
+func (fakeGroupsStore) ClaimOpenGroupUpdate(context.Context, groupsdb.ClaimOpenGroupUpdateParams) (
+	[]groupsdb.ClaimOpenGroupUpdateRow, error) {
+	return nil, nil
+}
+
+func (fakeGroupsStore) NextOpenGroupUpdate(context.Context, groupsdb.NextOpenGroupUpdateParams) (time.Time, error) {
+	return time.Time{}, nil
+}
 
 // TimersStore has no timers.
 func (f *fakeDB) TimersStore() timers.Store { return fakeTimersStore{} }
@@ -1739,10 +1756,15 @@ func TestConfigureWorker(t *testing.T) {
 		cfg:     config.Config{PublicURL: public, IngestURL: ingestURL, RunbookBaseURL: public},
 		replica: keyring.NewRecorder(nil, nil, business, log, "r-1", "host", "v1"),
 		worker:  &ingest.Worker{Log: log}, timers: &timers.Worker{Log: log}, deliverer: &delivery.Worker{Log: log},
-		groups: groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
+		openUpdates: &groups.UpdateWorker{Log: log},
+		groups:      groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
 		delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
 			Business: business})}
 	p.configureWorker()
+	if u := p.openUpdates; u.Service != p.groups || u.Lease.Owner != "r-1" || u.Lease.Duration != groups.UpdateLease ||
+		u.Lease.Clocks.Real != realClock {
+		t.Errorf("open alert group updates = %+v", u)
+	}
 	a, ok := p.deliverer.Adapters[delivery.TypeMattermost].(*mattermost.Adapter)
 	if !ok || a.PublicURL != "https://muster.example.org" || a.IngestURL != "https://ingest.example.org" ||
 		a.Targets != mattermost.Targets(p.connections) {

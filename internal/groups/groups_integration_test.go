@@ -219,6 +219,120 @@ func (e *env) events(t *testing.T, id string) []string {
 
 const gk = `{}:{alertname=\"DiskFull\"}`
 
+// TestIntegrationOpenGroupUpdates is C-26.FR-8, FR-9 and C-26.AC-11 on PostgreSQL: a Route with the Minimum severity
+// warning makes an info Alert's Alert Group warning while the Alert stays info; raising the Minimum severity to
+// critical in updateRoute writes one open_group_updates row in the update's transaction, which a worker claims and
+// runs in batches by id, recording the Quiet urgency_raised with the reason of the Minimum severity on each open Alert
+// Group of the Route and deleting the row; another worker then finds nothing, a second run changes nothing, and a
+// lowered Minimum severity lowers the levels without a Timeline entry. routes.urgent follows the Minimum severity.
+func TestIntegrationOpenGroupUpdates(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		r := e.route(t, "db", "db", "alertname", "pod")
+		in := routing.Input{Name: "db", GroupKey: r.GroupKey, Policy: r.Policy, Matchers: r.Matchers,
+			MinimumSeverity: new(routing.MinimumWarning)}
+		if _, err := e.routes.Update(ctx, by, r.PublicID, nil, in); err != nil {
+			t.Fatal(err)
+		}
+		const s1 = "2026-10-07T11:00:00Z"
+		e.process(t, gk, alert("firing", s1, "alertname", "Slow", "team", "db", "pod", "p1", "severity", "info"),
+			alert("firing", s1, "alertname", "Slow", "team", "db", "pod", "p2", "severity", "warning"),
+			alert("firing", s1, "alertname", "Slow", "team", "db", "pod", "p3", "severity", "warning"))
+		ids := []string{e.groupOf(t, "p1"), e.groupOf(t, "p2"), e.groupOf(t, "p3")}
+		levels := func(t *testing.T, want string, urgent bool) {
+			t.Helper()
+			for _, id := range ids {
+				if v, err := e.groups.Get(ctx, id); err != nil || string(v.Severity) != want || v.Urgent != urgent {
+					t.Errorf("%s: %+v, %v", id, v, err)
+				}
+			}
+		}
+		levels(t, "warning", false)
+		if n := e.count(t, `SELECT count(*) FROM alerts WHERE labels->>'pod' = 'p1' AND severity_level = 'info'`); n != 1 {
+			t.Error("the alert of p1 is not info")
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+			t.Errorf("a route without open alert groups wrote %d rows", n)
+		}
+
+		e.clock.Advance(time.Minute)
+		in.MinimumSeverity = new(routing.MinimumCritical)
+		if _, err := e.routes.Update(ctx, by, r.PublicID, nil, in); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'route_minimum_severity'
+			AND route_id = $1 AND requested_at = $2 AND after_alert_group_id = 0 AND leased_by IS NULL`, r.ID,
+			e.clock.Now()); n != 1 {
+			t.Fatalf("%d rows of the raise", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE id = $1 AND urgent AND minimum_severity = 'critical'`,
+			r.ID); n != 1 {
+			t.Error("routes.urgent does not follow the minimum severity")
+		}
+		var log bytes.Buffer
+		worker := func(owner string) *groups.UpdateWorker {
+			return &groups.UpdateWorker{Service: e.groups, Batch: 2, Log: logging.New(&log, logging.LevelInfo),
+				Lease: db.Lease{Owner: owner, Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: e.clock,
+					Real: clock.Real{}}}}
+		}
+		if next, err := worker("r1").Round(ctx); err != nil || next != groups.UpdateMaxWait {
+			t.Fatalf("round = %v, %v", next, err)
+		}
+		levels(t, "critical", true)
+		for _, id := range ids {
+			if got := e.events(t, id); got[len(got)-1] != "urgency_raised" {
+				t.Errorf("%s: %v", id, got)
+			}
+		}
+		page, _ := e.groups.Timeline(ctx, ids[0], groups.TimelineFilter{Limit: 1})
+		if x := page.Entries[0]; x.Loudness != groups.Quiet || x.ReasonCode != groups.ReasonCodeMinimumSeverity ||
+			*x.Reason != groups.ReasonMinimumSeverity || x.Actor.Transport != "system" {
+			t.Errorf("urgency_raised %+v", x)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 ||
+			!strings.Contains(log.String(), `"event":"open_group_update_done","kind":"route_minimum_severity","route":"`+
+				r.PublicID+`","alert_groups":3`) {
+			t.Errorf("%d rows left, log %s", n, log.String())
+		}
+		entries := e.count(t, `SELECT count(*) FROM timeline_entries`)
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+			VALUES ($1, 'route_minimum_severity', $2, $3)`, e.orgID, r.ID, e.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := worker("r2").Round(ctx); err != nil || e.count(t, `SELECT count(*) FROM timeline_entries`) !=
+			entries {
+			t.Errorf("a second run = %v", err)
+		}
+
+		in.MinimumSeverity = new(routing.MinimumNone)
+		if _, err := e.routes.Update(ctx, by, r.PublicID, nil, in); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := worker("r1").Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := e.groups.Get(ctx, ids[0]); v.Severity != "info" || v.Urgent ||
+			e.count(t, `SELECT count(*) FROM timeline_entries`) != entries {
+			t.Errorf("lowered: %+v", v)
+		}
+
+		// A row of a kind a later version adds, as its migration would widen the CHECK, waits: no replica of this
+		// version claims it or waits for it.
+		if _, err := e.d.Pool.Exec(ctx, `ALTER TABLE open_group_updates DROP CONSTRAINT open_group_updates_kind_check`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+			VALUES ($1, 'button_set', $2)`, e.orgID, e.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if next, err := worker("r1").Round(ctx); err != nil || next != groups.UpdateMaxWait ||
+			e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'button_set' AND leased_by IS NULL`) != 1 {
+			t.Errorf("a later kind = %v, %v", next, err)
+		}
+	})
+}
+
 // TestIntegrationLifecycle is the lifecycle on PostgreSQL through Snapshot processing: grouping by Route and Group
 // key (C-09.AC-6), a Replacement (C-09.AC-4), a Continuation (C-09.AC-10), a rise to Urgent (C-09.AC-12), a
 // resolution by the system and a Reopen by another fingerprint (C-09.AC-1, AC-22), a new #N after the window

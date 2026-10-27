@@ -1489,6 +1489,27 @@ func (e Messenger) Valid() bool {
 	}
 }
 
+// Defines values for MinimumSeverity.
+const (
+	MinimumSeverityCritical MinimumSeverity = "critical"
+	MinimumSeverityNone     MinimumSeverity = "none"
+	MinimumSeverityWarning  MinimumSeverity = "warning"
+)
+
+// Valid indicates whether the value is a known member of the MinimumSeverity enum.
+func (e MinimumSeverity) Valid() bool {
+	switch e {
+	case MinimumSeverityCritical:
+		return true
+	case MinimumSeverityNone:
+		return true
+	case MinimumSeverityWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NextNoticeKind.
 const (
 	NextNoticeKindAckTimeout NextNoticeKind = "ack_timeout"
@@ -1893,6 +1914,7 @@ const (
 	NullableStatusChangeReasonGone                NullableStatusChangeReason = "gone"
 	NullableStatusChangeReasonIntegrationDeleted  NullableStatusChangeReason = "integration_deleted"
 	NullableStatusChangeReasonLessThannil         NullableStatusChangeReason = "<nil>"
+	NullableStatusChangeReasonMinimumSeverity     NullableStatusChangeReason = "minimum_severity"
 	NullableStatusChangeReasonOwnerDeleted        NullableStatusChangeReason = "owner_deleted"
 	NullableStatusChangeReasonOwnerDisabled       NullableStatusChangeReason = "owner_disabled"
 	NullableStatusChangeReasonRemindersUnanswered NullableStatusChangeReason = "reminders_unanswered"
@@ -1908,6 +1930,8 @@ func (e NullableStatusChangeReason) Valid() bool {
 	case NullableStatusChangeReasonIntegrationDeleted:
 		return true
 	case NullableStatusChangeReasonLessThannil:
+		return true
+	case NullableStatusChangeReasonMinimumSeverity:
 		return true
 	case NullableStatusChangeReasonOwnerDeleted:
 		return true
@@ -3646,7 +3670,9 @@ type AlertGroup struct {
 	ResolvedAlertCount int                          `json:"resolved_alert_count"`
 	ResolvedAt         nullable.Nullable[time.Time] `json:"resolved_at,omitempty"`
 	Route              EntityRef                    `json:"route"`
-	SeverityLevel      SeverityLevel                `json:"severity_level"`
+
+	// SeverityLevel The highest Severity level of the firing Alerts, raised to the Route's Minimum severity (`minimum_severity`); each Alert keeps its own level.
+	SeverityLevel SeverityLevel `json:"severity_level"`
 
 	// SnoozeUntil Null while snoozed means no end.
 	SnoozeUntil nullable.Nullable[time.Time] `json:"snooze_until,omitempty"`
@@ -3658,7 +3684,9 @@ type AlertGroup struct {
 	Summary   nullable.Nullable[string] `json:"summary,omitempty"`
 	Title     string                    `json:"title"`
 	Unclaimed bool                      `json:"unclaimed"`
-	Urgent    bool                      `json:"urgent"`
+
+	// Urgent True exactly when `severity_level` is `critical`.
+	Urgent bool `json:"urgent"`
 }
 
 // AlertGroupAlert defines model for AlertGroupAlert.
@@ -5407,6 +5435,9 @@ type MentionSettings struct {
 // Messenger defines model for Messenger.
 type Messenger string
 
+// MinimumSeverity `route.minimum_severity` (default `none`): the lowest Severity level of the Route's Alert Groups. It only raises the Severity level of the Route's Alert Groups — never the level of an Alert, and never lowers one; an Urgent Alert Group is a critical one.
+type MinimumSeverity string
+
 // MovedAlertGroups defines model for MovedAlertGroups.
 type MovedAlertGroups struct {
 	// Moved Open Alert Groups moved to the Default route.
@@ -5481,7 +5512,7 @@ type NullableRequestErrorCode string
 // NullableResolveReason Why an Alert resolved; null while it fires.
 type NullableResolveReason string
 
-// NullableStatusChangeReason The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.
+// NullableStatusChangeReason The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.
 type NullableStatusChangeReason string
 
 // NullableTestStepErrorCode What failed in a step where `error_class` does not tell it, for the `press` step of a Mattermost Destination: `press_not_reached` — the bot pressed the button, but the press did not reach Muster's callback; `error` names the host of `MUSTER_INGEST_URL` to add to `ServiceSettings.AllowedUntrustedInternalConnections` on the Mattermost server; `bot_unknown` — no Connection check has learned the bot yet, so it did not press; run the Connection check, then test again. Null otherwise.
@@ -5639,6 +5670,8 @@ type OidcWarningKind string
 
 // Organization defines model for Organization.
 type Organization struct {
+	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	CriticalIsUrgent bool `json:"critical_is_urgent"`
 
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
@@ -5684,7 +5717,9 @@ type Organization struct {
 
 // OrganizationBase defines model for OrganizationBase.
 type OrganizationBase struct {
-	CriticalIsUrgent bool     `json:"critical_is_urgent"`
+	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
 
@@ -5716,7 +5751,9 @@ type OrganizationBase struct {
 
 // OrganizationInput defines model for OrganizationInput.
 type OrganizationInput struct {
-	CriticalIsUrgent bool     `json:"critical_is_urgent"`
+	// CriticalIsUrgent Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
 
@@ -6271,6 +6308,9 @@ type Route struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
+	MinimumSeverity MinimumSeverity `json:"minimum_severity"`
+
 	// Name Unique in the Organization.
 	Name                string      `json:"name"`
 	OpenAlertGroupCount int         `json:"open_alert_group_count"`
@@ -6285,7 +6325,10 @@ type Route struct {
 
 	// TemplateError Set while a template of the Route keeps failing.
 	TemplateError *TemplateErrorState `json:"template_error,omitempty"`
-	Urgent        bool                `json:"urgent"`
+
+	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Urgent bool `json:"urgent"`
 }
 
 // RouteInput defines model for RouteInput.
@@ -6299,10 +6342,16 @@ type RouteInput struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
+	MinimumSeverity *MinimumSeverity `json:"minimum_severity,omitempty"`
+
 	// Name Unique in the Organization.
 	Name   string      `json:"name"`
 	Policy RoutePolicy `json:"policy"`
-	Urgent bool        `json:"urgent"`
+
+	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Urgent *bool `json:"urgent,omitempty"`
 }
 
 // RouteList All Routes in evaluation order, the Default route last. The list ETag covers the order.
@@ -6341,9 +6390,15 @@ type RoutePolicy struct {
 type RouteProfile struct {
 	GroupKey []string       `json:"group_key"`
 	Id       RouteProfileId `json:"id"`
-	Name     string         `json:"name"`
-	Policy   RoutePolicy    `json:"policy"`
-	Urgent   bool           `json:"urgent"`
+
+	// MinimumSeverity `none` for both profiles: neither sets a Minimum severity.
+	MinimumSeverity MinimumSeverity `json:"minimum_severity"`
+	Name            string          `json:"name"`
+	Policy          RoutePolicy     `json:"policy"`
+
+	// Urgent Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`, so `false` for both profiles; removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Urgent bool `json:"urgent"`
 }
 
 // RouteProfileId defines model for RouteProfile.Id.
@@ -7323,10 +7378,15 @@ type TimelineAlertsEntry struct {
 	Kind TimelineAlertsEntryKind `json:"kind"`
 
 	// LabelConflicts Static labels the added Alerts already carried.
-	LabelConflicts *[]string                 `json:"label_conflicts,omitempty"`
-	Loudness       Loudness                  `json:"loudness"`
-	Mentions       []MentionName             `json:"mentions"`
-	Reason         nullable.Nullable[string] `json:"reason,omitempty"`
+	LabelConflicts *[]string     `json:"label_conflicts,omitempty"`
+	Loudness       Loudness      `json:"loudness"`
+	Mentions       []MentionName `json:"mentions"`
+
+	// Reason Why the Severity level rose, as text, for a `severity_raised` that no Alert caused; clients translate `reason_code` and show this text only when there is no code.
+	Reason nullable.Nullable[string] `json:"reason,omitempty"`
+
+	// ReasonCode The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.
+	ReasonCode nullable.Nullable[NullableStatusChangeReason] `json:"reason_code,omitempty"`
 
 	// ReplacedLabel The Instance label that differs, for `alert_replaced`.
 	ReplacedLabel nullable.Nullable[string] `json:"replaced_label,omitempty"`
@@ -7447,7 +7507,7 @@ type TimelineStatusEntry struct {
 	// Reason Reason of an automatic status change, as text; clients translate `reason_code` and show this text only when there is no code.
 	Reason nullable.Nullable[string] `json:"reason,omitempty"`
 
-	// ReasonCode The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), or `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically. Null when the entry has no reason or its reason has no code.
+	// ReasonCode The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.
 	ReasonCode  nullable.Nullable[NullableStatusChangeReason] `json:"reason_code,omitempty"`
 	SnoozeUntil nullable.Nullable[time.Time]                  `json:"snooze_until,omitempty"`
 	ToStatus    *AlertGroupStatus                             `json:"to_status,omitempty"`
@@ -7687,17 +7747,21 @@ type WebhookAlertGroup struct {
 	Number int      `json:"number"`
 
 	// Owner Present while acknowledged.
-	Owner         *WebhookUser                 `json:"owner,omitempty"`
-	ReopenCount   *int                         `json:"reopen_count,omitempty"`
-	ResolvedAt    nullable.Nullable[time.Time] `json:"resolved_at,omitempty"`
-	Route         EntityRef                    `json:"route"`
+	Owner       *WebhookUser                 `json:"owner,omitempty"`
+	ReopenCount *int                         `json:"reopen_count,omitempty"`
+	ResolvedAt  nullable.Nullable[time.Time] `json:"resolved_at,omitempty"`
+	Route       EntityRef                    `json:"route"`
+
+	// SeverityLevel The highest Severity level of the firing Alerts, raised to the Route's Minimum severity; each Alert of `alerts[]` keeps its own level.
 	SeverityLevel SeverityLevel                `json:"severity_level"`
 	SnoozeUntil   nullable.Nullable[time.Time] `json:"snooze_until,omitempty"`
 	StartedAt     time.Time                    `json:"started_at"`
 	Status        AlertGroupStatus             `json:"status"`
 	Summary       nullable.Nullable[string]    `json:"summary,omitempty"`
 	Title         string                       `json:"title"`
-	Urgent        bool                         `json:"urgent"`
+
+	// Urgent True exactly when `severity_level` is `critical`.
+	Urgent bool `json:"urgent"`
 
 	// Url Link to the Alert Group page at `MUSTER_PUBLIC_URL`.
 	Url string `json:"url"`
@@ -8013,7 +8077,7 @@ type GetAlertGroupCountsParams struct {
 	// Severity Only these Severity levels.
 	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
 
-	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups.
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
 	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
 
 	// ResolvedBy Only Alert Groups resolved by a person or by the system.
@@ -8094,7 +8158,7 @@ type ListAlertGroupsParams struct {
 	// Severity Only these Severity levels.
 	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
 
-	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups.
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
 	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
 
 	// ResolvedBy Only Alert Groups resolved by a person or by the system.

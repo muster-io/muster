@@ -65,6 +65,8 @@ info.
 
 **Critical is Urgent** (`organization.critical_is_urgent`, on)
 :   An Alert Group whose Severity level is critical is **Urgent**. See [Loud and Quiet](../concepts/loud-and-quiet.md).
+    From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
+    [upgrade notes of 0.2.0](../install/versions.md#upgrade-notes).
 
 **Instance labels** (`organization.instance_labels`, `pod`, `instance`, `container`, `endpoint`)
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
@@ -180,7 +182,8 @@ tables** and **Link rules** in [Messages and templates](messages-and-templates.m
 `GET /api/v1/organization` reads the Organization and its `ETag`; `PUT /api/v1/organization` replaces the fields above
 with `If-Match` set to that ETag, as [API tokens and automation](api-tokens.md#conventions) shows. The fields are
 `name`, `time_zone`, `workday_start`, `week_start`, `severity_label`, `severity_mapping`, `severity_styles`,
-`critical_is_urgent`, `instance_labels`, `outgoing_heartbeat` (required, with `proxy`, whose `enabled` is
+`critical_is_urgent` (ignored from 0.2.0, and always read as `true`), `instance_labels`, `outgoing_heartbeat`
+(required, with `proxy`, whose `enabled` is
 required; `url` is write-only and kept when omitted), `retention` (`stored_snapshots_days`, `alert_details_days`,
 `alert_group_summaries_days`, `audit_log_days`), `totp_required` (`nobody`, `local_users` or `everyone`) and
 `oidc_token_grace_seconds`. The outbound policy is `GET` and `PUT /api/v1/organization/outbound-policy`, and the values

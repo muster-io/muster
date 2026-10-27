@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { Matcher } from './matcher';
+import type { MinimumSeverity } from './minimumSeverity';
 import type { PublicId } from './publicId';
 import type { RoutePolicy } from './routePolicy';
 
@@ -15,7 +16,13 @@ export interface RouteInput {
   description?: string;
   /** Combined with AND. The Default route has none. */
   matchers: Matcher[];
-  urgent: boolean;
+  /** Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze. */
+  minimum_severity?: MinimumSeverity;
+  /**
+     * From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
+     * @deprecated
+     */
+  urgent?: boolean;
   /** Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty value. */
   group_key: string[];
   destination_ids: PublicId[];

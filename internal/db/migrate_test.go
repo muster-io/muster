@@ -1616,24 +1616,185 @@ func TestIntegrationOIDCGroupsClaimSeenAt(t *testing.T) {
 	})
 }
 
+// TestIntegrationMinimumSeverity runs 0021 over a database at 20 whose Organization turned "critical is Urgent" off,
+// with a Route marked urgent and a plain one: an open warning Alert Group of the urgent Route with a pending delivery,
+// a critical Alert Group of the plain Route, a warning Alert Group of the plain Route, and a resolved warning Alert
+// Group of the urgent Route. Up gives the urgent Route the Minimum severity critical, turns critical_is_urgent on and
+// computes the level and urgency of the open Alert Groups and of their pending deliveries by the new rule, writing no
+// Timeline entry, no delivery and no open_group_updates row; down drops the column and the table and leaves urgent
+// and critical_is_urgent as up left them; up again works.
+func TestIntegrationMinimumSeverity(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 20)
+		e.exec(t, `UPDATE organizations SET critical_is_urgent = false`)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, 'NT0000000000A1', 'am', 'webhook_only', '{}', 45, false, 300, 'not_configured',
+				'2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT o.id, r.public_id, r.name, r.position, r.urgent, '{alertname}', 0, 0, true, '{}', 0, 10, 'en',
+				false, 60, false, 60, 60, false, '2026-10-05', '2026-10-05'
+			FROM organizations o, (VALUES ('RT0000000000A1', 'urgent', 1, true),
+				('RT0000000000P1', 'plain', 2, false)) AS r (public_id, name, position, urgent)`)
+		e.exec(t, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels, annotations, status, starts_at,
+			fired_at, first_seen_at, last_seen_at, updated_at, severity_level)
+			SELECT i.org_id, i.id, a.fp, '{}', '{}', 'firing', '2026-10-05', '2026-10-05', '2026-10-05',
+				'2026-10-05', '2026-10-05', a.level
+			FROM integrations i, (VALUES ('w1', 'warning'), ('i1', 'info'), ('c1', 'critical'), ('w2', 'warning'),
+				('w3', 'warning')) AS a (fp, level)`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level,
+			urgent, resolved_at, resolved_by_kind, resolve_reason, created_at, last_changed_at)
+			SELECT r.org_id, g.public_id, g.number, r.id, '{alertname}', '{}', sha256(g.public_id::bytea), g.public_id,
+				'{}', '{}', ARRAY[(SELECT id FROM integrations)], g.status, g.level, g.urgent,
+				CASE WHEN g.status = 'resolved' THEN timestamptz '2026-10-05' END,
+				CASE WHEN g.status = 'resolved' THEN 'system' END,
+				CASE WHEN g.status = 'resolved' THEN 'resolved' END, '2026-10-05', '2026-10-05'
+			FROM routes r JOIN (VALUES
+				('AG00000000000A', 1, 'RT0000000000A1', 'firing', 'warning', true),
+				('AG0000000000PC', 2, 'RT0000000000P1', 'firing', 'critical', false),
+				('AG0000000000PW', 3, 'RT0000000000P1', 'firing', 'warning', false),
+				('AG0000000000AR', 4, 'RT0000000000A1', 'resolved', 'warning', true))
+				AS g (public_id, number, route, status, level, urgent) ON g.route = r.public_id`)
+		e.exec(t, `INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode, state, joined_at,
+			starts_at, annotations, ended_at, resolve_reason)
+			SELECT g.org_id, g.id, a.id, 1, m.state, '2026-10-05', '2026-10-05', '{}',
+				CASE WHEN m.state = 'resolved' THEN timestamptz '2026-10-05' END,
+				CASE WHEN m.state = 'resolved' THEN 'resolved' END
+			FROM (VALUES ('AG00000000000A', 'w1', 'firing'), ('AG00000000000A', 'i1', 'firing'),
+				('AG0000000000PC', 'c1', 'firing'), ('AG0000000000PW', 'w2', 'firing'),
+				('AG0000000000AR', 'w3', 'resolved')) AS m (grp, fp, state)
+			JOIN alert_groups g ON g.public_id = m.grp JOIN alerts a ON a.fingerprint = m.fp`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000W1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-10-05', '{}', 1, 1,
+				'healthy', '2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, urgent, next_attempt_at,
+			created_at, updated_at)
+			SELECT g.org_id, d.id, g.id, 'pending', false, '2026-10-05', '2026-10-05', '2026-10-05'
+			FROM alert_groups g, destinations d WHERE g.public_id IN ('AG00000000000A', 'AG0000000000PC')`)
+		groupsAre := func(t *testing.T, when, want string) {
+			t.Helper()
+			var got string
+			if err := e.d.Pool.QueryRow(t.Context(), `SELECT string_agg(g.public_id || ':' || g.severity_level || ':' ||
+					g.urgent || ':' || coalesce((SELECT string_agg(d.urgent::text, ',') FROM deliveries d
+						WHERE d.alert_group_id = g.id), '-'), ' ' ORDER BY g.number)
+				FROM alert_groups g`).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Errorf("%s: alert groups\n%s\nwant\n%s", when, got, want)
+			}
+		}
+		groupsAre(t, "before 0021", "AG00000000000A:warning:true:false AG0000000000PC:critical:false:false "+
+			"AG0000000000PW:warning:false:- AG0000000000AR:warning:true:-")
+
+		e.step(t, 1)
+		after := "AG00000000000A:critical:true:true AG0000000000PC:critical:true:true " +
+			"AG0000000000PW:warning:false:- AG0000000000AR:warning:true:-"
+		groupsAre(t, "after up", after)
+		for what, sql := range map[string]string{
+			"the urgent Route with the Minimum severity critical": `SELECT count(*) FROM routes
+				WHERE public_id = 'RT0000000000A1' AND urgent AND minimum_severity = 'critical'`,
+			"the plain Route without a Minimum severity": `SELECT count(*) FROM routes
+				WHERE public_id = 'RT0000000000P1' AND NOT urgent AND minimum_severity = 'none'`,
+			"critical is Urgent on": `SELECT count(*) FROM organizations WHERE critical_is_urgent`,
+			"two deliveries":        `SELECT count(*) FROM deliveries`,
+		} {
+			if n := e.count(t, sql); n != 1 && (what != "two deliveries" || n != 2) {
+				t.Errorf("after up: %d rows of %s", n, what)
+			}
+		}
+		for what, sql := range map[string]string{
+			"Timeline entries":   `SELECT count(*) FROM timeline_entries`,
+			"open group updates": `SELECT count(*) FROM open_group_updates`,
+		} {
+			if n := e.count(t, sql); n != 0 {
+				t.Errorf("after up: %d %s", n, what)
+			}
+		}
+		insert := func(t *testing.T, kind, route string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, route_id,
+				requested_at) SELECT id, $1, (SELECT id FROM routes WHERE public_id = $2), '2026-10-05'
+				FROM organizations`, kind, route)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, code, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != code || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		if err := insert(t, "route_minimum_severity", "RT0000000000P1"); err != nil {
+			t.Errorf("a row of the kind route_minimum_severity: %v", err)
+		}
+		refused(t, "a row of an unknown kind", insert(t, "button_set", "RT0000000000P1"), "23514",
+			"open_group_updates_kind_check")
+		refused(t, "a row of route_minimum_severity without a Route", insert(t, "route_minimum_severity", ""),
+			"23514", "open_group_updates_scope_check")
+		if _, err := e.d.Pool.Exec(t.Context(), `UPDATE routes SET minimum_severity = 'info'`); err == nil {
+			t.Error("a Minimum severity info was accepted")
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'open_group_updates'
+			AND indexname = 'open_group_updates_due_idx' AND indexdef LIKE '%(org_id, requested_at, id)'`); n != 1 {
+			t.Error("after up: no open_group_updates_due_idx")
+		}
+
+		e.step(t, -1)
+		for what, sql := range map[string]string{
+			"open_group_updates": `SELECT count(*) FROM pg_class WHERE relname = 'open_group_updates'`,
+			"routes.minimum_severity": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'routes' AND column_name = 'minimum_severity'`,
+		} {
+			if n := e.count(t, sql); n != 0 {
+				t.Errorf("after down: %s is left", what)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE urgent`); n != 1 {
+			t.Errorf("after down: %d Routes marked urgent, want 1", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM organizations WHERE critical_is_urgent`); n != 1 {
+			t.Error("after down: critical is Urgent is off")
+		}
+		groupsAre(t, "after down", after)
+
+		e.step(t, 1)
+		groupsAre(t, "up again", after)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 21 {
+			t.Errorf("up again: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE minimum_severity = 'critical'`); n != 1 {
+			t.Errorf("up again: %d Routes with the Minimum severity critical, want 1", n)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (20)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (21)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":20`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":21`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":20`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":21`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1649,10 +1810,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (20)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (21)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":20`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":21`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

@@ -21,7 +21,9 @@ export interface WebhookAlertGroup {
   /** Present while acknowledged. */
   owner?: WebhookUser;
   route: EntityRef;
+  /** True exactly when `severity_level` is `critical`. */
   urgent: boolean;
+  /** The highest Severity level of the firing Alerts, raised to the Route's Minimum severity; each Alert of `alerts[]` keeps its own level. */
   severity_level: SeverityLevel;
   started_at: string;
   /** @nullable */

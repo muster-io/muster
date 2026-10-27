@@ -497,14 +497,19 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 		if err != nil {
 			return nil, err
 		}
-		return unresolve{newer: newer, routeDeleted: routeDeleted, orgID: s.orgID}, nil
-	case CommandSnooze:
-		urgent, err := s.urgentNow(ctx, q, g)
+		policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: g.RouteID})
+		if err != nil {
+			return nil, fmt.Errorf("read route %d: %w", g.RouteID, err)
+		}
+		levels, err := firingLevels(ctx, q, s.orgID, []int64{g.ID})
 		if err != nil {
 			return nil, err
 		}
+		return unresolve{newer: newer, routeDeleted: routeDeleted, orgID: s.orgID, route: policyOf(policy),
+			alerts: levels[g.ID]}, nil
+	case CommandSnooze:
 		user, account := c.person()
-		return snooze{end: *a.end, user: user, account: account, urgent: urgent}, nil
+		return snooze{end: *a.end, user: user, account: account, urgent: urgentOf(g.Severity)}, nil
 	case CommandUnsnooze:
 		return unsnooze{}, nil
 	case CommandStillOnIt:
@@ -574,19 +579,6 @@ func (s *Service) newerOpen(ctx context.Context, q Queries, g *Group) (*GroupRef
 		return nil, fmt.Errorf("read alert group %d: %w", id, err)
 	}
 	return &GroupRef{PublicID: r.PublicID, Number: r.Number}, nil
-}
-
-// urgentNow is the urgency of g as its Route and organization.critical_is_urgent give it now (C-08.FR-6).
-func (s *Service) urgentNow(ctx context.Context, q Queries, g *Group) (bool, error) {
-	policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: g.RouteID})
-	if err != nil {
-		return false, fmt.Errorf("read route %d: %w", g.RouteID, err)
-	}
-	st, err := q.GetGroupingSettings(ctx, s.orgID)
-	if err != nil {
-		return false, fmt.Errorf("read the grouping settings: %w", err)
-	}
-	return urgentOf(&routeInfo{Urgent: policy.Urgent}, g.Severity, st.CriticalIsUrgent), nil
 }
 
 // clearSnooze ends the Snooze of g.
@@ -711,6 +703,10 @@ type unresolve struct {
 	newer        *GroupRef
 	routeDeleted bool
 	orgID        int64
+	// route and alerts give the level it fires at again: that of the Alerts still firing in it, raised to the Route's
+	// Minimum severity as it is now (C-26.FR-8); a rise records the Quiet entry of the Minimum severity.
+	route  *routeInfo
+	alerts organization.SeverityLevel
 }
 
 func (t unresolve) precondition(g *Group) error {
@@ -741,6 +737,10 @@ func (t unresolve) apply(ctx context.Context, q Queries, g *Group, c *change) er
 	}
 	c.action = ActionUnresolved
 	c.add(entry{Event: EventUnresolved, From: StatusResolved, To: StatusFiring})
+	before := g.Severity
+	g.Severity = t.route.raise(t.alerts)
+	g.Urgent = urgentOf(g.Severity)
+	minimumRise(c, g, before)
 	return nil
 }
 

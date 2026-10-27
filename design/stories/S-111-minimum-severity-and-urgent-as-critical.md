@@ -33,6 +33,11 @@ files_touched:
   - internal/groups/transitions.go
   - internal/groups/transitions_test.go
   - internal/groups/commands.go
+  - internal/groups/commands_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/timers.go
+  - internal/groups/move.go
+  - internal/groups/list_integration_test.go
   - internal/groups/read.go
   - internal/groups/events.go
   - internal/groups/query.sql
@@ -43,18 +48,31 @@ files_touched:
   - internal/groups/list_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - design/prd/l1/defaults.md
+  - design/stories/S-169-the-lifecycle-of-escalation-chains-with-the-ack-timeout-unclaimed-and-skipped-steps.md
+  - internal/delivery/enqueue.go
+  - internal/delivery/query.sql
+  - internal/delivery/storm_test.go
+  - design/prd/l2/C-26-routing-to-teams-and-by-severity.md
+  - internal/runtime/runtime_test.go
+  - internal/routing/routing_integration_test.go
+  - internal/organization/heartbeat_integration_test.go
   - web/src/components/timeline.tsx
+  - web/src/components/route-form.tsx
   - test/e2e/routing_test.go
   - test/e2e/minimum_severity_test.go
   - test/e2e/routing_preview_test.go
+  - test/e2e/lifecycle_test.go
   - docs/concepts/routes-and-group-keys.md
+  - docs/concepts/alert-groups.md
+  - docs/configure/organization.md
   - docs/install/versions.md
 acceptance:
   - "[C-26.FR-8, C-08.FR-6, C-09.FR-1, C-08.FR-1] The Severity level of an Alert Group is the highest Severity level of its firing Alerts raised to its Route's `minimum_severity` (`none`, `warning`, `critical`), and `urgent` is true exactly when that level is critical, whatever `routes.urgent` and `organizations.critical_is_urgent` hold; a Route with the Minimum severity critical makes a warning Alert's Alert Group critical and Urgent, while `listIntegrationAlerts`, `listAlertGroupAlerts` and the `alerts[]` of its `created` webhook event show the Alert as warning (`transitions_test.go`, `minimum_severity_test.go`)."
   - "[C-26.FR-8, C-09.FR-9, C-11.FR-3] Urgency keeps deciding what it decided in L1 — the order of the delivery queue, individual publication during a Storm, the end of a Snooze or an acknowledgement on a rise, the `urgent` filter and column of `listAlertGroups`, `urgent` in outgoing webhook events and the count in Storm summaries — now from the stored Severity level alone: an acknowledged Alert Group of a Route without a Minimum severity whose Alerts become critical records the Loud `urgency_raised` mentioning `owner` and `rise_to_urgent` and becomes firing where `route.urgent_rise_removes_ack` is on, whatever `critical_is_urgent` held before the upgrade (`transitions_test.go`)."
   - "[C-26.FR-9, C-26.AC-7, C-26.AC-11, C-09.AC-8] Raising a Route's Minimum severity to critical writes one `open_group_updates` row of the kind `route_minimum_severity` in the transaction of `updateRoute`; a worker on any replica claims it with a lease and records, on each open warning Alert Group of the Route, the Quiet `urgency_raised` that removes nothing, with the `reason_code` `minimum_severity`, keeping an acknowledgement, a Snooze and its Owner; raising it to warning records the Quiet `severity_raised` with the same `reason_code` on its open info Alert Groups; lowering it records nothing and lowers their level; the open Root messages are re-rendered Quietly; a second run of the same row changes nothing (`updates_test.go`, `minimum_severity_test.go`)."
   - "[C-26.FR-10, C-26.AC-8, C-20.FR-1] Migration `0021_minimum_severity` gives every Route with `urgent` the Minimum severity critical, sets `organizations.critical_is_urgent` to true and computes the `severity_level` and `urgent` of every open Alert Group and of its pending deliveries once by the new rule, writing no Timeline entry, no delivery and no `open_group_updates` row; up, down and up again work on PostgreSQL 14 and 17 (`TestIntegrationMinimumSeverity`)."
-  - "[C-26.FR-10, C-26.AC-8] After the migration a Route that was marked urgent reads `minimum_severity` `critical` and `urgent` true, and an `updateRoute` that sends `urgent: false` changes neither; `createRoute` without `urgent` is accepted, and one with `minimum_severity` `critical` stores `routes.urgent` true; `getOrganization` reads `critical_is_urgent: true` whatever `updateOrganization` sends, and an update without it is accepted; `listRouteProfiles` gives both profiles `minimum_severity` `none`."
+  - "[C-26.FR-10, C-26.AC-8] After the migration a Route that was marked urgent reads `minimum_severity` `critical` and `urgent` true, and an `updateRoute` that sends `urgent: false` changes neither, while a `createRoute` or `updateRoute` that sends `urgent: true` without `minimum_severity` gives the Minimum severity critical (`urgent` beside an explicit `minimum_severity` changes nothing); `createRoute` without `urgent` is accepted, and one with `minimum_severity` `critical` stores `routes.urgent` true; `getOrganization` reads `critical_is_urgent: true` whatever `updateOrganization` sends, and an update without it is accepted; `listRouteProfiles` gives both profiles `minimum_severity` `none`."
   - "[C-26.FR-8] The suggested Route \"Muster: Heartbeat lost\" has the Minimum severity critical instead of the urgent mark, so accepting it still makes its Alert Groups critical and Urgent (`suggestions_test.go`, `routing_preview_test.go`)."
   - "[C-26.FR-13] The documentation page Routes and Group keys explains the Minimum severity under its own heading, says that an Urgent Alert Group is a critical one and that the urgent mark and \"critical is Urgent\" no longer act, and the upgrade notes of 0.2.0 in Requirements and tested versions say what C-26.FR-10 lists and open the paragraph on the rolling upgrade from 0.1; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -70,9 +88,10 @@ issue: 400
 
 - The Route setting `route.minimum_severity` and the rule of C-26.FR-8: an Alert Group's Severity level is the highest
   of its firing Alerts raised to it, and it is Urgent exactly when that level is critical.
-- The expand step of C-26.FR-10: `route.urgent` and `organization.critical_is_urgent` stop acting, stay in the API as
-  read-only or ignored fields until 0.3.0, and are written so that a 0.1 replica of a rolling update computes the same
-  urgency; the migration that converts urgent Routes and recomputes the open Alert Groups once.
+- The expand step of C-26.FR-10: `route.urgent` and `organization.critical_is_urgent` stop acting, stay in the API until
+  0.3.0, derived on reads; `urgent: true` without a Minimum severity is converted to the Minimum severity critical, and
+  `critical_is_urgent` is ignored in requests; both are written so that a 0.1 replica of a rolling update computes the
+  same urgency; the migration that converts urgent Routes and recomputes the open Alert Groups once.
 - Applying a changed Minimum severity to the open Alert Groups of the Route (C-26.FR-9), through a durable row that any
   replica claims with a lease — the `open_group_updates` mechanism that S-113, S-163, S-121 (with S-170) and S-125
   reuse with kinds of their own.
@@ -89,8 +108,9 @@ issue: 400
 - Escalation chains, which a change of the Minimum severity never starts: S-169. The page "What critical changes":
   S-124.
 - 0.3.0 removes `urgent`, `critical_is_urgent` and their columns; not in 0.2.x.
-- Interim state until S-112: the Route form still shows the urgent switch, whose value the server now ignores, and the
-  Alert handling page still shows "critical is Urgent".
+- Interim state until S-112: the Route form still shows the urgent switch and sends `urgent` without
+  `minimum_severity` (`web/src/components/route-form.tsx`), so turning it on sets the Minimum severity critical and
+  turning it off changes nothing; the Alert handling page still shows "critical is Urgent", which is ignored.
 
 ## Contracts
 
@@ -98,8 +118,10 @@ issue: 400
   - New schema `MinimumSeverity`: `none`, `warning`, `critical`, described as `route.minimum_severity`, "only raises
     the Severity level of the Route's Alert Groups; an Urgent Alert Group is a critical one".
   - `RouteInput` gains `minimum_severity` (optional; omitted on create is `none`, omitted on update keeps it) and loses
-    `urgent` from its `required`; `urgent` becomes `deprecated: true` with the description "Read-only from 0.2.0: true
-    exactly when `minimum_severity` is `critical`. Ignored in requests; removed in 0.3.0." `Route` lists
+    `urgent` from its `required`; `urgent` becomes `deprecated: true` with the description "From 0.2.0 a read gives
+    true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as
+    `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes
+    nothing. Removed in 0.3.0." `Route` lists
     `minimum_severity` and `urgent` in its `required`, so every read carries both.
   - `RouteProfile` gains `minimum_severity` (required, `none` for both profiles); its `urgent` stays, `false`, and is
     deprecated as on `RouteInput`.
@@ -137,8 +159,10 @@ issue: 400
 - **Rolling update**: 0.2.0 writes `routes.urgent` = (`minimum_severity` = `critical`) on every create and update, and
   never writes `critical_is_urgent` again, so a 0.1 replica, which computes `routes.urgent OR (critical AND
   critical_is_urgent)`, finds the same urgency as 0.2.0.
-- **Routing** (`internal/routing`): `Route`, `Input`, `Profile` and the view gain `MinimumSeverity`; `Input.Urgent` is
-  ignored; a changed Minimum severity inserts the `open_group_updates` row in the update's transaction when the Route
+- **Routing** (`internal/routing`): `Route`, `Input`, `Profile` and the view gain `MinimumSeverity`; by the expand
+  and contract rule of L2 §2, `Input.Urgent` true without a `MinimumSeverity` — a 0.1 client's urgent mark — is read as
+  the Minimum severity critical, and false or beside a `MinimumSeverity` changes nothing; the reads of a Route select
+  `minimum_severity` and derive `urgent`, and `Profile` has no urgent mark of its own; a changed Minimum severity inserts the `open_group_updates` row in the update's transaction when the Route
   has open Alert Groups, and appears in the Audit log diff of `route.updated` (`/minimum_severity`, with `/urgent`
   changing with it). The suggestion `heartbeat_lost` of `suggestions.go` sets `MinimumSeverity: critical` instead of
   `Urgent: true`, as C-26 scenario 6 and the rule "Urgent exactly when critical" ask; `suggestions_test.go` and the
@@ -147,20 +171,32 @@ issue: 400
 - **Organization** (`internal/organization`, `internal/api/organization.go`): reads return `critical_is_urgent: true`;
   updates ignore the field, so it never appears in the diff of `organization.updated`.
 - **Groups** (`internal/groups`): `urgentOf` becomes `level == critical`; the level of `grouping.go` and
-  `transitions.go` is raised to the Route's Minimum severity (`routeInfo` gains it, the `GetRoute*` queries read it);
+  `transitions.go` is raised to the Route's Minimum severity (`routeInfo` gains it, the `GetRoute*` queries read it),
+  and a move to the Default route (`move.go`) computes it again against the Default route's Minimum severity, a rise
+  with the Quiet entry of the Minimum severity and a fall silently;
+  every change of the Alerts of an Alert Group first applies the Route's Minimum severity as it is now to the level of
+  the Alerts already firing in it, as the worker would — a rise with the Quiet entry of the Minimum severity, a fall
+  silently — before it judges the Alerts that join, so that a change of the Minimum severity the worker has not reached
+  yet is never mistaken for a rise of the Alerts, and sets `urgent` from the level, which heals one that a 0.1 replica
+  wrote; Unresolve fires again at the level of the Alerts still firing raised to the Route's Minimum severity as it is
+  now; the highest level of the firing Alerts of Alert Groups is read by `ListFiringLevels`, and a move to the Default
+  route locks it `FOR SHARE`, as grouping does;
   the derived urgency of the list, counts and reads (`query.sql`) becomes `g.severity_level = 'critical'`. The fakes of
   the unit tests follow: the route rows of `dispatcher_test.go` gain `MinimumSeverity` and its emulation of the read's
   urgency (`urgent`) becomes the stored level; `TestUrgencyFollowsConfiguration` of `list_test.go`, which asserts the L1
   rule that an urgent Route makes its open Alert Groups Urgent, is replaced by a test of the new rule.
   `updates.go` is the worker of `open_group_updates` on every replica: woken at start, by a `NOTIFY` from the inserting
   transaction and by the development clock, it claims a row with `FOR UPDATE SKIP LOCKED` and a lease of 60 s on the
-  real clock, renewed per batch, and walks the open Alert Groups of its scope by id from `after_alert_group_id` in
+  real clock — a replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica
+  that knows it — renewed per batch, and walks the open Alert Groups of its scope by id from `after_alert_group_id` in
   batches of 50, each in its own dispatcher transaction as a system transition (`MinimumSeverityChanged`, Transport
   `system`, actor Muster): the level is computed again; a rise records the Quiet `severity_raised`, or, when it reaches
   critical, the Quiet `urgency_raised` of the row "removes nothing" of C-09.FR-22 — never the Loud one, since a change
   of configuration removes no acknowledgement and ends no Snooze (C-09.FR-9) — both with the reason
   `minimum_severity`, whose text `events.go` gives as "Minimum severity of the Route"; a fall writes the level
-  silently, as a falling Severity level does; then the re-render step updates the Root messages Quietly. An Alert Group
+  silently, as a falling Severity level does; then the re-render step updates the Root messages Quietly, and an Alert
+  Group a Storm holds that the raise makes Urgent is published at once Quietly (`ReleaseHeld` with `loud` false in
+  `internal/delivery/enqueue.go`: a change of configuration publishes nothing Loud, ADR-0018). An Alert Group
   already at the computed level is skipped, so a second run of a row records nothing. The worker is not a Leader task,
   and delivery's tables need no new row.
 - **Log events** (`internal/logging/events.go`): `open_group_update_done` (INFO; `kind`, `route`, `destination`,
@@ -176,9 +212,10 @@ issue: 400
   it elsewhere); `docs/install/versions.md` gains the entry 0.2.0 of its upgrade notes for C-26.FR-10, with its
   paragraph "Rolling upgrade from 0.1": every migration of 0.2.0 applies when the first 0.2.0 replica starts, while
   0.1 replicas still run until the rollout ends; a 0.1 replica ignores the Minimum severity — it stores a lower Severity
-  level on the Alert Groups it changes, while `urgent` agrees, since 0.2.0 writes `routes.urgent` — and the stories that
-  add more of what 0.1 replicas ignore add one sentence each (S-115, S-117, S-121, S-140). The window lasts as long as
-  the rollout, and nothing of it remains afterwards.
+  level on the Alert Groups it changes, with `urgent` true, since 0.2.0 writes `routes.urgent`; until a later change of
+  their Alerts or of the Route's Minimum severity, the API and the list show such an Alert Group as not Urgent while its
+  messages and webhooks treat it as Urgent — and the stories that add more of what 0.1 replicas ignore add one sentence
+  each (S-115, S-117, S-121, S-140).
 
 ## Steps
 
@@ -210,11 +247,17 @@ BODY() { curl -s "${A[@]}" $API/routes/$1 | jq -c "del(.id, .etag, .position, .i
   .open_alert_group_count, .created_at) | $2"; }
 PUTR() { curl -s "${A[@]}" -X PUT -H "If-Match: $(curl -s "${A[@]}" $API/routes/$1 | jq -r .etag)" $API/routes/$1 -d "$(BODY $1 "$2")"; }
 
-# C-26.FR-10, C-26.AC-8: urgent is derived and ignored; a Route without urgent in its input is accepted
+# C-26.FR-10, C-26.AC-8: urgent is derived on reads; urgent false changes nothing; a Route without urgent in its input
+# is accepted; urgent true without minimum_severity, as a 0.1 client sends it, is converted to critical
 R1=$(ROUTE hb critical | jq -r .id); curl -s "${A[@]}" $API/routes/$R1 | jq -c '{minimum_severity, urgent}'
 # {"minimum_severity":"critical","urgent":true}
 psql "$MUSTER_DATABASE_URL" -Atc "SELECT urgent FROM routes WHERE public_id = '$R1'"                        # t
 PUTR $R1 '.urgent = false' | jq -c '{minimum_severity, urgent}'                 # {"minimum_severity":"critical","urgent":true}
+curl -s "${A[@]}" $API/routes -d "{\"name\":\"old\",\"matchers\":[],\"urgent\":true,\"group_key\":[\"alertname\"],
+  \"destination_ids\":[],\"policy\":$P}" | jq -c '{minimum_severity, urgent}'  # {"minimum_severity":"critical","urgent":true}
+R0=$(ROUTE none0 none | jq -r .id)
+PUTR $R0 'del(.minimum_severity) | .urgent = true' | jq -c '{minimum_severity, urgent}'
+# {"minimum_severity":"critical","urgent":true}
 O=$(curl -s "${A[@]}" $API/organization)
 curl -s "${A[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization \
   -d "$(jq -c 'del(.id, .etag) | .critical_is_urgent = false' <<<"$O")" | jq .critical_is_urgent           # true
@@ -223,7 +266,7 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $(jq -r .etag <<<"$O")" $API/organization
 curl -s -X PUT $FAM/groups/h1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"Lag"}}' > /dev/null
 PUTA h1 a '{"labels":{"svc":"hb","severity":"warning"}}'; NOTIFY h1 '{"reason":"first notification"}'
 G=$(AG 'svc%3D%22hb%22'); GET $G | jq -c '{severity_level, urgent}'          # {"severity_level":"critical","urgent":true}
-curl -s "${A[@]}" "$API/alert-groups/$G/alerts" | jq -r '.items[0].severity_level'                         # warning
+curl -s "${A[@]}" "$API/alert-groups/$G/alerts" | jq -r '.items[0].labels.severity'                         # warning
 
 # C-26.FR-9, C-26.AC-11, C-09.AC-8: raising the Minimum severity of a Route with an acknowledged warning Alert Group
 R2=$(ROUTE db none | jq -r .id)
@@ -255,6 +298,14 @@ None.
 
 ## Notes
 
+- Changes made while the story was worked, with their reasons: `move.go` and `list_integration_test.go` (C-26.FR-8,
+  the level follows the Route's Minimum severity after a move; the list oracle read `critical_is_urgent`);
+  `docs/configure/organization.md` (it must not contradict the 0.2.0 upgrade notes until S-112 rewrites the page);
+  `internal/delivery/enqueue.go`, `query.sql` and `storm_test.go` (C-26.FR-9: a raised Minimum severity publishes a
+  held Alert Group Quietly; the release still starts its ack timeout, as C-17.FR-1 says); `design/prd/l1/defaults.md`
+  (the row `route.urgent` follows the amended C-26.FR-10); the S-169 file (cross-reference for S-169: a Quiet release by
+  a minimum-severity raise starts no chain); C-26.FR-10 and C-26.AC-8 of the PRD (a 0.1 client's `urgent: true` is converted, the expand
+  and contract rule of L2 §2); the claim of `open_group_updates` filters by the kinds a replica handles.
 - Suggested commit: `feat(routing): replace the urgent mark with a minimum severity on routes`.
 - `open_group_updates` is the one mechanism for changes of configuration that must reach the open Alert Groups after
   the save — this story's Minimum severity, the button sets (S-113), the evaluation of Teams on save (S-163), the

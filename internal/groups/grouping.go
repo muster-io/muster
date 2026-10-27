@@ -150,12 +150,13 @@ type membership struct {
 	Annotations map[string]string
 }
 
-// routeInfo is the policy of a Route that grouping and the system transitions use.
+// routeInfo is the policy of a Route that grouping and the system transitions use. Minimum is its Minimum severity
+// (route.minimum_severity) as a Severity level, info for none.
 type routeInfo struct {
 	ID           int64
 	PublicID     string
 	IsDefault    bool
-	Urgent       bool
+	Minimum      organization.SeverityLevel
 	Key          []string
 	ReopenWindow time.Duration
 	Grace        time.Duration
@@ -199,7 +200,9 @@ type engine struct {
 	tx  dbgen.DBTX
 	now time.Time
 
-	settings      *dbgen.GetGroupingSettingsRow
+	// instance are the Instance labels of the Organization once read, which instanceRead marks.
+	instance      []string
+	instanceRead  bool
 	routes        map[int64]*routeInfo
 	defaultRoute  *routeInfo
 	policies      map[int64]*routeInfo
@@ -455,9 +458,7 @@ func (e *engine) lockRoutes(ctx context.Context, ids []int64) error {
 		return fmt.Errorf("lock the routes: %w", err)
 	}
 	for _, r := range rows {
-		e.routes[r.ID] = &routeInfo{ID: r.ID, PublicID: r.PublicID, IsDefault: r.IsDefault, Urgent: r.Urgent,
-			Key: r.GroupKey, ReopenWindow: seconds(r.ReopenWindowSeconds), Grace: seconds(r.GracePeriodSeconds),
-			RemovesAck: r.UrgentRiseRemovesAck}
+		e.routes[r.ID] = policyOf(dbgen.GetRoutePolicyRow(r))
 		e.policies[r.ID] = e.routes[r.ID]
 	}
 	return nil
@@ -472,9 +473,7 @@ func (e *engine) lockDefault(ctx context.Context) (*routeInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("lock the default route: %w", err)
 	}
-	e.defaultRoute = &routeInfo{ID: r.ID, PublicID: r.PublicID, IsDefault: r.IsDefault, Urgent: r.Urgent,
-		Key: r.GroupKey, ReopenWindow: seconds(r.ReopenWindowSeconds), Grace: seconds(r.GracePeriodSeconds),
-		RemovesAck: r.UrgentRiseRemovesAck}
+	e.defaultRoute = policyOf(dbgen.GetRoutePolicyRow(r))
 	e.routes[r.ID], e.policies[r.ID] = e.defaultRoute, e.defaultRoute
 	return e.defaultRoute, nil
 }
@@ -488,11 +487,16 @@ func (e *engine) policy(ctx context.Context, id int64) (*routeInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read route %d: %w", id, err)
 	}
-	p := &routeInfo{ID: r.ID, PublicID: r.PublicID, IsDefault: r.IsDefault, Urgent: r.Urgent, Key: r.GroupKey,
-		ReopenWindow: seconds(r.ReopenWindowSeconds), Grace: seconds(r.GracePeriodSeconds),
-		RemovesAck: r.UrgentRiseRemovesAck}
+	p := policyOf(r)
 	e.policies[id] = p
 	return p, nil
+}
+
+// policyOf is the policy of a Route as GetRoutePolicy reads it.
+func policyOf(r dbgen.GetRoutePolicyRow) *routeInfo {
+	return &routeInfo{ID: r.ID, PublicID: r.PublicID, IsDefault: r.IsDefault, Minimum: minimumOf(r.MinimumSeverity),
+		Key: r.GroupKey, ReopenWindow: seconds(r.ReopenWindowSeconds), Grace: seconds(r.GracePeriodSeconds),
+		RemovesAck: r.UrgentRiseRemovesAck}
 }
 
 // discover finds the Alert Group of each slot in the order of C-09.FR-3: the open one, else one to reopen, else a
@@ -720,25 +724,22 @@ func (e *engine) loadMembers(ctx context.Context, ids []int64) error {
 	return nil
 }
 
-// grouping reads the Organization's settings once per transaction.
-func (e *engine) grouping(ctx context.Context) (*dbgen.GetGroupingSettingsRow, error) {
-	if e.settings != nil {
-		return e.settings, nil
+// instanceLabels reads the Organization's Instance labels once per transaction.
+func (e *engine) instanceLabels(ctx context.Context) ([]string, error) {
+	if e.instanceRead {
+		return e.instance, nil
 	}
-	st, err := e.q.GetGroupingSettings(ctx, e.s.orgID)
+	labels, err := e.q.GetGroupingSettings(ctx, e.s.orgID)
 	if err != nil {
 		return nil, fmt.Errorf("read the grouping settings: %w", err)
 	}
-	e.settings = &st
-	return e.settings, nil
+	e.instance, e.instanceRead = labels, true
+	return labels, nil
 }
 
-// create starts a new Alert Group with the Alerts of a slot, with the next #N, as one `created` entry.
+// create starts a new Alert Group with the Alerts of a slot, with the next #N, as one `created` entry: its Severity
+// level is the highest of its Alerts raised to its Route's Minimum severity (C-26.FR-8).
 func (e *engine) create(ctx context.Context, s *slot) error {
-	st, err := e.grouping(ctx)
-	if err != nil {
-		return err
-	}
 	number, err := e.q.NextNumber(ctx, e.s.orgID)
 	if err != nil {
 		return fmt.Errorf("take the next alert group number: %w", err)
@@ -756,7 +757,8 @@ func (e *engine) create(ctx context.Context, s *slot) error {
 		g.joined(a)
 		g.Severity = higher(g.Severity, a.Severity)
 	}
-	g.Urgent = urgentOf(s.route, g.Severity, st.CriticalIsUrgent)
+	g.Severity = s.route.raise(g.Severity)
+	g.Urgent = urgentOf(g.Severity)
 	id, err := e.q.InsertGroup(ctx, dbgen.InsertGroupParams{OrgID: e.s.orgID, PublicID: g.PublicID,
 		Number: g.Number, RouteID: g.RouteID, GroupKeyLabels: g.KeyLabels, GroupKeyValues: jsonOf(g.KeyValues),
 		GroupKeySha256: g.KeySHA, Title: g.Title, TitleFromGroupKey: g.TitleFromKey, Summary: text(g.Summary),
@@ -853,9 +855,26 @@ func higher(a, b organization.SeverityLevel) organization.SeverityLevel {
 	return a
 }
 
-// urgentOf is the urgency of an Alert Group of the Route at the Severity level (C-08.FR-6).
-func urgentOf(r *routeInfo, level organization.SeverityLevel, criticalIsUrgent bool) bool {
-	return r.Urgent || (level == organization.SeverityCritical && criticalIsUrgent)
+// urgentOf is the urgency of an Alert Group at its Severity level: Urgent exactly when critical (C-26.FR-8), whatever
+// routes.urgent and organizations.critical_is_urgent hold.
+func urgentOf(level organization.SeverityLevel) bool {
+	return level == organization.SeverityCritical
+}
+
+// raise is the Severity level of an Alert Group of the Route whose firing Alerts are at level: that level raised to
+// the Route's Minimum severity, which never lowers it (C-26.FR-8).
+func (r *routeInfo) raise(level organization.SeverityLevel) organization.SeverityLevel {
+	return higher(level, r.Minimum)
+}
+
+// minimumOf is a Minimum severity as a Severity level: warning or critical, info for none.
+func minimumOf(m string) organization.SeverityLevel {
+	switch l := organization.SeverityLevel(m); l {
+	case organization.SeverityWarning, organization.SeverityCritical:
+		return l
+	default:
+		return organization.SeverityInfo
+	}
 }
 
 // readLabels reads the labels and annotations of an Alert.

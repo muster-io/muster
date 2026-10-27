@@ -32,7 +32,9 @@ export interface AlertGroup {
   snooze_until?: string | null;
   /** Set while snoozed: who set the current Snooze, a User or a Service account ("Snoozed by" in the Root message). Stored on the Alert Group by Snooze, restored with the Snooze by a Reopen into snoozed, and cleared when the Snooze ends. */
   readonly snoozed_by?: ActorRef;
+  /** The highest Severity level of the firing Alerts, raised to the Route's Minimum severity (`minimum_severity`); each Alert keeps its own level. */
   severity_level: SeverityLevel;
+  /** True exactly when `severity_level` is `critical`. */
   urgent: boolean;
   route: EntityRef;
   integrations: EntityRef[];

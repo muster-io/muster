@@ -132,9 +132,10 @@ func TestGroupKeyPreview(t *testing.T) {
 	type suggestion struct {
 		ID    string `json:"id"`
 		Route struct {
-			Name     string `json:"name"`
-			Urgent   bool   `json:"urgent"`
-			Matchers []struct {
+			Name            string `json:"name"`
+			MinimumSeverity string `json:"minimum_severity"`
+			Urgent          bool   `json:"urgent"`
+			Matchers        []struct {
 				Label, Op, Value string
 			} `json:"matchers"`
 			GroupKey []string `json:"group_key"`
@@ -154,17 +155,21 @@ func TestGroupKeyPreview(t *testing.T) {
 	}
 	got := suggestions(admin)
 	if len(got) != 1 || got[0].ID != "heartbeat_lost" || got[0].Route.Name != "Muster: Heartbeat lost" ||
-		!got[0].Route.Urgent || len(got[0].Route.Matchers) != 1 || got[0].Route.Matchers[0].Value != "MusterHeartbeatLost" ||
+		got[0].Route.MinimumSeverity != "critical" || !got[0].Route.Urgent || len(got[0].Route.Matchers) != 1 ||
+		got[0].Route.Matchers[0].Value != "MusterHeartbeatLost" ||
 		strings.Join(got[0].Route.GroupKey, ",") != "alertname,integration" {
 		t.Errorf("suggestions %+v", got)
 	}
 	_, etag := routeList(t, admin)
 	a = admin.do(http.MethodPost, "/api/v1/route-suggestions/heartbeat_lost/accept", "")
 	var accepted struct {
-		Name string `json:"name"`
+		Name            string `json:"name"`
+		MinimumSeverity string `json:"minimum_severity"`
+		Urgent          bool   `json:"urgent"`
 	}
 	decode(t, a, &accepted)
-	if a.status != http.StatusCreated || accepted.Name != "Muster: Heartbeat lost" || a.header.Get("ETag") == "" {
+	if a.status != http.StatusCreated || accepted.Name != "Muster: Heartbeat lost" || a.header.Get("ETag") == "" ||
+		accepted.MinimumSeverity != "critical" || !accepted.Urgent {
 		t.Errorf("accept = %d %s", a.status, a.body)
 	}
 	names, after := routeList(t, admin)

@@ -39,7 +39,7 @@ export const GetOrganizationResponse = zod.object({
   "emoji": zod.string(),
   "color": zod.string().describe('CSS hex colour, for example `#d32f2f`.')
 })),
-  "critical_is_urgent": zod.boolean(),
+  "critical_is_urgent": zod.boolean().describe('Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.'),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
   "stored_snapshots_days": zod.int().min(1).max(getOrganizationResponseOneRetentionStoredSnapshotsDaysMax),
@@ -107,7 +107,7 @@ export const UpdateOrganizationBody = zod.object({
   "emoji": zod.string(),
   "color": zod.string().describe('CSS hex colour, for example `#d32f2f`.')
 })),
-  "critical_is_urgent": zod.boolean(),
+  "critical_is_urgent": zod.boolean().optional().describe('Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.'),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
   "stored_snapshots_days": zod.int().min(1).max(updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax),
@@ -160,7 +160,7 @@ export const UpdateOrganizationResponse = zod.object({
   "emoji": zod.string(),
   "color": zod.string().describe('CSS hex colour, for example `#d32f2f`.')
 })),
-  "critical_is_urgent": zod.boolean(),
+  "critical_is_urgent": zod.boolean().describe('Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.'),
   "instance_labels": zod.array(zod.string()),
   "retention": zod.object({
   "stored_snapshots_days": zod.int().min(1).max(updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax),

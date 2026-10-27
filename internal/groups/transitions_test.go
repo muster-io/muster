@@ -195,10 +195,11 @@ func TestReopenPriorStatus(t *testing.T) {
 	}
 }
 
-// TestRise is C-09.FR-9, C-08.FR-6 and C-09.AC-12: a rise to critical in a Route whose Group key lacks severity makes
+// TestRise is C-09.FR-9, C-26.FR-8 and C-09.AC-12: a rise to critical in a Route whose Group key lacks severity makes
 // a firing Alert Group Urgent with a Quiet urgency_raised; a snoozed one stays snoozed when the Snooze was set while
-// Urgent; an acknowledged one keeps its Owner when the Route says so; a rise that leaves urgency unchanged is a Quiet
-// severity_raised.
+// Urgent; an acknowledged one keeps its Owner when the Route says so, and otherwise records the Loud urgency_raised
+// mentioning its Owner and becomes firing, as Urgent is critical whatever critical_is_urgent held; a rise that leaves
+// urgency unchanged is a Quiet severity_raised.
 func TestRise(t *testing.T) {
 	h := newHarness(t)
 	g := h.rise(t, nil)
@@ -220,47 +221,162 @@ func TestRise(t *testing.T) {
 	h = newHarness(t)
 	g = h.rise(t, func(g *dbgen.LockGroupsRow) { h.acknowledge(g) })
 	if e := h.last(t, g); g.Status != "firing" || g.OwnerUserID.Valid || e.PreviousOwnerUserID.Int64 != 9 ||
-		e.FromStatus.String != "acknowledged" || e.ToStatus.String != "firing" {
+		e.FromStatus.String != "acknowledged" || e.ToStatus.String != "firing" || e.Event.String != "urgency_raised" ||
+		e.Loudness.String != "loud" || !slices.Equal(e.Mentions, []string{"owner", "rise_to_urgent"}) ||
+		e.Reason.Valid || !g.Urgent {
 		t.Errorf("removed the acknowledgement: %+v", e.InsertTimelineEntryParams)
 	}
-	// Without critical is Urgent a rise to critical leaves urgency unchanged; so does a rise of an Urgent one.
+	// A rise of an Urgent one leaves urgency unchanged: the Minimum severity critical made it critical at creation, and
+	// a later Alert at a level below never lowers it.
 	h = newHarness(t)
-	h.db.settings.CriticalIsUrgent = false
-	g = h.rise(t, nil)
-	if g.Urgent || g.SeverityLevel != "critical" || h.last(t, g).Event.String != "severity_raised" {
-		t.Errorf("not urgent: %+v", g)
-	}
-	h = newHarness(t)
-	h.db.routes[2].Urgent = true
+	h.db.routes[2].MinimumSeverity = "critical"
 	a := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x"})
 	h.changes(t, ingest.ChangeFired, a)
 	g = h.groupOf(t, a)
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.changes(t, ingest.ChangeFired, b)
-	if !g.Urgent || h.last(t, g).Event.String != "severity_raised" {
-		t.Errorf("urgent route: %v", h.events(g))
+	if !g.Urgent || g.SeverityLevel != "critical" || h.last(t, g).Event.String != "alerts_added" ||
+		h.db.alerts[a].SeverityLevel.String != "info" {
+		t.Errorf("critical route: %+v %v", g, h.events(g))
 	}
 	// A lower or equal level changes nothing about the level.
 	c := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "3"})
 	h.changes(t, ingest.ChangeFired, c)
-	if g.SeverityLevel != "warning" || h.last(t, g).Event.String != "alerts_added" {
+	if g.SeverityLevel != "critical" || h.last(t, g).Event.String != "alerts_added" {
 		t.Errorf("a lower level: %s %v", g.SeverityLevel, h.events(g))
 	}
 }
 
-// TestConfigurationEdits is C-08.FR-8 and C-09.AC-8: marking a Route urgent changes the status of none of its open
-// Alert Groups, also when a new Alert joins at the same level.
+// TestConfigurationEdits is C-08.FR-8, C-09.AC-8 and C-26.FR-9: raising a Route's Minimum severity to critical
+// changes the status of none of its open Alert Groups, also when a new Alert joins at the same level before the
+// change reached them: the rise the Minimum severity makes is the Quiet urgency_raised that removes nothing, with its
+// reason, and a rise to warning the Quiet severity_raised with it.
 func TestConfigurationEdits(t *testing.T) {
 	h := newHarness(t)
 	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
 	h.changes(t, ingest.ChangeFired, a)
 	g := h.groupOf(t, a)
 	h.acknowledge(g)
-	h.db.routes[2].Urgent = true
+	h.db.routes[2].MinimumSeverity = "critical"
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.changes(t, ingest.ChangeFired, b)
-	if g.Status != "acknowledged" || g.OwnerUserID.Int64 != 9 {
-		t.Errorf("an edit changed the status: %+v", g)
+	es := h.entriesOf(g)
+	e := es[len(es)-2]
+	if g.Status != "acknowledged" || g.OwnerUserID.Int64 != 9 || g.SeverityLevel != "critical" || !g.Urgent ||
+		e.Event.String != "urgency_raised" || e.Loudness.String != "quiet" || e.Reason.String != ReasonMinimumSeverity ||
+		StatusReasonCode(e.Reason.String) != ReasonCodeMinimumSeverity || es[len(es)-1].Event.String != "alerts_added" {
+		t.Errorf("an edit changed the status: %+v %v", g, h.events(g))
+	}
+	h = newHarness(t)
+	c := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, c)
+	g = h.groupOf(t, c)
+	h.snooze(g, t0.Add(time.Hour), false)
+	h.db.routes[2].MinimumSeverity = "warning"
+	d := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.changes(t, ingest.ChangeFired, d)
+	es = h.entriesOf(g)
+	if e := es[len(es)-2]; g.Status != "snoozed" || g.SeverityLevel != "warning" || g.Urgent ||
+		e.Event.String != "severity_raised" || e.Reason.String != ReasonMinimumSeverity {
+		t.Errorf("a rise to warning by the edit: %+v %v", g, h.events(g))
+	}
+}
+
+// TestMinimumSeverityBeforeTheWorker is C-26.FR-9 and C-09.FR-9 for a change of the Minimum severity that the worker
+// of open_group_updates has not applied when a critical Alert joins: a raised one gives its Quiet entry and nothing
+// Loud, keeping the acknowledgement; a lowered one falls silently first, so the critical join is the Loud rise to
+// Urgent that removes the acknowledgement.
+func TestMinimumSeverityBeforeTheWorker(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	h.acknowledge(g)
+	h.db.routes[2].MinimumSeverity = "critical"
+	h.changes(t, ingest.ChangeFired, h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x",
+		"n": "2"}))
+	if got := h.events(g); g.Status != "acknowledged" || g.SeverityLevel != "critical" ||
+		!slices.Equal(got[1:], []string{"urgency_raised", "alerts_added"}) ||
+		h.entriesOf(g)[1].Loudness.String != "quiet" || h.entriesOf(g)[1].Reason.String != ReasonMinimumSeverity {
+		t.Errorf("raised: %+v %v", g, got)
+	}
+
+	h = newHarness(t)
+	h.db.routes[2].MinimumSeverity = "critical"
+	a = h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g = h.groupOf(t, a)
+	h.acknowledge(g)
+	h.db.routes[2].MinimumSeverity = "none"
+	h.changes(t, ingest.ChangeFired, h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x",
+		"n": "2"}))
+	e := h.last(t, g)
+	if g.Status != "firing" || g.OwnerUserID.Valid || g.SeverityLevel != "critical" || !g.Urgent ||
+		e.Event.String != "urgency_raised" || e.Loudness.String != "loud" || e.Reason.Valid ||
+		!slices.Equal(e.Mentions, []string{"owner", "rise_to_urgent"}) {
+		t.Errorf("lowered: %+v %v", g, h.events(g))
+	}
+}
+
+// TestUrgencyHeals is the rolling update from 0.1 (C-26.FR-10): an Alert Group that a 0.1 replica stored critical but
+// not Urgent is Urgent again after its next change.
+func TestUrgencyHeals(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	g.Urgent = false
+	h.db.alerts[a].Annotations = []byte(`{"summary":"changed"}`)
+	h.changes(t, ingest.ChangeAnnotations, a)
+	if !g.Urgent || g.SeverityLevel != "critical" {
+		t.Errorf("healed %+v %v", g, h.events(g))
+	}
+}
+
+// TestMinimumSeverityRule is C-26.FR-8 and C-26.AC-7 for the Alerts that join, resolve and reopen: the Severity level
+// is the highest of the firing Alerts raised to the Route's Minimum severity, Urgent exactly when critical.
+func TestMinimumSeverityRule(t *testing.T) {
+	// Joined: a critical Alert raises a group of the Minimum severity warning; its resolution lowers it to warning, not
+	// to the info of the Alert left; a Reopen of info Alerts takes warning.
+	h := newHarness(t)
+	h.db.routes[2].MinimumSeverity = "warning"
+	a := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	b := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	h.changes(t, ingest.ChangeFired, b)
+	if e := h.last(t, g); g.SeverityLevel != "critical" || !g.Urgent || e.Event.String != "urgency_raised" ||
+		e.Reason.Valid {
+		t.Errorf("joined critical: %+v %v", g, h.events(g))
+	}
+	h.resolve(t, b)
+	if g.SeverityLevel != "warning" || g.Urgent {
+		t.Errorf("after the critical alert resolved: %+v", g)
+	}
+	h.resolve(t, a)
+	h.clock.Advance(time.Minute)
+	h.refire(t, a)
+	if g.Status != "firing" || g.SeverityLevel != "warning" || g.Urgent || h.last(t, g).Event.String != "reopened" {
+		t.Errorf("reopened %+v %v", g, h.events(g))
+	}
+	// A resolution after the Minimum severity was raised, before the worker of open_group_updates reached the Alert
+	// Group: the level rises to the Minimum severity with its Quiet entry, recorded before the alert_resolved of the
+	// same change, and the acknowledgement stays.
+	for _, c := range []struct{ minimum, event string }{{"critical", "urgency_raised"}, {"warning", "severity_raised"}} {
+		h := newHarness(t)
+		x := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+		y := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+		h.changes(t, ingest.ChangeFired, x, y)
+		g := h.groupOf(t, x)
+		h.acknowledge(g)
+		h.db.routes[2].MinimumSeverity = c.minimum
+		h.resolve(t, x)
+		es := h.entriesOf(g)
+		if len(es) < 2 || es[len(es)-1].Event.String != "alert_resolved" || es[len(es)-2].Event.String != c.event ||
+			es[len(es)-2].Loudness.String != "quiet" || es[len(es)-2].Reason.String != ReasonMinimumSeverity ||
+			g.SeverityLevel != c.minimum || g.Urgent != (c.minimum == "critical") || g.Status != "acknowledged" {
+			t.Errorf("a resolution under the minimum %s: %+v %v", c.minimum, g, h.events(g))
+		}
 	}
 }
 
@@ -497,19 +613,19 @@ func metricsText(t *testing.T) string {
 	return rec.Body.String()
 }
 
-// TestRiseAfterAnEdit is C-09.FR-9 and C-08.FR-8: once the Route is marked urgent, a rise that leaves urgency
-// unchanged under the current settings is a Quiet severity_raised that keeps the acknowledgement and the Snooze.
+// TestRiseAfterAnEdit is C-09.FR-9 and C-26.FR-8: once the Route's Minimum severity made an Alert Group critical, a
+// critical Alert joining it leaves urgency unchanged and records nothing about the level, keeping the acknowledgement.
 func TestRiseAfterAnEdit(t *testing.T) {
 	h := newHarness(t)
+	h.db.routes[2].MinimumSeverity = "critical"
 	a := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x"})
 	h.changes(t, ingest.ChangeFired, a)
 	g := h.groupOf(t, a)
 	h.acknowledge(g)
-	h.db.routes[2].Urgent = true
-	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+	b := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.changes(t, ingest.ChangeFired, b)
-	if g.Status != "acknowledged" || !g.Urgent || g.SeverityLevel != "warning" ||
-		h.last(t, g).Event.String != "severity_raised" {
+	if g.Status != "acknowledged" || !g.Urgent || g.SeverityLevel != "critical" ||
+		h.last(t, g).Event.String != "alerts_added" {
 		t.Errorf("after the edit: %+v %v", g, h.events(g))
 	}
 }

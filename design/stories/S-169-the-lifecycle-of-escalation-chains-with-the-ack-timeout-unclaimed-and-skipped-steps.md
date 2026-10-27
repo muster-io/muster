@@ -241,6 +241,9 @@ change of the chain while a run goes on, the rows of C-32.AC-18, and `E2E_REPLIC
 
 ## Notes
 
+- A held Alert Group's Publication released only by a raised Minimum severity (S-111: Quiet, `publication_loud`
+  false) starts its ack timeout, as C-17.FR-1 says, but no Escalation chain: only Alerts and Commands start chains
+  (ADR-0018 amendment). The implementation tells that release apart from one an Alert or a Command made.
 - Suggested commit: `feat(escalation): run escalation chains on alert groups with the ack timeout and unclaimed`.
 - The maintainer confirms provisional values with this story (operator attention): P-70, a chain named by a Route and
   Teams more than once runs once, in the Threads of each; P-73, a change of a chain applies to runs that start

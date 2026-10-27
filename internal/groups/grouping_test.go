@@ -12,6 +12,7 @@ import (
 
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/organization"
 )
 
 // TestGrouping is C-09.AC-6, C-09.FR-3, C-09.FR-1 and C-08.FR-4: Alerts with the same Group key values on one Route
@@ -593,5 +594,25 @@ func TestListedFailures(t *testing.T) {
 	h.db.before["LockCounter"] = func() { h.db.fail["ListFiringMemberships"] = errBoom }
 	if _, err := h.apply(ingest.ChangeListed, a); !errors.Is(err, errBoom) {
 		t.Errorf("under the counter = %v", err)
+	}
+}
+
+// TestMinimumSeverityAtCreation is C-26.FR-8 and C-26.AC-7: a new Alert Group's Severity level is the highest of its
+// Alerts raised to its Route's Minimum severity, for each Minimum severity and each level, and it is Urgent exactly when
+// that level is critical; the Alert keeps its own level.
+func TestMinimumSeverityAtCreation(t *testing.T) {
+	for _, minimum := range []string{"none", "warning", "critical"} {
+		for _, level := range []string{"info", "warning", "critical"} {
+			h := newHarness(t)
+			h.db.routes[2].MinimumSeverity = minimum
+			a := h.alert(2, level, map[string]string{"alertname": "A", "cluster": "x"})
+			h.changes(t, ingest.ChangeFired, a)
+			g := h.groupOf(t, a)
+			want := higher(organization.SeverityLevel(level), minimumOf(minimum))
+			if g.SeverityLevel != string(want) || g.Urgent != (want == organization.SeverityCritical) ||
+				h.db.alerts[a].SeverityLevel.String != level || h.events(g)[0] != "created" || len(h.events(g)) != 1 {
+				t.Errorf("minimum %s, alert %s: %s urgent %v", minimum, level, g.SeverityLevel, g.Urgent)
+			}
+		}
 	}
 }

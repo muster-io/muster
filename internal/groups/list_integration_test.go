@@ -233,7 +233,6 @@ func TestIntegrationList(t *testing.T) {
 			groups.StatusResolved}
 		since, until := t0.Add(-100*time.Hour), t0.Add(-50*time.Hour)
 		urgent, yes, no := true, true, false
-		criticalIsUrgent := e.count(t, `SELECT count(*) FROM organizations WHERE critical_is_urgent`) == 1
 		byUser, bySystem, gone := groups.ResolvedByUser, groups.ResolvedBySystem, "gone"
 		for _, c := range []struct {
 			name string
@@ -255,7 +254,7 @@ func TestIntegrationList(t *testing.T) {
 			{"severity", groups.Filter{Statuses: all, Severities: []organization.SeverityLevel{"critical"}},
 				func(r *row) bool { return inRange(r) && r.severity == "critical" }},
 			{"urgent", groups.Filter{Statuses: all, Urgent: &urgent}, func(r *row) bool {
-				return inRange(r) && r.severity == "critical" && criticalIsUrgent
+				return inRange(r) && r.severity == "critical"
 			}},
 			{"resolved by a person", groups.Filter{Statuses: all, ResolvedBy: &byUser}, func(r *row) bool {
 				return inRange(r) && !open(r) && r.by == groups.ResolvedByUser
@@ -283,8 +282,7 @@ func TestIntegrationList(t *testing.T) {
 				func(r *row) bool { return inRange(r) && r.labels["pod"] == "" }},
 			{"payments and urgent", groups.Filter{Statuses: all, Urgent: &urgent, Matchers: []matchers.Matcher{
 				m(t, `namespace="payments"`)}}, func(r *row) bool {
-				return inRange(r) && r.labels["namespace"] == "payments" && r.severity == "critical" &&
-					criticalIsUrgent
+				return inRange(r) && r.labels["namespace"] == "payments" && r.severity == "critical"
 			}},
 			{"text inside words", groups.Filter{Statuses: all, Query: "POSTGRES"}, func(r *row) bool {
 				return inRange(r) && r.number == 43

@@ -220,15 +220,15 @@ func TestLifecycle(t *testing.T) {
 		t.Errorf("after the window = %v", v)
 	}
 
-	// C-09.AC-7 and C-09.AC-8: new Matchers and the urgent mark leave open Alert Groups alone.
+	// C-09.AC-7 and C-09.AC-8: new Matchers and a raised Minimum severity leave the status of open Alert Groups alone.
 	rt := admin.do(http.MethodGet, "/api/v1/routes/"+rdb, "")
 	var saved map[string]any
 	decode(t, rt, &saved)
 	saved["matchers"] = []map[string]string{{"label": "team", "op": "=", "value": "dba"}}
-	saved["urgent"] = true
 	saved["destination_ids"] = []string{}
-	body, _ := json.Marshal(map[string]any{"name": saved["name"], "matchers": saved["matchers"], "urgent": true,
-		"group_key": saved["group_key"], "destination_ids": []string{}, "policy": saved["policy"]})
+	body, _ := json.Marshal(map[string]any{"name": saved["name"], "matchers": saved["matchers"],
+		"minimum_severity": "critical", "group_key": saved["group_key"], "destination_ids": []string{},
+		"policy": saved["policy"]})
 	if a := admin.putWithIfMatch("/api/v1/routes/"+rdb, string(body), rt.header.Get("ETag")); a.status != http.StatusOK {
 		t.Fatalf("update = %d %s", a.status, a.body)
 	}

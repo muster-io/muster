@@ -3,7 +3,7 @@
 
 -- name: GetOrganization :one
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
-       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
 FROM organizations
 ORDER BY id
@@ -64,10 +64,11 @@ GROUP BY 1
 ORDER BY alerts DESC, value
 LIMIT @max_values;
 
--- GetSettings reads the organization resource, with the state of its Secrets but not their values.
+-- GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
+-- is not read: it is true from 0.2.0 (C-26.FR-10).
 -- name: GetSettings :one
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
-       critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
+       instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
@@ -102,7 +103,6 @@ SET name                                         = @name,
     severity_label                               = @severity_label,
     severity_mapping                             = @severity_mapping,
     severity_styles                              = @severity_styles,
-    critical_is_urgent                           = @critical_is_urgent,
     instance_labels                              = @instance_labels,
     retention_stored_snapshots_days              = @retention_stored_snapshots_days,
     retention_alert_details_days                 = @retention_alert_details_days,

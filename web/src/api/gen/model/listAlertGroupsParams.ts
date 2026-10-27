@@ -52,7 +52,7 @@ integration?: AgIntegrationParameter;
  */
 severity?: AgSeverityParameter;
 /**
- * Only Urgent (true) or non-Urgent (false) Alert Groups.
+ * Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
  */
 urgent?: AgUrgentParameter;
 /**

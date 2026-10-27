@@ -617,6 +617,11 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		v := gen.TimelineAlertsEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineAlertsEntryKindAlerts, Actor: actor,
 			Event: event, Loudness: loudness, Mentions: mentions, Reason: nullableString(e.Reason),
 			ReplacedLabel: nullableString(e.ReplacedLabel)}
+		if e.ReasonCode != "" {
+			v.ReasonCode.Set(gen.NullableStatusChangeReason(e.ReasonCode))
+		} else {
+			v.ReasonCode.SetNull()
+		}
 		if e.Fingerprints != nil {
 			v.Fingerprints = &e.Fingerprints
 		}

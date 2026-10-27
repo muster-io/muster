@@ -24,7 +24,11 @@ export interface OrganizationBase {
   /** Values of the severity label mapped to Severity levels. Unmapped values count as warning. */
   severity_mapping: SeverityMappingEntry[];
   severity_styles: SeverityLevelStyle[];
-  critical_is_urgent: boolean;
+  /**
+     * Always true from 0.2.0: critical is Urgent. Ignored in requests; removed in 0.3.0.
+     * @deprecated
+     */
+  critical_is_urgent?: boolean;
   instance_labels: string[];
   retention: RetentionSettings;
   totp_required: TotpPolicy;
