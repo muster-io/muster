@@ -1170,7 +1170,7 @@ func TestDispatch(t *testing.T) {
 		rendered = append(rendered, r.Group.ID)
 		return nil
 	}
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); err != nil ||
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); err != nil ||
 		!slices.Equal(rendered, []int64{row.ID}) || row.RouteID != 1 {
 		t.Errorf("moved = %v, rendered %v", err, rendered)
 	}
@@ -1182,7 +1182,7 @@ func TestDispatch(t *testing.T) {
 	}
 	g.MovedFromRouteID, g.RouteID = nil, 2
 	entries := len(h.db.entries)
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, Actor{Kind: audit.ActorUser, Transport: audit.TransportUI, Person: alice.Actor}, moveToDefault{from: 2, to: 1}, &after); err != nil {
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, Actor{Kind: audit.ActorUser, Transport: audit.TransportUI, Person: alice.Actor}, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); err != nil {
 		t.Fatal(err)
 	}
 	if e := h.db.entries[len(h.db.entries)-1]; len(h.db.entries) != entries+2 || e.Kind != string(KindSystem) ||
@@ -1192,7 +1192,7 @@ func TestDispatch(t *testing.T) {
 	}
 	h.db.fail["InsertTimelineEntry"] = errBoom
 	g.MovedFromRouteID, g.RouteID = nil, 2
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed fallback entry = %v", err)
 	}
@@ -1200,7 +1200,7 @@ func TestDispatch(t *testing.T) {
 	h.svc.d.rerender = func(context.Context, Queries, Rendering) error { return errBoom }
 	g.MovedFromRouteID = nil
 	g.RouteID = 2
-	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1}, &after); !errors.Is(err,
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, System, moveToDefault{from: 2, to: 1, route: &routeInfo{}, alerts: g.Severity}, &after); !errors.Is(err,
 		errBoom) {
 		t.Errorf("a failed re-render = %v", err)
 	}
@@ -1334,14 +1334,47 @@ func TestMove(t *testing.T) {
 			t.Errorf("%s = %v", id, err)
 		}
 	}
-	for _, q := range []string{"LockRouteForMove", "GetDefaultRouteID", "ListOpenGroupsOfRoute", "LockGroups",
-		"InsertTimelineEntry", "InsertAuditEntry"} {
+	for _, q := range []string{"LockRouteForMove", "GetDefaultRouteID", "GetRoutePolicy", "ListOpenGroupsOfRoute",
+		"LockGroups", "ListGroupFiringAlerts", "InsertTimelineEntry", "InsertAuditEntry"} {
 		h := newHarness(t)
 		h.changes(t, ingest.ChangeFired, h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"}))
 		h.db.fail[q] = errBoom
 		if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); !errors.Is(err, errBoom) {
 			t.Errorf("%s failing = %v", q, err)
 		}
+	}
+}
+
+// TestMoveMinimumSeverity is C-26.FR-8 for a move to the Default route: the level of a moved Alert Group follows the
+// Default route's Minimum severity: a rise records the Quiet entry of the Minimum severity, a fall nothing.
+func TestMoveMinimumSeverity(t *testing.T) {
+	h := newHarness(t)
+	h.db.routes[2].MinimumSeverity = "critical"
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	by := Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	if g.SeverityLevel != "critical" {
+		t.Fatalf("before the move %+v", g)
+	}
+	if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); err != nil {
+		t.Fatal(err)
+	}
+	if g.RouteID != 1 || g.SeverityLevel != "warning" || g.Urgent || h.last(t, g).Event.String != "moved_to_default_route" {
+		t.Errorf("a fall: %+v %v", g, h.events(g))
+	}
+	h = newHarness(t)
+	h.db.routes[1].MinimumSeverity = "critical"
+	a = h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g = h.groupOf(t, a)
+	h.acknowledge(g)
+	if _, err := h.svc.MoveOpenAlertGroups(t.Context(), by, "RTDBAAAAAAAAAA"); err != nil {
+		t.Fatal(err)
+	}
+	if e := h.last(t, g); g.SeverityLevel != "critical" || !g.Urgent || g.Status != "acknowledged" ||
+		e.Event.String != "urgency_raised" || e.Loudness.String != "quiet" || e.Reason.String != ReasonMinimumSeverity {
+		t.Errorf("a rise: %+v %v", g, h.events(g))
 	}
 }
 

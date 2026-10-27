@@ -63,6 +63,9 @@ func (t *snapshotChange) apply(ctx context.Context, q Queries, g *Group, c *chan
 		// A reopened Alert Group fires only its new Alerts: its level is theirs, and the Reopen records it.
 		t.level(g, levelOf(s.joins))
 	} else {
+		// Also without new Alerts: a Minimum severity raised since and not applied yet by the worker of
+		// open_group_updates raises the level here, with its Quiet entry, before the resolutions, which only lower the
+		// level of the Alerts and so never lower it below the level reached.
 		t.rise(g, before, c)
 	}
 	return t.resolutions(ctx, q, g, c)

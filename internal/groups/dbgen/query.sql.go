@@ -41,7 +41,8 @@ const claimOpenGroupUpdate = `-- name: ClaimOpenGroupUpdate :many
 WITH due AS MATERIALIZED (
     SELECT d.id
     FROM open_group_updates d
-    WHERE d.org_id = $3 AND (d.lease_until IS NULL OR d.lease_until <= $4::timestamptz)
+    WHERE d.org_id = $3 AND d.kind = ANY($4::text[])
+      AND (d.lease_until IS NULL OR d.lease_until <= $5::timestamptz)
     ORDER BY d.requested_at, d.id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -60,6 +61,7 @@ type ClaimOpenGroupUpdateParams struct {
 	Owner      string
 	LeaseUntil time.Time
 	OrgID      int64
+	Kinds      []string
 	Now        time.Time
 }
 
@@ -75,13 +77,15 @@ type ClaimOpenGroupUpdateRow struct {
 // The queue of the changes of configuration that reach the open Alert Groups after the save (open_group_updates,
 // schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
 // by id in batches, and is deleted with its last batch.
-// ClaimOpenGroupUpdate leases the earliest row whose lease is free or ran out, with the public_id of its Route, if any,
-// for its log lines; another claimer skips the row this one locked.
+// ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
+// the public_id of its Route, if any, for its log lines; another claimer skips the row this one locked. A row of a kind
+// that a later version adds waits for a replica that handles it.
 func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUpdateParams) ([]ClaimOpenGroupUpdateRow, error) {
 	rows, err := q.db.Query(ctx, claimOpenGroupUpdate,
 		arg.Owner,
 		arg.LeaseUntil,
 		arg.OrgID,
+		arg.Kinds,
 		arg.Now,
 	)
 	if err != nil {
@@ -3829,18 +3833,19 @@ SELECT coalesce(min(CASE WHEN lease_until IS NULL OR lease_until <= $1::timestam
                          ELSE lease_until END),
                 '0001-01-01 00:00:00+00')::timestamptz AS next
 FROM open_group_updates
-WHERE org_id = $2
+WHERE org_id = $2 AND kind = ANY($3::text[])
 `
 
 type NextOpenGroupUpdateParams struct {
 	Now   time.Time
 	OrgID int64
+	Kinds []string
 }
 
-// NextOpenGroupUpdate is when the next row can be claimed: now when one is free at the real time now, else the
-// earliest end of a lease still held; the zero time 0001-01-01 when the table holds no row.
+// NextOpenGroupUpdate is when the next row of the kinds this replica handles can be claimed: now when one is free at
+// the real time now, else the earliest end of a lease still held; the zero time 0001-01-01 when there is none.
 func (q *Queries) NextOpenGroupUpdate(ctx context.Context, arg NextOpenGroupUpdateParams) (time.Time, error) {
-	row := q.db.QueryRow(ctx, nextOpenGroupUpdate, arg.Now, arg.OrgID)
+	row := q.db.QueryRow(ctx, nextOpenGroupUpdate, arg.Now, arg.OrgID, arg.Kinds)
 	var next time.Time
 	err := row.Scan(&next)
 	return next, err

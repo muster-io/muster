@@ -40,7 +40,8 @@ func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGrou
 		return cmp.Or(a.requested.Compare(b.requested), cmp.Compare(a.id, b.id))
 	})
 	for _, u := range f.updates {
-		if arg.OrgID != orgID || (u.leaseUntil != nil && u.leaseUntil.After(arg.Now)) {
+		if arg.OrgID != orgID || !slices.Contains(arg.Kinds, u.kind) ||
+			(u.leaseUntil != nil && u.leaseUntil.After(arg.Now)) {
 			continue
 		}
 		until := arg.LeaseUntil
@@ -111,6 +112,9 @@ func (f *fakeDB) NextOpenGroupUpdate(_ context.Context, arg dbgen.NextOpenGroupU
 	}
 	var next time.Time
 	for _, u := range f.updates {
+		if !slices.Contains(arg.Kinds, u.kind) {
+			continue
+		}
 		at := arg.Now
 		if u.leaseUntil != nil && u.leaseUntil.After(arg.Now) {
 			at = *u.leaseUntil
@@ -343,12 +347,20 @@ func TestUpdateFailures(t *testing.T) {
 			t.Errorf("%s failing: next %v, log %s", q, next, u.log)
 		}
 	}
+	// A row of a kind this version does not handle is neither claimed nor waited for; one leased all the same, as a
+	// replica of a later version would, fails without changing anything.
 	u := newUpdates(t)
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: 1, kind: "button_set", requested: t0})
-	u.round(t, u.worker)
+	if next := u.round(t, u.worker); next != UpdateMaxWait || u.db.updates[0].leaseUntil != nil ||
+		strings.Contains(u.log.String(), "open_group_update") {
+		t.Errorf("an unknown kind: next %v, row %+v, log %s", next, u.db.updates[0], u.log)
+	}
+	until := u.real.Now().Add(time.Minute)
+	u.db.updates[0].leasedBy, u.db.updates[0].leaseUntil = "replica-a", &until
+	u.worker.run(t.Context(), update{id: 1, kind: "button_set"})
 	if !strings.Contains(u.log.String(), `"event":"open_group_update_failed","kind":"button_set",`+
-		`"error":"no handler for the kind \"button_set\""`) {
-		t.Errorf("an unknown kind: %s", u.log)
+		`"error":"no handler for the kind \"button_set\""`) || len(u.db.updates) != 1 {
+		t.Errorf("an unknown kind leased: %s", u.log)
 	}
 	// A canceled run logs nothing.
 	u = newUpdates(t)

@@ -306,6 +306,25 @@ func TestMinimumSeverityRule(t *testing.T) {
 	if g.Status != "firing" || g.SeverityLevel != "warning" || g.Urgent || h.last(t, g).Event.String != "reopened" {
 		t.Errorf("reopened %+v %v", g, h.events(g))
 	}
+	// A resolution after the Minimum severity was raised, before the worker of open_group_updates reached the Alert
+	// Group: the level rises to the Minimum severity with its Quiet entry, recorded before the alert_resolved of the
+	// same change, and the acknowledgement stays.
+	for _, c := range []struct{ minimum, event string }{{"critical", "urgency_raised"}, {"warning", "severity_raised"}} {
+		h := newHarness(t)
+		x := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+		y := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+		h.changes(t, ingest.ChangeFired, x, y)
+		g := h.groupOf(t, x)
+		h.acknowledge(g)
+		h.db.routes[2].MinimumSeverity = c.minimum
+		h.resolve(t, x)
+		es := h.entriesOf(g)
+		if len(es) < 2 || es[len(es)-1].Event.String != "alert_resolved" || es[len(es)-2].Event.String != c.event ||
+			es[len(es)-2].Loudness.String != "quiet" || es[len(es)-2].Reason.String != ReasonMinimumSeverity ||
+			g.SeverityLevel != c.minimum || g.Urgent != (c.minimum == "critical") || g.Status != "acknowledged" {
+			t.Errorf("a resolution under the minimum %s: %+v %v", c.minimum, g, h.events(g))
+		}
+	}
 }
 
 // TestEndReopenWindow is the timer reopen_window_end (C-09.FR-12): once due it forgets the prior status, without a

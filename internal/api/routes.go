@@ -325,7 +325,8 @@ func routeOf(rt routing.Route) gen.Route {
 	}
 	out := gen.Route{
 		Id: rt.PublicID, Name: rt.Name, Description: &description, Position: rt.Position, IsDefault: rt.IsDefault,
-		MinimumSeverity: gen.MinimumSeverity(rt.MinimumSeverity), Urgent: rt.Urgent, GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
+		MinimumSeverity: gen.MinimumSeverity(rt.MinimumSeverity), Urgent: rt.Urgent,
+		GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
 		Etag: &tag,

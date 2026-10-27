@@ -13,6 +13,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/groups/dbgen"
+	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
 )
 
@@ -29,9 +30,12 @@ type Requester struct {
 
 // moveToDefault is the system transition of an open Alert Group whose Route is to be deleted (C-09.FR-19): it moves
 // to the Default route and keeps its Group key values, but leaves the open-key index, so it takes no new Alerts and
-// never reopens.
+// never reopens. Its Severity level is that of its firing Alerts, alerts, raised to the Default route's Minimum
+// severity (C-26.FR-8): a rise records the Quiet entry of the Minimum severity, a fall nothing.
 type moveToDefault struct {
 	from, to int64
+	route    *routeInfo
+	alerts   organization.SeverityLevel
 }
 
 func (t moveToDefault) precondition(g *Group) error {
@@ -44,6 +48,10 @@ func (t moveToDefault) precondition(g *Group) error {
 func (t moveToDefault) apply(_ context.Context, _ Queries, g *Group, c *change) error {
 	g.RouteID, g.MovedFromRouteID = t.to, &t.from
 	c.add(entry{Event: EventMovedToDefaultRoute, System: SystemMovedToDefaultRoute})
+	before := g.Severity
+	g.Severity = t.route.raise(t.alerts)
+	g.Urgent = urgentOf(g.Severity)
+	minimumRise(c, g, before)
 	return nil
 }
 
@@ -77,6 +85,10 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 		if err != nil {
 			return fmt.Errorf("read the default route: %w", err)
 		}
+		policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: def})
+		if err != nil {
+			return fmt.Errorf("read the default route: %w", err)
+		}
 		ids, err := q.ListOpenGroupsOfRoute(ctx, dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID,
 			RouteID: route.ID})
 		if err != nil {
@@ -86,12 +98,17 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 		if err != nil {
 			return err
 		}
+		levels, err := firingLevels(ctx, q, s.orgID, ids)
+		if err != nil {
+			return err
+		}
 		for _, gid := range ids {
 			g := locked[gid]
 			if g == nil {
 				continue
 			}
-			err := s.d.dispatch(ctx, q, g, System, moveToDefault{from: route.ID, to: def}, &after)
+			err := s.d.dispatch(ctx, q, g, System, moveToDefault{from: route.ID, to: def, route: policyOf(policy),
+				alerts: levels[gid]}, &after)
 			if errors.Is(err, errNotMoved) {
 				continue
 			}

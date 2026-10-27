@@ -35,6 +35,10 @@ const (
 	OpenGroupUpdatesChannel  = "muster_open_group_updates"
 )
 
+// updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
+// of a kind a later version adds waits for a replica that knows it.
+var updateKinds = []string{KindRouteMinimumSeverity}
+
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
 // first wait after a failed round.
@@ -95,16 +99,27 @@ func (t *minimumSeverityChanged) apply(_ context.Context, _ Queries, g *Group, c
 	}
 	before := g.Severity
 	g.Severity, g.Urgent, t.changed = level, urgentOf(level), true
-	switch {
-	case rank(level) <= rank(before):
+	if !minimumRise(c, g, before) {
 		c.written = true
-	case g.Urgent && !urgentOf(before):
+	}
+	return nil
+}
+
+// minimumRise records a rise of g from the level before to its level now that the Route's Minimum severity made rather
+// than an Alert (C-26.FR-9, C-09.FR-9): the Quiet urgency_raised that removes nothing when it reaches critical, else the
+// Quiet severity_raised, both with ReasonMinimumSeverity. A level that did not rise records nothing, as a falling
+// Severity level does; it reports whether it recorded.
+func minimumRise(c *change, g *Group, before organization.SeverityLevel) bool {
+	switch {
+	case rank(g.Severity) <= rank(before):
+		return false
+	case urgentOf(g.Severity) && !urgentOf(before):
 		c.add(entry{Event: EventUrgencyRaised, Variant: VariantRemovesNone, From: g.Status, To: g.Status,
 			Reason: ReasonMinimumSeverity})
 	default:
 		c.add(entry{Event: EventSeverityRaised, Reason: ReasonMinimumSeverity})
 	}
-	return nil
+	return true
 }
 
 // applyMinimumSeverity applies the Minimum severity of the Route routeID, as it is now, to its open Alert Groups ids,
@@ -124,13 +139,9 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 	if err != nil {
 		return 0, err
 	}
-	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: s.orgID, AlertGroupIds: ids})
+	levels, err := firingLevels(ctx, q, s.orgID, ids)
 	if err != nil {
-		return 0, fmt.Errorf("read the alerts firing in the alert groups of route %d: %w", routeID, err)
-	}
-	levels := map[int64]organization.SeverityLevel{}
-	for _, m := range rows {
-		levels[m.AlertGroupID] = higher(levels[m.AlertGroupID], severityOf(m.SeverityLevel))
+		return 0, err
 	}
 	changed := 0
 	for _, id := range ids {
@@ -138,7 +149,7 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 		if g == nil || g.RouteID != routeID {
 			continue
 		}
-		t := &minimumSeverityChanged{route: route, alerts: higher(organization.SeverityInfo, levels[id])}
+		t := &minimumSeverityChanged{route: route, alerts: levels[id]}
 		if err := s.d.dispatch(ctx, q, g, System, t, after); errors.Is(err, errNotOpen) {
 			continue
 		} else if err != nil {
@@ -151,6 +162,23 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 	return changed, nil
 }
 
+// firingLevels are the highest Severity levels of the firing Alerts of the Alert Groups ids, info for one without any.
+func firingLevels(ctx context.Context, q Queries, orgID int64, ids []int64) (map[int64]organization.SeverityLevel,
+	error) {
+	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: orgID, AlertGroupIds: ids})
+	if err != nil {
+		return nil, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
+	}
+	out := make(map[int64]organization.SeverityLevel, len(ids))
+	for _, id := range ids {
+		out[id] = organization.SeverityInfo
+	}
+	for _, m := range rows {
+		out[m.AlertGroupID] = higher(out[m.AlertGroupID], severityOf(m.SeverityLevel))
+	}
+	return out, nil
+}
+
 // claimUpdate leases the earliest open_group_updates row that is free under l, in a short transaction; false when
 // there is none.
 func (s *Service) claimUpdate(ctx context.Context, l db.Lease) (update, bool, error) {
@@ -159,7 +187,7 @@ func (s *Service) claimUpdate(ctx context.Context, l db.Lease) (update, bool, er
 	err := s.store.InTx(ctx, func(q Queries) error {
 		var err error
 		rows, err = q.ClaimOpenGroupUpdate(ctx, dbgen.ClaimOpenGroupUpdateParams{OrgID: s.orgID, Owner: l.Owner,
-			Now: now, LeaseUntil: now.Add(l.Duration)})
+			Now: now, LeaseUntil: now.Add(l.Duration), Kinds: updateKinds})
 		return err
 	})
 	if err != nil {
@@ -237,7 +265,8 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 // earliest lease still held.
 func (s *Service) nextUpdate(ctx context.Context, l db.Lease, limit time.Duration) (time.Duration, error) {
 	now := l.Clocks.Real.Now().UTC()
-	next, err := s.store.NextOpenGroupUpdate(ctx, dbgen.NextOpenGroupUpdateParams{OrgID: s.orgID, Now: now})
+	next, err := s.store.NextOpenGroupUpdate(ctx, dbgen.NextOpenGroupUpdateParams{OrgID: s.orgID, Now: now,
+		Kinds: updateKinds})
 	if err != nil {
 		return 0, fmt.Errorf("read the next open alert group update: %w", err)
 	}

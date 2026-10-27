@@ -320,6 +320,20 @@ func TestIntegrationOpenGroupUpdates(t *testing.T) {
 			e.count(t, `SELECT count(*) FROM timeline_entries`) != entries {
 			t.Errorf("lowered: %+v", v)
 		}
+
+		// A row of a kind a later version adds, as its migration would widen the CHECK, waits: no replica of this
+		// version claims it or waits for it.
+		if _, err := e.d.Pool.Exec(ctx, `ALTER TABLE open_group_updates DROP CONSTRAINT open_group_updates_kind_check`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+			VALUES ($1, 'button_set', $2)`, e.orgID, e.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if next, err := worker("r1").Round(ctx); err != nil || next != groups.UpdateMaxWait ||
+			e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'button_set' AND leased_by IS NULL`) != 1 {
+			t.Errorf("a later kind = %v, %v", next, err)
+		}
 	})
 }
 

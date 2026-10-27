@@ -1021,13 +1021,15 @@ WHERE org_id = @org_id AND id = @id;
 -- schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
 -- by id in batches, and is deleted with its last batch.
 
--- ClaimOpenGroupUpdate leases the earliest row whose lease is free or ran out, with the public_id of its Route, if any,
--- for its log lines; another claimer skips the row this one locked.
+-- ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
+-- the public_id of its Route, if any, for its log lines; another claimer skips the row this one locked. A row of a kind
+-- that a later version adds waits for a replica that handles it.
 -- name: ClaimOpenGroupUpdate :many
 WITH due AS MATERIALIZED (
     SELECT d.id
     FROM open_group_updates d
-    WHERE d.org_id = @org_id AND (d.lease_until IS NULL OR d.lease_until <= @now::timestamptz)
+    WHERE d.org_id = @org_id AND d.kind = ANY(@kinds::text[])
+      AND (d.lease_until IS NULL OR d.lease_until <= @now::timestamptz)
     ORDER BY d.requested_at, d.id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -1060,14 +1062,14 @@ WHERE org_id = @org_id AND id = @id;
 DELETE FROM open_group_updates
 WHERE org_id = @org_id AND id = @id;
 
--- NextOpenGroupUpdate is when the next row can be claimed: now when one is free at the real time now, else the
--- earliest end of a lease still held; the zero time 0001-01-01 when the table holds no row.
+-- NextOpenGroupUpdate is when the next row of the kinds this replica handles can be claimed: now when one is free at
+-- the real time now, else the earliest end of a lease still held; the zero time 0001-01-01 when there is none.
 -- name: NextOpenGroupUpdate :one
 SELECT coalesce(min(CASE WHEN lease_until IS NULL OR lease_until <= @now::timestamptz THEN @now::timestamptz
                          ELSE lease_until END),
                 '0001-01-01 00:00:00+00')::timestamptz AS next
 FROM open_group_updates
-WHERE org_id = @org_id;
+WHERE org_id = @org_id AND kind = ANY(@kinds::text[]);
 
 -- ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
 -- it included.
