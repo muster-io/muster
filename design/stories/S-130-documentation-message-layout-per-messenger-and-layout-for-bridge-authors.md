@@ -21,7 +21,7 @@ acceptance:
   - "`make docs-screenshots GUIDES=routes-and-templates` takes the screenshots of the four tabs, every image has its alternative text, and `make docs-check` passes; `llms.txt` points bridge authors to the new section."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 419
 ---
 
 # S-130. Documentation: the message layout in each messenger, "Labels in the message", and layout for bridge authors

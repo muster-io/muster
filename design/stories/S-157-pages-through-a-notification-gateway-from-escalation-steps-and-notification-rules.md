@@ -40,7 +40,7 @@ acceptance:
   - "[C-32.FR-11] Pages through a gateway count in `muster_pages_total` with `kind` `call`; Concepts → Escalation chains and Notification rules describe the calls of steps and rules, combined per person and gateway, and the row \"Notification gateway\" of C-32.FR-11; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 446
 ---
 
 # S-157. Pages through a Notification gateway from Escalation steps and Notification rules, queued as calls (BE)

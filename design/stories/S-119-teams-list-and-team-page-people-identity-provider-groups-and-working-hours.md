@@ -49,7 +49,7 @@ acceptance:
   - "Every new text exists in English and Russian; the Teams page and the Team page have \"Learn more\" to Concepts → Teams, and the identity provider groups to its section on membership from the identity provider; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 408
 ---
 
 # S-119. Teams list and Team page with people, identity provider groups and Working hours, the claims of the Role mapping, and the filters by Team (FE)

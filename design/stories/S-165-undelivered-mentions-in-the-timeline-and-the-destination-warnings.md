@@ -43,7 +43,7 @@ acceptance:
   - "[C-28.FR-3] Concepts → Whom a message mentions has \"Undelivered Mentions\": nothing in the Thread, the Timeline entry and the warning on the Destination page, and how it clears; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 454
 ---
 
 # S-165. Undelivered Mentions in the Timeline and the warnings of a Destination (BE)

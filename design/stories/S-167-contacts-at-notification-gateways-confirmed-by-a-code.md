@@ -52,7 +52,7 @@ acceptance:
   - "[C-30.FR-3, C-30.FR-9] The documentation has the page Messengers → Notification gateways with \"Connect a Notification gateway\" and \"Contact for calls and SMS\" — what a gateway is, that Muster ships none, the code and its limits, that an Admin sees and removes contacts but never sets one — in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 456
 ---
 
 # S-167. Contacts at Notification gateways confirmed by a code, erased with their User and masked in the Request log (BE)

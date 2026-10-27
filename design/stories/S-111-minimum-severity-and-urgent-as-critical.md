@@ -53,7 +53,7 @@ acceptance:
   - "[C-26.FR-13] The documentation page Routes and Group keys explains the Minimum severity under its own heading, says that an Urgent Alert Group is a critical one and that the urgent mark and \"critical is Urgent\" no longer act, and the upgrade notes of 0.2.0 in Requirements and tested versions say what C-26.FR-10 lists; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 400
 ---
 
 # S-111. Minimum severity, Urgent as critical, and the expand step of the urgent mark and of "critical is Urgent" (BE)

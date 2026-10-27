@@ -22,7 +22,7 @@ acceptance:
   - "[C-27.FR-8] Concepts → Schedules says, under \"Unreachable On-calls\", that the warnings also cover the Destinations of the chains that Page the Schedule; `make docs-check` passes."
 verify: "make ci e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 461
 ---
 
 # S-172. Warnings about On-calls whom the Destinations of their chains cannot mention, with the Telegram discussion group check for them (BE)

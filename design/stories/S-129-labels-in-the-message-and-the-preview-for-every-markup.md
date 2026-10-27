@@ -28,7 +28,7 @@ acceptance:
   - "Every new text exists in English and Russian; \"Learn more\" next to \"Labels in the message\" opens Messages and templates at that section; the screenshot of the Route's message is taken again; `make e2e` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 418
 ---
 
 # S-129. "Labels in the message" on the Route form, and the preview of the compact layout for every markup (FE)

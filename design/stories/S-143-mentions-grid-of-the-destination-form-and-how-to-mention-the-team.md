@@ -46,7 +46,7 @@ acceptance:
   - "Every new text exists in English and Russian; \"Mentions\" has \"Learn more\" to Concepts → Whom a message mentions and \"How to mention the Team\" to Concepts → Teams, section \"Team mentions\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 432
 ---
 
 # S-143. The Mentions grid of the Destination form with its warnings and What each messenger supports, and How to mention the Team (FE)

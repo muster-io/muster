@@ -61,7 +61,7 @@ acceptance:
   - "[C-25.FR-12, C-24.FR-1] Concepts → Teams has \"Team mentions\" — per messenger, that a Team without one for a Connection is mentioned as nobody and never by its On-call; the Slack manifest of Connect Slack adds `usergroups:read`, and the upgrade notes of 0.2.0 say that an installed Slack app is reinstalled to get the scope; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 428
 ---
 
 # S-139. Team mentions per Connection, with the groups a Connection reads and the group mentions a bridge declares (BE)

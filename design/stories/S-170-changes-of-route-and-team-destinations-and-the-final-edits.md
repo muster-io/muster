@@ -28,7 +28,7 @@ acceptance:
   - "[C-26.FR-13] Routing to Teams has the section \"When you change a Route or a Team\": a new Destination, condition or Team adds Root messages Quietly and removes none by a condition, and a Destination taken away gets the final edit; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 459
 ---
 
 # S-170. Changes of the Destinations of Routes and Teams that publish open Alert Groups Quietly, and the final edits of Destinations no entry names any more (BE)

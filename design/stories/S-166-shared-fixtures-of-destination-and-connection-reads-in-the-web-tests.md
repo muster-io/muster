@@ -34,7 +34,7 @@ acceptance:
   - "The ten test files that built Destination reads by hand, the five that built Connection reads by hand and the four that built Alert Group, delivery or Alert reads by hand — `alert-group-header`, `command-buttons`, `alert-group-deliveries` and `integration-alerts` — build them through the builders only, with the same assertions as before; no other web test builds one of these reads by hand (`grep` of the read types' required fields outside `web/src/test/fixtures/` finds none); `make ci` passes without a change of behaviour."
 verify: "make ci"
 operator_attention: false
-issue: null
+issue: 455
 ---
 
 # S-166. Shared fixtures of Destination, Connection and Alert Group reads in the web tests

@@ -26,7 +26,7 @@ acceptance:
   - "[C-22.FR-16] The Bridge page of the documentation says how a group and a mention of everyone arrive in `mentions`; `make docs-check` passes."
 verify: "make ci e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 460
 ---
 
 # S-171. Group mentions and mentions of everyone in Slack and through bridges, with the kind of a Mention in the Bridge protocol (BE)

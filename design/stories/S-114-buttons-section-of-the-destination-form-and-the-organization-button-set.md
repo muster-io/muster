@@ -34,7 +34,7 @@ acceptance:
   - "[C-28.FR-11] The documentation describes the sets on the Destination form and on Alert handling, with screenshots, and \"Learn more\" next to both sections opens the section \"Button sets\"; `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 403
 ---
 
 # S-114. The Buttons section of the Destination form with its preview, and the Organization's button set (FE)

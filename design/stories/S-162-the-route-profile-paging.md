@@ -61,7 +61,7 @@ acceptance:
   - "[C-26.FR-11] The documentation calls the profile Paging everywhere, and the upgrade notes of 0.2.0 in Requirements and tested versions say that `route-profiles` returns `paging` instead of `on_call`, which breaks clients that type the enum, and that nothing stored changes; `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 451
 ---
 
 # S-162. The Route profile Paging, formerly On-call, with the id paging in the API, the UI and every client (BE)

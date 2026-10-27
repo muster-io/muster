@@ -55,7 +55,7 @@ acceptance:
   - "[C-28.FR-1, C-28.FR-2] The documentation has the page Concepts → Whom a message mentions with \"Mention entries\", \"What each messenger supports\", \"Teams and the On-call\" and \"Upgrading from 0.1\", and the upgrade notes of 0.2.0 describe the migration; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 429
 ---
 
 # S-140. Mention entries with their Loud events and their resolution, the migration of the L1 Mention settings, and storm_started (BE)

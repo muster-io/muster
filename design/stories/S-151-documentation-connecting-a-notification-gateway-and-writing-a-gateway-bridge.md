@@ -21,7 +21,7 @@ acceptance:
   - "[C-30.FR-11] The pages have screenshots of the profile's confirmed contact and of the Connection page of a gateway, taken by `web/e2e/screenshots/notification-gateways.spec.ts`; `make docs-screenshots GUIDES=notification-gateways` takes them, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the page in a scenario on reaching people at night."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 440
 ---
 
 # S-151. Documentation: connecting a Notification gateway, confirming a contact and writing a gateway bridge

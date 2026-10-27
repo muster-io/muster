@@ -32,7 +32,7 @@ acceptance:
   - "[C-29.FR-8] The Bridge page of the documentation says that Root messages carry the same content as `layout` beside `body`, and the generated Bridge protocol reference shows the schema; `make docs-check` passes."
 verify: "make ci e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 415
 ---
 
 # S-126. The structured layout in the Bridge protocol, the Bridge adapter, muster bridge check and the fake bridge (BE)

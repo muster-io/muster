@@ -21,7 +21,7 @@ acceptance:
   - "[C-29.FR-8] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 417
 ---
 
 # S-128. Types for the message layout in the Python bridge library (BE)

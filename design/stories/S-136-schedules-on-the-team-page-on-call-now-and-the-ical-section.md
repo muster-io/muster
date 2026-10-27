@@ -38,7 +38,7 @@ acceptance:
   - "The Home page is at `/`, reached through the logo, with no entry of its own in the main navigation; signing in, locally and through OIDC, lands on it; the specs that expected the Alert Group list after signing in or at `/` — `sign-in.spec.ts`, `oidc-settings.spec.ts`, `alert-group-list.spec.ts` — expect the Home page or go to `/alert-groups`; at 360 CSS pixels the Home page has no horizontal scrolling; every new text exists in English and Russian; \"On call now\" has \"Learn more\" to Concepts → Schedules and the iCal section to its section \"iCal feed\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 425
 ---
 
 # S-136. Schedules on the Team page, On call now on the Home page, the Team page and the Teams list, and the iCal section (FE)

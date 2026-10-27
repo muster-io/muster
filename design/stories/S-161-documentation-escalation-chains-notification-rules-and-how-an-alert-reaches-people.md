@@ -27,7 +27,7 @@ acceptance:
   - "[C-32.FR-20] The pages have screenshots of the chain page and of the Alert Group page with its running chains and Assignees, taken by `web/e2e/screenshots/escalation-chains.spec.ts`; `make docs-screenshots GUIDES=escalation-chains` takes them, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the new page in a scenario on Paging people."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 450
 ---
 
 # S-161. Documentation: Escalation chains, Notification rules and How an alert reaches people

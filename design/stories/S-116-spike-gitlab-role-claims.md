@@ -16,7 +16,7 @@ acceptance:
   - "[C-25.FR-4, C-03.FR-5] The item \"GitLab role claims\" leaves Pending in `design/facts.md`, and S-117's contract cites the new entries: its fake OIDC server's GitLab mode puts the claims where the facts say, and any assumption the facts contradict is corrected in it, or proposed as a change of C-03.FR-5 or C-25.FR-4 in the pull request."
 verify: "make lint"
 operator_attention: true
-issue: null
+issue: 405
 ---
 
 # S-116. Spike: GitLab's role claims — which token carries them, inherited memberships and discovery

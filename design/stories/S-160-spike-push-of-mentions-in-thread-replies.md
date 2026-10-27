@@ -16,7 +16,7 @@ acceptance:
   - "[C-32.FR-11] The item \"Push of Mentions in Threads\" leaves Pending in `design/facts.md`; S-161's contract says, for each messenger the facts confirm, that a Page by Mention reaches a phone at night, and keeps \"only a Notification gateway is reliable at night\" for each one they do not, citing the entries in the pages it completes; any requirement the facts contradict is proposed for change in the pull request."
 verify: "make lint"
 operator_attention: true
-issue: null
+issue: 449
 ---
 
 # S-160. Spike: push of Mentions in Thread replies to a phone in Mattermost, Slack and Telegram

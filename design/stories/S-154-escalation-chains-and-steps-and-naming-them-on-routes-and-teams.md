@@ -59,7 +59,7 @@ acceptance:
   - "The migration adds the Permissions `escalation-chains:read` (every Role) and `escalation-chains:write` (Admin), so that `TestIntegrationRoleMatrix` counts 38, 16 and 11 Permissions for Admin, Responder and Viewer instead of S-131's 36, 15 and 10 — no story between them adds one (`auth_integration_test.go`); reference.md moves them and `muster_escalation_chain_info` into the main tables; P-84 is confirmed in defaults.md and L2.md §5.3; Concepts → Escalation chains has \"What an Escalation chain is\", \"Steps\" and \"Naming chains on Routes and Teams\" in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 443
 ---
 
 # S-154. Escalation chains and their steps, naming them on Routes and Teams with Severity conditions, and the refusals that protect them (BE)

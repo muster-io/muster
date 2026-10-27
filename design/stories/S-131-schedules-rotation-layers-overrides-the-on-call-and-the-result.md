@@ -56,7 +56,7 @@ acceptance:
   - "The migration adds the Permissions `schedules:read` (Admin, Responder, Viewer), `schedules:write` (Admin) and `schedule-overrides:write` (Admin, Responder), and reference.md moves them, and `muster_schedule_info`, from their tables of L2 into the main tables, so that `TestIntegrationRoleMatrix`, which reads the matrix from reference.md and the seeded allocation, counts 36, 15 and 10 Permissions for Admin, Responder and Viewer instead of S-115's 33, 13 and 9 (`auth_integration_test.go`); P-64, P-65, P-66, P-77, P-90 and P-91 are confirmed in defaults.md and L2.md §5.3 (Notes)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 420
 ---
 
 # S-131. Schedules, Rotation layers, Overrides with their Permission and precondition, the On-call and the Result (BE)

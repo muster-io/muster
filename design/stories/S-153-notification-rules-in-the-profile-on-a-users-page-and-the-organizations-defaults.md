@@ -34,7 +34,7 @@ acceptance:
   - "Every new text exists in English and Russian with plural forms; \"Personal notification rules\" has \"Learn more\" to Concepts → Notification rules; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 442
 ---
 
 # S-153. Notification rules in the profile with the switch, on a User's page, and the Organization's defaults (FE)

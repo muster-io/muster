@@ -36,7 +36,7 @@ acceptance:
   - "[C-32.FR-13] Outgoing webhooks → Events documents `escalation_webhook` with an example body, and Concepts → Escalation chains the step; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 445
 ---
 
 # S-156. The step "Send to an outgoing webhook" and the event escalation_webhook (BE)

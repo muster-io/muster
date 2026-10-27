@@ -31,7 +31,7 @@ acceptance:
   - "[C-30.FR-2] `examples/gateway_bridge.py` prints each notification and acknowledges it from `/demo/acknowledge`; README.md shows it; `make conformance` runs `muster bridge check` from `ghcr.io/muster-io/muster:edge` against it with `--contact` and passes interactively."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 436
 ---
 
 # S-147. The role gateway in the Python bridge library (BE)

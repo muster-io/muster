@@ -24,7 +24,7 @@ acceptance:
   - "`make docs-screenshots GUIDES=teams` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the new pages in a scenario on setting up Teams and routing."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 413
 ---
 
 # S-124. Documentation: Teams with a worked example, Routing to Teams, and "What critical changes"

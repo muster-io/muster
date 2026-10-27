@@ -35,7 +35,7 @@ acceptance:
   - "[C-30.FR-10, C-03.FR-14, C-10.FR-3] An Acknowledge through the gateway counts in `muster_commands_total{transport=\"gateway\"}`; `Transport` gains `gateway` in the API, and the Timeline and the Audit log show it — the Timeline as \"from a call through {gateway}\", the Audit log's transport column as \"Notification gateway\" / «шлюз оповещений», whose exhaustive switches gain the value so that the TypeScript check passes after `make generate`; reference.md adds `gateway` to the `transport` values of the row of `muster_commands_total` and drops the sentence about it under \"Metrics added in L2\" (`metrics_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
-issue: null
+issue: 462
 ---
 
 # S-173. The Acknowledge of the Transport gateway, only while nobody owns the Alert Group, and its answers in the call (BE)

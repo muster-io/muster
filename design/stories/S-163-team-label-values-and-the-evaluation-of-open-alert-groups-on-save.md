@@ -37,7 +37,7 @@ acceptance:
   - "Concepts → Teams says that saving a Team or the Team label evaluates the open Alert Groups again and only adds, with \"Create Team\" from a value without a Team as the example; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 452
 ---
 
 # S-163. Values of the Team label without a Team, and the evaluation of open Alert Groups when a Team or the Team label is saved (BE)

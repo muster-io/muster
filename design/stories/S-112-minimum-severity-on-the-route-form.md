@@ -36,7 +36,7 @@ acceptance:
   - "Every new text exists in English and Russian; the documentation of the Route form and of Alert handling describes the pages as they are, its screenshots are taken again, and `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 401
 ---
 
 # S-112. Minimum severity on the Route form, and the urgent mark and "critical is Urgent" taken off the pages (FE)

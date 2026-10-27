@@ -17,7 +17,7 @@ acceptance:
   - "[C-27.FR-8] The item \"Telegram\" leaves Pending in `design/facts.md` for the two checks above (forum topics and plain group chats stay with the later part of L2), and S-164's contract cites the new entries: its Telegram Destination check and the fake Telegram server answer `getChatMember` for people as the facts say, and any assumption the facts contradict is corrected in it, or proposed as a change of C-27.FR-8 in the pull request; the answer about muted groups is cited by S-137 and S-144."
 verify: "make lint"
 operator_attention: true
-issue: null
+issue: 421
 ---
 
 # S-132. Spike: Telegram's muted discussion groups and getChatMember for people
