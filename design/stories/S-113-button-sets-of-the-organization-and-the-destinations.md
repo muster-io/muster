@@ -38,6 +38,8 @@ files_touched:
   - internal/delivery/rerender.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/rerender_test.go
   - internal/delivery/query.sql
   - internal/messages/render.go
   - internal/messages/default.go
