@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 )
@@ -534,22 +535,40 @@ func TestButtonsUpdate(t *testing.T) {
 		t.Errorf("the organization's set: rendered %v, log %s, calls %v", rendered, u.log, u.db.calls)
 	}
 
-	// A Route template that fails is recorded as the dispatcher records it.
+	// A Route template that fails is recorded as the dispatcher records it, with the Alert Group's live-update hint,
+	// when the re-render changed a Desired state; a second run, which changes none, records nothing and sends no hint.
+	changes = map[int64]bool{u.snoozed.ID: true}
 	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
 		r.Fallback(TemplateFailure{Template: "root_message", Detail: "root_message template failed: boom"})
+		if changes[r.Group.ID] {
+			r.Changed()
+		}
 		return nil
 	})
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
 		requested: u.clock.Now()})
-	entries = len(u.db.entries)
+	entries, hints = len(u.db.entries), len(u.db.hints)
 	u.round(t, u.worker)
 	if e := u.last(t, u.snoozed); len(u.db.entries) != entries+1 || e.SystemEvent.String != "fallback_template_used" {
 		t.Errorf("the failed template: %d entries, %+v", len(u.db.entries)-entries, e.InsertTimelineEntryParams)
 	}
+	if got := u.db.hints[hints:]; len(got) != 1 || got[0] != (db.Hint{OrgID: orgID, Type: live.HintAlertGroup,
+		ID: u.snoozed.PublicID}) {
+		t.Errorf("the hints of the failed template %+v", got)
+	}
+	changes = map[int64]bool{}
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
+		requested: u.clock.Now()})
+	entries, hints = len(u.db.entries), len(u.db.hints)
+	u.round(t, u.worker)
+	if len(u.db.entries) != entries || len(u.db.hints) != hints || len(u.db.updates) != 0 {
+		t.Errorf("a second run of the failed template: %d entries, %d hints", len(u.db.entries)-entries,
+			len(u.db.hints)-hints)
+	}
 
 	for kind, q := range map[string]string{KindDestinationButtons: "ListOpenGroupsOfDestinationAfter",
 		KindOrganizationButtons: "ListOpenGroupsFollowingOrganizationAfter"} {
-		for _, failing := range []string{q, "LockGroups", "rerender", "InsertTimelineEntry"} {
+		for _, failing := range []string{q, "LockGroups", "rerender", "InsertTimelineEntry", "Notify"} {
 			u := newUpdates(t)
 			u.db.delivered, u.db.following = map[int64][]int64{u.acked.ID: {21}}, []int64{21}
 			u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
@@ -557,6 +576,7 @@ func TestButtonsUpdate(t *testing.T) {
 					return errBoom
 				}
 				r.Fallback(TemplateFailure{Template: "root_message", Detail: "failed"})
+				r.Changed()
 				return nil
 			})
 			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: kind, destinationID: 21,

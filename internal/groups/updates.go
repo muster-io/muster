@@ -175,8 +175,10 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // locked in id order in the transaction of q, after a change of a button set (C-28.FR-9): delivery edits, Quietly,
 // each Root message whose Desired state the set changed and leaves the others, whose hashes are unchanged, so that a
 // second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint is
-// sent; a Route template that failed is recorded as the dispatcher records it. It returns how many Alert Groups had a
-// Desired state changed; after collects what runs once the transaction committed.
+// sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as
+// the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which changes no Desired
+// state, records nothing. It returns how many Alert Groups had a Desired state changed; after collects what runs once
+// the transaction committed.
 func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	if len(ids) == 0 || s.d.rerender == nil {
 		return 0, nil
@@ -199,11 +201,18 @@ func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, a
 			Changed:  func() { changed = true }}); err != nil {
 			return 0, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
 		}
+		if !changed {
+			continue
+		}
+		n++
+		if len(failures) == 0 {
+			continue
+		}
 		if err := s.d.recordFallbacks(ctx, q, g, failures, now); err != nil {
 			return 0, err
 		}
-		if changed {
-			n++
+		if err := s.d.hint(ctx, q, g, g.Status); err != nil {
+			return 0, err
 		}
 	}
 	return n, nil
