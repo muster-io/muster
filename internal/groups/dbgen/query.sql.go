@@ -452,20 +452,6 @@ func (q *Queries) FindReopenableGroup(ctx context.Context, arg FindReopenableGro
 	return id, err
 }
 
-const getDefaultRouteID = `-- name: GetDefaultRouteID :one
-SELECT id
-FROM routes
-WHERE org_id = $1 AND is_default
-`
-
-// GetDefaultRouteID reads the id of the Default route.
-func (q *Queries) GetDefaultRouteID(ctx context.Context, orgID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, getDefaultRouteID, orgID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
 const getGroup = `-- name: GetGroup :one
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
        (g.severity_level = 'critical')::boolean AS urgent, g.group_key_values,
@@ -1373,6 +1359,48 @@ func (q *Queries) ListChangedAlerts(ctx context.Context, arg ListChangedAlertsPa
 			&i.RouteID,
 			&i.SeverityLevel,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFiringLevels = `-- name: ListFiringLevels :many
+SELECT m.alert_group_id,
+       (CASE max(CASE a.severity_level WHEN 'critical' THEN 2 WHEN 'warning' THEN 1 ELSE 0 END)
+            WHEN 2 THEN 'critical' WHEN 1 THEN 'warning' ELSE 'info' END)::text AS severity_level
+FROM alert_group_alerts m
+JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
+WHERE m.org_id = $1 AND m.alert_group_id = ANY($2::bigint[]) AND m.state = 'firing'
+GROUP BY m.alert_group_id
+`
+
+type ListFiringLevelsParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListFiringLevelsRow struct {
+	AlertGroupID  int64
+	SeverityLevel string
+}
+
+// ListFiringLevels reads the highest Severity level of the firing Alerts of each of the Alert Groups that has any; an
+// Alert without a level counts as info.
+func (q *Queries) ListFiringLevels(ctx context.Context, arg ListFiringLevelsParams) ([]ListFiringLevelsRow, error) {
+	rows, err := q.db.Query(ctx, listFiringLevels, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFiringLevelsRow{}
+	for rows.Next() {
+		var i ListFiringLevelsRow
+		if err := rows.Scan(&i.AlertGroupID, &i.SeverityLevel); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

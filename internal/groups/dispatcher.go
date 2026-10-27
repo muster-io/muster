@@ -110,7 +110,6 @@ type Queries interface {
 	DeleteTimer(ctx context.Context, arg dbgen.DeleteTimerParams) error
 	NotifyTimers(ctx context.Context, channel string) error
 	LockRouteForMove(ctx context.Context, arg dbgen.LockRouteForMoveParams) (dbgen.LockRouteForMoveRow, error)
-	GetDefaultRouteID(ctx context.Context, orgID int64) (int64, error)
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error)
 	GetGroupRef(ctx context.Context, arg dbgen.GetGroupRefParams) (dbgen.GetGroupRefRow, error)
 	GetSnapshotReceivedAt(ctx context.Context, arg dbgen.GetSnapshotReceivedAtParams) (time.Time, error)

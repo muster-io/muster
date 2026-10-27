@@ -4209,19 +4209,28 @@ func (q *Queries) RejoinDelivery(ctx context.Context, arg RejoinDeliveryParams) 
 
 const releaseHeld = `-- name: ReleaseHeld :exec
 UPDATE deliveries
-SET held_by_storm_id = NULL, next_attempt_at = $1, updated_at = $1
-WHERE org_id = $2 AND id = $3 AND held_by_storm_id IS NOT NULL
+SET held_by_storm_id = NULL, publication_loud = (publication_loud AND $1::boolean), next_attempt_at = $2,
+    updated_at = $2
+WHERE org_id = $3 AND id = $4 AND held_by_storm_id IS NOT NULL
 `
 
 type ReleaseHeldParams struct {
+	Loud  bool
 	Now   time.Time
 	OrgID int64
 	ID    int64
 }
 
-// ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent.
+// ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent. A release that a change of
+// configuration made — a raised Minimum severity — publishes Quietly (@loud false); one that an Alert made keeps the
+// loudness the delivery was created with.
 func (q *Queries) ReleaseHeld(ctx context.Context, arg ReleaseHeldParams) error {
-	_, err := q.db.Exec(ctx, releaseHeld, arg.Now, arg.OrgID, arg.ID)
+	_, err := q.db.Exec(ctx, releaseHeld,
+		arg.Loud,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+	)
 	return err
 }
 

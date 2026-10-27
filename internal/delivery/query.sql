@@ -1043,10 +1043,13 @@ JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 WHERE d.org_id = @org_id AND d.storm_id = @storm_id::bigint
 ORDER BY d.id;
 
--- ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent.
+-- ReleaseHeld lets an Alert Group a Storm holds be published at once: it became Urgent. A release that a change of
+-- configuration made — a raised Minimum severity — publishes Quietly (@loud false); one that an Alert made keeps the
+-- loudness the delivery was created with.
 -- name: ReleaseHeld :exec
 UPDATE deliveries
-SET held_by_storm_id = NULL, next_attempt_at = @now, updated_at = @now
+SET held_by_storm_id = NULL, publication_loud = (publication_loud AND @loud::boolean), next_attempt_at = @now,
+    updated_at = @now
 WHERE org_id = @org_id AND id = @id AND held_by_storm_id IS NOT NULL;
 
 -- LockStorm reads, and locks, a Storm that has not ended, with the public_id, name and Storm threshold of its Route.

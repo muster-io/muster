@@ -350,12 +350,6 @@ FROM routes
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
 FOR NO KEY UPDATE;
 
--- GetDefaultRouteID reads the id of the Default route.
--- name: GetDefaultRouteID :one
-SELECT id
-FROM routes
-WHERE org_id = @org_id AND is_default;
-
 -- ListOpenGroupsOfRoute lists the open Alert Groups of a Route.
 -- name: ListOpenGroupsOfRoute :many
 SELECT id
@@ -1070,6 +1064,17 @@ SELECT coalesce(min(CASE WHEN lease_until IS NULL OR lease_until <= @now::timest
                 '0001-01-01 00:00:00+00')::timestamptz AS next
 FROM open_group_updates
 WHERE org_id = @org_id AND kind = ANY(@kinds::text[]);
+
+-- ListFiringLevels reads the highest Severity level of the firing Alerts of each of the Alert Groups that has any; an
+-- Alert without a level counts as info.
+-- name: ListFiringLevels :many
+SELECT m.alert_group_id,
+       (CASE max(CASE a.severity_level WHEN 'critical' THEN 2 WHEN 'warning' THEN 1 ELSE 0 END)
+            WHEN 2 THEN 'critical' WHEN 1 THEN 'warning' ELSE 'info' END)::text AS severity_level
+FROM alert_group_alerts m
+JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
+WHERE m.org_id = @org_id AND m.alert_group_id = ANY(@alert_group_ids::bigint[]) AND m.state = 'firing'
+GROUP BY m.alert_group_id;
 
 -- ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
 -- it included.

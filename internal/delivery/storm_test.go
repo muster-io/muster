@@ -139,6 +139,7 @@ func (f *fakeDB) ReleaseHeld(_ context.Context, arg dbgen.ReleaseHeldParams) err
 	}
 	if d := f.delivery(arg.ID); d.heldBy != 0 {
 		d.heldBy, d.next, d.updated = 0, arg.Now, arg.Now
+		d.loud = pgtype.Bool{Bool: d.loud.Bool && arg.Loud, Valid: d.loud.Valid}
 	}
 	return nil
 }
@@ -660,6 +661,40 @@ func TestStormFailures(t *testing.T) {
 	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System}); !errors.Is(err,
 		errBoom) {
 		t.Errorf("release = %v", err)
+	}
+}
+
+// TestStormQuietRelease is C-26.FR-9 and ADR-0018: an Alert Group a Storm holds that a raised Minimum severity makes
+// Urgent is published at once, Quietly — a change of configuration publishes nothing Loud — while one that an Alert
+// makes Urgent is published Loudly.
+func TestStormQuietRelease(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		reason string
+		want   groups.Loudness
+	}{{"minimum severity", groups.ReasonMinimumSeverity, groups.Quiet}, {"an alert", "", groups.Loud}} {
+		e := stormEnv(t)
+		r := e.db.routes[routeID]
+		r.threshold = 2
+		e.db.routes[routeID] = r
+		id := int64(5000)
+		for range 4 {
+			id++
+			e.addGroup(t, id, false)
+		}
+		e.onlyStorm(t)
+		e.round(t)
+		e.rec.Reset()
+		g := e.view(id, groups.StatusFiring)
+		g.Urgent = true
+		e.db.groups[id].urgent = true
+		e.enqueue(t, g, groups.System, groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised,
+			Variant: groups.VariantRemovesNone, Loudness: groups.Quiet, Reason: c.reason})
+		e.round(t)
+		if p := e.publications(); len(p) != 1 || p[0].Loudness != c.want ||
+			!strings.HasPrefix(textOf(p[0]), fmt.Sprintf("#%d ", id)) {
+			t.Errorf("%s: released %+v", c.name, p)
+		}
 	}
 }
 

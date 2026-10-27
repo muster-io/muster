@@ -367,7 +367,9 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	}
 	held := row.HeldByStormID.Valid
 	if held && g.Urgent {
-		if err := q.ReleaseHeld(ctx, dbgen.ReleaseHeldParams{OrgID: s.orgID, ID: row.ID, Now: now}); err != nil {
+		// A raised Minimum severity is a change of configuration, which publishes Quietly (C-26.FR-9, ADR-0018).
+		if err := q.ReleaseHeld(ctx, dbgen.ReleaseHeldParams{OrgID: s.orgID, ID: row.ID, Now: now,
+			Loud: !minimumOnly(r.Events)}); err != nil {
 			return fmt.Errorf("release the urgent alert group #%d from its storm: %w", g.Number, err)
 		}
 		held = false
@@ -415,6 +417,18 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 	}
 	return nil
+}
+
+// minimumOnly reports whether the lifecycle events of a rendering are all rises that the Route's Minimum severity
+// made (groups.ReasonMinimumSeverity): a change of configuration, not an Alert or a Command.
+func minimumOnly(events []groups.Recorded) bool {
+	for _, e := range events {
+		if e.Reason != groups.ReasonMinimumSeverity ||
+			(e.Event != groups.EventUrgencyRaised && e.Event != groups.EventSeverityRaised) {
+			return false
+		}
+	}
+	return len(events) > 0
 }
 
 // ended reports whether a delivery is in a state that a change of the Desired state does not revive: withheld,

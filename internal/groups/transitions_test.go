@@ -260,11 +260,12 @@ func TestConfigurationEdits(t *testing.T) {
 	h.db.routes[2].MinimumSeverity = "critical"
 	b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.changes(t, ingest.ChangeFired, b)
-	e := h.last(t, g)
+	es := h.entriesOf(g)
+	e := es[len(es)-2]
 	if g.Status != "acknowledged" || g.OwnerUserID.Int64 != 9 || g.SeverityLevel != "critical" || !g.Urgent ||
 		e.Event.String != "urgency_raised" || e.Loudness.String != "quiet" || e.Reason.String != ReasonMinimumSeverity ||
-		StatusReasonCode(e.Reason.String) != ReasonCodeMinimumSeverity {
-		t.Errorf("an edit changed the status: %+v %+v", g, e.InsertTimelineEntryParams)
+		StatusReasonCode(e.Reason.String) != ReasonCodeMinimumSeverity || es[len(es)-1].Event.String != "alerts_added" {
+		t.Errorf("an edit changed the status: %+v %v", g, h.events(g))
 	}
 	h = newHarness(t)
 	c := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x"})
@@ -274,9 +275,61 @@ func TestConfigurationEdits(t *testing.T) {
 	h.db.routes[2].MinimumSeverity = "warning"
 	d := h.alert(2, "info", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
 	h.changes(t, ingest.ChangeFired, d)
-	if e := h.last(t, g); g.Status != "snoozed" || g.SeverityLevel != "warning" || g.Urgent ||
+	es = h.entriesOf(g)
+	if e := es[len(es)-2]; g.Status != "snoozed" || g.SeverityLevel != "warning" || g.Urgent ||
 		e.Event.String != "severity_raised" || e.Reason.String != ReasonMinimumSeverity {
-		t.Errorf("a rise to warning by the edit: %+v %+v", g, e.InsertTimelineEntryParams)
+		t.Errorf("a rise to warning by the edit: %+v %v", g, h.events(g))
+	}
+}
+
+// TestMinimumSeverityBeforeTheWorker is C-26.FR-9 and C-09.FR-9 for a change of the Minimum severity that the worker
+// of open_group_updates has not applied when a critical Alert joins: a raised one gives its Quiet entry and nothing
+// Loud, keeping the acknowledgement; a lowered one falls silently first, so the critical join is the Loud rise to
+// Urgent that removes the acknowledgement.
+func TestMinimumSeverityBeforeTheWorker(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	h.acknowledge(g)
+	h.db.routes[2].MinimumSeverity = "critical"
+	h.changes(t, ingest.ChangeFired, h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x",
+		"n": "2"}))
+	if got := h.events(g); g.Status != "acknowledged" || g.SeverityLevel != "critical" ||
+		!slices.Equal(got[1:], []string{"urgency_raised", "alerts_added"}) ||
+		h.entriesOf(g)[1].Loudness.String != "quiet" || h.entriesOf(g)[1].Reason.String != ReasonMinimumSeverity {
+		t.Errorf("raised: %+v %v", g, got)
+	}
+
+	h = newHarness(t)
+	h.db.routes[2].MinimumSeverity = "critical"
+	a = h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g = h.groupOf(t, a)
+	h.acknowledge(g)
+	h.db.routes[2].MinimumSeverity = "none"
+	h.changes(t, ingest.ChangeFired, h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x",
+		"n": "2"}))
+	e := h.last(t, g)
+	if g.Status != "firing" || g.OwnerUserID.Valid || g.SeverityLevel != "critical" || !g.Urgent ||
+		e.Event.String != "urgency_raised" || e.Loudness.String != "loud" || e.Reason.Valid ||
+		!slices.Equal(e.Mentions, []string{"owner", "rise_to_urgent"}) {
+		t.Errorf("lowered: %+v %v", g, h.events(g))
+	}
+}
+
+// TestUrgencyHeals is the rolling update from 0.1 (C-26.FR-10): an Alert Group that a 0.1 replica stored critical but
+// not Urgent is Urgent again after its next change.
+func TestUrgencyHeals(t *testing.T) {
+	h := newHarness(t)
+	a := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	g.Urgent = false
+	h.db.alerts[a].Annotations = []byte(`{"summary":"changed"}`)
+	h.changes(t, ingest.ChangeAnnotations, a)
+	if !g.Urgent || g.SeverityLevel != "critical" {
+		t.Errorf("healed %+v %v", g, h.events(g))
 	}
 }
 

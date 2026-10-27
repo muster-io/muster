@@ -615,20 +615,6 @@ func (f *fakeDB) LockRouteForMove(_ context.Context, arg dbgen.LockRouteForMoveP
 	return dbgen.LockRouteForMoveRow{}, pgx.ErrNoRows
 }
 
-func (f *fakeDB) GetDefaultRouteID(context.Context, int64) (int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.call("GetDefaultRouteID"); err != nil {
-		return 0, err
-	}
-	for _, r := range f.routes {
-		if r.IsDefault {
-			return r.ID, nil
-		}
-	}
-	return 0, pgx.ErrNoRows
-}
-
 func (f *fakeDB) ListOpenGroupsOfRoute(_ context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1334,8 +1320,8 @@ func TestMove(t *testing.T) {
 			t.Errorf("%s = %v", id, err)
 		}
 	}
-	for _, q := range []string{"LockRouteForMove", "GetDefaultRouteID", "GetRoutePolicy", "ListOpenGroupsOfRoute",
-		"LockGroups", "ListGroupFiringAlerts", "InsertTimelineEntry", "InsertAuditEntry"} {
+	for _, q := range []string{"LockRouteForMove", "LockDefaultRoute", "ListOpenGroupsOfRoute", "LockGroups",
+		"ListFiringLevels", "InsertTimelineEntry", "InsertAuditEntry"} {
 		h := newHarness(t)
 		h.changes(t, ingest.ChangeFired, h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"}))
 		h.db.fail[q] = errBoom

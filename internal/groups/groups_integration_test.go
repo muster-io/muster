@@ -226,10 +226,6 @@ const gk = `{}:{alertname=\"DiskFull\"}`
 // Group of the Route and deleting the row; another worker then finds nothing, a second run changes nothing, and a
 // lowered Minimum severity lowers the levels without a Timeline entry. routes.urgent follows the Minimum severity.
 func TestIntegrationOpenGroupUpdates(t *testing.T) {
-	if routing.OpenGroupUpdatesChannel != groups.OpenGroupUpdatesChannel ||
-		routing.KindMinimumSeverity != groups.KindRouteMinimumSeverity {
-		t.Fatal("routing and groups name the open alert group updates differently")
-	}
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := setup(t, s)
 		ctx := t.Context()

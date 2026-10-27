@@ -6,6 +6,7 @@ package groups
 import (
 	"cmp"
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // fakeUpdate is an open_group_updates row.
@@ -54,6 +57,35 @@ func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGrou
 			Valid: u.routeID != 0}, RequestedAt: u.requested, AfterAlertGroupID: u.after, RoutePublicID: route}}, nil
 	}
 	return nil, nil
+}
+
+func (f *fakeDB) ListFiringLevels(_ context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListFiringLevels"); err != nil {
+		return nil, err
+	}
+	levels := map[int64]organization.SeverityLevel{}
+	for _, m := range f.members {
+		if m.state == "firing" && slices.Contains(arg.AlertGroupIds, m.group) && arg.OrgID == orgID {
+			levels[m.group] = higher(cmp.Or(levels[m.group], organization.SeverityInfo),
+				severityOf(f.alerts[m.alert].SeverityLevel))
+		}
+	}
+	out := make([]dbgen.ListFiringLevelsRow, 0, len(levels))
+	for _, id := range slices.Sorted(maps.Keys(levels)) {
+		out = append(out, dbgen.ListFiringLevelsRow{AlertGroupID: id, SeverityLevel: string(levels[id])})
+	}
+	return out, nil
+}
+
+// TestUpdateNames: routing, which inserts the rows and wakes the workers, and groups, which claims them, name the
+// kind and the channel alike.
+func TestUpdateNames(t *testing.T) {
+	if routing.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || routing.KindMinimumSeverity != KindRouteMinimumSeverity {
+		t.Error("routing and groups name the open alert group updates differently")
+	}
 }
 
 func (f *fakeDB) update(id int64) *fakeUpdate {
@@ -336,7 +368,7 @@ func TestUpdateFailures(t *testing.T) {
 		}
 	}
 	for _, q := range []string{"LockOpenGroupUpdate", "ListOpenGroupsOfRouteAfter", "GetRoutePolicy", "LockGroups",
-		"ListGroupFiringAlerts", "SaveGroup", "AdvanceOpenGroupUpdate", "DeleteOpenGroupUpdate"} {
+		"ListFiringLevels", "SaveGroup", "AdvanceOpenGroupUpdate", "DeleteOpenGroupUpdate"} {
 		u := newUpdates(t)
 		u.worker.Batch = 3
 		u.request("critical")

@@ -497,7 +497,16 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 		if err != nil {
 			return nil, err
 		}
-		return unresolve{newer: newer, routeDeleted: routeDeleted, orgID: s.orgID}, nil
+		policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: g.RouteID})
+		if err != nil {
+			return nil, fmt.Errorf("read route %d: %w", g.RouteID, err)
+		}
+		levels, err := firingLevels(ctx, q, s.orgID, []int64{g.ID})
+		if err != nil {
+			return nil, err
+		}
+		return unresolve{newer: newer, routeDeleted: routeDeleted, orgID: s.orgID, route: policyOf(policy),
+			alerts: levels[g.ID]}, nil
 	case CommandSnooze:
 		user, account := c.person()
 		return snooze{end: *a.end, user: user, account: account, urgent: urgentOf(g.Severity)}, nil
@@ -694,6 +703,10 @@ type unresolve struct {
 	newer        *GroupRef
 	routeDeleted bool
 	orgID        int64
+	// route and alerts give the level it fires at again: that of the Alerts still firing in it, raised to the Route's
+	// Minimum severity as it is now (C-26.FR-8); a rise records the Quiet entry of the Minimum severity.
+	route  *routeInfo
+	alerts organization.SeverityLevel
 }
 
 func (t unresolve) precondition(g *Group) error {
@@ -724,6 +737,10 @@ func (t unresolve) apply(ctx context.Context, q Queries, g *Group, c *change) er
 	}
 	c.action = ActionUnresolved
 	c.add(entry{Event: EventUnresolved, From: StatusResolved, To: StatusFiring})
+	before := g.Severity
+	g.Severity = t.route.raise(t.alerts)
+	g.Urgent = urgentOf(g.Severity)
+	minimumRise(c, g, before)
 	return nil
 }
 

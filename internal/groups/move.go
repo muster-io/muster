@@ -81,14 +81,12 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 		if route.IsDefault {
 			return ErrDefaultRoute
 		}
-		def, err := q.GetDefaultRouteID(ctx, s.orgID)
+		// The Default route is locked FOR SHARE, as grouping locks it, so that its Minimum severity holds meanwhile.
+		policy, err := q.LockDefaultRoute(ctx, s.orgID)
 		if err != nil {
-			return fmt.Errorf("read the default route: %w", err)
+			return fmt.Errorf("lock the default route: %w", err)
 		}
-		policy, err := q.GetRoutePolicy(ctx, dbgen.GetRoutePolicyParams{OrgID: s.orgID, ID: def})
-		if err != nil {
-			return fmt.Errorf("read the default route: %w", err)
-		}
+		def := policy.ID
 		ids, err := q.ListOpenGroupsOfRoute(ctx, dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID,
 			RouteID: route.ID})
 		if err != nil {
@@ -107,7 +105,7 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 			if g == nil {
 				continue
 			}
-			err := s.d.dispatch(ctx, q, g, System, moveToDefault{from: route.ID, to: def, route: policyOf(policy),
+			err := s.d.dispatch(ctx, q, g, System, moveToDefault{from: route.ID, to: def, route: policyOf(dbgen.GetRoutePolicyRow(policy)),
 				alerts: levels[gid]}, &after)
 			if errors.Is(err, errNotMoved) {
 				continue

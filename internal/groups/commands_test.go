@@ -536,6 +536,36 @@ func TestCommandFailures(t *testing.T) {
 	}
 }
 
+// TestUnresolveMinimumSeverity is C-26.FR-8 for Unresolve: the Alert Group fires again at the level of its Alerts still
+// firing, raised to the Route's Minimum severity as it is now, a rise with the Quiet entry of the Minimum severity
+// after unresolved; reading the Route or the levels can fail the Command.
+func TestUnresolveMinimumSeverity(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	g := h.firing(t, "x")
+	h.personResolve(g, time.Minute)
+	h.db.routes[2].MinimumSeverity = "critical"
+	if _, err := h.svc.Unresolve(t.Context(), alice, g.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	es := h.entriesOf(g)
+	if g.Status != "firing" || g.SeverityLevel != "critical" || !g.Urgent || len(es) < 2 ||
+		es[len(es)-2].Event.String != "unresolved" || es[len(es)-1].Event.String != "urgency_raised" ||
+		es[len(es)-1].Loudness.String != "quiet" || es[len(es)-1].Reason.String != ReasonMinimumSeverity {
+		t.Errorf("unresolved %+v %v", g, h.events(g))
+	}
+	for _, q := range []string{"GetRoutePolicy", "ListFiringLevels"} {
+		h := newHarness(t)
+		h.people()
+		g := h.firing(t, "x")
+		h.personResolve(g, time.Minute)
+		h.db.fail[q] = errBoom
+		if _, err := h.svc.Unresolve(t.Context(), alice, g.PublicID); !errors.Is(err, errBoom) {
+			t.Errorf("%s failing = %v", q, err)
+		}
+	}
+}
+
 // TestOwnerDetailsOfDeletedOwner: an Owner whose row is gone leaves the Audit log details empty.
 func TestOwnerDetailsOfDeletedOwner(t *testing.T) {
 	h := newHarness(t)

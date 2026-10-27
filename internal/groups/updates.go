@@ -59,6 +59,7 @@ type updateQueries interface {
 	DeleteOpenGroupUpdate(ctx context.Context, arg dbgen.DeleteOpenGroupUpdateParams) error
 	NextOpenGroupUpdate(ctx context.Context, arg dbgen.NextOpenGroupUpdateParams) (time.Time, error)
 	ListOpenGroupsOfRouteAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteAfterParams) ([]int64, error)
+	ListFiringLevels(ctx context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow, error)
 }
 
 // update is a claimed open_group_updates row: its kind and the Route its kind names, with the Route's public_id for
@@ -165,16 +166,16 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // firingLevels are the highest Severity levels of the firing Alerts of the Alert Groups ids, info for one without any.
 func firingLevels(ctx context.Context, q Queries, orgID int64, ids []int64) (map[int64]organization.SeverityLevel,
 	error) {
-	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: orgID, AlertGroupIds: ids})
+	rows, err := q.ListFiringLevels(ctx, dbgen.ListFiringLevelsParams{OrgID: orgID, AlertGroupIds: ids})
 	if err != nil {
-		return nil, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
+		return nil, fmt.Errorf("read the levels of the alerts firing in the alert groups: %w", err)
 	}
 	out := make(map[int64]organization.SeverityLevel, len(ids))
 	for _, id := range ids {
 		out[id] = organization.SeverityInfo
 	}
-	for _, m := range rows {
-		out[m.AlertGroupID] = higher(out[m.AlertGroupID], severityOf(m.SeverityLevel))
+	for _, r := range rows {
+		out[r.AlertGroupID] = organization.SeverityLevel(r.SeverityLevel)
 	}
 	return out, nil
 }

@@ -50,6 +50,9 @@ type snapshotChange struct {
 func (*snapshotChange) precondition(*Group) error { return nil }
 
 func (t *snapshotChange) apply(ctx context.Context, q Queries, g *Group, c *change) error {
+	if s := t.b.slot; s != nil && !s.reopen {
+		t.baseline(g, c)
+	}
 	before := g.Severity
 	if s := t.b.slot; s != nil {
 		if err := t.joins(ctx, q, g, s, c); err != nil {
@@ -68,7 +71,34 @@ func (t *snapshotChange) apply(ctx context.Context, q Queries, g *Group, c *chan
 		// level of the Alerts and so never lower it below the level reached.
 		t.rise(g, before, c)
 	}
-	return t.resolutions(ctx, q, g, c)
+	if err := t.resolutions(ctx, q, g, c); err != nil {
+		return err
+	}
+	// The urgency follows the level on every change, which also heals one a 0.1 replica of a rolling update stored.
+	if u := urgentOf(g.Severity); u != g.Urgent {
+		g.Urgent, c.written = u, true
+	}
+	return nil
+}
+
+// baseline applies, before Alerts join g, the Route's Minimum severity as it is now to the level of the Alerts already
+// firing in it, as the worker of open_group_updates would (C-26.FR-9): a change of the Minimum severity that the worker
+// has not reached yet is no rise of the joins, so a raised one records its Quiet entry and adds nothing Loud, and a
+// lowered one lets a critical join make it Urgent again with the Loud urgency_raised (C-09.FR-9). A fall is silent.
+func (t *snapshotChange) baseline(g *Group, c *change) {
+	alerts := organization.SeverityInfo
+	for _, m := range t.e.members[g.ID] {
+		alerts = higher(alerts, severityOf(m.SeverityLevel))
+	}
+	level := t.route.raise(alerts)
+	if level == g.Severity {
+		return
+	}
+	before := g.Severity
+	g.Severity, g.Urgent = level, urgentOf(level)
+	if !minimumRise(c, g, before) {
+		c.written = true
+	}
 }
 
 // level sets the Severity level of g from the level of its firing Alerts, raised to its Route's Minimum severity, and
