@@ -407,9 +407,17 @@ func TestSlugUnprocessable(t *testing.T) {
 			t.Errorf("%q = %d %s %s", slug, status, ptr, code)
 		}
 	}
-	if a := x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams",
-		`{"name":"","slug":"Payments","own_working_hours":false}`); a.status != http.StatusBadRequest {
-		t.Errorf("a slug and an empty name = %d %s", a.status, a.body)
+	for name, c := range map[string]struct{ body, code string }{
+		"a missing slug":               {`{"name":"x","own_working_hours":false}`, fieldRequired},
+		"a number":                     {`{"name":"x","slug":5,"own_working_hours":false}`, fieldInvalidFormat},
+		"null":                         {`{"name":"x","slug":null,"own_working_hours":false}`, fieldInvalidFormat},
+		"a bad slug and an empty name": {`{"name":"","slug":"Payments","own_working_hours":false}`, ""},
+	} {
+		a := x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams", c.body)
+		status, _, ptr, code := firstProblemError(t, a)
+		if status != http.StatusBadRequest || c.code != "" && (ptr != "/slug" || code != c.code) {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
 	}
 	if len(ft.inputs) != 0 {
 		t.Error("a refused slug reached the Teams")

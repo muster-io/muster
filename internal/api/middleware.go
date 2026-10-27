@@ -42,8 +42,8 @@ type operation struct {
 	sessionOnly bool
 	// validate is false for the ingestion operations, which take any body (ADR-0002).
 	validate bool
-	// unprocessable are the top-level fields of the request body marked x-unprocessable: a value of the right type
-	// that breaks their pattern or length is a rule of the domain, refused with 422 invalid_format, not 400.
+	// unprocessable are the top-level fields of the request body marked x-unprocessable: a string that breaks their
+	// pattern, maxLength or minLength is a rule of the domain, refused with 422 invalid_format, not 400.
 	unprocessable map[string]bool
 }
 
@@ -83,26 +83,55 @@ func unprocessableFields(op *openapi3.Operation) map[string]bool {
 	return out
 }
 
-// unprocessable turns a 400 whose every item is at a field marked x-unprocessable into the 422 the domain answers for
-// the same value: one invalid_format item per field.
-func (o *operation) unprocessableProblem(p *Problem) *Problem {
-	if o == nil || len(o.unprocessable) == 0 || len(p.Errors) == 0 {
-		return p
+// formatKeywords are the schema keywords that x-unprocessable covers: the format of a value of the right type. A
+// missing field (required), a wrong type or null (type, nullable) and every other keyword stay a 400.
+var formatKeywords = map[string]bool{"pattern": true, "maxLength": true, "minLength": true}
+
+// unprocessableProblem answers the failed request validation err as the 422 the domain answers for the same value —
+// one invalid_format item per field — when every failure is a format keyword of a field marked x-unprocessable;
+// otherwise it answers the 400 of validationProblem.
+func (o *operation) unprocessableProblem(err error) *Problem {
+	if o == nil || len(o.unprocessable) == 0 {
+		return validationProblem(err)
 	}
-	seen := map[string]bool{}
-	var items []gen.ProblemError
-	for _, e := range p.Errors {
-		if !o.unprocessable[e.Pointer] {
-			return p
-		}
-		if !seen[e.Pointer] {
-			seen[e.Pointer] = true
-			items = append(items, item(e.Pointer, fieldInvalidFormat))
-		}
+	var pointers []string
+	if !formatFailures(err, o.unprocessable, &pointers) || len(pointers) == 0 {
+		return validationProblem(err)
 	}
 	out := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
-	out.Errors = items
+	for _, ptr := range pointers {
+		if !slices.ContainsFunc(out.Errors, func(e gen.ProblemError) bool { return e.Pointer == ptr }) {
+			out.Errors = append(out.Errors, item(ptr, fieldInvalidFormat))
+		}
+	}
 	return out
+}
+
+// formatFailures reports whether every leaf of err is a schema error of a format keyword at one of the fields, and
+// adds their pointers.
+func formatFailures(err error, fields map[string]bool, pointers *[]string) bool {
+	switch e := err.(type) { //nolint:errorlint // the tree of the validation errors, walked by its direct types
+	case openapi3.MultiError:
+		for _, x := range e {
+			if !formatFailures(x, fields, pointers) {
+				return false
+			}
+		}
+		return true
+	case *openapi3filter.RequestError:
+		return e.Parameter == nil && e.Err != nil && formatFailures(e.Err, fields, pointers)
+	case *openapi3.SchemaError:
+		if multi, ok := errors.AsType[openapi3.MultiError](e.Origin); ok {
+			return formatFailures(multi, fields, pointers)
+		}
+		ptr := pointerOf(e.JSONPointer())
+		if !formatKeywords[e.SchemaField] || !fields[ptr] {
+			return false
+		}
+		*pointers = append(*pointers, ptr)
+		return true
+	}
+	return false
 }
 
 // permissionCheckDispatcher is the value of x-permission-check that leaves the Permission to the dispatcher.
@@ -422,7 +451,7 @@ func (s *Server) validator(doc *openapi3.T) func(http.Handler) http.Handler {
 				writeProblem(w, r, errTooLarge)
 				return
 			}
-			writeProblem(w, r, infoFrom(r.Context()).operation.unprocessableProblem(validationProblem(err)))
+			writeProblem(w, r, infoFrom(r.Context()).operation.unprocessableProblem(err))
 		},
 	})
 }
