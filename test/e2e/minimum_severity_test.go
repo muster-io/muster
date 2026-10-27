@@ -219,23 +219,24 @@ func TestMinimumSeverity(t *testing.T) {
 		t.Errorf("%d thread replies after the raise, want %d", got, replies)
 	}
 
-	// Lowered to warning: the info Alert Group rises to warning with severity_raised, g2 falls without an entry.
-	update(db, func(b map[string]any) { b["minimum_severity"] = "warning" })
-	settled("the change to warning")
-	if v := e.alertGroup(g2); v["severity_level"] != "warning" || v["urgent"] != false || last(g2).Event !=
-		"urgency_raised" {
+	// Lowered to none: both fall to the level of their Alerts without an entry, g2 still acknowledged.
+	update(db, func(b map[string]any) { b["minimum_severity"] = "none" })
+	settled("the change to none")
+	if v := e.alertGroup(g2); v["severity_level"] != "warning" || v["urgent"] != false || v["status"] != "acknowledged" ||
+		last(g2).Event != "urgency_raised" {
 		t.Errorf("g2 after the fall = %v %v", v["severity_level"], last(g2))
 	}
+	if v := e.alertGroup(g3); v["severity_level"] != "info" || last(g3).Event != "urgency_raised" {
+		t.Errorf("g3 after the fall = %v %+v", v["severity_level"], last(g3))
+	}
+	// Raised to warning: the info Alert Group records the Quiet severity_raised with the reason.
+	update(db, func(b map[string]any) { b["minimum_severity"] = "warning" })
+	settled("the change to warning")
 	if x := last(g3); e.alertGroup(g3)["severity_level"] != "warning" || x.Event != "severity_raised" ||
 		x.Loudness != "quiet" || x.ReasonCode == nil || *x.ReasonCode != "minimum_severity" {
 		t.Errorf("g3 = %+v", x)
 	}
-	update(db, func(b map[string]any) { b["minimum_severity"] = "none" })
-	settled("the change to none")
-	if v := e.alertGroup(g3); v["severity_level"] != "info" || last(g3).Event != "severity_raised" {
-		t.Errorf("g3 after the fall = %v", v["severity_level"])
-	}
 	if n := h.count(t, fmt.Sprintf(`SELECT count(*) FROM routes WHERE public_id = '%s' AND NOT urgent`, db)); n != 1 {
-		t.Errorf("routes.urgent of db after none: %d", n)
+		t.Errorf("routes.urgent of db after warning: %d", n)
 	}
 }
