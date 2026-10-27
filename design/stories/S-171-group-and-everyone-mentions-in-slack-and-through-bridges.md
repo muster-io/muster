@@ -57,7 +57,8 @@ issue: 460
   everyone targets out (S-140's Notes).
 - **Slack** (`internal/slack/layout.go`): `<!subteam^{id}>` and `<!everyone>`, as the facts of S-138 say, in the first
   line of a Loud message; Quiet messages and edits carry no Mentions (ADR-0005).
-- **Bridge** (`internal/bridge/envelope.go`): `mentions` entries of the kind `group` or `everyone`, each with its ref
+- **Bridge** (`internal/bridge/envelope.go`): `kind` omitted on a `user` entry, so that a bridge that declares no group
+  or everyone mentions never sees the new field; `mentions` entries of the kind `group` or `everyone`, each with its ref
   and marker, beside the `user` entries of C-22.FR-16.
 - **Fake bridge** (`internal/fakes/fakebridge/messages.go`): each recorded message keeps the `kind` of its `mentions`.
 - **AGENTS.md**: the paragraph on development mode says that the fake bridge records the `kind` of each Mention.
@@ -67,7 +68,14 @@ issue: 460
 ## Steps
 
 1. Add `kind` to `Mention` in `api/bridge.yaml`. Check: `make generate-check` (the models of `internal/bridge/gen/`);
-   `make lint`.
+   `make lint`; the two comparisons of the CI step "oasdiff breaking, api/bridge.yaml" (`.github/workflows/ci.yml`) run
+   locally — `oasdiff breaking --fail-on ERR --flatten-allof` of `origin/master:api/bridge.yaml` against the new file,
+   and the reverse with the step's `--severity-levels` — report no ERR: run on a draft of this change with oasdiff
+   v1.33.0 in the plan review, the reverse direction reports `request-property-removed` for `mentions/items/kind` on
+   `POST /v1/messages` and its Thread replies as WARN only. It would still break a bridge that refuses unknown fields,
+   so Muster writes `kind` only where a bridge asked for it: a `user` Mention is sent without `kind`, which defaults to
+   `user`, and the kinds `group` and `everyone` go only to a bridge that declares `group_mentions` or the token in
+   `everyone_mentions` (S-139), which S-140's validation and resolution already ensure.
 2. Write the Slack and Bridge forms and the fake bridge's record. Check: `layout_test.go`, `envelope_test.go`,
    `mentions_test.go`, `fakebridge_test.go`.
 3. Write `test/e2e/mention_kinds_test.go` and the documentation. Check: the Verification below; `make docs-check`.

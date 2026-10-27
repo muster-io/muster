@@ -57,6 +57,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
 - **C-18.FR-10** The profile lists links with the messenger, Connection, username and last use. It picks the
   Connection to link through from its own short list — only the id, the name and the messenger of each Connection that
   is not deleted — which needs no Permission, independently of `connections:read`.
+  _Revised for L2 (2026-10-27):_ a Bridge Connection whose only role is `gateway` is not in that list, since a
+  Notification gateway is no messenger to link an account through (C-30.FR-1).
 - **C-18.FR-11** Bot messages during linking go through the interactive path.
 
 ## UI

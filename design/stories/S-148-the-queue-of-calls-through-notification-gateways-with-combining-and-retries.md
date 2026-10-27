@@ -143,7 +143,9 @@ issue: 437
 - **SPA** (`web/src/components/timeline.tsx`, locales): `entryText` gains the kind `escalation`, whose branch has a case
   for each of its events that exists, here `page_not_delivered`, with the generic text `timeline.escalation.event`
   "{{event}}" / «{{event}}», so that the TypeScript check passes after `make generate`; S-155, S-156, S-168 and S-169
-  add a case per event they add, and S-159 renders them fully.
+  add a case per event they add, and S-159 renders them fully. `kindLabel`, whose `default` would name the new kind
+  "System" and give the kind filter two "System" buttons, gains the case `escalation` with `timeline.kinds.escalation`
+  "Escalation chains" / «Цепочки эскалации» (plan review, L5).
 - **Buttons** (`internal/buttons`): the subject `call` (code `c`), whose public id is a call's; `LooksSigned` knows it.
 - **Groups** (`internal/groups`): `pages.go` — the system transition `PageNotDelivered` that records
   `page_not_delivered`; `events.go` — its row (Quiet, no Mentions, kind `escalation`, nothing in a messenger).

@@ -4,7 +4,7 @@ title: Team mentions per Connection, with the groups a Connection reads and the 
 capability: C-25
 kind: be
 layer: L2
-depends_on: [S-115, S-119, S-126, S-138]
+depends_on: [S-115, S-126, S-138]
 covers: [C-25.FR-1, C-25.FR-8, C-25.FR-11, C-25.FR-12, C-25.AC-7, C-28.FR-2, C-22.FR-2, C-24.FR-1, C-24.FR-2]
 files_touched:
   - api/openapi.yaml
@@ -20,6 +20,7 @@ files_touched:
   - internal/teams/query.sql
   - internal/api/teams.go
   - internal/api/teams_test.go
+  - internal/api/problem.go
   - internal/connections/groups.go
   - internal/connections/groups_test.go
   - internal/connections/connections.go
@@ -52,7 +53,7 @@ files_touched:
   - AGENTS.md
 acceptance:
   - "[C-25.FR-8, C-25.AC-7, C-25.FR-1] A Team takes `team_mentions` — one per Connection, each a group's name and, for Slack, the user group's id — saved with `If-Match` and recorded in the diff of `team.updated`; one for a Mattermost Connection is saved; one for a Telegram Connection, for a Slack Connection whose last check found no `usergroups:read`, or for a Bridge Connection whose bridge does not declare group mentions is refused with `422` `group_mentions_unsupported` at `/team_mentions/{i}/connection_id` (`mentions_test.go`, `teams_test.go`)."
-  - "[C-25.FR-8] `getTeam` lists under `mention_connections` every Connection that may have a Destination, with its Team mention or none, `available`, and for the unavailable ones the `MentionUnavailableReason` `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`; a Team mention whose Connection later loses the ability stays, reads `available` false with the reason, and mentions nobody (`mentions_test.go`)."
+  - "[C-25.FR-8] `getTeam` lists under `mention_connections` every Connection that may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` —, with its Team mention or none, `available`, and for the unavailable ones the `MentionUnavailableReason` `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`; a Team mention whose Connection later loses the ability stays, reads `available` false with the reason, and mentions nobody (`mentions_test.go`)."
   - "[C-24.FR-1, C-24.FR-2] The Slack Connection check's step `scopes` reports `usergroups:read` as present or missing without failing, `getConnection` of a Slack Connection carries `usergroups_read` from its last successful check, and a check that no longer finds the scope sets it false; the bot needs no other new scope (`check_test.go`)."
   - "[C-25.FR-8] The Mattermost Connection check gains the step `groups` (`ConnectionCheckStep.name`), which reads the groups as F-NNN of S-138 says and passes, its message saying when the bot may not read them — no new warning value of `ConnectionCheckResult.warnings`; `getConnection` of a Mattermost Connection carries `groups_read` (`check_test.go`)."
   - "[C-22.FR-2, C-28.FR-2] `api/bridge.yaml` gives `Capabilities` the optional `group_mentions` (boolean) and `everyone_mentions` (an array of `channel`, `here`, `all`, `everyone`, unique), additively in protocol version 1; the Bridge Connection check shows them with the other features of `info`, and Muster reads them from the stored `info`; `make lint` passes Redocly and oasdiff reports no breaking change (`info_test.go`)."
@@ -96,7 +97,9 @@ issue: 428
   - `Team` gains `team_mentions` (`TeamMention`[] = the input with `connection` (`EntityRef` and `type`), `available`,
     `unavailable_reason`) and `mention_connections` (`TeamMentionConnection`[] {`connection` (`EntityRef`), `type`,
     `available`, `unavailable_reason` (`MentionUnavailableReason` or null), `team_mention` (the Team's for it, or
-    null)}), for every Connection that is not deleted.
+    null)}), for every Connection that is not deleted and may have a Destination: a Bridge Connection whose stored
+    `info` lists `roles` without `messenger` — a Notification gateway only, S-145 — is left out (maintainer's decision
+    Q2 of the plan review: such a Connection is never offered for Account links, Team mentions or Mention entries).
   - `MentionUnavailableReason`, one enum for every target a Connection cannot mention, shared by the Team mentions
     here and the Mention entries of S-140 and S-143: `telegram_no_groups` (Telegram has no group mentions and no
     mentions of everyone), `usergroups_read_missing` (a Slack Connection whose last check found no
@@ -110,7 +113,8 @@ issue: 428
   - The Slack Connection read gains `usergroups_read` (boolean or null until checked); the Mattermost Connection read
     gains `groups_read` (boolean or null); `ConnectionCheckStep.name` gains `groups` (the Mattermost check's new step),
     and `ConnectionCheckStep` gains `optional_scopes` ({`scope`, `present`}[]), set on the Slack step `scopes`.
-  - Problem code `group_mentions_unsupported` (`validation-failed`, in `errors[].code`).
+  - Problem code `group_mentions_unsupported` (`validation-failed`, in `errors[].code`). Both new codes map in
+    `internal/api/problem.go`: `group_mentions_unsupported` to its error item, `groups_not_listed` to a `409`.
 - **Protocol** (`api/bridge.yaml`, MIT): `Capabilities` gains `group_mentions` ("The bridge renders a group mention
   that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need
   it") and `everyone_mentions` (the mentions of everyone in the chat its messenger has, by their symbolic names); both
@@ -126,7 +130,10 @@ issue: 428
   never — writes them replaced as a whole, in the Team's diff; computes `available` and `mention_connections`;
   `ForConnection(team, connection)` answers the Team mention that delivery uses from S-140; it satisfies the interface
   `TeamMentions` that `mentions` declares in S-140 and that `internal/runtime` wires, so `mentions` never imports
-  `teams` (the direction of S-140's Contracts). A Slack Team mention is
+  `teams` (the direction of S-140's Contracts). The query of `mention_connections` leaves out a Bridge Connection whose
+  stored `info` has `roles` without `messenger`, a condition on `connections.bridge_info` that holds whether or not
+  S-145 has merged; a Team mention for one is refused with `group_mentions_unsupported`, since a gateway-only bridge
+  declares no group mentions. A Slack Team mention is
   saved with the id and handle the picker took from `listConnectionGroups`; saving does not call Slack. Teams and
   Connections are deleted softly, so no foreign key cascades: `teams.Delete` deletes the Team's `team_mentions` in its
   transaction, and the Connection delete in `internal/connections/connections.go` deletes those of the Connection in
@@ -142,7 +149,7 @@ issue: 428
 - **Bridge** (`internal/bridge/info.go`): `Info` gains `GroupMentions` and `EveryoneMentions`, read from the stored
   `info`; `Features()` names them, so the check shows them.
 - **Web test fixtures**: the builders of S-166 (`connections.ts`: `usergroups_read` and `groups_read` null) and of
-  S-119 (`teams.ts`: `team_mentions` and `mention_connections` empty) set the neutral values of the new required read
+  S-115 (`teams.ts`: `team_mentions` and `mention_connections` empty) set the neutral values of the new required read
   fields, so the TypeScript check of the web tests stays green after `make generate`.
 - **Exhaustive switches of the SPA** (S-166's rule): `stepName` of `web/src/components/connection-check.tsx` gains the
   case `groups` with the text "Groups" / «Группы» in `en.json` and `ru.json`, so that `make generate` and the
@@ -166,7 +173,11 @@ issue: 428
 ## Steps
 
 1. Add the two fields to `api/bridge.yaml`. Check: `make generate-check` (the models of `internal/bridge/gen/`); `make
-   lint`.
+   lint`; the two comparisons of the CI step "oasdiff breaking, api/bridge.yaml" (`.github/workflows/ci.yml`) run
+   locally — `oasdiff breaking --fail-on ERR --flatten-allof` of `origin/master:api/bridge.yaml` against the new file,
+   and the reverse with the step's `--severity-levels` — report nothing: run on a draft of this change with oasdiff
+   v1.33.0 in the plan review, two optional members of `Capabilities`, a response the bridge sends, are reported in
+   neither direction.
 2. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up.
 3. Extend the checks of Slack and Mattermost, and `info`; write `listConnectionGroups`; extend the fakes. Check:
    `check_test.go` (both), `client_test.go`, `info_test.go`, `groups_test.go`, the fakes' tests.
@@ -233,7 +244,9 @@ configuration as in S-097; "a" is the key of the demo Slack app.
 - Suggested commit: `feat(teams): add team mentions per connection with the groups each connection can read`.
 - Migration `0033` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
-- Depends on S-119, which creates the builder of Team reads that this story extends.
+- S-115 creates the builder of Team reads (`web/src/test/fixtures/teams.ts`) that this story extends; the plan review
+  moved it there from S-119 so that this backend story no longer waits for the Teams pages (and, through S-117, for the
+  spike S-116).
 - `everyone_mentions` is read here and offered by the Mention entries of S-140; Muster never sends a mention of
   everyone in the chat that the bridge did not declare (ADR-0017).
 - A Slack Connection keeps working without `usergroups:read`: only Team mentions and user group entries need it

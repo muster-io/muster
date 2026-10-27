@@ -26,6 +26,9 @@ files_touched:
   - internal/internalalerts/registry.go
   - internal/internalalerts/raise.go
   - internal/internalalerts/internalalerts_test.go
+  - internal/routing/suggestions.go
+  - internal/routing/suggestions_test.go
+  - internal/routing/query.sql
   - internal/leader/tasks.go
   - internal/leader/leader_test.go
   - internal/runtime/runtime.go
@@ -40,6 +43,7 @@ files_touched:
   - docs/operations/monitoring.md
   - docs/concepts/schedules.md
   - mkdocs.yml
+  - docs/install/versions.md
   - design/prd/l1/reference.md
   - test/e2e/schedule_gaps_test.go
 acceptance:
@@ -52,6 +56,7 @@ acceptance:
   - "[C-27.FR-7] Renaming a Schedule or its Team updates the name labels of the open `MusterScheduleGap`, a changed slug or Team label its Team label, and deleting a Schedule resolves its alert, without a second Alert (`scan_integration_test.go`)."
   - "[C-27.FR-9] `getOnCallNow` lists for every Team — or with `teams=mine` the Teams of the calling User — the main Schedule with the On-call now and until when, the next segment (its person, or a gap) and `no_schedule` true for a Team without a main Schedule, sorted by the Team's name (`oncallnow_test.go`)."
   - "[C-27.FR-7] The chart renders the rule `MusterScheduleGap` with its expression, severity, `description` and `runbook_url`, its threshold and `for` as chart values; its rule unit test fires on `muster_schedule_gap` 1 and not on 0; reference.md moves `MusterScheduleGap` and `muster_schedule_gap` into the main tables; the runbook page says how to fill a gap; `make rules-test helm-check docs-check` pass."
+  - "[C-27.FR-7] The suggested Route \"Muster internal alerts\" groups by `schedule` too — its Group key gains `schedule` after `route`, before S-149's `connection` if that has merged — so that the gaps of two Schedules make two Alert Groups, each delivered to its own Team; the simulation of `Suggestions` that decides whether the suggestion applies counts each Schedule as an entity of `MusterScheduleGap`, with its Team's label and name; the upgrade notes of 0.2.0 tell an installation that accepted the suggestion in 0.1 to add `schedule` to that Route's Group key (`suggestions_test.go`)."
   - "[C-27.FR-14] Concepts → Schedules has \"Gaps and the Internal alert\": the people whose Shifts are skipped, `schedule.gap_alert`, and that a Schedule which covers only part of the day, such as a second line in working hours, keeps it off; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: false
@@ -115,6 +120,18 @@ issue: 422
   a renamed Schedule or Team, a changed slug or a changed Team label updates the open alert instead of starting a new
   one; `ReservedLabels()` reads the registry, so the Team label refusal of S-118 keeps covering it. Its summary is "No
   one is On-call in Schedule {name} of {team}", and its description names the nearest gap's start and the runbook.
+- **Route suggestion** (`internal/routing/suggestions.go`, `query.sql`; maintainer's decision Q3 of the plan review):
+  the suggestion `internal_alerts` gives one Alert Group per Internal alert and entity, as for the entities of L1, so
+  its Group key gains `internalalerts.EntitySchedule` (`schedule`); without it the gaps of every Schedule would share
+  one Alert Group, which would collect the Teams of all of them and, through `deliver_to_teams`, reach every Team's
+  channels. The entity simulation of `Suggestions` reads the Schedules (`public_id`, name, and their Team's slug and
+  name) with a query of its own and adds them as entities of `MusterScheduleGap`, as it does for Integrations,
+  Destinations and Routes, each with the extra labels the alert carries — `team_id`, `team_name` and the Team label with
+  the Team's slug — so that a Route above the suggestion that matches on the Team label is simulated as it will match.
+  The Group key of the L1 suggestion is `alertname`, `integration`, `destination`, `route`; S-133 adds `schedule` and
+  S-149 `connection`, always in that order — `schedule` before `connection` — whichever of the two merges first, since
+  neither depends on the other; the second to merge adds its label to the Group key, to `suggestions_test.go` and to the
+  upgrade note that the first wrote.
 - **Chart** (`deploy/helm/muster/files/rules.yaml`, `values.yaml`, `values.schema.json`): the rule `MusterScheduleGap`
   of reference.md — `max by (schedule) (muster_schedule_gap{job="muster"}) == 1`, `for` `0m`, severity `warning`
   (P-88) — with its threshold and `for` as chart values and its `runbook_url`; `tests/rules/MusterScheduleGap.yaml`.
@@ -130,7 +147,11 @@ issue: 422
 - **Documentation**: `docs/concepts/schedules.md` — "Gaps and the Internal alert"; the runbook page
   `docs/operations/runbooks/MusterScheduleGap.md` — what the alert means, how to find the gap on the Schedule page and
   fill it with an Override or a change of the Rotation layers, and when to turn the alert off — in the runbook index and
-  the navigation; `docs/operations/monitoring.md` lists it among the Internal alerts with a chart rule.
+  the navigation; `docs/operations/monitoring.md` lists it among the Internal alerts with a chart rule and says that
+  the suggested Route groups by `schedule`; `docs/install/versions.md` — the upgrade note of 0.2.0: an installation
+  that accepted "Send Muster's own alerts to a Destination" in 0.1 adds `schedule` to that Route's Group key, so that
+  each Schedule's gaps get an Alert Group of their own; if S-149 merged first, this story adds `schedule` to the note
+  that S-149 wrote for `connection`.
 
 ## Steps
 
@@ -138,8 +159,9 @@ issue: 422
    `by_default`.
 2. Write the gaps, `next_gap`, the warnings and "On call now"; add the spec. Check: `make generate-check`;
    `gaps_test.go`, `oncallnow_test.go`.
-3. Register the Internal alert with the Team label, write the scan, the Leader task, the gauge and the log events.
-   Check: `internalalerts_test.go`, `leader_test.go`, `scan_integration_test.go`.
+3. Register the Internal alert with the Team label, write the scan, the Leader task, the gauge and the log events, and
+   add `schedule` to the suggestion. Check: `internalalerts_test.go`, `leader_test.go`, `scan_integration_test.go`,
+   `suggestions_test.go`.
 4. Add the chart rule, its test, the runbook and the documentation; move the shared rows. Check: `make rules-test
    helm-check docs-check`.
 5. Write `test/e2e/schedule_gaps_test.go`. Check: the Verification below.

@@ -7,6 +7,7 @@ layer: L2
 depends_on: [S-118, S-111]
 covers: [C-25.FR-5, C-25.FR-7, C-25.FR-13, C-25.AC-1, C-25.AC-13]
 files_touched:
+  - api/README.md
   - api/openapi.yaml
   - internal/db/migrations/0026_team_evaluation.up.sql
   - internal/db/migrations/0026_team_evaluation.down.sql
@@ -63,7 +64,11 @@ issue: 452
 - **Spec** (`api/openapi.yaml`, changed first, then generated): `listTeamLabelValues` (`GET /team-label-values`, tag
   Teams, `teams:read`, session or token, `x-listener: app`) → `TeamLabelValueList` {`label` (the Team label),
   `window_days`, `items` — `TeamLabelValue` {`value`, `last_seen_at`, `alert_count`, `valid_slug`}}, the most recently
-  seen first, at most 500, like `listSeverityValues`.
+  seen first, at most 500, like `listSeverityValues`. `window_days` keeps the name and unit of L1's
+  `SeverityValueList.window_days`, which it mirrors (plan review, Q4): the window is a whole number of days, as the
+  retention periods of `api/README.md`'s exception are, and a second spelling for the same window in two sibling lists
+  would be worse; this story widens that exception's wording in `api/README.md` to "retention periods and the windows
+  of value lists".
 - **Schema** (migration `0026_team_evaluation`, expand only; `schema.md` §4.15 and §5): `open_group_updates.team_id`
   (nullable foreign key to `teams`) and `open_group_updates_kind_v3_check` with every kind of `_v2` and
   `team_evaluation`, `NOT VALID` and validated in a second transaction. The values are read from `alerts` through

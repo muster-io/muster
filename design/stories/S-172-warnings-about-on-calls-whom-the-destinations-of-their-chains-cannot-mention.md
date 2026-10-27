@@ -39,17 +39,20 @@ issue: 461
 **OUT**
 
 - The warnings for the Destinations of the Team and the check for the people of its Teams: S-164. Whether a call
-  through a Notification gateway still reaches the person: S-167. Where chains Page: S-155. The pages that show the
+  through a Notification gateway still reaches the person: S-150. Where chains Page: S-155. The pages that show the
   warnings: S-135, S-136, S-150.
 
 ## Contracts
 
-- **Spec**: none new; `ScheduleWarning` and `OnCallReach` (S-164, S-167) carry the warnings as before.
+- **Spec**: none new; `ScheduleWarning` and `OnCallReach` (S-164, S-150) carry the warnings as before.
 - **Schema**: none new; `destinations.telegram_absent_user_ids` (S-164) holds the result.
 - **Schedules** (`internal/schedules/reach.go`, `query.sql`): the Destinations of the reach of a Schedule add, through a
   query of its own — `schedules` imports no package of Paging (S-169) — the Destinations of the Routes and Teams that
   name a chain with a `page_on_call` or `call` step on the Schedule, as `delivery.PageTargets` of S-155 finds them for a
-  run; each warning keeps its reason (C-27.FR-8).
+  run; each warning keeps its reason (C-27.FR-8). This SQL computes a part of the reach rule of S-121, so
+  `reach_test.go` also loads the vectors of `internal/routing/testdata/reach/` (S-121), the one
+  set of cases of who an Alert Group reaches, and checks for the vectors with chains of a Route or a Team that the
+  Destinations its query finds are those the vectors expect for those sources (plan review, M4).
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): the step `discussion_group_members` of S-164 also
   asks `getChatMember` for the people with a Telegram Account link for the Connection whom a chain Paging in that
   Destination can Page through a Schedule, once per person; a failed call leaves the person unknown, as in S-164.
@@ -104,4 +107,4 @@ None.
 
 | ID | Covered | Note |
 |---|---|---|
-| C-27.FR-8 | partial | the chains' Destinations; the Team's are S-164, gateway calls S-167, the pages S-135, S-136, S-150 |
+| C-27.FR-8 | partial | the chains' Destinations; the Team's are S-164, gateway calls and the pages S-150, the pages also S-135, S-136 |

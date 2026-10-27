@@ -28,6 +28,7 @@ files_touched:
   - web/src/routes/teams.index.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - design/prd/l1/reference.md
@@ -84,7 +85,8 @@ issue: 424
     "@{login} is a Viewer", "@{login} is not in the Team", "Unreachable in {messenger}: no linked account.", and the
     texts of settled 2 for the other reasons.
   - `rotation-layers-editor.tsx` — each Rotation layer with name, people in turn (ordered, from the Team), Shift length
-    (a day, a week, hours), handover time and day, start date, limits (days, from, to — a "to" earlier than "from" reads
+    (a day, a week, or a number of hours, which the form sends as `shift_seconds`, hours × 3600, and shows back in
+    hours), handover time and day, start date, limits (days, from, to — a "to" earlier than "from" reads
     "until {to} the next day" / «до {to} следующего дня», C-27.FR-2); "Add Rotation layer"; the order top first.
   - `schedule-form.tsx` — name, time zone (the picker of `time-zone-picker.tsx`), "main", the gap alert "By default"
     ("On while this is the Team's main Schedule"), "On", "Off".
@@ -101,7 +103,9 @@ issue: 424
 - **Documentation links** (`docs-links.json`): `page.schedule` → `concepts/schedules.md`, `field.overrides` →
   `concepts/schedules.md#overrides`, `field.gap_alert` → `concepts/schedules.md#gaps-and-the-internal-alert`,
   `field.unreachable_on_call` → `concepts/schedules.md#unreachable-on-calls`; the anchors exist from S-131, S-133 and
-  S-164.
+  S-164. `GUIDE_ABOUT` of `web/src/components/docs-link.tsx` (`satisfies Record<PageDocsKey, …>`) gains
+  `page.schedule` with the text `docs.guides.schedule` ("Schedules" / «Расписания») in both locales, so that the
+  TypeScript check passes.
 - **Audit log names** (`audit-diff.tsx`): `/rotation_layers` "Rotation layers", `/main` "Main Schedule", `/gap_alert`
   "Gap alert", `/time_zone` "Time zone".
 - **Texts** (EN / RU), from C-27's UI and the approved mockups: "Schedules" / «Расписания», "New Schedule" / «Новое

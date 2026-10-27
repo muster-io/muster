@@ -7,6 +7,13 @@ layer: L2
 depends_on: [S-136, S-149]
 covers: [C-30.FR-1, C-30.FR-3, C-30.FR-8, C-30.FR-9, C-30.AC-1, C-30.AC-6, C-27.FR-8, C-18.FR-6]
 files_touched:
+  - api/openapi.yaml
+  - internal/schedules/reach.go
+  - internal/schedules/reach_test.go
+  - internal/schedules/oncallnow.go
+  - internal/schedules/oncallnow_test.go
+  - internal/schedules/query.sql
+  - internal/api/schedules.go
   - web/src/routes/profile.tsx
   - web/src/components/gateway-contact-section.tsx
   - web/src/components/gateway-contact-section.test.tsx
@@ -31,6 +38,7 @@ files_touched:
   - web/src/components/on-call-now.test.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/profile.spec.ts
@@ -44,9 +52,10 @@ acceptance:
   - "[C-30.FR-3] A wrong code shows the attempts left; \"Too many code requests\" with the time to wait shows on `429`; with several gateways the section has one block per gateway (`gateway-contact-section.test.tsx`)."
   - "[C-30.FR-3, C-18.FR-6] A User's page shows their contacts with the gateway, the contact and its state, and \"Remove\" for Admins, which asks for confirmation; it offers no way to add one; the Audit log shows the contact's entries (`user-gateway-contacts.test.tsx`, `users.spec.ts`)."
   - "[C-30.FR-1, C-30.AC-1, C-30.FR-8] The page of a Bridge Connection in the role `gateway` shows \"Notification gateway\" among its roles from `info`, its health — \"Healthy\", or the banner \"Broken since HH:MM: {reason}. Muster tries again every {interval}.\" — and the Connections list marks it \"Notification gateway\"; its check lists the roles; the Destination form does not offer a Connection whose only role is `gateway`; a Connection whose only role is `gateway` and that still has Destinations, saved while its bridge was a messenger, shows \"This bridge now declares only the role gateway: its {count} Destinations no longer receive messages. Remove them or change the bridge.\" (S-145's Open question 1) (`gateway-health.test.tsx`, `connection-check.test.tsx`, `destination-form.test.tsx`, `bridge-connection.spec.ts`, `destinations.spec.ts`)."
+  - "[C-27.FR-8] In `getScheduleOnCall` and `getOnCallNow`, each warning `unreachable` carries `gateway_reaches`: true when the person has a confirmed contact at a Notification gateway, else false; whether the gateway is Broken is not considered (`reach_test.go`, `oncallnow_test.go`)."
   - "[C-27.FR-8] On the Schedule page and in \"On call now\", an unreachable mark of a person with a confirmed contact at a gateway is followed by \"A call through the Notification gateway works.\" (`schedule-warnings.test.tsx`, `on-call-now.test.tsx`, `schedules.spec.ts`)."
   - "Every new text exists in English and Russian; \"How to connect a Notification gateway\" and the link of the Connection page open sections of the page on Notification gateways (`docs-links.json`); `make e2e` passes."
-verify: "make ci e2e"
+verify: "make ci test-integration e2e"
 operator_attention: false
 issue: 439
 ---
@@ -63,16 +72,26 @@ issue: 439
 - The roles of a Bridge Connection, "Notification gateway" with its health and Broken banner on the Connection page and
   in the list, the roles in the check, and gateway-only Connections left out of the Destination form (C-30.FR-1,
   FR-8).
-- "A call through the Notification gateway works." after the unreachable marks of the Schedule page and "On call now"
-  (C-27.FR-8).
+- `gateway_reaches` on the `unreachable` warnings of Schedules and the marks of "On call now", and "A call through the
+  Notification gateway works." after them on the Schedule page and in "On call now" (C-27.FR-8).
 
 **OUT**
 
-- The API: S-145, S-167, S-148, S-149. The Notification rules in the profile: S-153. The documentation: S-151.
+- The API: S-145, S-167, S-148, S-149, apart from `gateway_reaches`. The Notification rules in the profile: S-153. The
+  documentation: S-151.
 - The theme switch that the profile mockup also shows: specified later in L2 (L2.md §1.5).
 
 ## Contracts
 
+- **Spec** (`api/openapi.yaml`): `ScheduleWarning` and `OnCallReach` gain the optional `gateway_reaches` (boolean, not
+  in `required`, present on every `unreachable` warning), so that the web tests of S-135 and S-136 that build these
+  reads by hand need no edit.
+- **Schedules** (`internal/schedules/reach.go`, `oncallnow.go`, `query.sql`; `internal/api/schedules.go` maps the
+  field): `gateway_reaches` on each `unreachable` warning and mark — the person has a confirmed contact at a
+  Notification gateway, read by a query of `schedules` over `gateway_contacts` (S-167) and the Bridge Connections whose
+  stored `info` has the role `gateway`, since `schedules` imports no package of Paging (S-155, S-169); whether the
+  gateway is Broken is not considered (S-149 shows the gateway's state). `reach_test.go` and `oncallnow_test.go` cover
+  a person with a confirmed contact, an unconfirmed one and none.
 - **API used**: `listMyGatewayContacts`, `createMyGatewayContact`, `sendMyGatewayContactCode`,
   `confirmMyGatewayContact`, `deleteMyGatewayContact`, `listUserGatewayContacts`, `deleteUserGatewayContact`,
   `listConnections` (`role=gateway`), `getConnection` (`roles`, `gateway`), `checkConnection`, `getScheduleOnCall` and
@@ -89,8 +108,12 @@ issue: 439
   offered; `schedule-warnings.tsx` and `on-call-now.tsx` — the note after an unreachable mark when `gateway_reaches`;
   `audit-diff.tsx` — the entries `gateway_contact.*`.
 - **Documentation links** (`docs-links.json`): `field.gateway_contact` →
-  `messengers/notification-gateways.md#contact-for-calls-and-sms`, `title.notification_gateway` →
-  `messengers/notification-gateways.md#connect-a-notification-gateway`; the sections exist from S-167.
+  `messengers/notification-gateways.md#contact-for-calls-and-sms`, `page.notification_gateway` →
+  `messengers/notification-gateways.md#connect-a-notification-gateway`, the Guide link beside the title of a Bridge
+  Connection whose only role is `gateway` — one with both roles keeps `page.connection.bridge`, since it is a messenger
+  first, and links the gateway page from its roles — with its entry `docs.guides.notificationGateway` ("Notification
+  gateways" / «Шлюзы оповещений») in `GUIDE_ABOUT` of `web/src/components/docs-link.tsx` (`satisfies Record<PageDocsKey,
+  …>`), since `PageTitle` takes only `page.*` keys; the sections exist from S-167.
 - **Texts** (EN / RU), from C-30's UI and the approved Profile mockup: "Contact for calls and SMS" / «Контакт для
   звонков/SMS», its hint / «Muster сам не звонит, не шлёт SMS и не проверяет телефоны: это делает шлюз оповещений (мост
   для звонков и SMS), и от мессенджера он не зависит. Администратор видит контакт и может удалить его, но не изменить.»,
@@ -115,13 +138,28 @@ issue: 439
 3. Show the roles, the health and the check on the Connection pages, and filter the Destination form. Check:
    `gateway-health.test.tsx`, `bridge-connection-fields.test.tsx`, `connection-check.test.tsx`,
    `destination-form.test.tsx`.
-4. Add the note to the warnings. Check: `schedule-warnings.test.tsx`, `on-call-now.test.tsx`.
+4. Add `gateway_reaches` to the API, then the note to the warnings. Check: `make generate-check`; `reach_test.go`,
+   `oncallnow_test.go`; `schedule-warnings.test.tsx`, `on-call-now.test.tsx`.
 5. Add the links, the texts and the end-to-end specs. Check: the Verification below; `make e2e`.
 
 ## Verification
 
-Run `make dev`; from a terminal remove the demo Connection "Example Gateway" for the first steps and add it back after
-step 2 (as in S-145). Then in Playwright at 1280 × 800, in English and in Russian:
+Run `make dev`. From a terminal, as in S-164 and S-167, with the Admin's token A: the Schedule "Main" of payments (`$S`)
+with petr, olga and bob On-call in turn, none of them linked in Mattermost, payments' Destination on the demo Mattermost
+Connection; petr has a confirmed contact at "Example Gateway", olga a contact that was sent a code but not confirmed,
+bob none.
+
+```sh
+API=localhost:8080/api/v1; CLK=localhost:8082/_dev/clock
+curl -s "${A[@]}" "$API/schedules/$S/on-call?to=$(date -u -d "$(curl -s $CLK | jq -r .now) +4 days" +%FT%TZ)" |
+  jq -c '[.warnings[] | select(.kind == "unreachable") | {u: .user.login, g: .gateway_reaches}] | unique'
+# [{"u":"bob","g":false},{"u":"olga","g":false},{"u":"petr","g":true}]
+curl -s "${A[@]}" "$API/on-call-now" | jq -c '.items[] | select(.team.slug == "payments") | [.unreachable[].gateway_reaches] | unique'
+# [true] while petr is On-call
+```
+
+Then, from a terminal, remove the demo Connection "Example Gateway" for the first steps and add it back after step 2 (as
+in S-145). Then in Playwright at 1280 × 800, in English and in Russian:
 
 1. Sign in as petr (a Responder): Profile → "Contact for calls and SMS" shows the hint and "Unavailable: a Notification
    gateway is needed (a bridge for calls and SMS)" with "How to connect a Notification gateway", no "Connect a bridge"
@@ -151,6 +189,10 @@ None.
 ## Notes
 
 - The Russian texts follow the vocabulary settled in S-162 (Open question 1).
+- `gateway_reaches` moved here from S-167 in the plan review (M12), so that S-167 and the stories that follow it —
+  S-148, S-149, S-152, S-154, S-156, S-169 and S-173 — no longer wait for S-164 and the spike S-132; this story still
+  depends on both through S-136 and S-149, as S-155 does through S-164, and the frontend stories S-070, S-108 and S-110
+  also change Go. Its Go tests run in `make ci` and `make test-integration`.
 - Suggested commit: `feat(web): confirm a contact for calls and show notification gateways`.
 - The profile mockup also shows a theme switch; it is specified later in L2 and is not part of this story.
 - The Notification rules of the profile are placed above this section by S-153, after "Linked accounts", as the mockup
@@ -166,5 +208,5 @@ None.
 | C-30.FR-9 | partial | the note in the profile; the rules S-153, the chain form S-158 |
 | C-30.AC-1 | partial | shown as a Notification gateway; the API is S-145 |
 | C-30.AC-6 | full | |
-| C-27.FR-8 | partial | the note on the pages; the API is S-167 |
+| C-27.FR-8 | partial | `gateway_reaches` in the API and the note on the pages; the Destinations of the Team are S-164, the chains' S-172 |
 | C-18.FR-6 | partial | revised for L2: a User's contacts on their page |

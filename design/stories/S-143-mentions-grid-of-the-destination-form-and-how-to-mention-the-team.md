@@ -77,7 +77,8 @@ issue: 432
   — the server's `available` and `unavailable_reason` decide, the form only words them; `mention-support-table.tsx` —
   "What each messenger supports"; `mention-warnings.tsx` — the warnings above the grid; `mention-settings.tsx` keeps
   only `defaultMentions`, the L1 form that reads stay with until 0.3.0, which the existing test fixtures use, and loses
-  its editor; `team-mentions-editor.tsx` — "How to mention the Team"; `timeline.tsx` — the delivery event with its
+  its editor; the form sends `mention_entries` and no longer `mentions`, which S-140 converts only in a request
+  without entries; `team-mentions-editor.tsx` — "How to mention the Team"; `timeline.tsx` — the delivery event with its
   person, entry, event and reason; `connection-check.tsx` — "Group mentions" and "Mentions of everyone: {tokens}" among
   the bridge's features.
 - **Documentation links** (`docs-links.json`): `field.mentions` moves to `concepts/mentions.md#mention-entries`,

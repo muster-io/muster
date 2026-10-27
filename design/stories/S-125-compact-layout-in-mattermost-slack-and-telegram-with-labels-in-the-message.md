@@ -35,10 +35,15 @@ files_touched:
   - internal/api/templates_test.go
   - internal/mattermost/layout.go
   - internal/mattermost/layout_test.go
+  - internal/mattermost/adapter_test.go
+  - internal/mattermost/testmsg_test.go
   - internal/slack/layout.go
   - internal/slack/layout_test.go
+  - internal/slack/testmsg_test.go
   - internal/telegram/layout.go
   - internal/telegram/layout_test.go
+  - internal/telegram/adapter_test.go
+  - internal/telegram/testmsg_test.go
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - test/e2e/compact_layout_test.go
@@ -46,6 +51,7 @@ files_touched:
   - test/e2e/telegram_test.go
   - test/e2e/slack_test.go
   - test/e2e/bridge_test.go
+  - web/e2e/destination-preview.spec.ts
   - docs/configure/messages-and-templates.md
   - docs/install/versions.md
 acceptance:
@@ -57,7 +63,7 @@ acceptance:
   - "[C-29.FR-2, C-29.AC-4] Adding `cluster` to a Route's `message_labels` writes an `open_group_updates` row of the kind `route_message_labels`, whose run edits the Route's open Root messages Quietly to show it; `listRouteLabelSuggestions` (`routes:read`) offers the labels of the Route's recent Alert Groups with an example value each (`updates_test.go`, `labelsuggestions_test.go`)."
   - "[C-29.FR-7, C-16.FR-4, C-12.FR-3] The default layout replaces that of L1 for every Route from 0.2.0 on, in Root messages, test messages and `previewTemplate`, whose result for `root_message` also carries `layout`, the structured content of the message, and `length` against `messenger_limit`; Thread replies and Storm summaries keep their forms; the built-in texts of the layout exist in English and Russian; the upgrade notes of 0.2.0 say that the layout changes (`templates_test.go`)."
   - "[C-29.FR-9] The documentation page Messages and templates shows the new default message and has the section \"Labels in the message\"; `make docs-check` passes."
-verify: "make ci test-integration e2e-go docs-check"
+verify: "make ci test-integration e2e-go e2e-web docs-check"
 operator_attention: false
 issue: 414
 ---
@@ -97,8 +103,9 @@ issue: 414
   - New schema `MessageLayout` — `number`, `title`, `status` {`key`, `word`}, `fields` ({`name`, `value`}[], `summary`,
     `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`},
     `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`, and the optional `team` {`name`}}), `links`
-    ({`label`, `url`}[]) — the same content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains `layout`
-    (for `root_message`), `length` and `messenger_limit`.
+    ({`label`, `url`}[]) — the same content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains the
+    optional `layout` (for `root_message`), `length` and `messenger_limit`, so that the web tests that build a preview
+    result by hand (`template-preview.test.tsx`) stay valid until S-129 uses them.
 - **Schema** (migration `0028_route_message_labels`, expand only; `schema.md` §4.8): `routes.message_labels text[]`
   (null = computed); `open_group_updates_kind_v5_check` lists every kind of `_v4` and `route_message_labels` (`NOT
   VALID`, validated, the old one dropped).
@@ -113,7 +120,14 @@ issue: 414
 - **End-to-end tests of L1** that assert the L1 layout assert the compact one instead: `mattermost_test.go` (the
   shortened Root message of 600 Alerts, "+590 more", "+27 more" and "Full list in Muster"), `telegram_test.go` (the
   labels in `<blockquote expandable>`), `slack_test.go` (the blocks `section`, `section`, `context`, `actions`) and
-  `bridge_test.go` (the Alert lines and "+30 more" of `TestBridgeBodyLimit`'s body).
+  `bridge_test.go` (the Alert lines and "+30 more" of `TestBridgeBodyLimit`'s body); and the Playwright spec
+  `web/e2e/destination-preview.spec.ts`, whose Telegram preview expects L1's "Expandable quote" with `cluster: prod`
+  in a `blockquote`, and now expects the field lines and the key labels of C-29.FR-4.
+- **Unit tests of the adapters**: `internal/telegram/adapter_test.go` and `internal/mattermost/adapter_test.go` build
+  a `Message` with `Environment`, `GroupLabels` and `CommonLabels` and assert the L1 sections — Telegram's expandable
+  blockquote among them — so they build the compact `Message` and assert its layout; the `testmsg_test.go` of
+  Mattermost, Slack and Telegram follow where they assert the title or the sections of a test message. The Bridge's
+  follow in S-126, whose adapter keeps its L1 envelope until then.
 - **Adapters**: Mattermost — the one attachment of C-13.FR-3 with the title, the four fields as short `fields`, items 3
   to 7 as its text, the links as its last line, the buttons after it; Slack — the blocks of C-24.FR-4, the fields as one
   `section`'s `fields`, the key labels and the people as `context` blocks, the buttons as `actions`; Telegram — one HTML
@@ -137,7 +151,8 @@ issue: 414
    label with and without Instance labels, twelve Alerts and a Route template; `shorten_test.go` covers the cut order.
 3. Lay it out in Mattermost, Slack and Telegram. Check: each `layout_test.go` against the fixtures of C-29.AC-1.
 4. Add the preview's layout and length, and the re-render kind. Check: `templates_test.go`, `updates_test.go`.
-5. Write `test/e2e/compact_layout_test.go` and the documentation. Check: the Verification below; `make docs-check`.
+5. Write `test/e2e/compact_layout_test.go`, change the L1 end-to-end tests and the destination preview spec, and write
+   the documentation. Check: the Verification below; `make e2e-web`; `make docs-check`.
 
 ## Verification
 
@@ -190,8 +205,10 @@ None.
 - The status emoji of L1 stays beside the word in Telegram (L2.md §5.2).
 - The distinguishing label (P-67) and the count of values (P-83) stay provisional; the test environment confirms them,
   not this story.
-- With 41 files the story is at the edge of the size signal: four of them are end-to-end tests of L1 that asserted
-  the old layout, which the review of the contracts added.
+- With 47 files the story is at the edge of the size signal: eleven of them are tests of L1 that assert the old layout
+  — four Go end-to-end tests, the destination preview spec, two adapter tests and three test-message tests — which the
+  reviews added. Moving the preview's `layout`, `length` and `messenger_limit` to S-129 would save three files but
+  split one renderer change over two pull requests, so it stays here.
 - `MessageLayout` in `openapi.yaml` is the content S-126 sends to bridges, so the preview shows a bridge author the same
   structure.
 - Migration `0028` follows the story map; a story merged out of that order renumbers its migration to the next free

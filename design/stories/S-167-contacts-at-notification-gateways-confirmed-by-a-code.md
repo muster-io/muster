@@ -4,8 +4,8 @@ title: Contacts at Notification gateways confirmed by a code, erased with their 
 capability: C-30
 kind: be
 layer: L2
-depends_on: [S-145, S-164]
-covers: [C-30.FR-3, C-30.FR-9, C-30.FR-10, C-30.AC-2, C-27.FR-8, C-03.FR-13, C-18.FR-6, C-23.FR-3]
+depends_on: [S-145]
+covers: [C-30.FR-3, C-30.FR-9, C-30.FR-10, C-30.AC-2, C-03.FR-13, C-18.FR-6, C-23.FR-3]
 files_touched:
   - api/openapi.yaml
   - api/README.md
@@ -22,6 +22,7 @@ files_touched:
   - internal/gateways/query.sql
   - internal/api/gatewaycontacts.go
   - internal/api/gatewaycontacts_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/runtime/runtime.go
   - internal/users/admin.go
@@ -31,9 +32,6 @@ files_touched:
   - internal/requestlog/mask.go
   - internal/requestlog/mask_test.go
   - internal/archlint/secretleak.go
-  - internal/schedules/reach.go
-  - internal/schedules/reach_test.go
-  - internal/schedules/oncallnow.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/logging/events.go
@@ -48,7 +46,6 @@ acceptance:
   - "[C-30.FR-3] A new contact for a gateway at which the User has a confirmed one replaces it only when it is confirmed; until then the confirmed contact stays the one called, and both are listed (`contacts_integration_test.go`)."
   - "[C-30.FR-10, C-23.FR-3, C-30.AC-2] The Request log shows the `contact` of every request to `sendNotification` as `[redacted]`, and the `text` of one without `action` — a confirmation code — as `[redacted]` too; the secret-leak probe `gateway_contacts` finds neither the contact nor the code in a log line or a returned error (`mask_test.go`, `secretleak.go`)."
   - "[C-03.FR-13, C-30.AC-2] Deleting a User erases their contacts in the same transaction; the Audit log keeps the entries and shows their `/contact` as `[erased]` when it is read (`admin_integration_test.go`, `audit_test.go`)."
-  - "[C-27.FR-8] In `getScheduleOnCall` and `getOnCallNow`, each warning `unreachable` carries `gateway_reaches`: true when the person has a confirmed contact at a Notification gateway, else false (`reach_test.go`)."
   - "[C-30.FR-3, C-30.FR-9] The documentation has the page Messengers → Notification gateways with \"Connect a Notification gateway\" and \"Contact for calls and SMS\" — what a gateway is, that Muster ships none, the code and its limits, that an Admin sees and removes contacts but never sets one — in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -67,14 +64,14 @@ issue: 456
 - An Admin's view and removal of a User's contacts, never setting one (C-18.FR-6 revised).
 - Contacts erased when their User is deleted and shown as `[erased]` in earlier Audit log diffs (C-03.FR-13 revised).
 - Contacts and confirmation codes masked in the Request log (C-23.FR-3 revised), and a probe of the secret-leak lint.
-- Whether a call still reaches an unreachable On-call, on the warnings of Schedules (C-27.FR-8).
 - The first form of the documentation page on Notification gateways.
 
 **OUT**
 
 - The protocol, the role and the fake gateway: S-145. Calls: S-148. Broken gateways: S-149.
-- The profile's contact block, a User's contacts on their page and "A call through the Notification gateway works." on
-  the Schedule pages: S-150. Writing a gateway bridge: S-151.
+- The profile's contact block, a User's contacts on their page, and whether a call still reaches an unreachable
+  On-call — `gateway_reaches` on the warnings of Schedules with "A call through the Notification gateway works." on the
+  Schedule pages: S-150. Writing a gateway bridge: S-151.
 
 ## Contracts
 
@@ -97,9 +94,9 @@ issue: 456
     `GatewayContactId`.
   - Problem codes: `contact_code_invalid` (`validation-failed`, with `attempts_remaining`),
     `contact_code_requests_exceeded` (`429`), `gateway_refused` (`502`), `unknown_id` at `/connection_id`,
-    `invalid_format` at `/contact`.
-  - `ScheduleWarning` and `OnCallReach` gain the optional `gateway_reaches` (boolean, not in `required`, present on
-    every `unreachable` warning), so that the web tests of S-135 and S-136 that build these reads by hand need no edit.
+    `invalid_format` at `/contact`. `internal/api/problem.go` maps the errors of `gateways` to them,
+    `attempts_remaining` on the error item as the L1 `AttemptsRemaining` of `link_code_invalid` is, `Retry-After` on the
+    `429`, and `session_required`.
   - `PublicId` and `api/README.md` gain the prefix `GC` (gateway contact).
 - **Schema** (migration `0036_gateway_contacts`, expand only; `schema.md` §2 and a new §4.17 Notification gateways):
   - `gateway_contacts`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^GC[0-9A-HJKMNP-TV-Z]{12}$')`), `user_id`
@@ -127,9 +124,6 @@ issue: 456
 - **Request log** (`internal/requestlog/mask.go`): in requests to `/v1/notifications`, the member `contact`, and `text`
   when the request has no `action`, are `[redacted]`, in the record and its answer; a probe `gateway_contacts` joins the
   secret-leak lint (`internal/archlint/secretleak.go`).
-- **Schedules** (`internal/schedules/reach.go`, `oncallnow.go`): `gateway_reaches` on each `unreachable` warning and
-  mark — a confirmed contact at a Notification gateway; whether the gateway is Broken is not considered (S-149 shows
-  the gateway's state).
 - **Log events** (`internal/logging/events.go`): `gateway_contact_code_sent` (info; the User, the Connection, the
   outcome; never the contact or the code), `gateway_contact_code_rejected` (warn; the reason), C-30.
 - **Settings**: `gateway.contact_code` and `gateway.contact_code_requests` (both P-86, which stays provisional until
@@ -146,8 +140,7 @@ issue: 456
    `contacts_integration_test.go` covers the replacement.
 3. Erase contacts with their User and mask them in the Audit log and the Request log; add the probe. Check:
    `admin_integration_test.go`, `audit_test.go`, `mask_test.go`; `make lint-arch`.
-4. Add `gateway_reaches`. Check: `reach_test.go`.
-5. Write `test/e2e/gateway_contacts_test.go` and the documentation. Check: the Verification below; `make docs-check`.
+4. Write `test/e2e/gateway_contacts_test.go` and the documentation. Check: the Verification below; `make docs-check`.
 
 ## Verification
 
@@ -187,8 +180,7 @@ psql postgres://muster:muster@127.0.0.1:55432/muster -tAc "SELECT count(*) FROM 
 
 `test/e2e/gateway_contacts_test.go` repeats these checks and adds an expired code after an advance of the development
 clock, the sixth request of one User across two contacts, a new contact that replaces the confirmed one only once
-confirmed, `deleteMyGatewayContact`, and `gateway_reaches` on the warning of an On-call without an Account link who has
-a confirmed contact.
+confirmed, and `deleteMyGatewayContact`.
 
 ## Open questions
 
@@ -207,6 +199,9 @@ a confirmed contact.
 - Migration numbers follow the story map: `0036` here, then `0037` to `0044` for S-148, S-149, S-152, S-154, S-169,
   S-155, S-168 and S-157. A story merged out of that order renumbers its migration to the next free number in its own
   pull request, with its tests and `schema.md`.
+- `gateway_reaches` on the warnings of Schedules moved to S-150 in the plan review (M12): with it this story depended
+  on S-164 and so on the spike S-132, which held up this story and S-148, S-149, S-152, S-154, S-156, S-169 and S-173
+  after it; S-150, S-155 and the stories after them still follow S-164.
 - The development token and the contacts of the checks are not real numbers; the documentation uses `+10000000001`
   and the like.
 
@@ -218,7 +213,6 @@ a confirmed contact.
 | C-30.FR-9 | partial | the documentation that the UI's note links to; the notes themselves are S-150, S-153 and S-158 |
 | C-30.FR-10 | partial | contacts masked in the Request log; the metrics are S-148 |
 | C-30.AC-2 | full | |
-| C-27.FR-8 | partial | whether a gateway call still reaches the person, in the API; the pages are S-150, the chains' Destinations S-155 |
 | C-03.FR-13 | partial | revised for L2: contacts erased; out of every Team was S-115 |
 | C-18.FR-6 | partial | revised for L2: contacts set only by their person, seen and removed by Admins; the pages are S-150 |
 | C-23.FR-3 | full | revised for L2 |

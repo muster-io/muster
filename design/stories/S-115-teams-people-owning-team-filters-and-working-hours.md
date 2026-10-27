@@ -22,6 +22,7 @@ files_touched:
   - internal/teams/teams_integration_test.go
   - internal/api/teams.go
   - internal/api/teams_test.go
+  - internal/api/problem.go
   - internal/api/server.go
   - internal/runtime/runtime.go
   - internal/routing/routes.go
@@ -48,6 +49,7 @@ files_touched:
   - design/prd/L2.md
   - test/e2e/teams_test.go
   - web/src/test/fixtures/destinations.ts
+  - web/src/test/fixtures/teams.ts
   - docs/concepts/teams.md
   - mkdocs.yml
   - docs/install/versions.md
@@ -57,7 +59,7 @@ acceptance:
   - "[C-25.FR-1, C-25.AC-6] A Responder or a Viewer who is in a Team gets `403` on `updateTeam`, `addTeamUser` and `deleteTeam`, and reads Teams with `teams:read`; a Viewer in a Team is refused Acknowledge with `403` as any Viewer is, so a Team grants and limits nothing (`teams_test.go`)."
   - "[C-25.FR-2, C-25.AC-11, C-08.FR-1] Routes and every Destination type take `owning_team_id`, recorded in their Audit log diff and read back as `owning_team` with the Team's id, name and slug; an unknown or deleted Team is refused with `422` `unknown_id`; `listRoutes` and `listDestinations` take `team` — a Team's `public_id`, or `mine` for the Teams of the calling User (`422` for a Service account token) — and return only what those Teams own (`routes_test.go`, `write_test.go`, `teams_test.go`)."
   - "[C-25.FR-9, C-25.AC-8, C-20.FR-9, C-20.FR-1] `getOrganization` carries `working_days` (Monday to Friday) and `workday_end` (`18:00`) and the derived read-only `working_hours` {days, start = `workday_start`, end, time_zone = `time_zone`}; a Team without its own Working hours reads the Organization's, so a change of `workday_start` moves their start; a Team with `own_working_hours` true takes days, start, end and an IANA time zone; an end not later than the start on the same day is refused with `422` `out_of_range` at `/working_hours/end`, on a Team and on the Organization (`organization_test.go`, `teams_test.go`)."
-  - "[C-25.FR-10, C-25.AC-9] Deleting a Team removes its people and its Working hours, leaves the Routes and Destinations it owned without an owner, frees its slug for a new Team and keeps the row, marked deleted, for the names that point at it; the Audit log records `team.deleted` (`teams_integration_test.go`)."
+  - "[C-25.FR-10, C-25.AC-9] Deleting a Team removes its people and its Working hours, leaves the Routes and Destinations it owned without an owner — each with its `version` raised, so its ETag changes —, frees its slug for a new Team and keeps the row, marked deleted, for the names that point at it; the Audit log records `team.deleted` (`teams_integration_test.go`)."
   - "[C-25.FR-12] The documentation has the page Concepts → Teams with what a Team owns and what it does not grant, people added by hand, and Working hours, in the navigation; `make docs-check` passes."
   - "The migration adds the Permissions `teams:read` (Admin, Responder, Viewer) and `teams:write` (Admin), and reference.md moves them, and `muster_team_info`, from their tables of L2 into the main tables, so that the matrix `TestIntegrationRoleMatrix` reads from reference.md and the migrations seed has 33, 13 and 9 Permissions for Admin, Responder and Viewer instead of 31, 12 and 8 (`auth_integration_test.go`); the provisional values P-63 (Working hours end later than they start) and P-74 (the slug format) are confirmed in defaults.md and L2.md §5.3 (Notes)."
 verify: "make ci test-integration e2e-go docs-check"
@@ -118,6 +120,9 @@ issue: 404
   - Problem codes: `slug_taken` (`409` `conflict`, the slug of a Team that is not deleted); `team_in_use` (`409`
     `conflict`, declared here for S-131 and S-154, which raise it); `invalid_format` at `/slug`; `out_of_range` at
     `/working_hours/end` and `/workday_end`; `unknown_id` at `/owning_team_id` and `/user_id`.
+- **Problems** (`internal/api/problem.go`): `problemFor` maps the errors of `teams` — not found (`404`), `name_taken`
+  and `slug_taken` (`409`), a stale version (`412`), and the declared `team_in_use` — as it maps those of the L1
+  domains.
 - **Schema** (migration `0023_teams`, expand only; `schema.md` §2, a new §4.15 Teams, §4.2, §4.5, §4.8):
   - `teams`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^TM[0-9A-HJKMNP-TV-Z]{12}$')`), `name`, `slug`
     (`CHECK (slug ~ '^[a-z0-9][a-z0-9._-]{0,62}$')`), `description`, `own_working_hours boolean NOT NULL DEFAULT
@@ -138,10 +143,17 @@ issue: 404
     `teams:write` to Admin — reference data, as in `0001`.
   - The down migration drops all of it.
 - **Teams** (`internal/teams`, a flat domain package, ADR-0016): validates, writes through its queries, records the
-  Audit log (`team.created`, `team.updated`, `team.deleted`, `team.user_added`, `team.user_removed`) and sends the
-  hint `team`; `deleteTeam` soft-deletes the row, deletes its `team_users`, sets `owning_team_id` to null on its Routes
-  and Destinations in the same transaction (each with its own Audit log entry `route.updated` and
-  `destination.updated` by the system) and, until S-131 and S-154, refuses nothing. `workinghours.go` holds
+  Audit log (`team.created`, `team.updated`, `team.deleted`, `team.user_added`, `team.user_removed`) and sends the hint
+  `team`; `deleteTeam` soft-deletes the row, deletes its `team_users`, sets `owning_team_id` to null on its Routes and
+  Destinations in the same transaction (each with its own Audit log entry `route.updated` and `destination.updated` by
+  the system) and, until S-131 and S-154, refuses nothing. `teams` stays a leaf of the import graph: `routing` imports
+  it from S-118 for the Teams of Alerts, and `destinations` imports `groups`, so `deleteTeam` nulls `owning_team_id`
+  with `teams`' own queries in `internal/teams/query.sql` — raising each Route's and Destination's `version`, as their
+  own updates do — and calls neither the `routing` nor the `destinations` service. It updates the owned Destinations
+  before the owned Routes, the order in which the deletion of a Destination locks its row and then its Routes; from
+  S-170 it takes the Team's membership lock only after both, so that it never holds that lock while it waits for a
+  Route's row that grouping or a Route save holds. `schema.md` §2 names `teams` among the writers of `routes` and
+  `destinations` (the owner only). `workinghours.go` holds
   `WorkingHours`, the validation, `Effective(team, org)` — the Team's own or the Organization's — and `Contains(t)`,
   which the Escalation steps of S-154 and S-169 use. "My Teams" is resolved from `team_users` of the caller's User.
 - **Routing and Destinations**: `owning_team_id` in their inputs, views, Audit log diffs and list filters; neither adds
@@ -156,12 +168,18 @@ issue: 404
   table and the `Permission` schema; defaults.md marks `team.slug_format` and the rule of P-63 decided; L2.md §5.3
   moves P-63 and P-74 to "Decided since they were first listed".
 - **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): the builders of Destination reads set the
-  neutral value of `owning_team` (null), so `make generate` leaves the TypeScript check of the web tests green.
+  neutral value of `owning_team` (null), so `make generate` leaves the TypeScript check of the web tests green. The new
+  `web/src/test/fixtures/teams.ts` holds the builders of `Team`, `TeamRef` and `TeamUser` reads, overridable field by
+  field as S-166's are, which the web tests of S-119 use and which S-117, S-118, S-121, S-139 and S-154 extend with
+  their required read fields; it is created here, with the read it builds, so that no backend story waits for the Teams
+  pages.
 - **Settings**: `team.slug_format` (P-74), `team.working_hours`, `organization.working_hours`,
   `organization.workday_start`, `organization.time_zone`.
 - **Documentation**: the new page `docs/concepts/teams.md` — "What a Team is", "People" and "Working hours" — in the
   navigation under Concepts; `docs/install/versions.md` — the end of the working day that 0.2.0 sets where the start
-  is 18:00 or later.
+  is 18:00 or later, and, in the paragraph on the rolling upgrade from 0.1 (S-111), that a 0.1 replica's
+  `updateOrganization` which leaves `workday_start` at or after `workday_end` fails the new CHECK with `500` until the
+  rollout ends.
 
 ## Steps
 
@@ -247,7 +265,8 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 44 files (the builder of S-166 and the Role matrix test included) the story is at the edge of the size signal;
+- With 46 files (the builders of S-166 and of Teams, the problem mapping and the Role matrix test included) the story
+  is at the edge of the size signal;
   the Working hours of the Organization and of a Team are one rule (C-25.FR-9), and the owning Team of Routes and
   Destinations is needed by the filter that checks it.
 - Migration `0023` follows the story map; a story merged out of that order renumbers its migration to the next free

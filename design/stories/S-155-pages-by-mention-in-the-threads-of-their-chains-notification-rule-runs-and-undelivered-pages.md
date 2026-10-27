@@ -37,6 +37,7 @@ files_touched:
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
   - internal/timers/query.sql
+  - internal/timers/worker.go
   - internal/metrics/catalogue.go
   - internal/runtime/runtime.go
   - design/prd/l1/reference.md
@@ -57,6 +58,7 @@ acceptance:
   - "[C-32.FR-19, C-32.AC-11, C-09.FR-22, C-11.FR-20] Every Page by Mention records one Loud `paged` (Timeline kind `escalation`) with `mentions` `[\"paged\"]` and its people in `paged_users`, or the Team or token of a `page_team` step; together with `page_not_delivered` and `escalation_step_skipped`, each row of the L2 lifecycle event table produces exactly one Timeline entry with its event, kind, loudness and Mentions (a table-driven test, `events_test.go`)."
   - "[C-32.FR-19] Pages count in `muster_pages_total{chain,kind,outcome}` with `kind` `mention` and `outcome` `delivered` or `not_delivered`; reference.md moves the metric into the catalogue (`catalogue.go`, `metrics_test.go`)."
   - "[C-32.FR-11, C-15.FR-2, C-15.FR-11] Outgoing webhooks in events mode receive `paged` with its people as `mentions` data, and `page_not_delivered`; a template-mode webhook among a chain's Destinations gets the Page through its \"reply in thread\" request when it has one; a Bridge Destination gets the Page with the Mention marker of C-22.FR-16 (`body_test.go`, `pages_test.go`)."
+  - "[C-31.FR-3, C-32.FR-3] The wait of a Notification rule run is a timer whose subject is the run — `notification_rule_run_id` set, `alert_group_id` and `storm_id` null — so a `page_people` step that Pages two people with repeating rules keeps two `notification_rule_action` timers on one Alert Group beside its chains' `escalation_step` timers and its Reminder, each firing for its own person and reading the Alert Group through the run; `timers_alert_group_key` and `UpsertTimer` are unchanged (`runs_test.go`, `pages_integration_test.go`, `db_test.go`)."
   - "[C-32.AC-17] `listEscalationChainRuns` lists, with each step made, its Pages with their people and outcome (`pages_integration_test.go`); Concepts → Escalation chains has \"Where chains Page\" and \"How a Page reaches a person\" with the table of C-32.FR-11 and the note that the push of Mentions in Threads is still to be verified; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -108,8 +110,16 @@ issue: 444
     `user_id`, `outcome`, `reason`; primary key `(page_id, user_id)`).
   - `thread_replies` gains `page_id` (FK, cascade) and `paged_user_ids bigint[]`; its event and mentions CHECKs are
     replaced by `_v2` ones with `paged`, `NOT VALID`, validated, the old ones dropped, as the Timeline's.
-  - `timers` gains the kind `notification_rule_action` and `notification_rule_run_id` (FK, cascade), with
-    `timers_subject_v3_check` and a unique partial index, as S-169 added its kind.
+  - `timers` gains the kind `notification_rule_action` through `timers_kind_v3_check`, replacing S-169's `_v2` (`NOT
+    VALID`, validated, the old one dropped), and `notification_rule_run_id` (FK `notification_rule_runs`, `ON DELETE
+    CASCADE`). As for S-169's `escalation_step`, the subject of such a timer is its run: `alert_group_id` and `storm_id`
+    are null, so `timers_alert_group_key` and `UpsertTimer` stay untouched and the runs of every person a step Pages
+    each have a timer. `timers_subject_v3_check` replaces S-169's `_v2` with the branch `notification_rule_action` →
+    `notification_rule_run_id` set, `alert_group_id`, `storm_id` and `escalation_run_id` null, and
+    `notification_rule_run_id` null on every other branch, `NOT VALID`, validated, the old one dropped; a unique partial
+    index `timers_notification_rule_run_key (notification_rule_run_id) WHERE kind = 'notification_rule_action'`. A rule
+    run cascades from its chain's run and its Alert Group, and its timer from it. `schema.md` §4.10 says so beside
+    S-169's paragraph, and §2 names `notificationrules` among the writers of `timers`.
   - `timeline_entries` gains `page_everyone`, `page_importance`; `team_id` (S-118) names the Team of a `page_team` step.
   - The down migration drops all of it after deleting the rows of the new kinds.
 - **Packages and their imports** (as in S-169): `groups` imports none of the packages of Paging and declares what it
@@ -126,10 +136,14 @@ issue: 444
 - **Notification rules** (`internal/notificationrules/runs.go`): a run per person and Page of a step, from
   `Effective(user)` (S-152): each Mention action dispatches the Command `Page` for its person; actions with no wait
   between them come due at the same moment, and the first actions of the people one step Pages that come due together
-  are one Command naming them all (Open question 1); a wait is a timer of the kind `notification_rule_action`, whose
-  handler this package registers in the runtime; a call action goes to `CallPages`, declared here and wired by S-157. A
-  run stops with the run of its chain — acknowledged, snoozed, resolved, started over — which the `ChainRuns` of
-  `escalation` tells it in the dispatcher's transaction, and an action due after that is not made.
+  are one Command naming them all (Open question 1); a wait is a timer of the kind `notification_rule_action` whose
+  subject is the rule run, written by this package's own upsert in `internal/notificationrules/query.sql`, never
+  `UpsertTimer`; its handler, which this package registers in the runtime, reads the run by the timer's
+  `notification_rule_run_id`, takes the Alert Group through it and does nothing when the run is no longer `running`; a
+  call action goes to `CallPages`, declared here and wired by S-157. A run stops with the run of its chain —
+  acknowledged, snoozed, resolved, started over — which the `ChainRuns` of `escalation` tells it in the dispatcher's
+  transaction, deleting its timer, and an action due after that is not made.
+- **Timers** (`internal/timers`): the claim returns `notification_rule_run_id`, which `Timer` gains.
 - **Groups** (`internal/groups/pages.go`, `escalation.go`, `events.go`): the system transitions `Page`, `PageReached`
   (the Page delivered to a person) and `PageNotDelivered` (S-148), with Muster as the actor. `Page` asks `PageTargets`
   for the Destinations of the run that can carry it; with none for a `page_team` step it records
@@ -141,12 +155,15 @@ issue: 444
   the Destinations of a run, by its sources, read through delivery's own queries: a Route's chain in the Route's
   Destinations whose delivery has a Root message, a Team's chain in the Team's, else in the Route's, a chain of both
   sources in the union, and for a `page_team` step only those whose Connection can mention the Team or the token
-  (`mentions`, C-28.FR-2). The fan-out of `paged` creates one Thread reply per Destination, `pending` at once without
-  the Thread batching window; the Mentions come from the people's Account links in each Destination's Identity space
-  (`mentions.IdentitySpace`); the outcome of the replies is reported back by the Commands `PageReached` (S-168 adds
-  the Assignees) and `PageNotDelivered` — any delivered reply that mentions a person delivers the Page to them, and all
-  of a person's replies Not delivered or withheld make it `not_delivered`. Replies withheld while a Destination is
-  Broken are dropped at recovery (C-11.FR-19).
+  (`mentions`, C-28.FR-2). Which Destinations a source's entries reach comes from `routing.Reach` (S-121), never a copy
+  of the rule, and `where_test.go` loads the vectors of `internal/routing/testdata/reach/` (S-121), the one set of cases
+  of who an Alert Group reaches, so that its answer for each source agrees with the entries the vectors expect (plan
+  review, M4). The fan-out of `paged` creates one Thread reply per Destination, `pending` at once without the Thread
+  batching window; the Mentions come from the people's Account links in each Destination's Identity space
+  (`mentions.IdentitySpace`); the outcome of the replies is reported back by the Commands `PageReached` (S-168 adds the
+  Assignees) and `PageNotDelivered` — any delivered reply that mentions a person delivers the Page to them, and all of a
+  person's replies Not delivered or withheld make it `not_delivered`. Replies withheld while a Destination is Broken are
+  dropped at recovery (C-11.FR-19).
 - **Timeline read and SPA** (`internal/groups/query.sql`, `read.go`, `internal/api/alertgroups.go`,
   `web/src/components/timeline.tsx`): `team`, `everyone` and `importance` read into `TimelineEscalationEntry`;
   `entryText` gains a case for `paged` with S-148's generic text.
@@ -172,7 +189,9 @@ issue: 444
 2. Write where chains Page and the Pages of each step kind. Check: `pages_test.go` and delivery's `where_test.go` cover
    a Route's chain, a Team's chain with and without its own Destination with the Root message, both sources, a Telegram
    Destination for `page_team`, and a Route without a Destination.
-3. Write the runs of Notification rules with their waits and stops. Check: `runs_test.go` with a manual clock.
+3. Write the runs of Notification rules with their waits and stops. Check: `runs_test.go` with a manual clock, with
+   two people Paged by one step whose important rules both repeat; `pages_integration_test.go` keeps their two timers,
+   the chains' step timers and a Reminder on one Alert Group at once.
 4. Enqueue Page replies, their text and their outcomes; record `paged` and `page_not_delivered`. Check: `page_test.go`,
    `pages_test.go` of delivery, `events_test.go` (one Timeline entry per row of the L2 table so far).
 5. Add the webhook event, the metric and the runs' Pages. Check: `body_test.go`,
@@ -236,6 +255,8 @@ Team mention and with `here`, `page_team` on a Telegram-only chain (`no_mention_
 - Until S-157 a rule's call action and a `call` step do nothing; S-157 wires them to the queue of S-148.
 - Until S-168 a delivered Page makes nobody an Assignee; S-168 hooks the Assignees into the outcome of Pages.
 - Migration `0042` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- The timers of rule runs name their run, not the Alert Group, for the reason S-169's Notes give (plan review, H2): one
+  step may Page several people, each with a rule run that waits.
 
 ## Coverage
 

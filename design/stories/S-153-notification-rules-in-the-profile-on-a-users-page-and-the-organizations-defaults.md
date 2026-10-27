@@ -64,9 +64,10 @@ issue: 442
   before "Contact for calls and SMS" as the approved mockup orders them, with the switch and the choice of a gateway
   when the User has confirmed contacts at more than one, and `gateway-unavailable.tsx` of S-150 when none exists;
   `lib/notification-rules.ts` — a rule in words ("a Mention in the Thread", "a call to {contact}", "at the same time",
-  "again after {N} minutes"); `user-notification-rules.tsx` — the same switch and reset on a User's page for
-  `users:write`; `default-notification-rules.tsx` — the Organization's two rules in words with the note about the API;
-  `audit-diff.tsx` — `notification_rules.updated` and the field `notification_rules` of the Organization.
+  "again after {N} minutes", N being an action's `wait_seconds` / 60, S-152); `user-notification-rules.tsx` — the same
+  switch and reset on a User's page for `users:write`; `default-notification-rules.tsx` — the Organization's two rules
+  in words with the note about the API; `audit-diff.tsx` — `notification_rules.updated` and the field
+  `notification_rules` of the Organization.
 - **Documentation links** (`docs-links.json`): `field.notification_rules` → `concepts/notification-rules.md`,
   `field.notification_rules_switch` → `concepts/notification-rules.md#the-switch`; the sections exist from S-152.
 - **Texts** (EN / RU), from C-31's UI and the approved Profile mockup: "Linked accounts" / «Привязанные аккаунты», "A

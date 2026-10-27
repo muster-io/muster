@@ -61,7 +61,7 @@ issue: 453
 **OUT**
 
 - The Destinations in whose Threads the Escalation chains that Page a Schedule write (C-32.FR-8), which the warning
-  covers from S-172; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-167.
+  covers from S-172; whether a call through a Notification gateway still reaches the person (C-30.FR-3), from S-150.
 - The pages that show the warnings: S-135 and S-136.
 
 ## Contracts
@@ -82,8 +82,12 @@ issue: 453
   S-121) and, for each, whether a Mention of the person reaches it — the Account link in the Destination's Identity
   space (`mentions.IdentitySpace`), the bridge's `native_mentions` from the Connection's `info`, the outgoing webhook's
   mode and "reply in thread" request, and the Telegram Destination's `telegram_absent_user_ids`. `result.go` adds the
-  `unreachable` warnings to the Result of a period, one per person, Destination and segment; `oncallnow.go` adds them
-  to the current segment. Read-only: it changes nothing anywhere.
+  `unreachable` warnings to the Result of a period, one per person, Destination and segment; `oncallnow.go` adds them to
+  the current segment. Read-only: it changes nothing anywhere. The Destinations of a Team are the Team's part of the
+  reach rule of S-121 (`routing.Reach`), read in SQL, so `reach_test.go` also loads the vectors of
+  `internal/routing/testdata/reach/` (S-121), the one set of cases of who an Alert Group reaches, seeds the Team entries
+  of each vector, and checks that the Destinations it finds for the Team are those the vectors name for the Team at any
+  level, conditions aside, since an On-call is warned about every Destination of their Team (plan review, M4).
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): after its steps of C-14.FR-14 pass, on save, on
   "Check" and in `muster doctor` — never as the Broken probe — the step `discussion_group_members` calls `getChatMember`
   of the discussion group for each User with a Telegram Account link for the Connection who is in a Team that names the
@@ -174,7 +178,7 @@ None open. Settled:
 
 | ID | Covered | Note |
 |---|---|---|
-| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-172, gateway calls S-167, the pages S-135 and S-136 |
+| C-27.FR-8 | partial | the Destinations of the Team; the chains' Destinations S-172, gateway calls S-150, the pages S-135 and S-136 |
 | C-27.FR-9 | partial | the unreachable marks in the API; the pages are S-136 |
 | C-27.FR-14 | partial | "Unreachable On-calls" |
 | C-27.AC-6 | partial | the API; the marks on the Schedule page S-135 and in "On call now" S-136 |
