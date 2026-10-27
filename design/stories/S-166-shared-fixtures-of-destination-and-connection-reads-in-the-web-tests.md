@@ -29,9 +29,10 @@ files_touched:
   - web/src/components/command-buttons.test.tsx
   - web/src/components/alert-group-deliveries.test.tsx
   - web/src/components/integration-alerts.test.tsx
+  - web/src/components/timeline.test.tsx
 acceptance:
   - "`web/src/test/fixtures/destinations.ts` exports one builder per Destination type — `mattermostDestination`, `telegramDestination`, `slackDestination`, `bridgeDestination`, `webhookDestination` — each returning a complete read of the generated type with every required field set to a neutral value and taking the fields a test cares about as overrides; `web/src/test/fixtures/connections.ts` does the same for `mattermostConnection`, `telegramConnection`, `slackConnection` and `bridgeConnection`, and `web/src/test/fixtures/alert-groups.ts` for `alertGroup`, `alertGroupDelivery` and `integrationAlert` (the reads of `AlertGroup`, `AlertGroupDelivery` and `IntegrationAlert`)."
-  - "The ten test files that built Destination reads by hand, the five that built Connection reads by hand and the four that built Alert Group, delivery or Alert reads by hand — `alert-group-header`, `command-buttons`, `alert-group-deliveries` and `integration-alerts` — build them through the builders only, with the same assertions as before; no other web test builds one of these reads by hand (`grep` of the read types' required fields outside `web/src/test/fixtures/` finds none); `make ci` passes without a change of behaviour."
+  - "The ten test files that built Destination reads by hand, the five that built Connection reads by hand and the four that built Alert Group, delivery or Alert reads by hand — `alert-group-header`, `command-buttons`, `alert-group-deliveries` and `integration-alerts` — and `timeline`, whose delivery labels read a Destination and a Connection, build them through the builders only, with the same assertions as before; no other web test builds one of these reads by hand (every file outside `web/src/test/fixtures/` that the grep of the Verification lists builds them through the builders only); `make ci` passes without a change of behaviour."
 verify: "make ci"
 operator_attention: false
 issue: 455
@@ -72,7 +73,10 @@ issue: 455
   `slack-destination-fields`, `telegram-destination-fields` and `webhook-destination-fields`; the Connection reads of
   those of them that build one and of `account-links-table`, `bridge-connection-fields`, `connection-form`,
   `slack-connection-fields` and `telegram-connection-fields`; the Alert Group reads of `alert-group-header` and
-  `command-buttons`, the delivery reads of `alert-group-deliveries` and the Alert reads of `integration-alerts`.
+  `command-buttons`, the delivery reads of `alert-group-deliveries` and the Alert reads of `integration-alerts`; the
+  Destination and Connection reads that `alert-group-deliveries` and `timeline` serve as the lists the labels of
+  deliveries come from; and the Alert Group reads that `destination-test-panel` serves to the picker of the test's
+  source.
 
 ## Steps
 
@@ -81,9 +85,11 @@ issue: 455
 
 ## Verification
 
-`make ci` passes; `grep -rlE "bot_token_status|destination_count|health: \{ state" web/src --include='*.test.ts*'`
-lists no file outside `web/src/test/fixtures/` that builds a Destination or Connection read. The story changes no page,
-so it has no browser check; `make e2e` is unaffected.
+`make ci` passes;
+`grep -rlE "bot_token_status|destination_count|health: \{ state|allowed_commands|thread_not_attached|alertmanager_groups" web/src --include='*.test.ts*'`
+lists the candidates, and none of them outside `web/src/test/fixtures/` builds one of these reads by hand: a match is an
+override passed to a builder, a read spread from a builder's read, a Destination reference (`DestinationRef`) or the
+result of a check or a test. The story changes no page, so it has no browser check; `make e2e` is unaffected.
 
 ## Open questions
 

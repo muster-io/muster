@@ -21,31 +21,14 @@ import type { AlertGroup, Session } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
+import { alertGroup } from "../test/fixtures/alert-groups";
 import { AlertGroupHeader } from "./alert-group-header";
 
 const ZONE = "Europe/Berlin";
 const AT = "2026-10-12T14:45:00Z";
 
 function group(extra: Partial<AlertGroup> = {}): AlertGroup {
-  return {
-    id: "AG0000000000AA",
-    number: 412,
-    title: "Disk full",
-    status: "firing",
-    severity_level: "warning",
-    urgent: false,
-    route: { id: "RT0000000000OP", name: "ops" },
-    integrations: [],
-    started_at: "2026-10-12T09:00:00Z",
-    last_changed_at: "2026-10-12T09:00:00Z",
-    reopen_count: 0,
-    firing_alert_count: 1,
-    resolved_alert_count: 0,
-    unclaimed: false,
-    delivery_problem: false,
-    allowed_commands: [],
-    ...extra,
-  };
+  return alertGroup({ route: { id: "RT0000000000OP", name: "ops" }, ...extra });
 }
 
 const SESSION: SessionRead = {

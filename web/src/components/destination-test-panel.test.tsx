@@ -20,6 +20,7 @@ import { render } from "vitest-browser-react";
 
 import { getGetDestinationQueryKey } from "../api/gen/endpoints/destinations/destinations";
 import type {
+  AlertGroupList,
   BridgeDestination,
   DestinationCheckResult,
   MattermostDestination,
@@ -34,10 +35,16 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { alertGroup } from "../test/fixtures/alert-groups";
+import {
+  bridgeDestination,
+  mattermostDestination,
+  slackDestination,
+  webhookDestination,
+} from "../test/fixtures/destinations";
 import { DestinationCheck } from "./destination-check";
 import { DestinationTestPanel, TestResult } from "./destination-test-panel";
 import { readableBody } from "./rendered-request";
-import { defaultMentions } from "./mention-settings";
 import { EXAMPLE, type PickedSource, TestSourcePicker } from "./test-source-picker";
 
 const ID = "DS0000000000WH";
@@ -46,21 +53,18 @@ const RUN = "CR0000000000R1";
 const PRESS_ERROR =
   "The button press did not reach Muster. Add the host of http://localhost:8081 to ServiceSettings.AllowedUntrustedInternalConnections on the Mattermost server.";
 
-const DESTINATION: WebhookDestination = {
+const DESTINATION: WebhookDestination = webhookDestination({
   id: ID,
-  type: "webhook",
   name: "chat",
   mode: "template",
-  mentions: defaultMentions(),
+  events: undefined,
   limiter: { limit: 5, per_seconds: 1 },
-  proxy: { enabled: false },
   signing_secret_status: { set: true },
-  warnings: [],
   health: { state: "broken", since: "2026-10-09T09:30:00Z", reason: "Refused" },
   routes: [{ id: "RT0000000000DB", name: "db" }],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"4"',
-};
+});
 
 const ALL: Permission[] = ["destinations:read", "destinations:test", "alert-groups:read"];
 
@@ -419,13 +423,14 @@ function fakeApi(answer: () => Promise<Response>): Call[] {
     const method = (init?.method ?? "GET").toUpperCase();
     calls.push({ method, url, body: typeof init?.body === "string" ? init.body : "" });
     if (url.startsWith("/api/v1/alert-groups")) {
-      return json(200, {
+      const groups: AlertGroupList = {
         items: [
-          { id: "AG0000000000K1", number: 12, title: "DiskFull" },
-          { id: "AG0000000000K2", number: 11, title: "QueueStuck" },
+          alertGroup({ id: "AG0000000000K1", number: 12, title: "DiskFull" }),
+          alertGroup({ id: "AG0000000000K2", number: 11, title: "QueueStuck" }),
         ],
         next_cursor: null,
-      });
+      };
+      return json(200, groups);
     }
     if (url === `/api/v1/destinations/${ID}/tests` && method === "POST") {
       return answer();
@@ -546,20 +551,16 @@ describe("DestinationTestPanel", () => {
   });
 
   test("explains the test of a Bridge Destination", async () => {
-    const bridge: BridgeDestination = {
+    const bridge: BridgeDestination = bridgeDestination({
       id: "DS0000000000BR",
-      type: "bridge",
       name: "alerts",
       connection_id: "CN0000000000BR",
       channel_id: "ch-alerts",
       channel_name: "alerts",
-      mentions: defaultMentions(),
       limiter: { limit: 30, per_seconds: 60 },
-      health: { state: "healthy" },
-      routes: [],
       created_at: "2026-10-17T09:30:00Z",
       etag: '"1"',
-    };
+    });
     const calls = fakeApi(() => Promise.resolve(json(500, {})));
     const panel = () => (
       <DestinationTestPanel
@@ -593,20 +594,16 @@ describe("DestinationTestPanel", () => {
   });
 
   test("says beside a Slack Destination's one step that Slack does not let a bot press its own button", async () => {
-    const slack: SlackDestination = {
+    const slack: SlackDestination = slackDestination({
       id: ID,
-      type: "slack",
       name: "slack-alerts",
       connection_id: "CN0000000000SL",
       channel_id: "C0FAKEALERTS",
       channel_name: "alerts",
-      mentions: defaultMentions(),
       limiter: { limit: 30, per_seconds: 60 },
-      health: { state: "healthy" },
-      routes: [],
       created_at: "2026-10-20T09:30:00Z",
       etag: '"1"',
-    };
+    });
     const result: DestinationTestResult = {
       steps: [step("message", "none", { response_status: 200 })],
       health: { state: "healthy" },
@@ -726,21 +723,17 @@ describe("the requests of a test or a check", () => {
   });
 
   test("opens the requests of a Destination check's run, and in Russian", async () => {
-    const mattermost: MattermostDestination = {
+    const mattermost: MattermostDestination = mattermostDestination({
       id: "DS0000000000MM",
-      type: "mattermost",
       name: "alerts",
       connection_id: "CN0000000000MM",
       team_id: "team-dev",
       channel_id: "ch-alerts",
       channel_name: "alerts",
-      mentions: defaultMentions(),
       limiter: { limit: 50, per_seconds: 1 },
-      health: { state: "healthy" },
-      routes: [],
       created_at: "2026-10-17T09:30:00Z",
       etag: '"1"',
-    };
+    });
     const result: DestinationCheckResult = {
       ok: true,
       checks: [],

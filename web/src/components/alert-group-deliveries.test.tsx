@@ -23,18 +23,28 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
-import type { AlertGroupDelivery, Permission, Session } from "../api/gen/model";
+import type {
+  AlertGroupDelivery,
+  AlertGroupDeliveryList,
+  ConnectionList,
+  DestinationList,
+  Permission,
+  Session,
+} from "../api/gen/model";
 import i18n from "../i18n";
 import { getListAlertGroupDeliveriesQueryKey } from "../api/gen/endpoints/alert-groups/alert-groups";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { applyHint } from "../lib/live";
+import { alertGroupDelivery } from "../test/fixtures/alert-groups";
+import { mattermostConnection } from "../test/fixtures/connections";
+import { mattermostDestination } from "../test/fixtures/destinations";
 // The row and the dialog are laid out by their classes, as in the application.
 // oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for its side effect
 import "../styles.css";
 import { AlertGroupDeliveries, deliveryStateText, safeMessageUrl } from "./alert-group-deliveries";
 
 function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
-  return {
+  return alertGroupDelivery({
     destination: {
       id: "DS0000000000AA",
       name: "alerts",
@@ -42,11 +52,8 @@ function delivery(extra: Partial<AlertGroupDelivery>): AlertGroupDelivery {
       health: { state: "healthy" },
     },
     state: "delivered",
-    thread_not_attached: false,
-    possible_duplicate: false,
-    past_edit_window: false,
     ...extra,
-  };
+  });
 }
 
 function providers(
@@ -90,27 +97,26 @@ afterEach(async () => {
 async function renderLabelled(permissions: Permission[], items: AlertGroupDelivery[]) {
   vi.spyOn(window, "fetch").mockImplementation((input) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const body = url.startsWith("/api/v1/destinations")
+    const body: DestinationList | ConnectionList | AlertGroupDeliveryList = url.startsWith(
+      "/api/v1/destinations",
+    )
       ? {
           items: [
-            {
+            mattermostDestination({
               id: "DS0000000000AA",
-              type: "mattermost",
               name: "alerts",
               connection_id: "CN000000000MMB",
               team_id: "team-dev",
               channel_id: "ch-alerts",
               channel_name: "alerts",
-              health: { state: "healthy" },
-              routes: [],
-            },
+            }),
           ],
           next_cursor: null,
         }
       : url.startsWith("/api/v1/connections")
         ? {
             items: [
-              { id: "CN000000000MMB", type: "mattermost", name: "mm-b", server_url: "http://mm" },
+              mattermostConnection({ id: "CN000000000MMB", name: "mm-b", server_url: "http://mm" }),
             ],
             next_cursor: null,
           }

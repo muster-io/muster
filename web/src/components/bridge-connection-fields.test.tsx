@@ -27,6 +27,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { bridgeConnection } from "../test/fixtures/connections";
 import {
   BridgeInfoPanel,
   connectionLimiterProposal,
@@ -65,23 +66,19 @@ const INFO: BridgeInfo = {
   link_url_template: null,
 };
 
-const BRIDGE: BridgeConnection = {
+const BRIDGE: BridgeConnection = bridgeConnection({
   id: "CN0000000000BR",
-  type: "bridge",
   name: "br",
   base_url: "http://127.0.0.1:18094",
   event_delivery: "poll",
   limiter: { limit: 10, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
-  push_secret_status: { set: false },
   callback_url: CALLBACK,
   info: INFO,
   info_read_at: "2026-10-17T09:31:00Z",
-  proxy: { enabled: false },
-  destination_count: 0,
   created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const WRITE: Permission[] = ["connections:read", "connections:write"];
 

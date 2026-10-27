@@ -27,6 +27,7 @@ import type { AlertGroup, CommandName, Problem, Session } from "../api/gen/model
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { bulkItemText, buttonCommands, refusalText } from "../lib/commands";
+import { alertGroup } from "../test/fixtures/alert-groups";
 // The dialogs and the menu are laid out by their classes, as in the application.
 // oxlint-disable-next-line import/no-unassigned-import -- the stylesheet is imported for its side effect
 import "../styles.css";
@@ -40,26 +41,16 @@ function group(
   allowed: CommandName[],
   extra: Partial<AlertGroup> = {},
 ) {
-  const g: AlertGroup = {
+  return alertGroup({
     id: "AG0000000000AA",
     number: 412,
-    title: "Disk full",
     status,
-    severity_level: "warning",
-    urgent: false,
     route: { id: "RT0000000000OP", name: "ops" },
-    integrations: [],
     started_at: "2026-10-07T09:00:00Z",
     last_changed_at: "2026-10-07T09:00:00Z",
-    reopen_count: 0,
-    firing_alert_count: 1,
-    resolved_alert_count: 0,
-    unclaimed: false,
-    delivery_problem: false,
     allowed_commands: allowed,
     ...extra,
-  };
-  return g;
+  });
 }
 
 interface Answer {

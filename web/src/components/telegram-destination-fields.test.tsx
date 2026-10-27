@@ -25,6 +25,8 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { mattermostConnection, telegramConnection } from "../test/fixtures/connections";
+import { telegramDestination } from "../test/fixtures/destinations";
 import { DestinationCheck } from "./destination-check";
 import { DestinationForm } from "./destination-form";
 import { defaultMentions } from "./mention-settings";
@@ -35,52 +37,42 @@ const NO_COMMENTS =
 const NOT_ADMIN =
   "The bot is not an admin of the discussion group Muster alerts Chat. Make the bot an admin there, allowed to post messages.";
 
-const TG: TelegramConnection = {
+const TG: TelegramConnection = telegramConnection({
   id: "CN0000000000TG",
-  type: "telegram",
   name: "Example Telegram",
   bot_api_base_url: "http://127.0.0.1:18081",
   update_mode: "long_polling",
   limiter: { limit: 15, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
   bot_username: "muster_dev_bot",
-  proxy: { enabled: false },
-  destination_count: 0,
   warnings: ["base_url_uses_http"],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"1"',
-};
+});
 
-const MM: MattermostConnection = {
+const MM: MattermostConnection = mattermostConnection({
   id: "CN0000000000MM",
-  type: "mattermost",
   name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
-  proxy: { enabled: false },
-  destination_count: 0,
   callback_url: "http://localhost:8081/api/v1/callbacks/mattermost/CN0000000000MM",
   created_at: "2026-10-09T09:30:00Z",
   etag: '"1"',
-};
+});
 
-const DESTINATION: TelegramDestination = {
+const DESTINATION: TelegramDestination = telegramDestination({
   id: "DS0000000000TG",
-  type: "telegram",
   name: "muster_alerts",
   connection_id: TG.id,
   channel_id: "@muster_alerts",
   channel_title: "Muster alerts",
   discussion_group_id: "-1001000000002",
   discussion_group_title: "Muster alerts Chat",
-  mentions: defaultMentions(),
   limiter: { limit: 10, per_seconds: 60 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const WRITE: Permission[] = [
   "destinations:read",

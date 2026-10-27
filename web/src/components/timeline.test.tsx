@@ -13,7 +13,9 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type {
+  Connection,
   DeliveryEventKind,
+  Destination,
   LifecycleEvent,
   Permission,
   Session,
@@ -29,6 +31,8 @@ import type {
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
+import { telegramConnection } from "../test/fixtures/connections";
+import { telegramDestination } from "../test/fixtures/destinations";
 import { Timeline, actorText, entryText } from "./timeline";
 
 const AT = "2026-10-07T09:00:00Z";
@@ -140,7 +144,7 @@ const text = (entry: TimelineEntry) => entryText(i18n.t, entry, dateTime);
 let entries: TimelineEntry[] = [];
 let requests: URL[] = [];
 // The Destinations and Connections lists the labels of delivery entries come from.
-let lists: { destinations: unknown[]; connections: unknown[] } = {
+let lists: { destinations: Destination[]; connections: Connection[] } = {
   destinations: [],
   connections: [],
 };
@@ -470,22 +474,16 @@ describe("Timeline", () => {
   test("gives a delivery entry the full label of its Destination as tooltip and description", async () => {
     lists = {
       destinations: [
-        {
+        telegramDestination({
           id: "DS0000000000OP",
-          type: "telegram",
           name: "ops",
           connection_id: "CN000000000TGB",
           channel_id: "@muster_alerts",
           channel_title: "Muster alerts",
-          mentions: {},
-          limiter: { limit: 20, per_seconds: 60 },
-          health: { state: "healthy" },
-          routes: [],
           created_at: AT,
-          etag: '"1"',
-        },
+        }),
       ],
-      connections: [{ id: "CN000000000TGB", type: "telegram", name: "tg-b" }],
+      connections: [telegramConnection({ id: "CN000000000TGB", name: "tg-b" })],
     };
     const gone: TimelineDeliveryEntry = {
       id: "DE2",
