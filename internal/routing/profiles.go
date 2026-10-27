@@ -5,7 +5,7 @@ package routing
 
 // The ids of the Route profiles (C-08.FR-7).
 const (
-	ProfileOnCall        = "on_call"
+	ProfilePaging        = "paging"
 	ProfileInformational = "informational"
 )
 
@@ -25,10 +25,10 @@ const (
 	day  = 24 * hour
 )
 
-// onCall is the On-call profile, which the Default route also takes.
-func onCall() Profile {
+// paging is the Paging profile, which the Default route also takes.
+func paging() Profile {
 	return Profile{
-		ID: ProfileOnCall, Name: "On-call", MinimumSeverity: MinimumNone,
+		ID: ProfilePaging, Name: "Paging", MinimumSeverity: MinimumNone,
 		GroupKey: []string{"alertname", "severity", "cluster"},
 		Policy: Policy{
 			ReopenWindowSeconds: 15 * 60, GracePeriodSeconds: 15 * 60, UrgentRiseRemovesAck: true,
@@ -42,7 +42,7 @@ func onCall() Profile {
 
 // informational is the Informational profile: no ack timeout, no Reminders and long Snooze durations.
 func informational() Profile {
-	p := onCall()
+	p := paging()
 	p.ID, p.Name = ProfileInformational, "Informational"
 	p.Policy.SnoozeDurationsSeconds = []int64{day, 3 * day, 7 * day}
 	p.Policy.AckTimeout.Enabled = false
@@ -50,7 +50,7 @@ func informational() Profile {
 	return p
 }
 
-// Profiles are the Route profiles, On-call first, read from the built-in defaults; each call returns fresh copies.
+// Profiles are the Route profiles, Paging first, read from the built-in defaults; each call returns fresh copies.
 func Profiles() []Profile {
-	return []Profile{onCall(), informational()}
+	return []Profile{paging(), informational()}
 }

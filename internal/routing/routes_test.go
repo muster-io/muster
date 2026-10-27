@@ -548,9 +548,9 @@ type nilWriter struct{}
 
 func (nilWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// input is a Route named name with the Matchers, the On-call profile's Group key and policy.
+// input is a Route named name with the Matchers, the Paging profile's Group key and policy.
 func input(name string, ms ...Matcher) Input {
-	p := onCall()
+	p := paging()
 	return Input{Name: name, Matchers: ms, GroupKey: p.GroupKey, Policy: p.Policy}
 }
 
@@ -587,7 +587,7 @@ func names(list List) string {
 	return strings.Join(out, ",")
 }
 
-// TestEnsureDefault is C-08.FR-3: the start-up step creates "Default" once, without Matchers and with the On-call
+// TestEnsureDefault is C-08.FR-3: the start-up step creates "Default" once, without Matchers and with the Paging
 // profile; it changes nothing when the Default route exists, and a Route that has its name stops the start.
 func TestEnsureDefault(t *testing.T) {
 	svc, store, _ := newService(t)
@@ -602,11 +602,11 @@ func TestEnsureDefault(t *testing.T) {
 		t.Fatalf("routes %+v", list.Routes)
 	}
 	d := list.Routes[0]
-	on := onCall()
+	pg := paging()
 	if d.Name != DefaultName || !d.IsDefault || len(d.Matchers) != 0 || d.Position != 0 || d.Urgent ||
-		!slices.Equal(d.GroupKey, on.GroupKey) || !d.CreatedAt.Equal(t0) || d.Version != 1 ||
-		d.Policy.Language != LanguageEnglish || !slices.Equal(d.Policy.SnoozeDurationsSeconds, on.Policy.SnoozeDurationsSeconds) ||
-		d.Policy.AckTimeout != on.Policy.AckTimeout || d.Policy.Reminders != on.Policy.Reminders ||
+		!slices.Equal(d.GroupKey, pg.GroupKey) || !d.CreatedAt.Equal(t0) || d.Version != 1 ||
+		d.Policy.Language != LanguageEnglish || !slices.Equal(d.Policy.SnoozeDurationsSeconds, pg.Policy.SnoozeDurationsSeconds) ||
+		d.Policy.AckTimeout != pg.Policy.AckTimeout || d.Policy.Reminders != pg.Policy.Reminders ||
 		d.Policy.Templates != (Templates{}) {
 		t.Errorf("default %+v", d)
 	}
@@ -953,7 +953,7 @@ func TestUpdate(t *testing.T) {
 // its pointer; a changed Minimum severity of a Route with open Alert Groups writes one open_group_updates row of the
 // kind route_minimum_severity, requested at the business time, with a notification on the workers' channel, in the
 // update's transaction, which a failure rolls back; an unchanged one, or a Route without open Alert Groups, writes
-// none. The Default route takes the Minimum severity of the On-call profile, none.
+// none. The Default route takes the Minimum severity of the Paging profile, none.
 func TestMinimumSeverity(t *testing.T) {
 	svc, store, c := newService(t)
 	bad := input("bad")
@@ -1392,10 +1392,10 @@ func TestRouteStorm(t *testing.T) {
 	}
 }
 
-// TestProfiles is C-08.FR-7: On-call and Informational with the values of defaults.md.
+// TestProfiles is C-08.FR-7: Paging and Informational with the values of defaults.md.
 func TestProfiles(t *testing.T) {
 	ps := Profiles()
-	if len(ps) != 2 || ps[0].ID != ProfileOnCall || ps[0].Name != "On-call" || ps[1].ID != ProfileInformational ||
+	if len(ps) != 2 || ps[0].ID != ProfilePaging || ps[0].Name != "Paging" || ps[1].ID != ProfileInformational ||
 		ps[1].Name != "Informational" {
 		t.Fatalf("profiles %+v", ps)
 	}
@@ -1415,7 +1415,7 @@ func TestProfiles(t *testing.T) {
 	}
 	if !slices.Equal(ps[0].Policy.SnoozeDurationsSeconds, []int64{3600, 14400, 86400}) || !ps[0].Policy.AckTimeout.Enabled ||
 		!ps[0].Policy.Reminders.Enabled {
-		t.Errorf("on-call %+v", ps[0].Policy)
+		t.Errorf("paging %+v", ps[0].Policy)
 	}
 	if !slices.Equal(ps[1].Policy.SnoozeDurationsSeconds, []int64{86400, 259200, 604800}) ||
 		ps[1].Policy.AckTimeout.Enabled || ps[1].Policy.Reminders.Enabled {

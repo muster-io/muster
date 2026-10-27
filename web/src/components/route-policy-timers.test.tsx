@@ -33,8 +33,8 @@ import {
 
 const HOUR = 3600;
 
-/** The On-call profile's policy, as defaults.md gives it. */
-const ON_CALL: RoutePolicy = {
+/** The Paging profile's policy, as defaults.md gives it. */
+const PAGING: RoutePolicy = {
   reopen_window_seconds: 900,
   grace_period_seconds: 900,
   urgent_rise_removes_ack: true,
@@ -50,9 +50,9 @@ const ON_CALL: RoutePolicy = {
 
 /** The Informational profile's policy: no ack timeout and no Reminders. */
 const INFORMATIONAL: RoutePolicy = {
-  ...ON_CALL,
-  ack_timeout: { ...ON_CALL.ack_timeout, enabled: false },
-  reminders: { ...ON_CALL.reminders, enabled: false },
+  ...PAGING,
+  ack_timeout: { ...PAGING.ack_timeout, enabled: false },
+  reminders: { ...PAGING.reminders, enabled: false },
 };
 
 const schema = z.object(timersSchema).superRefine(refineTimers);
@@ -104,7 +104,7 @@ function Harness({
   );
 }
 
-async function renderSection(policy: RoutePolicy = ON_CALL, serverErrors: ServerErrors = {}) {
+async function renderSection(policy: RoutePolicy = PAGING, serverErrors: ServerErrors = {}) {
   const onSave = vi.fn<(p: RoutePolicy) => void>();
   // The section's "Learn more" reads the documentation version from the session, which the root route has read.
   const queryClient = new QueryClient();
@@ -145,7 +145,7 @@ describe("the times of the policy", () => {
 });
 
 describe("RoutePolicyTimers", () => {
-  test("shows the On-call values and the times they give", async () => {
+  test("shows the Paging values and the times they give", async () => {
     await renderSection();
     await expect
       .element(page.getByRole("group", { name: "Ack timeout and Reminders" }))
@@ -188,7 +188,7 @@ describe("RoutePolicyTimers", () => {
   });
 
   test("a switch turned off hides its fields and keeps what was stored", async () => {
-    const { onSave } = await renderSection({ ...ON_CALL, auto_unacknowledge: true });
+    const { onSave } = await renderSection({ ...PAGING, auto_unacknowledge: true });
     await ackSwitch().click();
     expect(page.getByLabelText("First notice after").query()).toBeNull();
     expect(page.getByTestId("ack-timeout-times").query()).toBeNull();
@@ -239,7 +239,7 @@ describe("RoutePolicyTimers", () => {
     await save();
     await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave.mock.calls[0]?.[0]).toEqual({
-      ...ON_CALL,
+      ...PAGING,
       ack_timeout: { enabled: true, first_interval_seconds: 1200 },
       reminders: { enabled: true, first_interval_seconds: 2 * HOUR, cap_seconds: 12 * HOUR },
       auto_unacknowledge: true,
@@ -268,7 +268,7 @@ describe("RoutePolicyTimers", () => {
   });
 
   test("shows the API's refusals of the switches next to them", async () => {
-    await renderSection(ON_CALL, {
+    await renderSection(PAGING, {
       ack_timeout_enabled: "invalid",
       reminders_enabled: "unsupported",
       auto_unacknowledge: "invalid",
@@ -329,7 +329,7 @@ describe("RoutePolicyTimersReadOnly", () => {
   test("lists the policy", async () => {
     await render(
       <I18nextProvider i18n={i18n}>
-        <RoutePolicyTimersReadOnly policy={{ ...INFORMATIONAL, reminders: ON_CALL.reminders }} />
+        <RoutePolicyTimersReadOnly policy={{ ...INFORMATIONAL, reminders: PAGING.reminders }} />
       </I18nextProvider>,
     );
     const section = page.getByTestId("route-timers");

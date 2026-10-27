@@ -121,7 +121,7 @@ async function route(admin: Api, name: string, destinationId: string): Promise<v
     urgent: false,
     group_key: ["alertname", "cluster"],
     destination_ids: [destinationId],
-    policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+    policy: profiles.items.find((p) => p.id === "paging")?.policy,
   });
 }
 

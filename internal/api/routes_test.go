@@ -434,7 +434,7 @@ func TestRouteMinimumSeverityAPI(t *testing.T) {
 	}
 }
 
-// TestListRouteProfilesAPI is C-08.FR-7 and C-08.AC-11: On-call and Informational with the values of defaults.md,
+// TestListRouteProfilesAPI is C-08.FR-7 and C-08.AC-11: Paging and Informational with the values of defaults.md,
 // for routes:read.
 func TestListRouteProfilesAPI(t *testing.T) {
 	x, _ := newRoutesAPI(t)
@@ -444,13 +444,13 @@ func TestListRouteProfilesAPI(t *testing.T) {
 	if a.status != http.StatusOK || len(list.Items) != 2 {
 		t.Fatalf("profiles = %d %s", a.status, a.body)
 	}
-	on, info := list.Items[0], list.Items[1]
-	if on.Id != gen.OnCall || on.Name != "On-call" || !slices.Equal(on.Policy.SnoozeDurationsSeconds, []int{3600, 14400, 86400}) ||
-		!on.Policy.AckTimeout.Enabled || on.Policy.AckTimeout.FirstIntervalSeconds != 900 || !on.Policy.Reminders.Enabled ||
-		on.Policy.Reminders.FirstIntervalSeconds != 14400 || on.Policy.Reminders.CapSeconds != 86400 ||
-		!slices.Equal(on.GroupKey, []string{"alertname", "severity", "cluster"}) || on.Urgent ||
-		on.MinimumSeverity != gen.MinimumSeverityNone {
-		t.Errorf("on-call %+v", on)
+	pg, info := list.Items[0], list.Items[1]
+	if pg.Id != gen.Paging || pg.Name != "Paging" || !slices.Equal(pg.Policy.SnoozeDurationsSeconds, []int{3600, 14400, 86400}) ||
+		!pg.Policy.AckTimeout.Enabled || pg.Policy.AckTimeout.FirstIntervalSeconds != 900 || !pg.Policy.Reminders.Enabled ||
+		pg.Policy.Reminders.FirstIntervalSeconds != 14400 || pg.Policy.Reminders.CapSeconds != 86400 ||
+		!slices.Equal(pg.GroupKey, []string{"alertname", "severity", "cluster"}) || pg.Urgent ||
+		pg.MinimumSeverity != gen.MinimumSeverityNone {
+		t.Errorf("paging %+v", pg)
 	}
 	if info.Id != gen.Informational || info.Name != "Informational" || info.Urgent ||
 		info.MinimumSeverity != gen.MinimumSeverityNone ||

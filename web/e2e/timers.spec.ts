@@ -368,9 +368,9 @@ test("the Route editor shows the ack timeout and Reminders of the profile and cr
   await signInAdmin(page);
   await page.goto("/routes");
   await page.getByRole("link", { name: "Create route" }).click();
-  await page.getByRole("button", { name: "On-call" }).click();
+  await page.getByRole("button", { name: "Paging" }).click();
 
-  // 1. On-call: the ack timeout on at 15 minutes with its three notices, the Reminders at 4 and 24 hours, no
+  // 1. Paging: the ack timeout on at 15 minutes with its three notices, the Reminders at 4 and 24 hours, no
   //    auto-unacknowledge.
   const section = page.getByRole("group", { name: "Ack timeout and Reminders" });
   await expect(section).toBeVisible();
@@ -396,7 +396,7 @@ test("the Route editor shows the ack timeout and Reminders of the profile and cr
     ),
   ).toBeVisible();
   await section.scrollIntoViewIfNeeded();
-  await shot(page, "route-timers-on-call");
+  await shot(page, "route-timers-paging");
 
   // Informational: both switches off, their fields hidden, auto-unacknowledge disabled.
   await page.getByRole("button", { name: "Choose another profile" }).click();
@@ -408,9 +408,9 @@ test("the Route editor shows the ack timeout and Reminders of the profile and cr
   await expect(auto).toBeDisabled();
   await expect(section.getByText("Turn on Reminders to use it.")).toBeVisible();
 
-  // Back to On-call: the Route "tm" for team="tm" to "tm-alerts".
+  // Back to Paging: the Route "tm" for team="tm" to "tm-alerts".
   await page.getByRole("button", { name: "Choose another profile" }).click();
-  await page.getByRole("button", { name: "On-call" }).click();
+  await page.getByRole("button", { name: "Paging" }).click();
   await expect(ack).toBeChecked();
   await page.getByRole("textbox", { name: "Name" }).fill("tm");
   await page.getByRole("button", { name: "Add matcher" }).click();
@@ -434,12 +434,12 @@ test("the Route editor shows the ack timeout and Reminders of the profile and cr
 });
 
 test("the ack timeout and Reminders section fits a phone", async ({ browser }) => {
-  // 9. At 360 × 740 the section of a new On-call Route fits without scrolling sideways.
+  // 9. At 360 × 740 the section of a new Paging Route fits without scrolling sideways.
   const phone = await adminPhone(browser);
   const csp = watchCsp(phone);
   await phone.goto("/routes");
   await phone.getByRole("link", { name: "Create route" }).click();
-  await phone.getByRole("button", { name: "On-call" }).click();
+  await phone.getByRole("button", { name: "Paging" }).click();
   const section = phone.getByRole("group", { name: "Ack timeout and Reminders" });
   await expect(section).toBeVisible();
   await expect(section.getByRole("switch", { name: "Ack timeout", exact: true })).toBeChecked();
@@ -447,7 +447,7 @@ test("the ack timeout and Reminders section fits a phone", async ({ browser }) =
   await section.scrollIntoViewIfNeeded();
   await expectInside(phone, "route-timers");
   await expectNoHorizontalScroll(phone);
-  await shot(phone, "route-timers-on-call-360");
+  await shot(phone, "route-timers-paging-360");
   expect(csp).toEqual([]);
   await phone.context().close();
 });
@@ -600,7 +600,7 @@ test("two unanswered Reminders unacknowledge automatically", async ({ page, brow
     "GET",
     "/api/v1/route-profiles",
   );
-  const policy = profiles.items.find((p) => p.id === "on_call")?.policy;
+  const policy = profiles.items.find((p) => p.id === "paging")?.policy;
   await pat(tokenA, "POST", "/api/v1/routes", {
     name: "tm-au",
     matchers: [{ label: "team", op: "=", value: "tm-au" }],

@@ -74,22 +74,22 @@ When you create a Route, you choose a **Route profile**. A profile only fills in
 can change every field afterwards. There are two:
 
 Ack timeout (`route.ack_timeout`)
-:   On-call: on; first notice after 15 minutes · Informational: off
+:   Paging: on; first notice after 15 minutes · Informational: off
 
 Reminders (`route.reminders`)
-:   On-call: on; first after 4 hours · Informational: off
+:   Paging: on; first after 4 hours · Informational: off
 
 Snooze durations (`route.snooze_durations`)
-:   On-call: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
+:   Paging: 1 h, 4 h, 24 h · Informational: 1 d, 3 d, 7 d
 
 Group key (`route.group_key`)
-:   On-call: `alertname`, `severity`, `cluster` · Informational: the same
+:   Paging: `alertname`, `severity`, `cluster` · Informational: the same
 
 Reopen window and Grace period
-:   On-call: 15 minutes each · Informational: the same
+:   Paging: 15 minutes each · Informational: the same
 
 Choose **Informational** for alerts nobody needs to act on at once, such as a certificate that expires in a month: no
-notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and
+notices, no Reminders, and long Snooze durations. Choose **Paging** for the rest. See [Statuses and
 commands](statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) for what the timers do.
 
 ### Minimum severity
@@ -201,10 +201,10 @@ labels](../integrations/alertmanager.md#static-labels).
 
 ## Create a Route
 
-1. Open **Routes** and select **Create route**. Choose a [Route profile](#route-profiles), **On-call** or
+1. Open **Routes** and select **Create route**. Choose a [Route profile](#route-profiles), **Paging** or
    **Informational**; **Choose another profile** takes you back.
 
-    ![Create route: the choice between the profiles On-call and Informational](../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
+    ![Create route: the choice between the profiles Paging and Informational](../assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
 
 2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](#matchers) and check the
    [Group key](#group-keys) with its [preview](#preview-before-you-save).
@@ -222,7 +222,7 @@ labels](../integrations/alertmanager.md#static-labels).
    and **Message**, which [Messages and templates](../configure/messages-and-templates.md#edit-a-routes-message)
    explains.
 
-    ![The policy of the Route with the values of On-call: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](../assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](../assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
 
 5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
    Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](#order-and-the-default-route).
@@ -237,7 +237,7 @@ Destination to the Default route and everything reaches one place. This is the s
 plus a messenger.
 
 **Pages for payments.** Create the Route `payments-critical` with the Matchers `team="payments"` and
-`severity="critical"`, the On-call profile and a Destination that is the payments team's channel. Put it above the
+`severity="critical"`, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.
 

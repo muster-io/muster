@@ -134,7 +134,7 @@ func setup(t *testing.T, s dbtest.Server) *env {
 	return e
 }
 
-// route creates a Route for team=value with the Group key and the On-call policy, and returns its public_id.
+// route creates a Route for team=value with the Group key and the Paging policy, and returns its public_id.
 func (e *env) route(t *testing.T, name, team string, key ...string) routing.Route {
 	t.Helper()
 	p := routing.Profiles()[0].Policy
@@ -1561,7 +1561,7 @@ func TestIntegrationDeliveryProblem(t *testing.T) {
 }
 
 // TestIntegrationAckTimeout is C-17.FR-1 to FR-3, FR-7 and FR-9 on PostgreSQL: the first Publication starts the ack
-// timeout of a firing Alert Group on an On-call Route, a second one does not; two replicas fire notice 1 once at 15
+// timeout of a firing Alert Group on a Paging Route, a second one does not; two replicas fire notice 1 once at 15
 // minutes; notices 2 and 3 overdue together collapse into notices_missed and make it Unclaimed, which the list, the
 // counts and the read show; Acknowledge ends Unclaimed and the timer, Unacknowledge starts the ack timeout over.
 func TestIntegrationAckTimeout(t *testing.T) {

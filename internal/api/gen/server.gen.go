@@ -2282,7 +2282,7 @@ func (e RoleName) Valid() bool {
 // Defines values for RouteProfileId.
 const (
 	Informational RouteProfileId = "informational"
-	OnCall        RouteProfileId = "on_call"
+	Paging        RouteProfileId = "paging"
 )
 
 // Valid indicates whether the value is a known member of the RouteProfileId enum.
@@ -2290,7 +2290,7 @@ func (e RouteProfileId) Valid() bool {
 	switch e {
 	case Informational:
 		return true
-	case OnCall:
+	case Paging:
 		return true
 	default:
 		return false

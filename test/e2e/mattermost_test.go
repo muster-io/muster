@@ -93,17 +93,26 @@ func (e *mm) destination(name, connection, channel string, mentions map[string]s
 	return created["destination"].(map[string]any)["id"].(string)
 }
 
-// route creates a Route for the label team=team with the Group key [alertname, cluster] and the On-call profile,
+// route creates a Route for the label team=team with the Group key [alertname, cluster] and the Paging profile,
 // changed by edit.
 func (e *mm) route(name, team string, destinations []string, edit func(policy map[string]any)) string {
 	e.t.Helper()
 	var profiles struct {
 		Items []struct {
+			ID     string         `json:"id"`
 			Policy map[string]any `json:"policy"`
 		} `json:"items"`
 	}
 	decode(e.t, e.api.do(http.MethodGet, "/api/v1/route-profiles", ""), &profiles)
-	policy := profiles.Items[0].Policy
+	var policy map[string]any
+	for _, p := range profiles.Items {
+		if p.ID == "paging" {
+			policy = p.Policy
+		}
+	}
+	if policy == nil {
+		e.t.Fatalf("no profile paging in %+v", profiles.Items)
+	}
 	if edit != nil {
 		edit(policy)
 	}

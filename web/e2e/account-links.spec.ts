@@ -534,7 +534,7 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
       urgent: false,
       group_key: ["alertname"],
       destination_ids: [created.destination.id],
-      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
     });
     await fam("PUT", `/groups/${BRIDGE_TEAM}`, {
       receiver: "bridge-links",

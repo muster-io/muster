@@ -186,7 +186,7 @@ test("an alert reaches Telegram and is acknowledged from there", async ({ page }
   // 4. The Route "checkout": the Matcher service="checkout", the Group key alertname and service, the Destination.
   await nav(page, "Routes").click();
   await page.getByRole("link", { name: "Create route" }).click();
-  await page.getByRole("button", { name: "On-call" }).click();
+  await page.getByRole("button", { name: "Paging" }).click();
   await page.getByRole("textbox", { name: "Name" }).fill(ROUTE);
   await page.getByRole("button", { name: "Add matcher" }).click();
   await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("service");

@@ -192,7 +192,7 @@ test.beforeAll(async () => {
       urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [ids.alerts],
-      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
     });
 
     // "hb" with a Heartbeat that gets one signal and then none.

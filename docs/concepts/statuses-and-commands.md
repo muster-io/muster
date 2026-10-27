@@ -116,7 +116,7 @@ Details:
   makes you say which: a request names exactly one of `until`, `no_end` and `preset`. A Snooze with no end asks you to
   confirm "This Alert Group stays snoozed until someone unsnoozes it".
   Messengers offer the Route's **Snooze durations** as separate buttons or a menu (`route.snooze_durations`: 1 hour,
-  4 hours and 24 hours on an On-call Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
+  4 hours and 24 hours on a Paging Route, 1 day, 3 days and 7 days on an Informational Route), and after them the
   two Snooze presets; see [In messengers](#in-messengers).
 - **Unresolve** is refused when the system resolved the Alert Group ("it reopens by itself when an alert returns"),
   when its Route was deleted, when a newer open Alert Group with the same key exists, and when all its Alerts have
@@ -359,7 +359,7 @@ message.
 ## Ack timeouts, Reminders and auto-unacknowledge
 
 Three timers make sure nobody forgets: one for an Alert Group nobody has taken, one for an Alert Group somebody took and
-then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the On-call profile turns
+then went quiet, and an optional one that takes the Alert Group back. They are Route settings; the Paging profile turns
 the first two on and the Informational profile turns everything off.
 
 ### Ack timeout
@@ -368,7 +368,7 @@ The ack timeout runs while an Alert Group is Firing. It starts at the Alert Grou
 starts over each time it becomes Firing again. Acknowledge, Snooze and Resolve stop it.
 
 When nobody acknowledges, Muster sends up to three **notices**, at doubling intervals from the Route's first interval
-(`route.ack_timeout`, 15 minutes on an On-call Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
+(`route.ack_timeout`, 15 minutes on a Paging Route). With 15 minutes they come at 15, 45 and 105 minutes after the start.
 Each is a Loud Thread reply that Mentions whom the Destination's `ack_timeout` setting says. After the last notice the
 Alert Group is **Unclaimed**: its message shows "⚠ Nobody has taken this", and the Alert Group list has an Unclaimed
 filter, column and badge. Unclaimed ends when the Alert Group stops being Firing.
@@ -378,7 +378,7 @@ until its first Publication.
 
 ### Reminders
 
-When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (`route.reminders`, on an On-call
+When somebody acknowledges, Muster reminds the Owner while the Alert Group stays open (`route.reminders`, on a Paging
 Route). The first **Reminder** comes 4 hours after the acknowledgement, and each next interval doubles up to 24 hours: at 4,
 12, 28 and 52 hours, then every 24 hours. Each is a Loud Thread reply that Mentions the Owner, with the buttons **Still
 on it** and **Unack**.

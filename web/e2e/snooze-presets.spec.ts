@@ -3,9 +3,9 @@
 
 // The Snooze presets in the web UI against `muster dev`: Verification steps 1 to 3 and 5 to 7 of their story; step 4,
 // the General page, is in organization-settings.spec.ts. The fake Alertmanager sends the group spr to the Integration
-// "snooze-presets" on the On-call Route "spr", two firing Alert Groups; the Responder "spr-anna" reads Muster in
+// "snooze-presets" on the Paging Route "spr", two firing Alert Groups; the Responder "spr-anna" reads Muster in
 // Russian. The development clock moves to the next 02:00 in Berlin, the time zone of the browser and of the profiles,
-// which follow it. The Snooze dialog offers the On-call durations, then "Until tomorrow 09:00", which ends the same
+// which follow it. The Snooze dialog offers the Paging durations, then "Until tomorrow 09:00", which ends the same
 // morning, and "Until Monday 09:00", which ends on the next Monday, and snoozes until 09:00; a bulk Snooze gives both
 // Alert Groups the same end; the profile names the Organization's time zone, UTC; the Russian texts; at 360 × 740 the
 // dialog is a full-screen sheet with both presets and their ends in view; and at 08:59 the preset still ends at 09:00.
@@ -192,7 +192,7 @@ test("at 02:00 the presets end at 09:00 the same day and on Monday, and snooze u
   await signInAdmin(page);
   await alignClock(page);
 
-  // 1. The On-call durations, both presets with their ends, "Until" and "No end".
+  // 1. The Paging durations, both presets with their ends, "Until" and "No end".
   const dialog = await openSnooze(page, g1 ?? { id: "", number: 0 });
   await expect(dialog.getByTestId("snooze-preset-end-tomorrow")).toHaveText(
     `Ends ${await shown(page, ends.tomorrow, "en")}`,

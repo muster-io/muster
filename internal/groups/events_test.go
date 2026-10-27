@@ -562,7 +562,7 @@ func TestTimerEventTable(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.people()
-			h.onCall()
+			h.paging()
 			h.db.routes[2].timers.AutoUnacknowledge = true
 			g := h.firing(t, "x")
 			h.publish(t, g, t0)

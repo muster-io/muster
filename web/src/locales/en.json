@@ -2224,8 +2224,8 @@
       "hint": "A profile only fills in the starting values; you can change them before you create the route.",
       "informational": "Informational",
       "informationalLine": "For alerts to read later: no ack timeout, no Reminders, long Snooze durations.",
-      "onCall": "On-call",
-      "onCallLine": "For alerts someone must act on: ack timeout and Reminders on.",
+      "paging": "Paging",
+      "pagingLine": "For alerts someone must act on: ack timeout and Reminders on.",
       "title": "Choose a profile"
     },
     "snooze": {

@@ -132,11 +132,12 @@ func TestRouting(t *testing.T) {
 	var profiles struct {
 		Items []struct {
 			ID     string          `json:"id"`
+			Name   string          `json:"name"`
 			Policy json.RawMessage `json:"policy"`
 		} `json:"items"`
 	}
 	decode(t, admin.do(http.MethodGet, "/api/v1/route-profiles", ""), &profiles)
-	var onCall json.RawMessage
+	var paging json.RawMessage
 	for _, p := range profiles.Items {
 		var pol struct {
 			Snooze     []int `json:"snooze_durations_seconds"`
@@ -151,14 +152,16 @@ func TestRouting(t *testing.T) {
 			t.Fatal(err)
 		}
 		switch p.ID {
-		case "on_call":
-			onCall = p.Policy
-			if !slices.Equal(pol.Snooze, []int{3600, 14400, 86400}) || !pol.AckTimeout.Enabled || !pol.Reminders.Enabled {
-				t.Errorf("on-call %s", p.Policy)
+		case "paging":
+			paging = p.Policy
+			if p.Name != "Paging" || !slices.Equal(pol.Snooze, []int{3600, 14400, 86400}) ||
+				!pol.AckTimeout.Enabled || !pol.Reminders.Enabled {
+				t.Errorf("paging %s %s", p.Name, p.Policy)
 			}
 		case "informational":
-			if !slices.Equal(pol.Snooze, []int{86400, 259200, 604800}) || pol.AckTimeout.Enabled || pol.Reminders.Enabled {
-				t.Errorf("informational %s", p.Policy)
+			if p.Name != "Informational" || !slices.Equal(pol.Snooze, []int{86400, 259200, 604800}) ||
+				pol.AckTimeout.Enabled || pol.Reminders.Enabled {
+				t.Errorf("informational %s %s", p.Name, p.Policy)
 			}
 		default:
 			t.Errorf("profile %s", p.ID)
@@ -177,8 +180,8 @@ func TestRouting(t *testing.T) {
 		decode(t, a, &rt)
 		return rt
 	}
-	ra := created(mk("A", `[{"label":"severity","op":"=","value":"critical"}]`, onCall))
-	rb := created(mk("B", `[{"label":"team","op":"=","value":"x"}]`, onCall))
+	ra := created(mk("A", `[{"label":"severity","op":"=","value":"critical"}]`, paging))
+	rb := created(mk("B", `[{"label":"team","op":"=","value":"x"}]`, paging))
 	if got := routeNames(); got != "A,B,Default" {
 		t.Fatalf("routes %s", got)
 	}
@@ -241,11 +244,11 @@ func TestRouting(t *testing.T) {
 	}
 
 	// C-08.AC-10, and a template that calls an unregistered function (C-12.AC-2).
-	if s, _, pointer, code := problem(mk("C", `[{"label":"pod","op":"=~","value":"api-("}]`, onCall)); s !=
+	if s, _, pointer, code := problem(mk("C", `[{"label":"pod","op":"=~","value":"api-("}]`, paging)); s !=
 		http.StatusUnprocessableEntity || pointer != "/matchers/0/value" || code != "invalid_regex" {
 		t.Errorf("invalid regex = %d %s %s", s, pointer, code)
 	}
-	templated := strings.Replace(string(onCall), `"root_message":null`, `"root_message":"{{ env \"HOME\" }}"`, 1)
+	templated := strings.Replace(string(paging), `"root_message":null`, `"root_message":"{{ env \"HOME\" }}"`, 1)
 	if s, _, pointer, code := problem(mk("T", `[]`, json.RawMessage(templated))); s != http.StatusUnprocessableEntity ||
 		pointer != "/policy/templates/root_message" || code != "unknown_function" {
 		t.Errorf("template = %d %s %s", s, pointer, code)

@@ -137,7 +137,7 @@ export async function fakeIntegration(name: string): Promise<string> {
   }
 }
 
-/** Creates a Route with the On-call profile for the alerts with team=<team>, grouped by groupKey. Returns its id. */
+/** Creates a Route with the Paging profile for the alerts with team=<team>, grouped by groupKey. Returns its id. */
 export async function createRoute(name: string, team: string, groupKey: string[]): Promise<string> {
   const admin = await adminApi();
   try {
@@ -151,7 +151,7 @@ export async function createRoute(name: string, team: string, groupKey: string[]
       urgent: false,
       group_key: groupKey,
       destination_ids: [],
-      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
     });
     return route.id;
   } finally {

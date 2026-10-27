@@ -688,7 +688,7 @@ export const useMoveOpenAlertGroups = <TError = UnauthorizedResponse | Forbidden
 }
 
 /**
- * The two starting sets of Route settings, On-call and Informational, read from the built-in defaults. They only pre-fill the create form; they cannot be edited or stored.
+ * The two starting sets of Route settings, Paging and Informational, read from the built-in defaults. They only pre-fill the create form; they cannot be edited or stored.
  * @summary List Route profiles
  */
 export const listRouteProfiles = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RouteProfileList> => {

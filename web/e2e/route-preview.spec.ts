@@ -3,7 +3,7 @@
 
 // The Route editor and the Group key preview against `muster dev`: Verification steps 2 to 4 of the Routes story. The
 // fake Alertmanager sends the group rk1 (alertname Disk, two alerts with cluster=a and two without a cluster) to the
-// Integration "pv"; "Create route" with the On-call profile previews the unsaved Route, creates "disk", and its
+// Integration "pv"; "Create route" with the Paging profile previews the unsaved Route, creates "disk", and its
 // editor previews the current and the proposed Group key and puts the server's regular expression error under its
 // row. Then the editor of a Route changed elsewhere, and the editor in Russian and 360 px wide.
 
@@ -85,21 +85,21 @@ test("creates a Route from a profile and previews its Group key", async ({ page 
   await prepare();
   await signInAdmin(page);
 
-  // 2. "Create route" → "On-call": the editor has the profile's values; the unsaved Route previews the proposed side.
+  // 2. "Create route" → "Paging": the editor has the profile's values; the unsaved Route previews the proposed side.
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Routes" })
     .click();
   await page.getByRole("link", { name: "Create route" }).click();
-  await expect(page.getByRole("button", { name: "On-call" })).toHaveAccessibleDescription(
+  await expect(page.getByRole("button", { name: "Paging" })).toHaveAccessibleDescription(
     "For alerts someone must act on: ack timeout and Reminders on.",
   );
   await expect(page.getByRole("button", { name: "Informational" })).toHaveAccessibleDescription(
     "For alerts to read later: no ack timeout, no Reminders, long Snooze durations.",
   );
   await shot(page, "routes-profile-choice");
-  await page.getByRole("button", { name: "On-call" }).click();
-  await expect(page.getByTestId("route-profile")).toContainText("Profile: On-call");
+  await page.getByRole("button", { name: "Paging" }).click();
+  await expect(page.getByTestId("route-profile")).toContainText("Profile: Paging");
   await expect(page.getByRole("textbox", { name: "Name" })).toBeFocused();
   await expect(page.getByTestId("group-key-label")).toHaveText([
     "alertname",
@@ -283,7 +283,7 @@ test("the editor and the preview in Russian, 360 px wide", async ({ browser }) =
   await shot(page, "routes-editor-ru-360");
 
   await page.goto("/routes/new");
-  await expect(page.getByRole("button", { name: "Дежурный" })).toHaveAccessibleDescription(
+  await expect(page.getByRole("button", { name: "С призывом" })).toHaveAccessibleDescription(
     "Для алертов, на которые кто-то должен отреагировать: тайм-аут подтверждения и напоминания включены.",
   );
   await page.getByRole("button", { name: "Информационный" }).click();

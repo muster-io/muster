@@ -87,7 +87,7 @@ export function characterCount(text: string): number {
 
 /**
  * A Snooze duration as a quick choice: "1 h", "4 h", "24 h", "30 min"; whole days from two days on, such as "3 d", so
- * that one day stays "24 h" as the On-call profile names it.
+ * that one day stays "24 h" as the Paging profile names it.
  */
 export function snoozeDurationLabel(t: TFunction, seconds: number): string {
   const day = 24 * 60 * 60;

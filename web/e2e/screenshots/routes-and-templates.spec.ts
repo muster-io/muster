@@ -5,7 +5,7 @@
 // (docs/configure/messages-and-templates.md). The fake Alertmanager first sends the four KubePodCrashLooping Alerts of
 // the page's Group key table, all with team=payments, to the Integration "payments-am", so that the Group key preview
 // has Stored Snapshots to read; the outgoing webhook Destination "payments" is made through the API. The Admin then
-// creates the Route "payments" with the On-call profile, the Matcher team="payments", the default Group key and its
+// creates the Route "payments" with the Paging profile, the Matcher team="payments", the default Group key and its
 // preview, and the Destination; previews another Group key on the saved Route; makes its Alert line Custom with the
 // preview of the built-in example; creates the Lookup table "dashboards" and the Link rule "Dashboard" that reads it.
 // The Default route is not edited. It deletes what it created.
@@ -126,11 +126,11 @@ test("creates a Route, edits its message, and adds a Lookup table and a Link rul
   // Create a Route: the profile, the Matcher, the Group key with its preview, the Destination, the policy, the list.
   await nav(page, "Routes").click();
   await page.getByRole("link", { name: "Create route" }).click();
-  await expect(page.getByRole("button", { name: "On-call" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Paging" })).toBeVisible();
   await capture(page, ROUTES, "04-choose-profile", {
-    highlight: page.getByRole("button", { name: "On-call" }),
+    highlight: page.getByRole("button", { name: "Paging" }),
   });
-  await page.getByRole("button", { name: "On-call" }).click();
+  await page.getByRole("button", { name: "Paging" }).click();
   await page.getByRole("textbox", { name: "Name" }).fill(ROUTE);
   await page.getByRole("button", { name: "Add matcher" }).click();
   await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("team");

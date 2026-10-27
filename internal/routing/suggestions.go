@@ -53,7 +53,7 @@ func suggested(id string) (Input, error) {
 				Value: internalalerts.HeartbeatLost.Name}},
 			MinimumSeverity: new(MinimumCritical),
 			GroupKey:        []string{"alertname", internalalerts.EntityIntegration},
-			DestinationIDs:  []string{}, Policy: onCall().Policy,
+			DestinationIDs:  []string{}, Policy: paging().Policy,
 		}, nil
 	case SuggestionInternalAlerts:
 		return Input{
@@ -61,7 +61,7 @@ func suggested(id string) (Input, error) {
 			Matchers: []Matcher{{Label: "alertname", Op: string(matchers.Regexp), Value: "Muster.*"}},
 			GroupKey: []string{"alertname", internalalerts.EntityIntegration, internalalerts.EntityDestination,
 				internalalerts.EntityRoute},
-			DestinationIDs: []string{}, Policy: onCall().Policy,
+			DestinationIDs: []string{}, Policy: paging().Policy,
 		}, nil
 	default:
 		return Input{}, ErrSuggestionNotFound

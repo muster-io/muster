@@ -144,7 +144,7 @@ func TestPreview(t *testing.T) {
 	}
 
 	saved, err := svc.Create(ctx, by, Input{Name: "disk", Matchers: disk, GroupKey: []string{"alertname"},
-		Policy: onCall().Policy})
+		Policy: paging().Policy})
 	if err != nil {
 		t.Fatal(err)
 	}

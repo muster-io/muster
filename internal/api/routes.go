@@ -162,7 +162,7 @@ func (s *Server) ReorderRoutes(ctx context.Context, req gen.ReorderRoutesRequest
 		Headers: gen.ReorderRoutes200ResponseHeaders{ETag: &tag}}, nil
 }
 
-// ListRouteProfiles is listRouteProfiles: On-call and Informational, from the built-in defaults.
+// ListRouteProfiles is listRouteProfiles: Paging and Informational, from the built-in defaults.
 func (s *Server) ListRouteProfiles(context.Context, gen.ListRouteProfilesRequestObject) (
 	gen.ListRouteProfilesResponseObject, error) {
 	profiles := routing.Profiles()

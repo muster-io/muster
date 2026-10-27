@@ -7,7 +7,7 @@
 // Matchers all match takes a newly firing Alert (Router). Reordering replaces the positions under the list ETag,
 // organizations.route_order_version, which creating, deleting and reordering bump; deletion is soft. Every change is
 // recorded in the Audit log and announced with the live hint route; the package also exports muster_route_info,
-// serves the two Route profiles, On-call and Informational, from the built-in defaults, previews a Group key over the
+// serves the two Route profiles, Paging and Informational, from the built-in defaults, previews a Group key over the
 // Stored Snapshots of a period with the Router's evaluation order, and computes the Route suggestions on each read.
 package routing
 
@@ -1134,10 +1134,10 @@ func newOrder(current []dbgen.ListRoutesRow, ids []string) ([]string, []int64, e
 }
 
 // EnsureDefault creates the Default route of the Organization once (C-08.FR-3), as a start-up ensure step: "Default",
-// without Matchers, with the values of the On-call profile, which sets no Minimum severity. It changes nothing when the Default route exists; a Route
+// without Matchers, with the values of the Paging profile, which sets no Minimum severity. It changes nothing when the Default route exists; a Route
 // that is not deleted and already has its name stops the start with ErrNameTaken.
 func EnsureDefault(ctx context.Context, q Queries, orgID int64, now time.Time) error {
-	p := onCall()
+	p := paging()
 	_, err := q.EnsureDefaultRoute(ctx, dbgen.EnsureDefaultRouteParams{
 		OrgID: orgID, PublicID: publicid.New(publicid.Route), Name: DefaultName,
 		Description: "Takes every Alert no other Route took.", MinimumSeverity: p.MinimumSeverity, GroupKey: p.GroupKey,
