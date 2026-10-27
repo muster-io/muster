@@ -13,6 +13,7 @@ export const HintEventType = {
   route: 'route',
   connection: 'connection',
   destination: 'destination',
+  team: 'team',
   organization: 'organization',
   'system-notices': 'system-notices',
   'system-status': 'system-status',

@@ -65,6 +65,8 @@ import (
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
+	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/timers"
 	timersdb "github.com/muster-io/muster/internal/timers/dbgen"
@@ -2010,4 +2012,13 @@ func TestDrainSlackPresses(t *testing.T) {
 		strings.Contains(fmt.Sprint(lines[1]["error"]), "no answers here") {
 		t.Errorf("slack_press lines %v", lines)
 	}
+}
+
+func (f *fakeDB) TeamsStore() teams.Store { return fakeTeamsStore{} }
+
+// fakeTeamsStore has no Teams.
+type fakeTeamsStore struct{ teams.Store }
+
+func (fakeTeamsStore) ListTeamInfo(context.Context, int64) ([]teamsdb.ListTeamInfoRow, error) {
+	return nil, nil
 }

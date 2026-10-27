@@ -53,6 +53,19 @@ files_touched:
   - docs/concepts/teams.md
   - mkdocs.yml
   - docs/install/versions.md
+  - design/prd/l2/C-25-teams.md
+  - internal/tools/refgen/main.go
+  - sqlc.yaml
+  - internal/api/server_test.go
+  - internal/api/routes_test.go
+  - internal/api/organization_test.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
+  - internal/publicid/publicid_test.go
+  - internal/organization/heartbeat_integration_test.go
+  - internal/runtime/runtime_test.go
+  - web/src/components/alert-group-filters.tsx
+  - web/src/routes/statistics.tsx
 acceptance:
   - "[C-25.FR-1, C-25.FR-11] `createTeam` makes a Team with a name and a slug, each unique among the Teams that are not deleted (`409` `name_taken` or `slug_taken`), a description and Working hours; a slug outside `team.slug_format` — `Payments`, `-x`, 64 characters — is refused with `422` `invalid_format` at `/slug`; `getTeam`, `updateTeam` with `If-Match` (`412` when stale, `428` without) and `deleteTeam` work as for Routes; every change is an Audit log entry `team.created`, `team.updated` or `team.deleted` with a before/after diff, and `muster_team_info{team,name}` has one series per Team that is not deleted (`teams_test.go`, `teams_integration_test.go`)."
   - "[C-25.FR-3, C-25.AC-12, C-03.FR-13] `addTeamUser` adds a User to a Team and `removeTeamUser` removes them, each recorded as `team.user_added` and `team.user_removed`; a User may be in several Teams; `listTeamUsers` lists each person with their Role, the source `by_hand` and their linked messengers; deleting a User takes them out of every Team, and disabling one keeps them there (`admin_integration_test.go`)."
@@ -137,7 +150,8 @@ issue: 404
     `organizations.workday_end text NOT NULL DEFAULT '18:00'` with the pattern of `workday_start`, and `CHECK
     (workday_end > workday_start)` added `NOT VALID` and validated in a second transaction. An Organization whose
     `workday_start` is 18:00 or later (P-58 allows any time) gets `workday_end` `23:59` from the up migration before
-    the CHECK is validated (Open question 1); afterwards an update that would leave the end not later than the start
+    the CHECK is validated (Open question 1), and one whose `workday_start` is `23:59` also gets the start `23:58`:
+    `23:59` is the latest `HH:MM`, so no end later than it exists; afterwards an update that would leave the end not later than the start
     is refused with `422` `out_of_range` at the field it changes, `/workday_start` or `/workday_end`.
   - `permissions` gains `teams:read` and `teams:write`, and `role_permissions` gives `teams:read` to every Role and
     `teams:write` to Admin — reference data, as in `0001`.
@@ -185,7 +199,8 @@ issue: 404
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up on PostgreSQL 14 and 17;
    the Permissions of each Role read from `role_permissions` as in the acceptance; `TestIntegrationTeams` migrates an
-   Organization whose `workday_start` is `20:00` and finds `workday_end` `23:59` and the CHECK validated.
+   Organization whose `workday_start` is `20:00` and finds `workday_end` `23:59` and the CHECK validated, and one
+   whose `workday_start` is `23:59` and finds `23:58` to `23:59`.
 2. Write `internal/teams` with the operations, the Audit log, the metric and the hint. Check: `teams_test.go` covers
    every validation, conflict and Permission, and the effective Working hours; `make generate-check`.
 3. Add the owning Team and the filters to Routes and Destinations, and the Working hours to the Organization. Check:
@@ -250,8 +265,9 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
 1. **The end of the Organization's working day where the start is late.** Settled by the maintainer (review of PR
    #399), from P-63 — Working hours end later than they start on the same day: the migration sets `workday_end` to
    `23:59` where `workday_start` is 18:00 or later, and from then on the end must be later than the start — an update
-   that breaks it is refused with `422` `out_of_range` at the field it changes. The contract above follows it, and the
-   upgrade notes of 0.2.0 name the Organizations it changes.
+   that breaks it is refused with `422` `out_of_range` at the field it changes. Where `workday_start` is `23:59`, the
+   latest `HH:MM`, no end later than it exists, so the migration also moves the start to `23:58` (added with the
+   implementation). The contract above follows it, and the upgrade notes of 0.2.0 name the Organizations it changes.
 
 ## Notes
 
@@ -265,10 +281,9 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 46 files (the builders of S-166 and of Teams, the problem mapping and the Role matrix test included) the story
-  is at the edge of the size signal;
-  the Working hours of the Organization and of a Team are one rule (C-25.FR-9), and the owning Team of Routes and
-  Destinations is needed by the filter that checks it.
+- With 59 files — 13 of them test fakes, counts and call sites that the new fields and Permissions touch — the story
+  is past the size signal and kept whole: the Working hours of the Organization and of a Team are one rule
+  (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
 - Migration `0023` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
 

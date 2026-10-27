@@ -350,6 +350,8 @@ with the C-03 sign-in story (P-42).
 | `users:read`, `users:write` | Read and manage Users, their Account links and password setup links; list Roles | ✓ | — | — |
 | `oidc:read`, `oidc:write` | Read and change the OIDC settings, run its check | ✓ | — | — |
 | `service-accounts:read`, `service-accounts:write` | Read and manage Service accounts and their tokens | ✓ | — | — |
+| `teams:read` | Read Teams, the people in them, their Team mentions, Destinations and Working hours, and the Team label values seen without a Team (from 0.2.0, C-25, C-26) | ✓ | ✓ | ✓ |
+| `teams:write` | Create, edit and delete Teams, the people in them, their identity provider entries, Team matchers, Team mentions, Working hours, Destinations and Escalation chains (from 0.2.0, C-25, C-26, C-32) | ✓ | — | — |
 | `organization:read` | Read the outbound address policy, the Keyring status and the severity values seen | ✓ | — | — |
 | `organization:write` | Change Organization settings, the outbound address policy and the outgoing heartbeat | ✓ | — | — |
 | `audit-log:read`, `system-status:read` | Read the Audit log and the System status | ✓ | — | — |
@@ -379,8 +381,6 @@ User's Notification rules and removing their gateway contacts need `users:read` 
 
 | L2 Permission | Allows | Admin | Responder | Viewer | Capability |
 |---|---|---|---|---|---|
-| `teams:read` | Read Teams, the people in them, their Team mentions, Destinations and Working hours, and the Team label values seen without a Team | ✓ | ✓ | ✓ | C-25, C-26 |
-| `teams:write` | Create, edit and delete Teams, the people in them, their identity provider entries, Team matchers, Team mentions, Working hours, Destinations and Escalation chains | ✓ | — | — | C-25, C-26, C-32 |
 | `schedules:read` | Read Schedules, Rotation layers, Overrides, the On-call, gaps and "On call now" | ✓ | ✓ | ✓ | C-27 |
 | `schedules:write` | Create, edit and delete Schedules and Rotation layers, and choose a Team's main Schedule | ✓ | — | — | C-27 |
 | `schedule-overrides:write` | Create, change and delete Overrides, when the caller is in the Team or is an Admin (C-27.FR-6) | ✓ | ✓ | — | C-27 |
@@ -471,6 +471,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_request_log_records_total` | counter | `direction` (`outbound`, `inbound`) — records written to the Request log | C-23 |
 | `muster_request_log_write_failures_total` | counter | `direction` (`outbound`, `inbound`) — records that could not be written and were dropped | C-23 |
 | `muster_request_log_pruned_total` | counter | — (records the Leader deleted past `request_log.max_records` or `request_log.max_age`, `request_log_pruning`) | C-23 |
+| `muster_team_info` | gauge | `team`, `name` | C-25 |
 
 ## Chart rules
 
@@ -514,7 +515,6 @@ holds them, outside the catalogue that the code checks. The value `gateway` join
 
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|
-| `muster_team_info` | gauge | `team`, `name` | C-25 |
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
 | `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while there is a gap now or one that starts within `schedule.gap_alert_horizon` | C-27 |
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |

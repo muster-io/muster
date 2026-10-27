@@ -19,6 +19,16 @@ export interface OrganizationBase {
      */
   workday_start?: string;
   week_start?: Weekday;
+  /**
+     * The days of the Organization's Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.
+     * @minItems 1
+     */
+  working_days?: Weekday[];
+  /**
+     * The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.
+     * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
+     */
+  workday_end?: string;
   /** Label that carries severity. */
   severity_label: string;
   /** Values of the severity label mapped to Severity levels. Unmapped values count as warning. */

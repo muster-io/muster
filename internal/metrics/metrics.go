@@ -30,8 +30,8 @@ const (
 type LabelKind string
 
 const (
-	// LabelEntity carries the public_id of a configuration entity: integration, route or destination. Its value may
-	// be empty where the metric says the entity is absent.
+	// LabelEntity carries the public_id of a configuration entity: integration, route, destination or team. Its value
+	// may be empty where the metric says the entity is absent.
 	LabelEntity LabelKind = "entity"
 	// LabelClosed takes one of the values listed with the label.
 	LabelClosed LabelKind = "closed"
@@ -41,7 +41,7 @@ const (
 )
 
 // EntityLabels are the only labels that name configuration entities (ADR-0014).
-var EntityLabels = []string{"integration", "route", "destination"}
+var EntityLabels = []string{"integration", "route", "destination", "team"}
 
 // Label is one label of a metric.
 type Label struct {

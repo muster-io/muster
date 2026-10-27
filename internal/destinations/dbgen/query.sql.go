@@ -37,9 +37,11 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
-       d.created_at, d.version
+       d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
+       t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM destinations d
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+LEFT JOIN teams t ON t.org_id = d.org_id AND t.id = d.owning_team_id
 WHERE d.org_id = $1 AND d.public_id = $2 AND d.deleted_at IS NULL
 `
 
@@ -86,6 +88,11 @@ type GetDestinationRow struct {
 	TemplateError                pgtype.Text
 	CreatedAt                    time.Time
 	Version                      int64
+	OwningTeamID                 pgtype.Int8
+	OwningTeamPublicID           pgtype.Text
+	OwningTeamName               pgtype.Text
+	OwningTeamSlug               pgtype.Text
+	OwningTeamDeleted            bool
 }
 
 // GetDestination reads a Destination that is not deleted.
@@ -130,6 +137,11 @@ func (q *Queries) GetDestination(ctx context.Context, arg GetDestinationParams) 
 		&i.TemplateError,
 		&i.CreatedAt,
 		&i.Version,
+		&i.OwningTeamID,
+		&i.OwningTeamPublicID,
+		&i.OwningTeamName,
+		&i.OwningTeamSlug,
+		&i.OwningTeamDeleted,
 	)
 	return i, err
 }
@@ -474,9 +486,11 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
-       d.created_at, d.version
+       d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
+       t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM destinations d
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+LEFT JOIN teams t ON t.org_id = d.org_id AND t.id = d.owning_team_id
 WHERE d.org_id = $1 AND d.deleted_at IS NULL
   AND ($2::text IS NULL OR d.type = $2::text)
   AND ($3::text IS NULL OR d.health = $3::text)
@@ -486,9 +500,15 @@ WHERE d.org_id = $1 AND d.deleted_at IS NULL
                   JOIN routes r ON r.org_id = rd.org_id AND r.id = rd.route_id
                   WHERE rd.org_id = d.org_id AND rd.destination_id = d.id AND r.public_id = $4::text
                     AND r.deleted_at IS NULL))
-  AND ($5::bigint IS NULL OR d.id > $5::bigint)
+  AND ($5::text IS NULL OR t.public_id = $5::text)
+  AND ($6::bigint IS NULL
+       OR EXISTS (SELECT 1
+                  FROM team_users tu
+                  WHERE tu.org_id = d.org_id AND tu.team_id = d.owning_team_id
+                    AND tu.user_id = $6::bigint))
+  AND ($7::bigint IS NULL OR d.id > $7::bigint)
 ORDER BY d.id
-LIMIT $6
+LIMIT $8
 `
 
 type ListDestinationsParams struct {
@@ -496,6 +516,8 @@ type ListDestinationsParams struct {
 	Type     pgtype.Text
 	Health   pgtype.Text
 	Route    pgtype.Text
+	Team     pgtype.Text
+	TeamUser pgtype.Int8
 	AfterID  pgtype.Int8
 	PageSize int32
 }
@@ -538,19 +560,27 @@ type ListDestinationsRow struct {
 	TemplateError                pgtype.Text
 	CreatedAt                    time.Time
 	Version                      int64
+	OwningTeamID                 pgtype.Int8
+	OwningTeamPublicID           pgtype.Text
+	OwningTeamName               pgtype.Text
+	OwningTeamSlug               pgtype.Text
+	OwningTeamDeleted            bool
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // Destinations (C-11.FR-18): reading every type with its health and Routes. Secrets are read only as their status.
 // ListDestinations reads a page of the Destinations that are not deleted, in id order after a cursor, filtered by
-// type, health and the public_id of a Route that is not deleted.
+// type, health, the public_id of a Route that is not deleted, and the public_id of the Team that owns them or a User
+// in the Team that owns them.
 func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsParams) ([]ListDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listDestinations,
 		arg.OrgID,
 		arg.Type,
 		arg.Health,
 		arg.Route,
+		arg.Team,
+		arg.TeamUser,
 		arg.AfterID,
 		arg.PageSize,
 	)
@@ -599,6 +629,11 @@ func (q *Queries) ListDestinations(ctx context.Context, arg ListDestinationsPara
 			&i.TemplateError,
 			&i.CreatedAt,
 			&i.Version,
+			&i.OwningTeamID,
+			&i.OwningTeamPublicID,
+			&i.OwningTeamName,
+			&i.OwningTeamSlug,
+			&i.OwningTeamDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -736,6 +771,39 @@ func (q *Queries) LockMattermostConnection(ctx context.Context, arg LockMattermo
 	return id, err
 }
 
+const lockOwningTeam = `-- name: LockOwningTeam :one
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockOwningTeamParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type LockOwningTeamRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// LockOwningTeam reads the Team that is not deleted that a Destination is to name as its owner, in share mode, so that
+// the Team's deletion, which locks it for update, either waits for the save or is seen by it.
+func (q *Queries) LockOwningTeam(ctx context.Context, arg LockOwningTeamParams) (LockOwningTeamRow, error) {
+	row := q.db.QueryRow(ctx, lockOwningTeam, arg.OrgID, arg.PublicID)
+	var i LockOwningTeamRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Slug,
+	)
+	return i, err
+}
+
 const lockSlackConnection = `-- name: LockSlackConnection :one
 SELECT id
 FROM connections
@@ -793,6 +861,25 @@ type MarkDestinationDeletedParams struct {
 // MarkDestinationDeleted soft-deletes a Destination: it leaves every list and reads as missing, the row stays.
 func (q *Queries) MarkDestinationDeleted(ctx context.Context, arg MarkDestinationDeletedParams) error {
 	_, err := q.db.Exec(ctx, markDestinationDeleted, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const setDestinationOwningTeam = `-- name: SetDestinationOwningTeam :exec
+UPDATE destinations
+SET owning_team_id = $1::bigint
+WHERE org_id = $2 AND id = $3
+`
+
+type SetDestinationOwningTeamParams struct {
+	OwningTeamID pgtype.Int8
+	OrgID        int64
+	ID           int64
+}
+
+// SetDestinationOwningTeam writes the owning Team of a Destination in the transaction that saved it, which moved its
+// version.
+func (q *Queries) SetDestinationOwningTeam(ctx context.Context, arg SetDestinationOwningTeamParams) error {
+	_, err := q.db.Exec(ctx, setDestinationOwningTeam, arg.OwningTeamID, arg.OrgID, arg.ID)
 	return err
 }
 

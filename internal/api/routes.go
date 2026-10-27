@@ -23,9 +23,20 @@ func routeRequester(ctx context.Context) (routing.Requester, error) {
 	return routing.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
 }
 
-// ListRoutes is listRoutes: every Route in evaluation order, the Default route last, with the list ETag.
-func (s *Server) ListRoutes(ctx context.Context, _ gen.ListRoutesRequestObject) (gen.ListRoutesResponseObject, error) {
-	list, err := s.routes.List(ctx)
+// ListRoutes is listRoutes: every Route in evaluation order, the Default route last, with the list ETag; with team,
+// only those a Team owns, or the Teams of the calling User (C-25.FR-2).
+func (s *Server) ListRoutes(ctx context.Context, req gen.ListRoutesRequestObject) (gen.ListRoutesResponseObject,
+	error) {
+	team, user, err := teamFilter(ctx, req.Params.Team)
+	if err != nil {
+		return nil, err
+	}
+	var list routing.List
+	if req.Params.Team == nil {
+		list, err = s.routes.List(ctx)
+	} else {
+		list, err = s.routes.ListOwned(ctx, routing.OwnerFilter{Team: team, UserID: user})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -331,6 +342,13 @@ func routeOf(rt routing.Route) gen.Route {
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
 		Etag: &tag,
 	}
+	if o := rt.OwningTeam; o != nil {
+		out.OwningTeam = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true)
+		out.OwningTeamId = owningTeamIDOf(o.PublicID, true)
+	} else {
+		out.OwningTeam = teamRefOf("", "", "", false, false)
+		out.OwningTeamId = owningTeamIDOf("", false)
+	}
 	if rt.Storm != nil {
 		out.Storm = &gen.RouteStorm{Since: rt.Storm.Since.UTC(), AlertGroupCount: int(rt.Storm.AlertGroupCount)}
 	}
@@ -370,7 +388,7 @@ func routeInputOf(in gen.RouteInput) routing.Input {
 	t := in.Policy.Templates
 	out := routing.Input{Name: in.Name, Description: in.Description, Urgent: in.Urgent != nil && *in.Urgent,
 		GroupKey:       in.GroupKey,
-		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy),
+		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy), OwningTeamID: owningTeamOf(in.OwningTeamId),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
 			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}}
 	if in.MinimumSeverity != nil {

@@ -39,8 +39,8 @@ func newFakeOrganization() *fakeOrganization {
 	at := t0
 	return &fakeOrganization{org: organization.Organization{
 		PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
-		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel, SeverityMapping: d.SeverityMapping,
-		SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
+		WeekStart: d.WeekStart, WorkingDays: d.WorkingDays, WorkdayEnd: d.WorkdayEnd, SeverityLabel: d.SeverityLabel,
+		SeverityMapping: d.SeverityMapping, SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
 		InstanceLabels: d.InstanceLabels, Retention: d.Retention, TOTPRequired: d.TOTPRequired,
 		OIDCTokenGrace: d.OIDCTokenGrace, Version: 3,
 		OutgoingHeartbeat: organization.OutgoingHeartbeat{

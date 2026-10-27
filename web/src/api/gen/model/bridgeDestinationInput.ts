@@ -5,6 +5,7 @@
 import type { BridgeDestinationInputType } from './bridgeDestinationInputType';
 import type { Limiter } from './limiter';
 import type { MentionSettings } from './mentionSettings';
+import type { NullablePublicId } from './nullablePublicId';
 import type { PublicId } from './publicId';
 
 /**
@@ -20,6 +21,8 @@ export interface BridgeDestinationInput {
   channel_id: string;
   /** Nobody or chosen users; everyone in the chat and messenger groups are refused with `unsupported`. */
   mentions: MentionSettings;
+  /** The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
+  owning_team_id?: NullablePublicId | null;
   /** `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it. */
   limiter: Limiter;
 }

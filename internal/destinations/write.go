@@ -169,6 +169,67 @@ type Input struct {
 	Webhook    *WebhookInput
 	Bridge     *BridgeInput
 	Slack      *SlackInput
+	// OwningTeamID is the public_id of the Team that owns the Destination (C-25.FR-2): nil keeps the stored one on an
+	// update and is none on a creation, and an empty string clears it.
+	OwningTeamID *string
+}
+
+// checkOwner refuses an owning Team that cannot be a Team's public_id, and writes the canonical form of one that can.
+func checkOwner(in *Input) error {
+	if in.OwningTeamID == nil || *in.OwningTeamID == "" {
+		return nil
+	}
+	id, err := publicid.Parse(publicid.Team, *in.OwningTeamID)
+	if err != nil {
+		return unknownTeam()
+	}
+	in.OwningTeamID = &id
+	return nil
+}
+
+func unknownTeam() *FieldError {
+	return &FieldError{Pointer: "/owning_team_id", Code: CodeUnknownID, Detail: "No such Team."}
+}
+
+// planOwner sets on d the owning Team that in asks for, by its public_id only: nil keeps d's, an empty one clears it.
+func planOwner(in Input, d *Destination) {
+	switch {
+	case in.OwningTeamID == nil:
+	case *in.OwningTeamID == "":
+		d.OwningTeam = nil
+	default:
+		d.OwningTeam = &TeamRef{PublicID: *in.OwningTeamID}
+	}
+}
+
+// lockOwner reads the owning Team that in gives d, in share mode, in the transaction of the save and before the
+// Destination is locked, as a Team's deletion locks the Team, then its Destinations; a Team that does not exist or is
+// deleted is an unknown_id FieldError at /owning_team_id.
+func (s *Service) lockOwner(ctx context.Context, q TxQueries, in Input, d *Destination) error {
+	if in.OwningTeamID == nil || d.OwningTeam == nil {
+		return nil
+	}
+	t, err := q.LockOwningTeam(ctx, dbgen.LockOwningTeamParams{OrgID: s.orgID, PublicID: d.OwningTeam.PublicID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return unknownTeam()
+	}
+	if err != nil {
+		return fmt.Errorf("read the owning team %s: %w", d.OwningTeam.PublicID, err)
+	}
+	d.OwningTeam = &TeamRef{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Slug: t.Slug}
+	return nil
+}
+
+// writeOwner writes the owning Team of d, saved in the same transaction with the id id.
+func (s *Service) writeOwner(ctx context.Context, q TxQueries, id int64, d Destination) error {
+	p := dbgen.SetDestinationOwningTeamParams{OrgID: s.orgID, ID: id}
+	if d.OwningTeam != nil {
+		p.OwningTeamID = pgtype.Int8{Int64: d.OwningTeam.ID, Valid: true}
+	}
+	if err := q.SetDestinationOwningTeam(ctx, p); err != nil {
+		return fmt.Errorf("write the owning team of the destination %s: %w", d.PublicID, err)
+	}
+	return nil
 }
 
 // ChannelCheck is the Destination check of a Mattermost channel through the Connection Connection (public_id): of the
@@ -287,6 +348,8 @@ type writeQueries interface {
 	LockSlackConnection(ctx context.Context, arg dbgen.LockSlackConnectionParams) (int64, error)
 	InsertSlackDestination(ctx context.Context, arg dbgen.InsertSlackDestinationParams) (int64, error)
 	UpdateSlackDestination(ctx context.Context, arg dbgen.UpdateSlackDestinationParams) error
+	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
+	SetDestinationOwningTeam(ctx context.Context, arg dbgen.SetDestinationOwningTeamParams) error
 }
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
@@ -301,11 +364,16 @@ type view struct {
 	Proxy      *proxyconf.Config        `json:"proxy,omitempty"`
 	Mentions   mentions.Settings        `json:"mentions"`
 	Limiter    Limiter                  `json:"limiter"`
+	// OwningTeam is the public_id of the Team that owns the Destination, null for none.
+	OwningTeam *string `json:"owning_team_id"`
 }
 
 func viewOf(d Destination) (view, error) {
 	v := view{Name: d.Name, Connection: d.Connection, TeamID: d.MattermostTeamID, ChannelID: d.MattermostChannelID,
 		Mode: d.WebhookMode, Limiter: Limiter{Limit: d.LimiterLimit, PerSeconds: d.LimiterPerSeconds}}
+	if d.OwningTeam != nil {
+		v.OwningTeam = &d.OwningTeam.PublicID
+	}
 	switch d.Type {
 	case TypeTelegram:
 		v.ChannelID = d.TelegramChannelID
@@ -526,11 +594,15 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 		SigningSecret: SigningSecret{Set: true, UpdatedAt: &now}, SigningSecretOnce: secret, Mentions: set,
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		p := dbgen.InsertWebhookDestinationParams{OrgID: s.orgID, PublicID: d.PublicID, Name: d.Name,
 			WebhookMode: text(d.WebhookMode), WebhookEventsConfig: d.EventsConfig,
 			WebhookTemplateConfig: d.TemplateConfig, Proxy: sec.proxy.JSON(), SigningSecretCiphertext: signing.Ciphertext, SigningSecretKeyID: nonEmpty(signing.KeyID), Now: now,
@@ -544,6 +616,9 @@ func (s *Service) createWebhook(ctx context.Context, r Requester, in Input) (Des
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
 		return s.record(ctx, q, r, ActionCreated, d, append(audit.Created(after), sec.diff...))
 	})
 	if err != nil {
@@ -579,6 +654,7 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 	if err != nil {
 		return Destination{}, err
 	}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -588,6 +664,9 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 		return d, s.probe(ctx, before)
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -610,6 +689,9 @@ func (s *Service) updateWebhook(ctx context.Context, r Requester, before Destina
 			return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 		}
 		d.Version++
+		if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+			return err
+		}
 		if err := s.renamed(ctx, q, before, d); err != nil {
 			return err
 		}
@@ -727,6 +809,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 	if err := s.validate(ctx, &in, nil); err != nil {
 		return Destination{}, err
 	}
+	if err := checkOwner(&in); err != nil {
+		return Destination{}, err
+	}
 	switch in.Type {
 	case TypeWebhook:
 		return created(s.createWebhook(ctx, r, in))
@@ -752,11 +837,15 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 		MattermostTeamName: &checked.Check.TeamName, MattermostChannelName: &checked.Check.ChannelName, Mentions: set,
 		LimiterLimit: in.Limiter.Limit, LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"},
 		Routes: []RouteRef{}, CreatedAt: now, Version: 1}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		if err := lockConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
 			return err
 		}
@@ -769,6 +858,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Destinatio
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
 	})
 	return created(d, err)
@@ -800,6 +892,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	if err := s.validate(ctx, &in, &before); err != nil {
 		return Destination{}, err
 	}
+	if err := checkOwner(&in); err != nil {
+		return Destination{}, err
+	}
 	switch in.Type {
 	case TypeWebhook:
 		return s.updateWebhook(ctx, r, before, in)
@@ -828,6 +923,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	if err != nil {
 		return Destination{}, err
 	}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -837,6 +933,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		deref(before.MattermostChannelName) != checked.Check.ChannelName
 	if len(diff) > 0 || namesChanged {
 		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			if err := s.lockOwner(ctx, q, in, &d); err != nil {
+				return err
+			}
 			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -859,6 +958,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1105,11 +1207,15 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
 	telegramFound(&d, checked.Check)
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		if err := lockTelegramConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
 			return err
 		}
@@ -1124,6 +1230,9 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
 	})
 	if err != nil {
@@ -1154,6 +1263,7 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 	if err != nil {
 		return Destination{}, err
 	}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1165,6 +1275,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 		deref(before.TelegramDiscussionGroupTitle) != deref(d.TelegramDiscussionGroupTitle)
 	if len(diff) > 0 || found {
 		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			if err := s.lockOwner(ctx, q, in, &d); err != nil {
+				return err
+			}
 			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -1189,6 +1302,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1293,11 +1409,15 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 		BridgeChannelID: &channel, BridgeChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		if err := lockBridgeConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
 			return err
 		}
@@ -1309,6 +1429,9 @@ func (s *Service) createBridge(ctx context.Context, r Requester, in Input) (Dest
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
 	})
 	if err != nil {
@@ -1338,6 +1461,7 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 	if err != nil {
 		return Destination{}, err
 	}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1345,6 +1469,9 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 	diff := audit.Diff(old, after)
 	if len(diff) > 0 || deref(before.BridgeChannelName) != name {
 		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			if err := s.lockOwner(ctx, q, in, &d); err != nil {
+				return err
+			}
 			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -1366,6 +1493,9 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1471,11 +1601,15 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 		SlackChannelID: &channel, SlackChannelName: &name, Mentions: set, LimiterLimit: in.Limiter.Limit,
 		LimiterPerSeconds: in.Limiter.PerSeconds, Health: Health{State: "healthy"}, Routes: []RouteRef{},
 		CreatedAt: now, Version: 1}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
 	}
 	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		if err := s.lockOwner(ctx, q, in, &d); err != nil {
+			return err
+		}
 		if err := lockSlackConnection(ctx, q, s.orgID, checked.ConnectionID); err != nil {
 			return err
 		}
@@ -1487,6 +1621,9 @@ func (s *Service) createSlack(ctx context.Context, r Requester, in Input) (Desti
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.writeOwner(ctx, q, id, d); err != nil {
+			return err
+		}
 		return s.record(ctx, q, r, ActionCreated, d, audit.Created(after))
 	})
 	if err != nil {
@@ -1516,6 +1653,7 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 	if err != nil {
 		return Destination{}, err
 	}
+	planOwner(in, &d)
 	after, err := viewOf(d)
 	if err != nil {
 		return Destination{}, err
@@ -1523,6 +1661,9 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 	diff := audit.Diff(old, after)
 	if len(diff) > 0 || deref(before.SlackChannelName) != name {
 		err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+			if err := s.lockOwner(ctx, q, in, &d); err != nil {
+				return err
+			}
 			lock, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: before.PublicID})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -1544,6 +1685,9 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}

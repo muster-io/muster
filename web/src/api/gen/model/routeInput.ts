@@ -4,6 +4,7 @@
  */
 import type { Matcher } from './matcher';
 import type { MinimumSeverity } from './minimumSeverity';
+import type { NullablePublicId } from './nullablePublicId';
 import type { PublicId } from './publicId';
 import type { RoutePolicy } from './routePolicy';
 
@@ -26,5 +27,7 @@ export interface RouteInput {
   /** Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty value. */
   group_key: string[];
   destination_ids: PublicId[];
+  /** The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
+  owning_team_id?: NullablePublicId | null;
   policy: RoutePolicy;
 }

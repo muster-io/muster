@@ -13,7 +13,7 @@ import (
 var allPrefixes = []Prefix{
 	AuditLogEntry, AlertGroup, AccountLink, AccountLinkRequest, Connection, CheckRun, DeliveryEvent, Destination,
 	LinkRule, Note, IntegrationToken, Integration, PersonalToken, Organization, RequestRecord, Route, ServiceAccount,
-	Session, User, StoredSnapshot, ServiceToken, LookupTable, TimelineEntry,
+	Session, User, StoredSnapshot, ServiceToken, LookupTable, TimelineEntry, Team,
 }
 
 // The pattern of the PublicId schema and of the CHECK constraints, for one prefix.

@@ -84,8 +84,12 @@ type Organization struct {
 	Name     string
 	TimeZone string
 	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start (C-20.FR-9).
-	WorkdayStart    string
-	WeekStart       string
+	WorkdayStart string
+	WeekStart    string
+	// WorkingDays and WorkdayEnd are the days and the end of the Organization's Working hours, which start at
+	// WorkdayStart in TimeZone (organization.working_hours, C-25.FR-9).
+	WorkingDays     []string
+	WorkdayEnd      string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -111,8 +115,11 @@ type Input struct {
 	Name     string
 	TimeZone string
 	// WorkdayStart and WeekStart are organization.workday_start and organization.week_start; nil keeps the stored one.
-	WorkdayStart    *string
-	WeekStart       *string
+	WorkdayStart *string
+	WeekStart    *string
+	// WorkingDays and WorkdayEnd are the days and the end of organization.working_hours; nil keeps the stored ones.
+	WorkingDays     *[]string
+	WorkdayEnd      *string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -244,7 +251,8 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 	}
 	o := Organization{
 		PublicID: row.PublicID, Name: row.Name, TimeZone: row.TimeZone, WorkdayStart: row.WorkdayStart,
-		WeekStart: row.WeekStart, SeverityLabel: row.SeverityLabel, CriticalIsUrgent: true,
+		WeekStart: row.WeekStart, WorkingDays: row.WorkingDays, WorkdayEnd: row.WorkdayEnd,
+		SeverityLabel: row.SeverityLabel, CriticalIsUrgent: true,
 		InstanceLabels: row.InstanceLabels,
 		Retention: Retention{
 			StoredSnapshotsDays: row.RetentionStoredSnapshotsDays, AlertDetailsDays: row.RetentionAlertDetailsDays,
@@ -348,6 +356,8 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			TimeZone:                         after.TimeZone,
 			WorkdayStart:                     after.WorkdayStart,
 			WeekStart:                        after.WeekStart,
+			WorkingDays:                      after.WorkingDays,
+			WorkdayEnd:                       after.WorkdayEnd,
 			SeverityLabel:                    after.SeverityLabel,
 			SeverityMapping:                  mapping,
 			SeverityStyles:                   styles,
@@ -412,6 +422,22 @@ func applyInput(before Organization, in Input) (Organization, error) {
 	}
 	if in.WeekStart != nil {
 		after.WeekStart = *in.WeekStart
+	}
+	if in.WorkingDays != nil {
+		after.WorkingDays = inWeekOrder(*in.WorkingDays)
+	}
+	if in.WorkdayEnd != nil {
+		after.WorkdayEnd = *in.WorkdayEnd
+	}
+	// The working day ends later than it starts (P-63): the field the update changes is refused, the end when both
+	// change.
+	if after.WorkdayEnd <= after.WorkdayStart {
+		pointer := "/workday_end"
+		if after.WorkdayEnd == before.WorkdayEnd {
+			pointer = "/workday_start"
+		}
+		return Organization{}, &FieldError{Pointer: pointer, Code: CodeOutOfRange,
+			Detail: "The working day ends later than it starts on the same day; it cannot span midnight."}
 	}
 	after.SeverityLabel = in.SeverityLabel
 	after.SeverityMapping = append([]SeverityMapping{}, in.SeverityMapping...)
@@ -490,6 +516,8 @@ type view struct {
 	TimeZone              string            `json:"time_zone"`
 	WorkdayStart          string            `json:"workday_start"`
 	WeekStart             string            `json:"week_start"`
+	WorkingDays           []string          `json:"working_days"`
+	WorkdayEnd            string            `json:"workday_end"`
 	SeverityLabel         string            `json:"severity_label"`
 	SeverityMapping       []SeverityMapping `json:"severity_mapping"`
 	SeverityStyles        []SeverityStyle   `json:"severity_styles"`
@@ -516,8 +544,8 @@ type heartbeatView struct {
 func viewOf(o Organization) view {
 	return view{
 		Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart, WeekStart: o.WeekStart,
-		SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles,
-		InstanceLabels: o.InstanceLabels,
+		WorkingDays: o.WorkingDays, WorkdayEnd: o.WorkdayEnd, SeverityLabel: o.SeverityLabel,
+		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, InstanceLabels: o.InstanceLabels,
 		Retention: retentionView{
 			StoredSnapshotsDays: o.Retention.StoredSnapshotsDays, AlertDetailsDays: o.Retention.AlertDetailsDays,
 			AlertGroupSummariesDays: o.Retention.AlertGroupSummariesDays, AuditLogDays: o.Retention.AuditLogDays,
@@ -605,9 +633,15 @@ func validate(in Input) *FieldError {
 	case in.WeekStart != nil && !slices.Contains(weekdays, *in.WeekStart):
 		return &FieldError{Pointer: "/week_start", Code: CodeInvalidFormat,
 			Detail: "The first day of the week is not a day from monday to sunday."}
+	case in.WorkdayEnd != nil && !timeOfDay.MatchString(*in.WorkdayEnd):
+		return &FieldError{Pointer: "/workday_end", Code: CodeInvalidFormat,
+			Detail: "The end of the working day is not a time HH:MM on the 24-hour clock, such as 18:00."}
 	case !labelName.MatchString(in.SeverityLabel):
 		return &FieldError{Pointer: "/severity_label", Code: CodeInvalidFormat,
 			Detail: "The severity label is not a label name."}
+	}
+	if fe := validateWorkingDays(in.WorkingDays); fe != nil {
+		return fe
 	}
 	if fe := validateMapping(in.SeverityMapping); fe != nil {
 		return fe
@@ -640,6 +674,41 @@ func validate(in Input) *FieldError {
 			Detail: fmt.Sprintf("The grace period is not from 1 to %d seconds.", MaxOIDCTokenGraceSeconds)}
 	}
 	return nil
+}
+
+// validateWorkingDays refuses no day, a day that is not a weekday and a day given twice, when the days are given.
+func validateWorkingDays(days *[]string) *FieldError {
+	if days == nil {
+		return nil
+	}
+	if len(*days) == 0 {
+		return &FieldError{Pointer: "/working_days", Code: CodeRequired,
+			Detail: "The Working hours need at least one day."}
+	}
+	seen := map[string]bool{}
+	for i, d := range *days {
+		pointer := fmt.Sprintf("/working_days/%d", i)
+		switch {
+		case !slices.Contains(weekdays, d):
+			return &FieldError{Pointer: pointer, Code: CodeInvalidFormat,
+				Detail: "The day is not a day from monday to sunday."}
+		case seen[d]:
+			return &FieldError{Pointer: pointer, Code: CodeDuplicate, Detail: "The day appears twice."}
+		}
+		seen[d] = true
+	}
+	return nil
+}
+
+// inWeekOrder are the days in the order of the week, Monday first, as they are stored.
+func inWeekOrder(days []string) []string {
+	out := make([]string, 0, len(days))
+	for _, d := range weekdays {
+		if slices.Contains(days, d) {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 func validLevel(l SeverityLevel) bool {

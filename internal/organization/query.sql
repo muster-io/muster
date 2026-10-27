@@ -4,7 +4,8 @@
 -- name: GetOrganization :one
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
        instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
-       retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
+       retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
+       working_days, workday_end
 FROM organizations
 ORDER BY id
 LIMIT 1;
@@ -14,13 +15,13 @@ INSERT INTO organizations (
     public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
     critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
     retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
-    created_at, updated_at
+    working_days, workday_end, created_at, updated_at
 )
 VALUES (
     @public_id, @name, @time_zone, @workday_start, @week_start, @severity_label, @severity_mapping, @severity_styles,
     @critical_is_urgent, @instance_labels, @retention_stored_snapshots_days, @retention_alert_details_days,
     @retention_alert_group_summaries_days, @retention_audit_log_days, @totp_required, @oidc_token_grace_seconds,
-    @created_at, @created_at
+    @working_days::text[], @workday_end, @created_at, @created_at
 )
 RETURNING id;
 
@@ -73,7 +74,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end
 FROM organizations
 WHERE id = @org_id;
 
@@ -100,6 +101,8 @@ SET name                                         = @name,
     time_zone                                    = @time_zone,
     workday_start                                = @workday_start,
     week_start                                   = @week_start,
+    working_days                                 = @working_days::text[],
+    workday_end                                  = @workday_end,
     severity_label                               = @severity_label,
     severity_mapping                             = @severity_mapping,
     severity_styles                              = @severity_styles,

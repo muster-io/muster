@@ -258,7 +258,7 @@ function Statistics() {
       placeholderData: (previous) => (previous?.group_by === by ? previous : undefined),
     },
   });
-  const routes = useListRoutes({ query: { enabled: canRoutes && by === "route" } });
+  const routes = useListRoutes(undefined, { query: { enabled: canRoutes && by === "route" } });
   const integrations = useListIntegrations(
     { limit: 500 },
     { query: { enabled: canIntegrations && by === "integration" } },

@@ -180,7 +180,7 @@ export function AlertGroupFilters({
   const queryClient = useQueryClient();
   const canRoutes = useCan("routes:read");
   const canIntegrations = useCan("integrations:read");
-  const routes = useListRoutes({ query: { enabled: canRoutes } });
+  const routes = useListRoutes(undefined, { query: { enabled: canRoutes } });
   const integrations = useListIntegrations({ limit: 500 }, { query: { enabled: canIntegrations } });
   const id = useId();
 

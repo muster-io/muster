@@ -14,6 +14,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/teams"
 )
 
 // GetOrganization is getOrganization: the organization resource for every signed-in identity, its Secrets shown only
@@ -86,8 +87,15 @@ func organizationOf(o organization.Organization) gen.Organization {
 			AuditLogDays:            int(o.Retention.AuditLogDays),
 		},
 		TotpRequired: gen.TotpPolicy(o.TOTPRequired), OidcTokenGraceSeconds: int(o.OIDCTokenGrace / time.Second),
-		Etag: &tag,
+		Etag: &tag, WorkdayEnd: o.WorkdayEnd, WorkingDays: make([]gen.Weekday, 0, len(o.WorkingDays)),
 	}
+	for _, d := range o.WorkingDays {
+		out.WorkingDays = append(out.WorkingDays, gen.Weekday(d))
+	}
+	// The Organization's Working hours (C-25.FR-9) start at the start of the working day, in its time zone.
+	hours := workingHoursOf(teams.WorkingHours{Days: o.WorkingDays, Start: o.WorkdayStart, End: o.WorkdayEnd,
+		TimeZone: o.TimeZone})
+	out.WorkingHours = &hours
 	for _, m := range o.SeverityMapping {
 		out.SeverityMapping = append(out.SeverityMapping, gen.SeverityMappingEntry{Value: m.Value,
 			Level: gen.SeverityLevel(m.Level)})
@@ -139,6 +147,14 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 		},
 		HeartbeatURL: secretInputOf(b.OutgoingHeartbeat.Url),
 	}
+	if b.WorkingDays != nil {
+		days := make([]string, len(*b.WorkingDays))
+		for i, d := range *b.WorkingDays {
+			days[i] = string(d)
+		}
+		in.WorkingDays = &days
+	}
+	in.WorkdayEnd = b.WorkdayEnd
 	if b.WeekStart != nil {
 		w := string(*b.WeekStart)
 		in.WeekStart = &w

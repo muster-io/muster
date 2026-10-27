@@ -11,6 +11,8 @@ import * as zod from 'zod';
  */
 
 export const getOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const getOrganizationResponseOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const getOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const getOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -23,12 +25,17 @@ export const getOrganizationResponseOneOidcTokenGraceSecondsMax = 3153600000;
 
 export const getOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
+export const getOrganizationResponseTwoWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getOrganizationResponseTwoWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
 
 export const GetOrganizationResponse = zod.object({
   "name": zod.string().min(1),
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
   "workday_start": zod.string().regex(getOrganizationResponseOneWorkdayStartRegExp).describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
   "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
+  "working_days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1).describe('The days of the Organization\'s Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.'),
+  "workday_end": zod.string().regex(getOrganizationResponseOneWorkdayEndRegExp).describe('The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -50,7 +57,13 @@ export const GetOrganizationResponse = zod.object({
   "totp_required": zod.enum(['nobody', 'local_users', 'everyone']).describe('Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.'),
   "oidc_token_grace_seconds": zod.int().min(1).max(getOrganizationResponseOneOidcTokenGraceSecondsMax).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
 }).and(zod.object({
-  "id": zod.string().regex(getOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "id": zod.string().regex(getOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "working_hours": zod.object({
+  "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
+  "start": zod.string().regex(getOrganizationResponseTwoWorkingHoursStartRegExp),
+  "end": zod.string().regex(getOrganizationResponseTwoWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
+  "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
+}).describe('The Organization\'s Working hours, derived (C-25.FR-9) — `working_days`, from `workday_start` to `workday_end`, in `time_zone` — which every Team without its own follows.'),
   "outgoing_heartbeat": zod.object({
   "url_status": zod.object({
   "set": zod.boolean(),
@@ -80,6 +93,8 @@ export const UpdateOrganizationHeader = zod.object({
 
 
 export const updateOrganizationBodyOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const updateOrganizationBodyOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationBodyOneRetentionAlertDetailsDaysMax = 36500;
@@ -97,6 +112,8 @@ export const UpdateOrganizationBody = zod.object({
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
   "workday_start": zod.string().regex(updateOrganizationBodyOneWorkdayStartRegExp).optional().describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
   "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).optional().describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
+  "working_days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1).optional().describe('The days of the Organization\'s Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.'),
+  "workday_end": zod.string().regex(updateOrganizationBodyOneWorkdayEndRegExp).optional().describe('The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -132,6 +149,8 @@ export const UpdateOrganizationBody = zod.object({
 
 
 export const updateOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const updateOrganizationResponseOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -144,12 +163,17 @@ export const updateOrganizationResponseOneOidcTokenGraceSecondsMax = 3153600000;
 
 export const updateOrganizationResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
+export const updateOrganizationResponseTwoWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateOrganizationResponseTwoWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
 
 export const UpdateOrganizationResponse = zod.object({
   "name": zod.string().min(1),
   "time_zone": zod.string().describe('IANA time zone used for times in messages.'),
   "workday_start": zod.string().regex(updateOrganizationResponseOneWorkdayStartRegExp).describe('The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.'),
   "week_start": zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.'),
+  "working_days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1).describe('The days of the Organization\'s Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.'),
+  "workday_end": zod.string().regex(updateOrganizationResponseOneWorkdayEndRegExp).describe('The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -171,7 +195,13 @@ export const UpdateOrganizationResponse = zod.object({
   "totp_required": zod.enum(['nobody', 'local_users', 'everyone']).describe('Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.'),
   "oidc_token_grace_seconds": zod.int().min(1).max(updateOrganizationResponseOneOidcTokenGraceSecondsMax).describe('`auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner\'s last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.')
 }).and(zod.object({
-  "id": zod.string().regex(updateOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "id": zod.string().regex(updateOrganizationResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "working_hours": zod.object({
+  "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
+  "start": zod.string().regex(updateOrganizationResponseTwoWorkingHoursStartRegExp),
+  "end": zod.string().regex(updateOrganizationResponseTwoWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
+  "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
+}).describe('The Organization\'s Working hours, derived (C-25.FR-9) — `working_days`, from `workday_start` to `workday_end`, in `time_zone` — which every Team without its own follows.'),
   "outgoing_heartbeat": zod.object({
   "url_status": zod.object({
   "set": zod.boolean(),

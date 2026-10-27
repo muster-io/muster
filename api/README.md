@@ -99,6 +99,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `ST` | Service account token | `api_tokens` |
 | `TB` | Lookup table | `lookup_tables` |
 | `TE` | Timeline entry (lifecycle and system entries) | `timeline_entries` |
+| `TM` | Team (from S-115) | `teams` |
 
 ## Security
 

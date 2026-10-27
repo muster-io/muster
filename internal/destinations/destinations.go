@@ -119,6 +119,18 @@ type Destination struct {
 	TemplateError     *TemplateError
 	CreatedAt         time.Time
 	Version           int64
+	// OwningTeam is the Team that owns the Destination (C-25.FR-2), nil when none does.
+	OwningTeam *TeamRef
+}
+
+// TeamRef names the Team that owns a Destination: its internal id, public_id, name and slug, and whether it was
+// deleted.
+type TeamRef struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
 }
 
 // Page is a page of Destinations; Next is the cursor after its last one, nil on the last page.
@@ -127,14 +139,16 @@ type Page struct {
 	Next         *int64
 }
 
-// ListFilter selects the Destinations of a page: of a type, a health and a Route (its public_id) when set, after the
-// id After, at most Limit.
+// ListFilter selects the Destinations of a page: of a type, a health, a Route (its public_id), owned by a Team (its
+// public_id) and owned by a Team the User TeamUser is in, "My Teams", when set, after the id After, at most Limit.
 type ListFilter struct {
-	Type   *string
-	Health *string
-	Route  *string
-	After  *int64
-	Limit  int
+	Type     *string
+	Health   *string
+	Route    *string
+	Team     *string
+	TeamUser *int64
+	After    *int64
+	Limit    int
 }
 
 // Store are the queries of the package.
@@ -181,6 +195,15 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		}
 		p.Route = pgtype.Text{String: id, Valid: true}
 	}
+	if f.Team != nil {
+		// A Team that cannot exist owns nothing.
+		id, ok := teamID(*f.Team)
+		if !ok {
+			return Page{Destinations: []Destination{}}, nil
+		}
+		p.Team = pgtype.Text{String: id, Valid: true}
+	}
+	p.TeamUser = nullInt(f.TeamUser)
 	rows, err := s.store.ListDestinations(ctx, p)
 	if err != nil {
 		return Page{}, fmt.Errorf("list the destinations: %w", err)
@@ -361,12 +384,22 @@ func destinationOf(r dbgen.GetDestinationRow) Destination {
 	if r.TemplateErrorSince.Valid {
 		d.TemplateError = &TemplateError{Since: r.TemplateErrorSince.Time.UTC(), Error: r.TemplateError.String}
 	}
+	if r.OwningTeamID.Valid && r.OwningTeamPublicID.Valid {
+		d.OwningTeam = &TeamRef{ID: r.OwningTeamID.Int64, PublicID: r.OwningTeamPublicID.String,
+			Name: r.OwningTeamName.String, Slug: r.OwningTeamSlug.String, Deleted: r.OwningTeamDeleted}
+	}
 	return d
 }
 
 // routeID is the canonical public_id of a Route, false when s cannot name one.
 func routeID(s string) (string, bool) {
 	id, err := publicid.Parse(publicid.Route, s)
+	return id, err == nil
+}
+
+// teamID is the canonical public_id of a Team, false when s cannot name one.
+func teamID(s string) (string, bool) {
+	id, err := publicid.Parse(publicid.Team, s)
 	return id, err == nil
 }
 

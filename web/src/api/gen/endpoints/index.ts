@@ -17,5 +17,6 @@ export * from './request-log/request-log';
 export * from './routes/routes';
 export * from './sessions/sessions';
 export * from './system/system';
+export * from './teams/teams';
 export * from './templates/templates';
 export * from './users/users';

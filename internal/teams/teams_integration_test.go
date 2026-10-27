@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright The Muster Authors
+
+//go:build integration
+
+package teams_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/config"
+	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/db/dbtest"
+	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/teams"
+)
+
+func TestMain(m *testing.M) {
+	os.Exit(dbtest.Main(context.Background(), m))
+}
+
+var t0 = time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+
+var by = teams.Requester{Actor: audit.System, Transport: audit.TransportSystem}
+
+type env struct {
+	d      *db.DB
+	orgID  int64
+	svc    *teams.Service
+	routes *routing.Service
+	dests  *destinations.Service
+	bob    string
+	bobID  int64
+}
+
+func setup(t *testing.T, s dbtest.Server) *env {
+	t.Helper()
+	ctx := t.Context()
+	conn := config.Database{URL: logging.Secret(s.NewDatabase(t)), SSLMode: "disable"}
+	d, err := db.Open(ctx, conn, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.Close)
+	logger := logging.New(&bytes.Buffer{}, logging.LevelInfo)
+	if err := d.Migrate(ctx, logger); err != nil {
+		t.Fatal(err)
+	}
+	if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Pool.Exec(ctx, `CREATE TABLE audit_log_p202610 PARTITION OF audit_log
+		FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+		t.Fatal(err)
+	}
+	org, err := organization.NewStore(d.Pool).GetOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := clock.NewManual(t0)
+	w := audit.NewWriter(logger, c)
+	rs := routing.NewStore(d.Pool)
+	if err := routing.EnsureDefault(ctx, rs, org.ID, t0); err != nil {
+		t.Fatal(err)
+	}
+	e := &env{d: d, orgID: org.ID, bob: "SR0000000000BB",
+		svc:    teams.New(teams.Config{OrgID: org.ID, Store: teams.NewStore(d.Pool), Audit: w, Business: c}),
+		routes: routing.New(routing.Config{OrgID: org.ID, Store: rs, Audit: w, Business: c}),
+		dests:  destinations.New(org.ID, destinations.NewStore(d.Pool))}
+	if err := d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+		created_at, updated_at) VALUES ($1, $2, 'bob', 'bob', 'responder', 'local', 'active', $3, $3) RETURNING id`,
+		org.ID, e.bob, t0).Scan(&e.bobID); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func (e *env) count(t *testing.T, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := e.d.Pool.QueryRow(t.Context(), sql, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return n
+}
+
+// infoSeries counts the muster_team_info series on /metrics.
+func infoSeries(t *testing.T, id string) int {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	metrics.Handler(nil).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	return strings.Count(rec.Body.String(), `muster_team_info{team="`+id+`"`)
+}
+
+// TestIntegrationTeams is C-25.FR-1, FR-2, FR-9, FR-10 and FR-11 against PostgreSQL: names unique ignoring case and
+// slugs unique among the Teams that are not deleted, own Working hours stored and the Organization's followed, a Route
+// and a Destination owned and filtered by the Team and by "My Teams", and the deletion, which keeps the row marked
+// deleted, removes the people, leaves the owned objects without an owner with a new version and frees the slug.
+func TestIntegrationTeams(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		pay, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pay.WorkingHours.Start != "09:00" || pay.WorkingHours.End != "18:00" || len(pay.WorkingHours.Days) != 5 ||
+			pay.WorkingHours.TimeZone != "UTC" {
+			t.Errorf("the Organization's hours %+v", pay.WorkingHours)
+		}
+		if infoSeries(t, pay.PublicID) != 1 {
+			t.Error("no muster_team_info series")
+		}
+		if _, err := e.svc.Create(ctx, by, teams.Input{Name: "PAYMENTS", Slug: "pay"}); !errors.Is(err,
+			teams.ErrNameTaken) {
+			t.Errorf("name taken = %v", err)
+		}
+		if _, err := e.svc.Create(ctx, by, teams.Input{Name: "Pay", Slug: "payments"}); !errors.Is(err,
+			teams.ErrSlugTaken) {
+			t.Errorf("slug taken = %v", err)
+		}
+		hours := teams.WorkingHours{Days: []string{"monday", "friday"}, Start: "11:00", End: "19:00",
+			TimeZone: "Europe/Berlin"}
+		search, err := e.svc.Create(ctx, by, teams.Input{Name: "Search", Slug: "search", OwnWorkingHours: true,
+			WorkingHours: &hours})
+		if err != nil || search.Own == nil || search.WorkingHours.TimeZone != "Europe/Berlin" {
+			t.Fatalf("own hours = %+v, %v", search, err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE organizations SET workday_start = '08:00'`); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := e.svc.Get(ctx, pay.PublicID); got.WorkingHours.Start != "08:00" {
+			t.Errorf("the start follows the Organization's: %+v", got.WorkingHours)
+		}
+		if got, _ := e.svc.Get(ctx, search.PublicID); got.WorkingHours.Start != "11:00" {
+			t.Errorf("own hours stay: %+v", got.WorkingHours)
+		}
+		page, err := e.svc.List(ctx, teams.ListFilter{Query: "SEA", Limit: 10})
+		if err != nil || len(page.Teams) != 1 || page.Teams[0].PublicID != search.PublicID {
+			t.Errorf("q = %+v, %v", page, err)
+		}
+
+		if _, added, err := e.svc.AddUser(ctx, by, pay.PublicID, e.bob); err != nil || !added {
+			t.Fatalf("add = %v, %v", added, err)
+		}
+		if _, _, err := e.svc.AddUser(ctx, by, search.PublicID, e.bob); err != nil {
+			t.Fatal(err)
+		}
+		if _, added, err := e.svc.AddUser(ctx, by, pay.PublicID, e.bob); err != nil || added {
+			t.Errorf("again = %v, %v", added, err)
+		}
+		// A person in a Team other than by hand — later, through the identity provider — is added by hand too.
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE team_users SET by_hand = false WHERE user_id = $1 AND team_id =
+			(SELECT id FROM teams WHERE public_id = $2)`, e.bobID, search.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if m, added, err := e.svc.AddUser(ctx, by, search.PublicID, e.bob); err != nil || !added ||
+			len(m.Sources) != 1 || m.Sources[0] != "by_hand" {
+			t.Errorf("by hand too = %+v, %v, %v", m, added, err)
+		}
+		people, err := e.svc.Users(ctx, pay.PublicID)
+		if err != nil || len(people) != 1 || people[0].Role != "responder" || people[0].Sources[0] != "by_hand" {
+			t.Errorf("people = %+v, %v", people, err)
+		}
+
+		// A Route and a Destination owned by Payments, and one Destination owned by Search.
+		in := routing.Input{Name: "pay", GroupKey: []string{"alertname"}, Policy: routing.Profiles()[0].Policy,
+			OwningTeamID: &pay.PublicID}
+		rt, err := e.routes.Create(ctx, routing.Requester{Actor: audit.System, Transport: audit.TransportSystem}, in)
+		if err != nil || rt.OwningTeam == nil || rt.OwningTeam.Slug != "payments" {
+			t.Fatalf("route = %+v, %v", rt.OwningTeam, err)
+		}
+		for i, owner := range []string{pay.PublicID, search.PublicID} {
+			if _, err := e.d.Pool.Exec(ctx, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode,
+				webhook_events_config, proxy, signing_secret_ciphertext, signing_secret_key_id, mentions,
+				limiter_limit, limiter_per_seconds, health, created_at, updated_at, owning_team_id)
+				SELECT $1, $2, 'webhook', $3, 'events', '{"url":"https://example.org","headers":[]}', '{}', '\x00',
+				'k', '{}', 1, 1, 'healthy', $4, $4, id FROM teams WHERE public_id = $5`, e.orgID,
+				[]string{"DS0000000000PA", "DS0000000000SE"}[i], "hook"+owner, t0, owner); err != nil {
+				t.Fatal(err)
+			}
+		}
+		owned, err := e.routes.ListOwned(ctx, routing.OwnerFilter{UserID: e.bobID})
+		if err != nil || len(owned.Routes) != 1 || owned.Routes[0].PublicID != rt.PublicID {
+			t.Errorf("my teams' routes = %+v, %v", owned.Routes, err)
+		}
+		dp, err := e.dests.List(ctx, destinations.ListFilter{Team: &pay.PublicID, Limit: 10})
+		if err != nil || len(dp.Destinations) != 1 || dp.Destinations[0].OwningTeam == nil ||
+			dp.Destinations[0].OwningTeam.Name != "Payments" {
+			t.Errorf("payments' destinations = %+v, %v", dp.Destinations, err)
+		}
+		if dp, err := e.dests.List(ctx, destinations.ListFilter{TeamUser: &e.bobID, Limit: 10}); err != nil ||
+			len(dp.Destinations) != 2 {
+			t.Errorf("my teams' destinations = %+v, %v", dp.Destinations, err)
+		}
+
+		before := e.count(t, `SELECT version FROM routes WHERE public_id = $1`, rt.PublicID)
+		destBefore := e.count(t, `SELECT version FROM destinations WHERE public_id = 'DS0000000000PA'`)
+		if err := e.svc.Delete(ctx, by, pay.PublicID, &pay.Version); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM teams WHERE public_id = $1 AND deleted_at IS NOT NULL
+			AND NOT own_working_hours`, pay.PublicID); got != 1 {
+			t.Error("the row is not kept, marked deleted")
+		}
+		if got := e.count(t, `SELECT count(*) FROM team_users tu JOIN teams t ON t.id = tu.team_id
+			WHERE t.public_id = $1`, pay.PublicID); got != 0 {
+			t.Errorf("%d people are left", got)
+		}
+		if got := e.count(t, `SELECT version FROM routes WHERE public_id = $1 AND owning_team_id IS NULL`,
+			rt.PublicID); got != before+1 {
+			t.Errorf("route version %d, want %d without an owner", got, before+1)
+		}
+		if got := e.count(t, `SELECT version FROM destinations WHERE public_id = 'DS0000000000PA'
+			AND owning_team_id IS NULL`); got != destBefore+1 {
+			t.Errorf("destination version %d, want %d without an owner", got, destBefore+1)
+		}
+		if got := e.count(t, `SELECT count(*) FROM destinations WHERE public_id = 'DS0000000000SE'
+			AND owning_team_id IS NOT NULL`); got != 1 {
+			t.Error("another Team's Destination lost its owner")
+		}
+		for action, actor := range map[string]string{teams.ActionDeleted: "system", "route.updated": "system",
+			"destination.updated": "system"} {
+			if got := e.count(t, `SELECT count(*) FROM audit_log WHERE action = $1 AND actor_kind = $2`, action,
+				actor); got < 1 {
+				t.Errorf("no %s by %s", action, actor)
+			}
+		}
+		if infoSeries(t, pay.PublicID) != 0 {
+			t.Error("the deleted Team keeps its muster_team_info series")
+		}
+		again, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments"})
+		if err != nil || again.PublicID == pay.PublicID {
+			t.Errorf("the slug is free = %+v, %v", again, err)
+		}
+		if err := e.svc.RefreshInfo(ctx); err != nil || infoSeries(t, again.PublicID) != 1 ||
+			infoSeries(t, pay.PublicID) != 0 {
+			t.Errorf("refresh = %v", err)
+		}
+
+		// The CHECKs keep what the package refuses first.
+		for _, sql := range []string{
+			`UPDATE teams SET slug = 'Payments' WHERE public_id = '` + again.PublicID + `'`,
+			`UPDATE teams SET working_end = '10:00' WHERE public_id = '` + search.PublicID + `'`,
+			`UPDATE teams SET own_working_hours = false WHERE public_id = '` + search.PublicID + `'`,
+		} {
+			if _, err := e.d.Pool.Exec(ctx, sql); err == nil {
+				t.Errorf("%s was stored", sql)
+			}
+		}
+	})
+}

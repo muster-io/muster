@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/users"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
 )
@@ -665,6 +666,63 @@ func TestIntegrationUserDirectory(t *testing.T) {
 			if page, err := d.List(ctx, q, nil, 10); err != nil || len(page.Entries) != want {
 				t.Errorf("q %q = %d, %v", q, len(page.Entries), err)
 			}
+		}
+	})
+}
+
+// TestIntegrationTeamsOfDeletedUsers is C-03.FR-13 revised for L2, C-25.FR-3 and C-25.AC-12: a disabled user stays in
+// their Teams, and deleting a user takes them out of every Team in the transaction of the deletion, each recorded as
+// team.user_removed with the reason user_deleted.
+func TestIntegrationTeamsOfDeletedUsers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		svc := teams.New(teams.Config{OrgID: e.orgID, Store: teams.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock), Business: e.clock})
+		e.admin.SetTeamRemover(svc)
+		bob := e.create(t, "Bob", "bob", auth.RoleResponder, "bob-password-1")
+		byOps := teams.Requester{Actor: e.byOps.Actor, Transport: audit.TransportUI}
+		var ids []string
+		for _, slug := range []string{"payments", "search"} {
+			team, err := svc.Create(ctx, byOps, teams.Input{Name: slug, Slug: slug})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := svc.AddUser(ctx, byOps, team.PublicID, bob.PublicID); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, team.PublicID)
+		}
+		count := func() int64 {
+			t.Helper()
+			var n int64
+			for _, id := range ids {
+				team, err := svc.Get(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				n += team.UserCount
+			}
+			return n
+		}
+		if _, err := e.admin.Disable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if got := count(); got != 2 {
+			t.Errorf("a disabled user is in %d Teams, want 2", got)
+		}
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := count(); got != 0 {
+			t.Errorf("a deleted user is in %d Teams", got)
+		}
+		var removed int
+		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'team.user_removed'
+			AND details ->> 'reason' = 'user_deleted' AND actor_user_id = $1 AND details ->> 'user' = $2
+			AND diff -> 0 ->> 'pointer' = '/users/' || $2`, e.ops.ID, bob.PublicID).Scan(&removed); err != nil ||
+			removed != 2 {
+			t.Errorf("%d team.user_removed entries, %v", removed, err)
 		}
 	})
 }

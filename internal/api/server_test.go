@@ -298,8 +298,8 @@ func TestXPermission(t *testing.T) {
 	for _, v := range doc.Components.Schemas["Permission"].Value.Enum {
 		enum = append(enum, v.(string))
 	}
-	if len(enum) != 31 {
-		t.Errorf("the Permission enum has %d values, want 31", len(enum))
+	if len(enum) != 33 {
+		t.Errorf("the Permission enum has %d values, want 33", len(enum))
 	}
 	special := []string{auth.PermissionNone, auth.PermissionAuthenticated, auth.PermissionIntegrationToken}
 	for path, item := range doc.Paths.Map() {

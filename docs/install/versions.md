@@ -93,6 +93,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
       both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
       `critical_is_urgent` is always `true`.
+    - Migration 0023 adds [Teams](../concepts/teams.md) and the Organization's Working hours: Monday to Friday, from
+      the start of the working day to its end, `18:00`. The end must be later than the start on the same day, so an
+      Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
+      the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
+      yours did.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -105,7 +110,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
     Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
     Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
-    differently.
+    differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
+    start of the working day at or after the end fails the CHECK of migration 0023 with `500` until the rollout ends;
+    save the settings again on a 0.2.0 replica.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and gives up after 5 seconds of waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas. Its

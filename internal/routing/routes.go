@@ -244,6 +244,24 @@ type Route struct {
 	Version         int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
 	OpenAlertGroupCount int64
+	// OwningTeam is the Team that owns the Route (C-25.FR-2), nil when none does.
+	OwningTeam *TeamRef
+}
+
+// TeamRef names the Team that owns a Route: its internal id, public_id, name and slug, and whether it was deleted.
+type TeamRef struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+}
+
+// OwnerFilter selects the Routes a Team owns (C-25.FR-2): the Team by its public_id, or with UserID the Teams the
+// User is in, "My Teams".
+type OwnerFilter struct {
+	Team   string
+	UserID int64
 }
 
 // Storm is the active Storm of a Route (C-11.FR-6): when it started and the new Alert Groups it counted, those of its
@@ -282,6 +300,9 @@ type Input struct {
 	Policy          Policy
 	// Keep are the templates an update leaves as they are stored.
 	Keep KeepTemplates
+	// OwningTeamID is the public_id of the Team that owns the Route: nil keeps the stored one on an update and is none
+	// on a creation, and an empty string clears it.
+	OwningTeamID *string
 }
 
 // List is every Route that is not deleted in evaluation order, the Default route last, with the version of the list
@@ -336,6 +357,8 @@ type Queries interface {
 	LockRouteMembership(ctx context.Context, arg dbgen.LockRouteMembershipParams) error
 	BumpRoutesOfDestination(ctx context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
 		[]dbgen.BumpRoutesOfDestinationRow, error)
+	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
+	ListUserTeams(ctx context.Context, arg dbgen.ListUserTeamsParams) ([]string, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or the transaction the queries run on, which the membership hook writes through.
@@ -500,7 +523,9 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
 			AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: int64(i),
 			TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
-			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount})
+			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
+			OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName,
+			OwningTeamSlug: r.OwningTeamSlug, OwningTeamDeleted: r.OwningTeamDeleted})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
 		return List{}, err
@@ -512,6 +537,67 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 		return List{}, err
 	}
 	return out, nil
+}
+
+// ListOwned lists the Routes that are not deleted and that the Team of f owns, or the Teams of its User, in
+// evaluation order with the version of the whole list. A Team that cannot exist owns nothing.
+func (s *Service) ListOwned(ctx context.Context, f OwnerFilter) (List, error) {
+	teams := map[string]bool{}
+	if f.UserID != 0 {
+		ids, err := s.store.ListUserTeams(ctx, dbgen.ListUserTeamsParams{OrgID: s.orgID, UserID: f.UserID})
+		if err != nil {
+			return List{}, fmt.Errorf("list the teams of the user: %w", err)
+		}
+		for _, id := range ids {
+			teams[id] = true
+		}
+	} else if id, err := publicid.Parse(publicid.Team, f.Team); err == nil {
+		teams[id] = true
+	}
+	list, err := s.List(ctx)
+	if err != nil {
+		return List{}, err
+	}
+	owned := make([]Route, 0, len(list.Routes))
+	for _, rt := range list.Routes {
+		if rt.OwningTeam != nil && teams[rt.OwningTeam.PublicID] {
+			owned = append(owned, rt)
+		}
+	}
+	list.Routes = owned
+	return list, nil
+}
+
+// resolveOwner reads the Team raw names as the owner of a Route (C-25.FR-2) in share mode: nil keeps stored, an empty
+// string clears it, and a Team that does not exist or is deleted is an unknown_id FieldError.
+func (s *Service) resolveOwner(ctx context.Context, q Queries, raw *string, stored *TeamRef) (*TeamRef, error) {
+	if raw == nil {
+		return stored, nil
+	}
+	if *raw == "" {
+		return nil, nil
+	}
+	unknown := &FieldError{Pointer: "/owning_team_id", Code: CodeUnknownID, Detail: "No such Team."}
+	id, err := publicid.Parse(publicid.Team, *raw)
+	if err != nil {
+		return nil, unknown
+	}
+	t, err := q.LockOwningTeam(ctx, dbgen.LockOwningTeamParams{OrgID: s.orgID, PublicID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, unknown
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the owning team %s: %w", id, err)
+	}
+	return &TeamRef{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Slug: t.Slug}, nil
+}
+
+// ownerID is the owning_team_id of a write.
+func ownerID(t *TeamRef) pgtype.Int8 {
+	if t == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: t.ID, Valid: true}
 }
 
 // Get reads the Route publicID; a deleted or unknown one is ErrNotFound.
@@ -751,6 +837,10 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if err != nil {
 			return err
 		}
+		owner, err := s.resolveOwner(ctx, q, in.OwningTeamID, nil)
+		if err != nil {
+			return err
+		}
 		description := ""
 		if in.Description != nil {
 			description = *in.Description
@@ -768,7 +858,7 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(owner), Now: s.clock.Now().UTC(),
 		})
 		if err != nil {
 			return fmt.Errorf("create the route: %w", nameTaken(err))
@@ -867,9 +957,16 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	}
 	var before, updated Route
 	err := s.store.InTx(ctx, func(q Queries) error {
-		var err error
+		// A new owner is read before the Route is locked: a Team's deletion locks the Team, then its Routes.
+		owner, err := s.resolveOwner(ctx, q, in.OwningTeamID, nil)
+		if err != nil {
+			return err
+		}
 		if before, err = s.lock(ctx, q, publicID); err != nil {
 			return err
+		}
+		if in.OwningTeamID == nil {
+			owner = before.OwningTeam
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
@@ -894,7 +991,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			next.MinimumSeverity = MinimumCritical
 		}
 		next.Urgent = next.MinimumSeverity == MinimumCritical
-		next.DestinationIDs = dests.publicIDs()
+		next.DestinationIDs, next.OwningTeam = dests.publicIDs(), owner
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -915,7 +1012,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(next.OwningTeam), Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the route %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -1324,6 +1421,7 @@ type view struct {
 	Urgent          bool      `json:"urgent"`
 	GroupKey        []string  `json:"group_key"`
 	DestinationIDs  []string  `json:"destination_ids"`
+	OwningTeamID    *string   `json:"owning_team_id"`
 	Policy          Policy    `json:"policy"`
 }
 
@@ -1343,8 +1441,12 @@ func viewOf(r Route) view {
 	if p.SnoozeDurationsSeconds == nil {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
-	return view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
+	v := view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
 		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, Policy: p}
+	if r.OwningTeam != nil {
+		v.OwningTeamID = &r.OwningTeam.PublicID
+	}
+	return v
 }
 
 func routeOf(r dbgen.GetRouteRow) Route {
@@ -1356,7 +1458,12 @@ func routeOf(r dbgen.GetRouteRow) Route {
 	if r.TemplateErrorSince.Valid {
 		te = &TemplateError{Since: r.TemplateErrorSince.Time.UTC(), Error: r.TemplateError.String}
 	}
-	return Route{Storm: st, TemplateError: te,
+	var owner *TeamRef
+	if r.OwningTeamID.Valid && r.OwningTeamPublicID.Valid {
+		owner = &TeamRef{ID: r.OwningTeamID.Int64, PublicID: r.OwningTeamPublicID.String,
+			Name: r.OwningTeamName.String, Slug: r.OwningTeamSlug.String, Deleted: r.OwningTeamDeleted}
+	}
+	return Route{Storm: st, TemplateError: te, OwningTeam: owner,
 		ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
 		IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity, Urgent: r.MinimumSeverity == MinimumCritical,
 		GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),

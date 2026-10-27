@@ -113,7 +113,7 @@ export const getListDestinationsQueryKey = (params?: ListDestinationsParams,) =>
     }
 
 
-export const getListDestinationsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export const getListDestinationsQueryOptions = <TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -132,10 +132,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListDestinationsQueryResult = NonNullable<Awaited<ReturnType<typeof listDestinations>>>
-export type ListDestinationsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+export type ListDestinationsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
 
 
-export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params: undefined |  ListDestinationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDestinations>>,
@@ -145,7 +145,7 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listDestinations>>,
@@ -155,7 +155,7 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -163,7 +163,7 @@ export function useListDestinations<TData = Awaited<ReturnType<typeof listDestin
  * @summary List destinations
  */
 
-export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+export function useListDestinations<TData = Awaited<ReturnType<typeof listDestinations>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
  params?: ListDestinationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listDestinations>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
