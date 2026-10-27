@@ -7170,7 +7170,7 @@ type Team struct {
 	// OwnWorkingHours False follows the Organization's Working hours (`team.working_hours`); true takes `working_hours`.
 	OwnWorkingHours bool `json:"own_working_hours"`
 
-	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.
+	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
 
 	// UserCount How many people are in the Team, disabled Users included.
@@ -7191,7 +7191,7 @@ type TeamInput struct {
 	// OwnWorkingHours False follows the Organization's Working hours (`team.working_hours`); true takes `working_hours`.
 	OwnWorkingHours bool `json:"own_working_hours"`
 
-	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.
+	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
 
 	// WorkingHours The Team's own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization's when the Team has none of its own.
@@ -8209,6 +8209,9 @@ type LinkRuleId = PublicId
 // LookupTableId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type LookupTableId = PublicId
 
+// OwningTeamQuery defines model for OwningTeamQuery.
+type OwningTeamQuery = string
+
 // RequestRecordId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type RequestRecordId = PublicId
 
@@ -8226,9 +8229,6 @@ type StoredSnapshotId = PublicId
 
 // SuggestionId `heartbeat_lost` suggests a Route for `alertname="MusterHeartbeatLost"`; `internal_alerts` suggests a Route for `alertname=~"Muster.*"`.
 type SuggestionId = RouteSuggestionId
-
-// TeamFilter defines model for TeamFilter.
-type TeamFilter = string
 
 // TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type TeamId = PublicId
@@ -8572,7 +8572,7 @@ type ListDestinationsParams struct {
 	Route *string `form:"route,omitempty" json:"route,omitempty"`
 
 	// Team Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
-	Team *TeamFilter `form:"team,omitempty" json:"team,omitempty"`
+	Team *OwningTeamQuery `form:"team,omitempty" json:"team,omitempty"`
 }
 
 // DeleteDestinationParams defines parameters for DeleteDestination.
@@ -8758,7 +8758,7 @@ type ReorderRoutesParams struct {
 // ListRoutesParams defines parameters for ListRoutes.
 type ListRoutesParams struct {
 	// Team Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
-	Team *TeamFilter `form:"team,omitempty" json:"team,omitempty"`
+	Team *OwningTeamQuery `form:"team,omitempty" json:"team,omitempty"`
 }
 
 // DeleteRouteParams defines parameters for DeleteRoute.
@@ -12822,7 +12822,7 @@ type ClientInterface interface {
 
 	// ListTeamUsers List the people in a Team
 	//
-	// Each person with their Role, how they are in the Team and the messengers they linked, by name.
+	// Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
 	//
 	// Corresponds with GET /teams/{team_id}/users (the `ListTeamUsers` operationId).
 	ListTeamUsers(ctx context.Context, teamId TeamId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -16633,7 +16633,7 @@ func (c *Client) UpdateTeam(ctx context.Context, teamId TeamId, params *UpdateTe
 
 // ListTeamUsers List the people in a Team
 //
-// Each person with their Role, how they are in the Team and the messengers they linked, by name.
+// Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
 //
 // Corresponds with GET /teams/{team_id}/users (the `ListTeamUsers` operationId).
 func (c *Client) ListTeamUsers(ctx context.Context, teamId TeamId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -27008,7 +27008,7 @@ type ClientWithResponsesInterface interface {
 
 	// ListTeamUsersWithResponse List the people in a Team
 	//
-	// Each person with their Role, how they are in the Team and the messengers they linked, by name.
+	// Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -39708,6 +39708,11 @@ func (r ListTeamUsersResponse) ContentType() string {
 	return ""
 }
 
+// AddTeamUserResponse201Headers the declared response headers of an HTTP 201 response for AddTeamUser
+type AddTeamUserResponse201Headers struct {
+	Location *string
+}
+
 // AddTeamUserResponse429Headers the declared response headers of an HTTP 429 response for AddTeamUser
 type AddTeamUserResponse429Headers struct {
 	RetryAfter *int
@@ -39732,6 +39737,8 @@ type AddTeamUserResponse struct {
 	ApplicationproblemJSON422 *Unprocessable
 	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
 	ApplicationproblemJSON429 *TooManyRequests
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *AddTeamUserResponse201Headers
 	// Headers429 the parsed response headers for an HTTP 429 response
 	Headers429 *AddTeamUserResponse429Headers
 }
@@ -44064,7 +44071,7 @@ func (c *ClientWithResponses) UpdateTeamWithResponse(ctx context.Context, teamId
 
 // ListTeamUsersWithResponse List the people in a Team
 //
-// Each person with their Role, how they are in the Team and the messengers they linked, by name.
+// Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -55831,6 +55838,16 @@ func ParseAddTeamUserResponse(rsp *http.Response) (*AddTeamUserResponse, error) 
 	}
 
 	switch {
+	case rsp.StatusCode == 201:
+		var headers AddTeamUserResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: "uri-reference"}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 429:
 		var headers AddTeamUserResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {

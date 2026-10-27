@@ -27,7 +27,7 @@ func routeRequester(ctx context.Context) (routing.Requester, error) {
 // only those a Team owns, or the Teams of the calling User (C-25.FR-2).
 func (s *Server) ListRoutes(ctx context.Context, req gen.ListRoutesRequestObject) (gen.ListRoutesResponseObject,
 	error) {
-	team, user, err := teamFilter(ctx, req.Params.Team)
+	team, user, err := owningTeamQuery(ctx, req.Params.Team)
 	if err != nil {
 		return nil, err
 	}

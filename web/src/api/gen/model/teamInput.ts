@@ -8,11 +8,19 @@ export interface TeamInput {
   /**
      * Unique, ignoring case, among the Teams that are not deleted.
      * @minLength 1
+     * @maxLength 200
      */
   name: string;
-  /** The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. */
+  /**
+     * The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
+     * @maxLength 63
+     * @pattern ^[a-z0-9][a-z0-9._-]{0,62}$
+     */
   slug: string;
-  /** Omit it on an update to keep it. */
+  /**
+     * Omit it on an update to keep it.
+     * @maxLength 2000
+     */
   description?: string;
   /** False follows the Organization's Working hours (`team.working_hours`); true takes `working_hours`. */
   own_working_hours: boolean;

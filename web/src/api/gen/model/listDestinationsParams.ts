@@ -6,7 +6,7 @@ import type { CursorParameter } from './cursorParameter';
 import type { DestinationType } from './destinationType';
 import type { HealthState } from './healthState';
 import type { LimitParameter } from './limitParameter';
-import type { TeamFilterParameter } from './teamFilterParameter';
+import type { OwningTeamQueryParameter } from './owningTeamQueryParameter';
 
 export type ListDestinationsParams = {
 /**
@@ -34,5 +34,5 @@ route?: string;
 /**
  * Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
  */
-team?: TeamFilterParameter;
+team?: OwningTeamQueryParameter;
 };

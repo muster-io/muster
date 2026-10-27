@@ -138,8 +138,8 @@ type Input struct {
 	WorkingHours    *WorkingHours
 }
 
-// Member is a person in a Team with their Role, how they are in it and the messengers they linked.
-type Member struct {
+// Person is someone in a Team with their Role, how they are in it and the messengers they linked.
+type Person struct {
 	ID       int64
 	PublicID string
 	Name     string
@@ -342,11 +342,15 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	page := Page{Teams: make([]Team, 0, min(len(rows), limit))}
 	for i, r := range rows {
 		if i == limit {
-			last := page.Teams[limit-1]
-			page.Next = &Position{Name: strings.ToLower(last.Name), ID: last.ID}
+			// The cursor carries the name as the database lowers it, the key the list is sorted by.
+			last := rows[limit-1]
+			page.Next = &Position{Name: last.SortName, ID: last.ID}
 			break
 		}
-		page.Teams = append(page.Teams, teamOf(teamRow(r), org))
+		page.Teams = append(page.Teams, teamOf(teamRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug,
+			Description: r.Description, OwnWorkingHours: r.OwnWorkingHours, WorkingDays: r.WorkingDays,
+			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
+			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount}, org))
 	}
 	return page, nil
 }
@@ -611,7 +615,7 @@ func (s *Service) released(ctx context.Context, q Queries, t Team, action, resou
 }
 
 // Users lists the people in the Team publicID, by name.
-func (s *Service) Users(ctx context.Context, publicID string) ([]Member, error) {
+func (s *Service) Users(ctx context.Context, publicID string) ([]Person, error) {
 	t, err := s.get(ctx, s.store, publicID)
 	if err != nil {
 		return nil, err
@@ -620,9 +624,9 @@ func (s *Service) Users(ctx context.Context, publicID string) ([]Member, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list the people of the team %s: %w", t.PublicID, err)
 	}
-	out := make([]Member, len(rows))
+	out := make([]Person, len(rows))
 	for i, r := range rows {
-		out[i] = memberOf(dbgen.GetTeamUserRow(r))
+		out[i] = personOf(dbgen.GetTeamUserRow(r))
 	}
 	if err := s.withLinks(ctx, s.store, out); err != nil {
 		return nil, err
@@ -630,8 +634,8 @@ func (s *Service) Users(ctx context.Context, publicID string) ([]Member, error) 
 	return out, nil
 }
 
-func memberOf(r dbgen.GetTeamUserRow) Member {
-	m := Member{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Login: r.Login, Role: r.Role,
+func personOf(r dbgen.GetTeamUserRow) Person {
+	m := Person{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Login: r.Login, Role: r.Role,
 		Sources: []string{}, Linked: []LinkedMessenger{}}
 	if r.ByHand {
 		m.Sources = append(m.Sources, SourceByHand)
@@ -640,7 +644,7 @@ func memberOf(r dbgen.GetTeamUserRow) Member {
 }
 
 // withLinks sets the messengers each person linked.
-func (s *Service) withLinks(ctx context.Context, q Queries, list []Member) error {
+func (s *Service) withLinks(ctx context.Context, q Queries, list []Person) error {
 	if len(list) == 0 {
 		return nil
 	}
@@ -670,13 +674,13 @@ func unknownUser() *FieldError {
 // AddUser adds the User userID to the Team teamID by hand (C-25.FR-3) and reports whether it added them: a User
 // already in the Team by hand changes nothing. A User that does not exist or is deleted is an unknown_id FieldError;
 // a disabled one may be added.
-func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID string) (Member, bool, error) {
+func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID string) (Person, bool, error) {
 	uid, err := publicid.Parse(publicid.User, userID)
 	if err != nil {
-		return Member{}, false, unknownUser()
+		return Person{}, false, unknownUser()
 	}
 	var (
-		out   Member
+		out   Person
 		added bool
 	)
 	err = s.store.InTx(ctx, func(q Queries) error {
@@ -700,7 +704,7 @@ func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID strin
 		if err != nil {
 			return fmt.Errorf("read %s in the team %s: %w", uid, t.PublicID, err)
 		}
-		list := []Member{memberOf(row)}
+		list := []Person{personOf(row)}
 		if err := s.withLinks(ctx, q, list); err != nil {
 			return err
 		}
@@ -710,20 +714,20 @@ func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID strin
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionUserAdded, Resource: resourceOf(t),
-			Diff:    []audit.Change{{Pointer: "/users/" + u.PublicID, After: memberView{Sources: out.Sources}}},
+			Diff:    []audit.Change{{Pointer: "/users/" + u.PublicID, After: personView{Sources: out.Sources}}},
 			Details: map[string]any{"user": u.PublicID, "user_name": u.Name}, SourceAddress: r.Address}); err != nil {
 			return err
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: t.PublicID})
 	})
 	if err != nil {
-		return Member{}, false, err
+		return Person{}, false, err
 	}
 	return out, added, nil
 }
 
-// memberView is a person in a Team as the Audit log diff shows them.
-type memberView struct {
+// personView is a person in a Team as the Audit log diff shows them.
+type personView struct {
 	Sources []string `json:"sources"`
 }
 
@@ -749,10 +753,10 @@ func (s *Service) RemoveUser(ctx context.Context, r Requester, teamID, userID st
 			UserID: row.ID}); err != nil {
 			return fmt.Errorf("remove %s from the team %s: %w", uid, t.PublicID, err)
 		}
-		m := memberOf(row)
+		m := personOf(row)
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionUserRemoved, Resource: resourceOf(t),
-			Diff:    []audit.Change{{Pointer: "/users/" + row.PublicID, Before: memberView{Sources: m.Sources}}},
+			Diff:    []audit.Change{{Pointer: "/users/" + row.PublicID, Before: personView{Sources: m.Sources}}},
 			Details: map[string]any{"user": row.PublicID, "user_name": row.Name}, SourceAddress: r.Address}); err != nil {
 			return err
 		}
@@ -772,10 +776,10 @@ func (s *Service) RemoveUserTeams(ctx context.Context, tx usersdb.DBTX, userID i
 		return nil, fmt.Errorf("remove the user %d from their teams: %w", userID, err)
 	}
 	for _, r := range rows {
-		m := memberOf(dbgen.GetTeamUserRow{ByHand: r.ByHand})
+		m := personOf(dbgen.GetTeamUserRow{ByHand: r.ByHand})
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: actor, Transport: t,
 			Action: ActionUserRemoved, Resource: audit.Resource{Type: ResourceTeam, PublicID: r.PublicID, Name: r.Name},
-			Diff:          []audit.Change{{Pointer: "/users/" + r.UserPublicID, Before: memberView{Sources: m.Sources}}},
+			Diff:          []audit.Change{{Pointer: "/users/" + r.UserPublicID, Before: personView{Sources: m.Sources}}},
 			Details:       map[string]any{"user": r.UserPublicID, "user_name": r.UserName, "reason": "user_deleted"},
 			SourceAddress: addr}); err != nil {
 			return nil, err

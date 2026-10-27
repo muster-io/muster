@@ -157,7 +157,10 @@ func (q *Queries) GetOrganizationWorkingHours(ctx context.Context, orgID int64) 
 const getTeam = `-- name: GetTeam :one
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
        t.working_end, t.working_time_zone, t.created_at, t.version,
-       (SELECT count(*) FROM team_users u WHERE u.org_id = t.org_id AND u.team_id = t.id)::bigint AS user_count
+       (SELECT count(*)
+        FROM team_users tu
+        JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+        WHERE tu.org_id = t.org_id AND tu.team_id = t.id AND u.status <> 'deleted')::bigint AS user_count
 FROM teams t
 WHERE t.org_id = $1 AND t.public_id = $2 AND t.deleted_at IS NULL
 `
@@ -403,7 +406,7 @@ const listTeamUsers = `-- name: ListTeamUsers :many
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
-WHERE tu.org_id = $1 AND tu.team_id = $2
+WHERE tu.org_id = $1 AND tu.team_id = $2 AND u.status <> 'deleted'
 ORDER BY lower(u.name), u.id
 `
 
@@ -422,7 +425,8 @@ type ListTeamUsersRow struct {
 	ByHand   bool
 }
 
-// ListTeamUsers lists the people in a Team, by name, with their Role and status.
+// ListTeamUsers lists the people in a Team, by name, with their Role and status; a deleted User, whom the deletion
+// took out of every Team, is never listed.
 func (q *Queries) ListTeamUsers(ctx context.Context, arg ListTeamUsersParams) ([]ListTeamUsersRow, error) {
 	rows, err := q.db.Query(ctx, listTeamUsers, arg.OrgID, arg.TeamID)
 	if err != nil {
@@ -454,7 +458,11 @@ func (q *Queries) ListTeamUsers(ctx context.Context, arg ListTeamUsersParams) ([
 const listTeams = `-- name: ListTeams :many
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
        t.working_end, t.working_time_zone, t.created_at, t.version,
-       (SELECT count(*) FROM team_users u WHERE u.org_id = t.org_id AND u.team_id = t.id)::bigint AS user_count
+       (SELECT count(*)
+        FROM team_users tu
+        JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+        WHERE tu.org_id = t.org_id AND tu.team_id = t.id AND u.status <> 'deleted')::bigint AS user_count,
+       lower(t.name)::text AS sort_name
 FROM teams t
 WHERE t.org_id = $1 AND t.deleted_at IS NULL
   AND ($2::text IS NULL OR strpos(lower(t.name), lower($2::text)) > 0
@@ -487,6 +495,7 @@ type ListTeamsRow struct {
 	CreatedAt       time.Time
 	Version         int64
 	UserCount       int64
+	SortName        string
 }
 
 // ListTeams reads a page of the Teams that are not deleted by name, after a cursor, with the number of people in each;
@@ -520,6 +529,7 @@ func (q *Queries) ListTeams(ctx context.Context, arg ListTeamsParams) ([]ListTea
 			&i.CreatedAt,
 			&i.Version,
 			&i.UserCount,
+			&i.SortName,
 		); err != nil {
 			return nil, err
 		}
@@ -543,8 +553,10 @@ type LockTeamParams struct {
 	PublicID string
 }
 
-// LockTeam locks a Team that is not deleted for a change; the lock leaves the key alone, so that saving an object it
-// owns, whose foreign key takes a key share lock, waits only for the deletion, which the owner's share lock does.
+// LockTeam locks a Team that is not deleted for a change, FOR NO KEY UPDATE: a Route or a Destination saved with the
+// Team as its owner reads the Team FOR SHARE first, before its own row, so it waits for this lock and then finds a
+// deleted Team gone; the key share lock of their foreign key does not conflict with it. A deletion takes this lock,
+// then the Destinations and then the Routes the Team owns, each set in id order.
 func (q *Queries) LockTeam(ctx context.Context, arg LockTeamParams) (int64, error) {
 	row := q.db.QueryRow(ctx, lockTeam, arg.OrgID, arg.PublicID)
 	var id int64
@@ -590,10 +602,15 @@ func (q *Queries) LockTeamUser(ctx context.Context, arg LockTeamUserParams) (Loc
 }
 
 const releaseOwnedDestinations = `-- name: ReleaseOwnedDestinations :many
-UPDATE destinations
-SET owning_team_id = NULL, updated_at = $1, version = version + 1
-WHERE org_id = $2 AND owning_team_id = $3 AND deleted_at IS NULL
-RETURNING public_id, name
+UPDATE destinations d
+SET owning_team_id = NULL, updated_at = $1, version = d.version + 1
+FROM (SELECT x.id
+      FROM destinations x
+      WHERE x.org_id = $2 AND x.owning_team_id = $3 AND x.deleted_at IS NULL
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE d.org_id = $2 AND d.id = locked.id
+RETURNING d.public_id, d.name
 `
 
 type ReleaseOwnedDestinationsParams struct {
@@ -608,7 +625,7 @@ type ReleaseOwnedDestinationsRow struct {
 }
 
 // ReleaseOwnedDestinations leaves the Destinations that are not deleted and that the Team owns without an owner, each
-// with a new version, as a save of the Destination gives it.
+// with a new version, as a save of the Destination gives it, locking them in id order.
 func (q *Queries) ReleaseOwnedDestinations(ctx context.Context, arg ReleaseOwnedDestinationsParams) ([]ReleaseOwnedDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, releaseOwnedDestinations, arg.Now, arg.OrgID, arg.TeamID)
 	if err != nil {
@@ -630,10 +647,15 @@ func (q *Queries) ReleaseOwnedDestinations(ctx context.Context, arg ReleaseOwned
 }
 
 const releaseOwnedRoutes = `-- name: ReleaseOwnedRoutes :many
-UPDATE routes
-SET owning_team_id = NULL, updated_at = $1, version = version + 1
-WHERE org_id = $2 AND owning_team_id = $3 AND deleted_at IS NULL
-RETURNING public_id, name
+UPDATE routes r
+SET owning_team_id = NULL, updated_at = $1, version = r.version + 1
+FROM (SELECT x.id
+      FROM routes x
+      WHERE x.org_id = $2 AND x.owning_team_id = $3 AND x.deleted_at IS NULL
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE r.org_id = $2 AND r.id = locked.id
+RETURNING r.public_id, r.name
 `
 
 type ReleaseOwnedRoutesParams struct {
@@ -648,7 +670,7 @@ type ReleaseOwnedRoutesRow struct {
 }
 
 // ReleaseOwnedRoutes leaves the Routes that are not deleted and that the Team owns without an owner, each with a new
-// version, as a save of the Route gives it.
+// version, as a save of the Route gives it, locking them in id order.
 func (q *Queries) ReleaseOwnedRoutes(ctx context.Context, arg ReleaseOwnedRoutesParams) ([]ReleaseOwnedRoutesRow, error) {
 	rows, err := q.db.Query(ctx, releaseOwnedRoutes, arg.Now, arg.OrgID, arg.TeamID)
 	if err != nil {

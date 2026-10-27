@@ -14,7 +14,11 @@ WHERE id = @org_id;
 -- name: ListTeams :many
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
        t.working_end, t.working_time_zone, t.created_at, t.version,
-       (SELECT count(*) FROM team_users u WHERE u.org_id = t.org_id AND u.team_id = t.id)::bigint AS user_count
+       (SELECT count(*)
+        FROM team_users tu
+        JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+        WHERE tu.org_id = t.org_id AND tu.team_id = t.id AND u.status <> 'deleted')::bigint AS user_count,
+       lower(t.name)::text AS sort_name
 FROM teams t
 WHERE t.org_id = @org_id AND t.deleted_at IS NULL
   AND (sqlc.narg('q')::text IS NULL OR strpos(lower(t.name), lower(sqlc.narg('q')::text)) > 0
@@ -28,12 +32,17 @@ LIMIT @page_size;
 -- name: GetTeam :one
 SELECT t.id, t.public_id, t.name, t.slug, t.description, t.own_working_hours, t.working_days, t.working_start,
        t.working_end, t.working_time_zone, t.created_at, t.version,
-       (SELECT count(*) FROM team_users u WHERE u.org_id = t.org_id AND u.team_id = t.id)::bigint AS user_count
+       (SELECT count(*)
+        FROM team_users tu
+        JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+        WHERE tu.org_id = t.org_id AND tu.team_id = t.id AND u.status <> 'deleted')::bigint AS user_count
 FROM teams t
 WHERE t.org_id = @org_id AND t.public_id = @public_id AND t.deleted_at IS NULL;
 
--- LockTeam locks a Team that is not deleted for a change; the lock leaves the key alone, so that saving an object it
--- owns, whose foreign key takes a key share lock, waits only for the deletion, which the owner's share lock does.
+-- LockTeam locks a Team that is not deleted for a change, FOR NO KEY UPDATE: a Route or a Destination saved with the
+-- Team as its owner reads the Team FOR SHARE first, before its own row, so it waits for this lock and then finds a
+-- deleted Team gone; the key share lock of their foreign key does not conflict with it. A deletion takes this lock,
+-- then the Destinations and then the Routes the Team owns, each set in id order.
 -- name: LockTeam :one
 SELECT id
 FROM teams
@@ -76,27 +85,38 @@ DELETE FROM team_users
 WHERE org_id = @org_id AND team_id = @team_id;
 
 -- ReleaseOwnedDestinations leaves the Destinations that are not deleted and that the Team owns without an owner, each
--- with a new version, as a save of the Destination gives it.
+-- with a new version, as a save of the Destination gives it, locking them in id order.
 -- name: ReleaseOwnedDestinations :many
-UPDATE destinations
-SET owning_team_id = NULL, updated_at = @now, version = version + 1
-WHERE org_id = @org_id AND owning_team_id = @team_id AND deleted_at IS NULL
-RETURNING public_id, name;
+UPDATE destinations d
+SET owning_team_id = NULL, updated_at = @now, version = d.version + 1
+FROM (SELECT x.id
+      FROM destinations x
+      WHERE x.org_id = @org_id AND x.owning_team_id = @team_id AND x.deleted_at IS NULL
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE d.org_id = @org_id AND d.id = locked.id
+RETURNING d.public_id, d.name;
 
 -- ReleaseOwnedRoutes leaves the Routes that are not deleted and that the Team owns without an owner, each with a new
--- version, as a save of the Route gives it.
+-- version, as a save of the Route gives it, locking them in id order.
 -- name: ReleaseOwnedRoutes :many
-UPDATE routes
-SET owning_team_id = NULL, updated_at = @now, version = version + 1
-WHERE org_id = @org_id AND owning_team_id = @team_id AND deleted_at IS NULL
-RETURNING public_id, name;
+UPDATE routes r
+SET owning_team_id = NULL, updated_at = @now, version = r.version + 1
+FROM (SELECT x.id
+      FROM routes x
+      WHERE x.org_id = @org_id AND x.owning_team_id = @team_id AND x.deleted_at IS NULL
+      ORDER BY x.id
+      FOR NO KEY UPDATE OF x) AS locked
+WHERE r.org_id = @org_id AND r.id = locked.id
+RETURNING r.public_id, r.name;
 
--- ListTeamUsers lists the people in a Team, by name, with their Role and status.
+-- ListTeamUsers lists the people in a Team, by name, with their Role and status; a deleted User, whom the deletion
+-- took out of every Team, is never listed.
 -- name: ListTeamUsers :many
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
-WHERE tu.org_id = @org_id AND tu.team_id = @team_id
+WHERE tu.org_id = @org_id AND tu.team_id = @team_id AND u.status <> 'deleted'
 ORDER BY lower(u.name), u.id;
 
 -- ListLinkedMessengers lists the Account links of the Users through Connections that are not deleted, by the name of

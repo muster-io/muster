@@ -51,22 +51,22 @@ type owned struct {
 
 // fakeStore is the database of the package in memory.
 type fakeStore struct {
-	teams   []*teamRec
-	members map[int64][]dbgen.GetTeamUserRow
-	users   map[string]dbgen.LockTeamUserRow
-	links   []dbgen.ListLinkedMessengersRow
-	dests   []*owned
-	routes  []*owned
-	org     dbgen.GetOrganizationWorkingHoursRow
-	audit   []auditdb.InsertAuditEntryParams
-	hints   []db.Hint
-	fail    map[string]error
-	nextID  int64
-	listed  []dbgen.ListTeamsParams
+	teams  []*teamRec
+	people map[int64][]dbgen.GetTeamUserRow
+	users  map[string]dbgen.LockTeamUserRow
+	links  []dbgen.ListLinkedMessengersRow
+	dests  []*owned
+	routes []*owned
+	org    dbgen.GetOrganizationWorkingHoursRow
+	audit  []auditdb.InsertAuditEntryParams
+	hints  []db.Hint
+	fail   map[string]error
+	nextID int64
+	listed []dbgen.ListTeamsParams
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{members: map[int64][]dbgen.GetTeamUserRow{},
+	return &fakeStore{people: map[int64][]dbgen.GetTeamUserRow{},
 		users: map[string]dbgen.LockTeamUserRow{
 			"SR0000000000BB": {ID: 2, PublicID: "SR0000000000BB", Name: "bob", Login: "bob", Role: "responder",
 				Status: "active"},
@@ -113,7 +113,7 @@ func (s *fakeStore) unique(name, slug string, except int64) error {
 
 func (s *fakeStore) withCount(t *teamRec) dbgen.GetTeamRow {
 	r := t.GetTeamRow
-	r.UserCount = int64(len(s.members[t.ID]))
+	r.UserCount = int64(len(s.people[t.ID]))
 	return r
 }
 
@@ -147,7 +147,11 @@ func (s *fakeStore) ListTeams(_ context.Context, arg dbgen.ListTeamsParams) ([]d
 		if len(out) == int(arg.PageSize) {
 			break
 		}
-		out = append(out, dbgen.ListTeamsRow(s.withCount(t)))
+		r := s.withCount(t)
+		out = append(out, dbgen.ListTeamsRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug,
+			Description: r.Description, OwnWorkingHours: r.OwnWorkingHours, WorkingDays: r.WorkingDays,
+			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
+			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount, SortName: strings.ToLower(r.Name)})
 	}
 	return out, nil
 }
@@ -218,7 +222,7 @@ func (s *fakeStore) DeleteTeamUsers(_ context.Context, arg dbgen.DeleteTeamUsers
 	if err := s.fail["DeleteTeamUsers"]; err != nil {
 		return err
 	}
-	delete(s.members, arg.TeamID)
+	delete(s.people, arg.TeamID)
 	return nil
 }
 
@@ -260,7 +264,7 @@ func (s *fakeStore) ListTeamUsers(_ context.Context, arg dbgen.ListTeamUsersPara
 		return nil, err
 	}
 	var out []dbgen.ListTeamUsersRow
-	for _, m := range s.members[arg.TeamID] {
+	for _, m := range s.people[arg.TeamID] {
 		out = append(out, dbgen.ListTeamUsersRow(m))
 	}
 	return out, nil
@@ -295,7 +299,7 @@ func (s *fakeStore) GetTeamUser(_ context.Context, arg dbgen.GetTeamUserParams) 
 	if err := s.fail["GetTeamUser"]; err != nil {
 		return dbgen.GetTeamUserRow{}, err
 	}
-	for _, m := range s.members[arg.TeamID] {
+	for _, m := range s.people[arg.TeamID] {
 		if m.PublicID == arg.PublicID {
 			return m, nil
 		}
@@ -307,18 +311,18 @@ func (s *fakeStore) InsertTeamUser(_ context.Context, arg dbgen.InsertTeamUserPa
 	if err := s.fail["InsertTeamUser"]; err != nil {
 		return 0, err
 	}
-	for i, m := range s.members[arg.TeamID] {
+	for i, m := range s.people[arg.TeamID] {
 		if m.ID == arg.UserID {
 			if m.ByHand {
 				return 0, nil
 			}
-			s.members[arg.TeamID][i].ByHand = true
+			s.people[arg.TeamID][i].ByHand = true
 			return 1, nil
 		}
 	}
 	for _, u := range s.users {
 		if u.ID == arg.UserID {
-			s.members[arg.TeamID] = append(s.members[arg.TeamID], dbgen.GetTeamUserRow{ID: u.ID,
+			s.people[arg.TeamID] = append(s.people[arg.TeamID], dbgen.GetTeamUserRow{ID: u.ID,
 				PublicID: u.PublicID, Name: u.Name, Login: u.Login, Role: u.Role, Status: u.Status, ByHand: true})
 		}
 	}
@@ -329,11 +333,11 @@ func (s *fakeStore) DeleteTeamUser(_ context.Context, arg dbgen.DeleteTeamUserPa
 	if err := s.fail["DeleteTeamUser"]; err != nil {
 		return 0, err
 	}
-	before := len(s.members[arg.TeamID])
-	s.members[arg.TeamID] = slices.DeleteFunc(s.members[arg.TeamID], func(m dbgen.GetTeamUserRow) bool {
+	before := len(s.people[arg.TeamID])
+	s.people[arg.TeamID] = slices.DeleteFunc(s.people[arg.TeamID], func(m dbgen.GetTeamUserRow) bool {
 		return m.ID == arg.UserID
 	})
-	return int64(before - len(s.members[arg.TeamID])), nil
+	return int64(before - len(s.people[arg.TeamID])), nil
 }
 
 func (s *fakeStore) DeleteUserTeams(_ context.Context, arg dbgen.DeleteUserTeamsParams) ([]dbgen.DeleteUserTeamsRow,
@@ -343,13 +347,13 @@ func (s *fakeStore) DeleteUserTeams(_ context.Context, arg dbgen.DeleteUserTeams
 	}
 	var out []dbgen.DeleteUserTeamsRow
 	for _, t := range s.teams {
-		for _, m := range s.members[t.ID] {
+		for _, m := range s.people[t.ID] {
 			if m.ID == arg.UserID {
 				out = append(out, dbgen.DeleteUserTeamsRow{PublicID: t.PublicID, Name: t.Name,
 					UserPublicID: m.PublicID, UserName: "deleted-user-" + m.PublicID, ByHand: m.ByHand})
 			}
 		}
-		s.members[t.ID] = slices.DeleteFunc(s.members[t.ID], func(m dbgen.GetTeamUserRow) bool {
+		s.people[t.ID] = slices.DeleteFunc(s.people[t.ID], func(m dbgen.GetTeamUserRow) bool {
 			return m.ID == arg.UserID
 		})
 	}
@@ -760,8 +764,8 @@ func TestDelete(t *testing.T) {
 		got[2] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {
 		t.Errorf("hints %+v", got)
 	}
-	if len(store.members[1]) != 0 || !store.teams[0].deleted {
-		t.Errorf("after the deletion %+v %+v", store.members, store.teams[0])
+	if len(store.people[1]) != 0 || !store.teams[0].deleted {
+		t.Errorf("after the deletion %+v %+v", store.people, store.teams[0])
 	}
 	if _, err := svc.Get(ctx, team.PublicID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a deleted team reads %v", err)
@@ -864,8 +868,8 @@ func TestPeople(t *testing.T) {
 
 	audits, hints := len(store.audit), len(store.hints)
 	after, err := svc.RemoveUserTeams(ctx, nil, 2, audit.User(1, "SRAAAAAAAAAAAA"), audit.TransportUI, by.Address)
-	if err != nil || after != nil || len(store.members[1])+len(store.members[2]) != 0 {
-		t.Fatalf("a deleted user = %v, %+v", err, store.members)
+	if err != nil || after != nil || len(store.people[1])+len(store.people[2]) != 0 {
+		t.Fatalf("a deleted user = %v, %+v", err, store.people)
 	}
 	if got := store.audit[audits:]; len(got) != 2 || got[0].Action != ActionUserRemoved ||
 		string(got[0].Details) != `{"reason":"user_deleted","user":"SR0000000000BB",`+
@@ -876,7 +880,7 @@ func TestPeople(t *testing.T) {
 	}
 
 	// A person in the Team other than by hand — later, through the identity provider — is added by hand too.
-	store.members[1] = []dbgen.GetTeamUserRow{{ID: 3, PublicID: "SR0000000000VV", Name: "vic", ByHand: false}}
+	store.people[1] = []dbgen.GetTeamUserRow{{ID: 3, PublicID: "SR0000000000VV", Name: "vic", ByHand: false}}
 	if m, added, err := svc.AddUser(ctx, by, pay.PublicID, "SR0000000000VV"); err != nil || !added ||
 		!slices.Equal(m.Sources, []string{SourceByHand}) {
 		t.Errorf("by hand too = %+v, %v, %v", m, added, err)
@@ -884,7 +888,7 @@ func TestPeople(t *testing.T) {
 
 	for _, name := range []string{"LockTeamUser", "InsertTeamUser", "GetTeamUser", "ListLinkedMessengers",
 		"InsertAuditEntry", "Notify"} {
-		store.members[1] = nil
+		store.people[1] = nil
 		store.fail[name] = errBoom
 		if _, _, err := svc.AddUser(ctx, by, pay.PublicID, "SR0000000000BB"); !errors.Is(err, errBoom) {
 			t.Errorf("add: %s fails = %v", name, err)
@@ -893,7 +897,7 @@ func TestPeople(t *testing.T) {
 	}
 	bob := dbgen.GetTeamUserRow{ID: 2, PublicID: "SR0000000000BB", Name: "bob", ByHand: true}
 	for _, name := range []string{"GetTeamUser", "DeleteTeamUser", "InsertAuditEntry", "Notify"} {
-		store.members[1] = []dbgen.GetTeamUserRow{bob}
+		store.people[1] = []dbgen.GetTeamUserRow{bob}
 		store.fail[name] = errBoom
 		if err := svc.RemoveUser(ctx, by, pay.PublicID, "SR0000000000BB"); !errors.Is(err, errBoom) {
 			t.Errorf("remove: %s fails = %v", name, err)
@@ -901,7 +905,7 @@ func TestPeople(t *testing.T) {
 		delete(store.fail, name)
 	}
 	for _, name := range []string{"ListTeamUsers", "ListLinkedMessengers"} {
-		store.members[1] = []dbgen.GetTeamUserRow{bob}
+		store.people[1] = []dbgen.GetTeamUserRow{bob}
 		store.fail[name] = errBoom
 		if _, err := svc.Users(ctx, pay.PublicID); !errors.Is(err, errBoom) {
 			t.Errorf("people: %s fails = %v", name, err)
@@ -909,7 +913,7 @@ func TestPeople(t *testing.T) {
 		delete(store.fail, name)
 	}
 	for _, name := range []string{"DeleteUserTeams", "InsertAuditEntry", "Notify"} {
-		store.members[1] = []dbgen.GetTeamUserRow{{ID: 2, PublicID: "SR0000000000BB"}}
+		store.people[1] = []dbgen.GetTeamUserRow{{ID: 2, PublicID: "SR0000000000BB"}}
 		store.fail[name] = errBoom
 		if _, err := svc.RemoveUserTeams(ctx, nil, 2, by.Actor, by.Transport, by.Address); !errors.Is(err, errBoom) {
 			t.Errorf("a deleted user: %s fails = %v", name, err)

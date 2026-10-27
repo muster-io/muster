@@ -6,4 +6,4 @@
 /**
  * Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
  */
-export type TeamFilterParameter = string;
+export type OwningTeamQueryParameter = string;

@@ -20,6 +20,13 @@ export const ListTeamsQueryParams = zod.object({
   "q": zod.string().optional().describe('Case-insensitive match on the name and the slug.')
 })
 
+export const listTeamsResponseItemsItemOneNameMax = 200;
+
+export const listTeamsResponseItemsItemOneSlugMax = 63;
+
+
+export const listTeamsResponseItemsItemOneSlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const listTeamsResponseItemsItemOneDescriptionMax = 2000;
 
 
 export const listTeamsResponseItemsItemOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -29,9 +36,9 @@ export const listTeamsResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Z
 
 export const ListTeamsResponse = zod.object({
   "items": zod.array(zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(listTeamsResponseItemsItemOneNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(listTeamsResponseItemsItemOneSlugMax).regex(listTeamsResponseItemsItemOneSlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(listTeamsResponseItemsItemOneDescriptionMax).describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -52,6 +59,13 @@ export const ListTeamsResponse = zod.object({
  * The name and the slug are each unique among the Teams that are not deleted (`409` `name_taken` or `slug_taken`); a slug outside `team.slug_format` is refused with `422` `invalid_format` at `/slug`, and Working hours that do not end later than they start with `422` `out_of_range` at `/working_hours/end`.
  * @summary Create a Team
  */
+export const createTeamBodyNameMax = 200;
+
+export const createTeamBodySlugMax = 63;
+
+
+export const createTeamBodySlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const createTeamBodyDescriptionMax = 2000;
 
 
 export const createTeamBodyWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -59,9 +73,9 @@ export const createTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3
 
 
 export const CreateTeamBody = zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().optional().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(createTeamBodyNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(createTeamBodySlugMax).regex(createTeamBodySlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(createTeamBodyDescriptionMax).optional().describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -71,6 +85,13 @@ export const CreateTeamBody = zod.object({
 }).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
 })
 
+export const createTeamResponseOneNameMax = 200;
+
+export const createTeamResponseOneSlugMax = 63;
+
+
+export const createTeamResponseOneSlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const createTeamResponseOneDescriptionMax = 2000;
 
 
 export const createTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -79,9 +100,9 @@ export const createTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp
 
 
 export const CreateTeamResponse = zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(createTeamResponseOneNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(createTeamResponseOneSlugMax).regex(createTeamResponseOneSlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(createTeamResponseOneDescriptionMax).describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -106,6 +127,13 @@ export const GetTeamParams = zod.object({
   "team_id": zod.string().regex(getTeamPathTeamIdRegExp).describe('Team `public_id`.')
 })
 
+export const getTeamResponseOneNameMax = 200;
+
+export const getTeamResponseOneSlugMax = 63;
+
+
+export const getTeamResponseOneSlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const getTeamResponseOneDescriptionMax = 2000;
 
 
 export const getTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -114,9 +142,9 @@ export const getTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv
 
 
 export const GetTeamResponse = zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(getTeamResponseOneNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(getTeamResponseOneSlugMax).regex(getTeamResponseOneSlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(getTeamResponseOneDescriptionMax).describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -146,6 +174,13 @@ export const UpdateTeamHeader = zod.object({
   "If-Match": zod.string().describe('ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.')
 })
 
+export const updateTeamBodyNameMax = 200;
+
+export const updateTeamBodySlugMax = 63;
+
+
+export const updateTeamBodySlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const updateTeamBodyDescriptionMax = 2000;
 
 
 export const updateTeamBodyWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -153,9 +188,9 @@ export const updateTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3
 
 
 export const UpdateTeamBody = zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().optional().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(updateTeamBodyNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(updateTeamBodySlugMax).regex(updateTeamBodySlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(updateTeamBodyDescriptionMax).optional().describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -165,6 +200,13 @@ export const UpdateTeamBody = zod.object({
 }).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
 })
 
+export const updateTeamResponseOneNameMax = 200;
+
+export const updateTeamResponseOneSlugMax = 63;
+
+
+export const updateTeamResponseOneSlugRegExp = new RegExp('^[a-z0-9][a-z0-9._-]{0,62}$');
+export const updateTeamResponseOneDescriptionMax = 2000;
 
 
 export const updateTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
@@ -173,9 +215,9 @@ export const updateTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp
 
 
 export const UpdateTeamResponse = zod.object({
-  "name": zod.string().min(1).describe('Unique, ignoring case, among the Teams that are not deleted.'),
-  "slug": zod.string().describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.'),
-  "description": zod.string().describe('Omit it on an update to keep it.'),
+  "name": zod.string().min(1).max(updateTeamResponseOneNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
+  "slug": zod.string().max(updateTeamResponseOneSlugMax).regex(updateTeamResponseOneSlugRegExp).describe('The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.'),
+  "description": zod.string().max(updateTeamResponseOneDescriptionMax).describe('Omit it on an update to keep it.'),
   "own_working_hours": zod.boolean().describe('False follows the Organization\'s Working hours (`team.working_hours`); true takes `working_hours`.'),
   "working_hours": zod.object({
   "days": zod.array(zod.enum(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']).describe('A day of the week. As the Organization\'s `week_start` it is `organization.week_start` (default `monday`), the first day of the week, on which the Snooze preset `week_start` ends at the start of the working day; omit it on an update to keep it.')).min(1),
@@ -208,7 +250,7 @@ export const DeleteTeamHeader = zod.object({
 export const DeleteTeamResponse = zod.void()
 
 /**
- * Each person with their Role, how they are in the Team and the messengers they linked, by name.
+ * Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
  * @summary List the people in a Team
  */
 export const listTeamUsersPathTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

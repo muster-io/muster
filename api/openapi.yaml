@@ -2787,7 +2787,7 @@ paths:
       - sessionCookie: []
       - apiToken: []
       parameters:
-      - $ref: '#/components/parameters/TeamFilter'
+      - $ref: '#/components/parameters/OwningTeamQuery'
       responses:
         '200':
           description: All Routes.
@@ -3416,7 +3416,8 @@ paths:
       tags:
       - Teams
       summary: List the people in a Team
-      description: Each person with their Role, how they are in the Team and the messengers they linked, by name.
+      description: Each person with their Role, how they are in the Team and the messengers they linked, by name. The
+        complete list, not paginated.
       x-permission: teams:read
       x-listener: app
       security:
@@ -3470,6 +3471,9 @@ paths:
                 $ref: '#/components/schemas/TeamUser'
         '201':
           description: The person was added.
+          headers:
+            Location:
+              $ref: '#/components/headers/Location'
           content:
             application/json:
               schema:
@@ -4863,7 +4867,7 @@ paths:
         description: Only Destinations of this Route (`public_id`).
         schema:
           type: string
-      - $ref: '#/components/parameters/TeamFilter'
+      - $ref: '#/components/parameters/OwningTeamQuery'
       responses:
         '200':
           description: A page of Destinations.
@@ -7899,7 +7903,7 @@ components:
       description: Team `public_id`.
       schema:
         $ref: '#/components/schemas/PublicId'
-    TeamFilter:
+    OwningTeamQuery:
       name: team
       in: query
       description: Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own —
@@ -10904,15 +10908,20 @@ components:
         name:
           type: string
           minLength: 1
+          maxLength: 200
           description: Unique, ignoring case, among the Teams that are not deleted.
         slug:
           type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,62}$'
+          maxLength: 63
+          x-unprocessable: true
           description: The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters,
             lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that
-            are not deleted.
+            are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
           example: payments
         description:
           type: string
+          maxLength: 2000
           description: Omit it on an update to keep it.
         own_working_hours:
           type: boolean

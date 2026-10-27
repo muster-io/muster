@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams"
 )
 
@@ -21,15 +22,15 @@ type Teams interface {
 	Update(ctx context.Context, r teams.Requester, publicID string, version *int64, in teams.Input) (teams.Team,
 		error)
 	Delete(ctx context.Context, r teams.Requester, publicID string, version *int64) error
-	Users(ctx context.Context, publicID string) ([]teams.Member, error)
-	AddUser(ctx context.Context, r teams.Requester, teamID, userID string) (teams.Member, bool, error)
+	Users(ctx context.Context, publicID string) ([]teams.Person, error)
+	AddUser(ctx context.Context, r teams.Requester, teamID, userID string) (teams.Person, bool, error)
 	RemoveUser(ctx context.Context, r teams.Requester, teamID, userID string) error
 }
 
 // teamsCursor is the cursor of the Team list.
 const teamsCursor = "teams"
 
-// teamMine is the value of the team filter that names the Teams of the calling User, "My Teams".
+// teamMine is the value of the parameter team that names the Teams of the calling User, "My Teams".
 const teamMine = "mine"
 
 // teamsRequester is who asks for a change of a Team through the API.
@@ -166,7 +167,10 @@ func (s *Server) AddTeamUser(ctx context.Context, req gen.AddTeamUserRequestObje
 		return nil, err
 	}
 	if added {
-		return gen.AddTeamUser201JSONResponse(teamUserOf(m)), nil
+		team, _ := publicid.Parse(publicid.Team, req.TeamId) // the addition found the Team by it
+		location := BasePath + "/teams/" + team + "/users/" + m.PublicID
+		return gen.AddTeamUser201JSONResponse{Body: teamUserOf(m),
+			Headers: gen.AddTeamUser201ResponseHeaders{Location: &location}}, nil
 	}
 	return gen.AddTeamUser200JSONResponse(teamUserOf(m)), nil
 }
@@ -221,7 +225,7 @@ func teamOf(t teams.Team) gen.Team {
 }
 
 // teamUserOf is the API form of a person in a Team.
-func teamUserOf(m teams.Member) gen.TeamUser {
+func teamUserOf(m teams.Person) gen.TeamUser {
 	login := m.Login
 	out := gen.TeamUser{User: gen.UserRef{Id: m.PublicID, Name: m.Name, Login: &login}, Role: gen.RoleName(m.Role),
 		Sources: make([]gen.TeamUserSource, 0, len(m.Sources)), LinkedMessengers: make([]gen.LinkedMessenger, 0,
@@ -275,9 +279,9 @@ func owningTeamIDOf(publicID string, set bool) nullable.Nullable[gen.NullablePub
 var errServiceAccountTeams = fieldProblem(http.StatusUnprocessableEntity, "/query/team", fieldUnsupported,
 	"A Service account is in no Team; name a Team instead of mine.")
 
-// teamFilter reads the team filter of a list: the public_id of a Team, or with mine the internal id of the calling
-// User, whose Teams the list keeps. A Service account's mine is refused with 422.
-func teamFilter(ctx context.Context, team *string) (string, int64, error) {
+// owningTeamQuery reads the parameter team of a list: the public_id of the Team that owns what the list keeps, or
+// with mine the internal id of the calling User, whose Teams own it. A Service account's mine is refused with 422.
+func owningTeamQuery(ctx context.Context, team *string) (string, int64, error) {
 	if team == nil || *team != teamMine {
 		if team == nil {
 			return "", 0, nil

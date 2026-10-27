@@ -30,7 +30,7 @@ const (
 // fakeTeams stands for internal/teams: one Team, Payments, with Bob in it, and what the API asked.
 type fakeTeams struct {
 	team     teams.Team
-	members  []teams.Member
+	people   []teams.Person
 	filters  []teams.ListFilter
 	inputs   []teams.Input
 	versions []*int64
@@ -46,7 +46,7 @@ func newFakeTeams() *fakeTeams {
 	hours := teams.WorkingHours{Days: []string{"monday", "friday"}, Start: "09:00", End: "18:00", TimeZone: "UTC"}
 	return &fakeTeams{team: teams.Team{ID: 1, PublicID: teamID, Name: "Payments", Slug: "payments",
 		WorkingHours: hours, UserCount: 1, CreatedAt: t0, Version: 2},
-		members: []teams.Member{{ID: 2, PublicID: bobPublicID, Name: "bob", Login: "bob", Role: "responder",
+		people: []teams.Person{{ID: 2, PublicID: bobPublicID, Name: "bob", Login: "bob", Role: "responder",
 			Sources: []string{teams.SourceByHand}, Linked: []teams.LinkedMessenger{{Type: "mattermost",
 				ConnectionPublicID: "CNAAAAAAAAAAA1", ConnectionName: "chat"}}}}}
 }
@@ -79,11 +79,11 @@ func (f *fakeTeams) Delete(_ context.Context, r teams.Requester, id string, vers
 	return f.err
 }
 
-func (f *fakeTeams) Users(context.Context, string) ([]teams.Member, error) { return f.members, f.err }
+func (f *fakeTeams) Users(context.Context, string) ([]teams.Person, error) { return f.people, f.err }
 
-func (f *fakeTeams) AddUser(_ context.Context, _ teams.Requester, _, userID string) (teams.Member, bool, error) {
+func (f *fakeTeams) AddUser(_ context.Context, _ teams.Requester, _, userID string) (teams.Person, bool, error) {
 	f.added = append(f.added, userID)
-	return f.members[0], !f.already, f.err
+	return f.people[0], !f.already, f.err
 }
 
 func (f *fakeTeams) RemoveUser(_ context.Context, _ teams.Requester, _, userID string) error {
@@ -217,8 +217,9 @@ func TestTeamsAPI(t *testing.T) {
 		t.Errorf("people = %d %s", a.status, a.body)
 	}
 	add := `{"user_id":"` + bobPublicID + `"}`
-	if a = x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams/"+teamID+"/users", add); a.status !=
-		http.StatusCreated || ft.added[0] != bobPublicID {
+	if a = x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams/"+strings.ToLower(teamID)+"/users", add); a.status !=
+		http.StatusCreated || ft.added[0] != bobPublicID ||
+		a.header.Get("Location") != "/api/v1/teams/"+teamID+"/users/"+bobPublicID {
 		t.Errorf("add = %d %s", a.status, a.body)
 	}
 	ft.already = true
@@ -305,9 +306,9 @@ func TestTeamsGrantNothing(t *testing.T) {
 	}
 }
 
-// TestTeamFilters is C-25.FR-2 and C-25.AC-11 at the API: listRoutes and listDestinations take team, a Team's
+// TestOwningTeamQuery is C-25.FR-2 and C-25.AC-11 at the API: listRoutes and listDestinations take team, a Team's
 // public_id or mine for the Teams of the calling User; a Service account's mine is 422 unsupported at /query/team.
-func TestTeamFilters(t *testing.T) {
+func TestOwningTeamQuery(t *testing.T) {
 	x, _, fr := newTeamsAPI(t)
 	if a := x.as(t, teamsReader, http.MethodGet, "/api/v1/routes?team=mine", ""); a.status != http.StatusOK ||
 		len(fr.owned) != 1 || fr.owned[0].UserID == 0 || fr.owned[0].Team != "" {
@@ -391,5 +392,26 @@ func TestOwningTeamInputs(t *testing.T) {
 	if a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", body); a.status != http.StatusCreated ||
 		fr.inputs[0].OwningTeamID == nil || *fr.inputs[0].OwningTeamID != "" {
 		t.Errorf("route = %d %s, %+v", a.status, a.body, fr.inputs)
+	}
+}
+
+// TestSlugUnprocessable: a slug outside team.slug_format, refused by the request validation for the pattern and the
+// length of the spec, answers the 422 invalid_format at /slug that the domain answers (x-unprocessable); a body that
+// is also malformed elsewhere stays a 400.
+func TestSlugUnprocessable(t *testing.T) {
+	x, ft, _ := newTeamsAPI(t)
+	for _, slug := range []string{"Payments", "-x", strings.Repeat("a", 64)} {
+		status, _, ptr, code := firstProblemError(t, x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams",
+			`{"name":"x","slug":"`+slug+`","own_working_hours":false}`))
+		if status != http.StatusUnprocessableEntity || ptr != "/slug" || code != fieldInvalidFormat {
+			t.Errorf("%q = %d %s %s", slug, status, ptr, code)
+		}
+	}
+	if a := x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams",
+		`{"name":"","slug":"Payments","own_working_hours":false}`); a.status != http.StatusBadRequest {
+		t.Errorf("a slug and an empty name = %d %s", a.status, a.body)
+	}
+	if len(ft.inputs) != 0 {
+		t.Error("a refused slug reached the Teams")
 	}
 }

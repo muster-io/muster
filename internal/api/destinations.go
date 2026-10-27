@@ -71,7 +71,7 @@ func (s *Server) ListDestinations(ctx context.Context, req gen.ListDestinationsR
 	gen.ListDestinationsResponseObject, error) {
 	p := req.Params
 	f := destinations.ListFilter{Limit: pageSize(p.Limit), Route: p.Route}
-	team, user, err := teamFilter(ctx, p.Team)
+	team, user, err := owningTeamQuery(ctx, p.Team)
 	if err != nil {
 		return nil, err
 	}

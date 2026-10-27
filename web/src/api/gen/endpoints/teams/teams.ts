@@ -530,7 +530,7 @@ export const useDeleteTeam = <TError = UnauthorizedResponse | ForbiddenResponse 
 }
 
 /**
- * Each person with their Role, how they are in the Team and the messengers they linked, by name.
+ * Each person with their Role, how they are in the Team and the messengers they linked, by name. The complete list, not paginated.
  * @summary List the people in a Team
  */
 export const listTeamUsers = async (teamId: string, options?: Parameters<typeof apiFetch>[1]): Promise<TeamUserList> => {

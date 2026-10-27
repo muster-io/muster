@@ -7168,7 +7168,7 @@ type Team struct {
 	// OwnWorkingHours False follows the Organization's Working hours (`team.working_hours`); true takes `working_hours`.
 	OwnWorkingHours bool `json:"own_working_hours"`
 
-	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.
+	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
 
 	// UserCount How many people are in the Team, disabled Users included.
@@ -7189,7 +7189,7 @@ type TeamInput struct {
 	// OwnWorkingHours False follows the Organization's Working hours (`team.working_hours`); true takes `working_hours`.
 	OwnWorkingHours bool `json:"own_working_hours"`
 
-	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted.
+	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
 
 	// WorkingHours The Team's own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization's when the Team has none of its own.
@@ -8207,6 +8207,9 @@ type LinkRuleId = PublicId
 // LookupTableId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type LookupTableId = PublicId
 
+// OwningTeamQuery defines model for OwningTeamQuery.
+type OwningTeamQuery = string
+
 // RequestRecordId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type RequestRecordId = PublicId
 
@@ -8224,9 +8227,6 @@ type StoredSnapshotId = PublicId
 
 // SuggestionId `heartbeat_lost` suggests a Route for `alertname="MusterHeartbeatLost"`; `internal_alerts` suggests a Route for `alertname=~"Muster.*"`.
 type SuggestionId = RouteSuggestionId
-
-// TeamFilter defines model for TeamFilter.
-type TeamFilter = string
 
 // TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type TeamId = PublicId
@@ -8570,7 +8570,7 @@ type ListDestinationsParams struct {
 	Route *string `form:"route,omitempty" json:"route,omitempty"`
 
 	// Team Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
-	Team *TeamFilter `form:"team,omitempty" json:"team,omitempty"`
+	Team *OwningTeamQuery `form:"team,omitempty" json:"team,omitempty"`
 }
 
 // DeleteDestinationParams defines parameters for DeleteDestination.
@@ -8756,7 +8756,7 @@ type ReorderRoutesParams struct {
 // ListRoutesParams defines parameters for ListRoutes.
 type ListRoutesParams struct {
 	// Team Only what this Team owns (its `public_id`), or with `mine` what the Teams of the calling User own — "My Teams". A Service account has no Teams, so its `mine` is refused with `422` `unsupported`. A value that names no Team, or a deleted one, matches nothing.
-	Team *TeamFilter `form:"team,omitempty" json:"team,omitempty"`
+	Team *OwningTeamQuery `form:"team,omitempty" json:"team,omitempty"`
 }
 
 // DeleteRouteParams defines parameters for DeleteRoute.
@@ -33959,15 +33959,25 @@ func (response AddTeamUser200JSONResponse) VisitAddTeamUserResponse(w http.Respo
 	return err
 }
 
-type AddTeamUser201JSONResponse TeamUser
+type AddTeamUser201ResponseHeaders struct {
+	Location *string
+}
+
+type AddTeamUser201JSONResponse struct {
+	Body    TeamUser
+	Headers AddTeamUser201ResponseHeaders
+}
 
 func (response AddTeamUser201JSONResponse) VisitAddTeamUserResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err

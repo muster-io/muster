@@ -172,6 +172,18 @@ func TestIntegrationTeams(t *testing.T) {
 			len(m.Sources) != 1 || m.Sources[0] != "by_hand" {
 			t.Errorf("by hand too = %+v, %v, %v", m, added, err)
 		}
+		// A deleted User is neither counted nor listed, should a row of theirs be left.
+		if _, err := e.d.Pool.Exec(ctx, `WITH u AS (INSERT INTO users (org_id, public_id, login, name, role, source,
+			status, deleted_at, created_at, updated_at) VALUES ($1, 'SR0000000000DD', 'deleted-user-SR0000000000DD',
+			'deleted-user-SR0000000000DD', 'viewer', 'local', 'deleted', $2, $2, $2) RETURNING id)
+			INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
+			SELECT $1, t.id, u.id, true, $2 FROM teams t, u WHERE t.public_id = $3`, e.orgID, t0,
+			pay.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.svc.Get(ctx, pay.PublicID); err != nil || got.UserCount != 1 {
+			t.Errorf("user_count with a deleted User = %+v, %v", got.UserCount, err)
+		}
 		people, err := e.svc.Users(ctx, pay.PublicID)
 		if err != nil || len(people) != 1 || people[0].Role != "responder" || people[0].Sources[0] != "by_hand" {
 			t.Errorf("people = %+v, %v", people, err)
