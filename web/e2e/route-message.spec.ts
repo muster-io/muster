@@ -106,13 +106,13 @@ test("edits the message templates with live previews and refuses an unknown func
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 1. Routes → "Create route" → On-call → Message: the language and "Root message" built in.
+  // 1. Routes → "Create route" → Paging → Message: the language and "Root message" built in.
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Routes" })
     .click();
   await page.getByRole("link", { name: "Create route" }).click();
-  await page.getByRole("button", { name: "On-call" }).click();
+  await page.getByRole("button", { name: "Paging" }).click();
   const message = page.getByTestId("route-message");
   await expect(message.getByRole("group", { name: "Message" })).toBeVisible();
   const language = message.getByLabel("Language");

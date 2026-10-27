@@ -197,7 +197,7 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   09:00" and "Until Monday 09:00", for example — with a style hint for each, the presets `neutral` like the durations,
   at most as many as the bridge allows. Beyond that limit the Snooze buttons go first, whatever their labels: the
   "Until Monday" preset (the first day of the week), then the "Until tomorrow" preset, then the durations from the
-  longest. A firing Root message on an On-call Route has seven buttons, so a bridge that allows five gets Ack, Resolve
+  longest. A firing Root message on a Paging Route has seven buttons, so a bridge that allows five gets Ack, Resolve
   and the three durations, and one that allows six also "Until tomorrow 09:00". Without buttons, a bridge that forwards
   the messages of a Thread gets a last line in each Root message that is not resolved, such as "Reply in the Thread:
   ack · resolve · snooze 1h", and takes the presets as Text commands such as `snooze tomorrow`.

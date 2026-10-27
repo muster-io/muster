@@ -413,7 +413,7 @@ test("the Route editor saves a Snooze duration that the dialog then offers", asy
   await signInAdmin(page);
   // A new Route starts with the durations of its profile.
   await page.goto("/routes/new");
-  await page.getByTestId("route-profile-on_call").click();
+  await page.getByTestId("route-profile-paging").click();
   await expect(page.getByTestId("route-snooze").getByTestId("snooze-duration")).toHaveText([
     "1 h",
     "4 h",

@@ -1038,7 +1038,7 @@ without a notification. Edits are always Quiet. Do not make an edit ring anyone.
 `success`), and `data`. The data is opaque and signed by Muster; return it unchanged with the press. Map a style that
 your messenger lacks to the closest one, or show a plain button. Muster sends at most `max_per_message` buttons, and
 drops Snooze buttons first: the preset of the first day of the week ("Until Monday 09:00"), then the preset of the next
-morning ("Until tomorrow 09:00"), then the durations from the longest. A firing Root message on an On-call Route has
+morning ("Until tomorrow 09:00"), then the durations from the longest. A firing Root message on a Paging Route has
 seven buttons, Ack, Resolve, three durations and the two presets, so a bridge that declares `max_per_message: 5` gets
 Ack, Resolve and the three durations.
 

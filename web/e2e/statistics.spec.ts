@@ -5,7 +5,7 @@
 // their story. The fake Alertmanager sends the group s1 to the Integration "stats": three Alerts of the Route "st",
 // each its own Alert Group, resolved 10, 20 and 30 minutes after they started by the development clock. The page
 // shows 3 Alert Groups with a median time to resolve of 20 min, on one day, by Route and by Integration, with no
-// Content Security Policy violation; the Lifecycle section shows the On-call values and saves a new Reopen window.
+// Content Security Policy violation; the Lifecycle section shows the Paging values and saves a new Reopen window.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -163,7 +163,7 @@ test("the Lifecycle section shows the profile's values and saves new ones", asyn
 
   // A new Route takes the values of its profile.
   await page.goto("/routes/new");
-  await page.getByTestId("route-profile-on_call").click();
+  await page.getByTestId("route-profile-paging").click();
   const fresh = page.getByTestId("route-lifecycle");
   await expect(fresh.getByLabel("Reopen window")).toHaveValue("15");
   await expect(fresh.getByLabel("Grace period")).toHaveValue("15");

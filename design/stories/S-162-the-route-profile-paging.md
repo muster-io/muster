@@ -57,7 +57,7 @@ files_touched:
 acceptance:
   - "[C-26.FR-11, C-26.AC-8, C-08.FR-7, C-08.AC-11] `listRouteProfiles` returns the ids `paging` and `informational`, named \"Paging\" and \"Informational\", with the policy values of the Paging and Informational columns of defaults.md; the `RouteProfile.id` enum of the specification is `paging`, `informational`; the Default route created on a new database and both Route suggestions take the values of the Paging profile (`routes_test.go`, `suggestions_test.go`, `routing_test.go`)."
   - "[C-26.FR-11] Neither the id nor the name of the old profile is left: `grep -rnE 'on_call|onCall|On-call' internal test web/src web/e2e docs` lists only the upgrade notes and uses that mean the person On-call (CONTEXT.md) — the clicks on the button \"On-call\" and \"Profile: On-call\" of `route-preview.spec.ts`, `route-message.spec.ts` and `timers.spec.ts`, `gen.OnCall` of `routes_test.go`, the helpers `onCall()`, and every comment that names the profile, included — and `make e2e` passes."
-  - "[C-26.FR-11, C-10.AC-23] In a real browser, Routes → \"Create route\" offers \"Paging\" with \"For alerts someone must act on: ack timeout and Reminders on.\" and \"Informational\"; choosing \"Paging\" pre-fills the Snooze durations 1 h, 4 h and 24 h, and a firing Root message of such a Route in the fake Mattermost server still shows the Snooze presets after \"Snooze 24 h\"; in Russian the profile reads «С призывом» (`routes.spec.ts`, `commands.spec.ts`)."
+  - "[C-26.FR-11, C-10.AC-23] In a real browser, Routes → \"Create route\" offers \"Paging\" with \"For alerts someone must act on: ack timeout and Reminders on.\" and \"Informational\"; choosing \"Paging\" pre-fills the Snooze durations 1 h, 4 h and 24 h, and a firing Root message of such a Route in the fake Mattermost server still shows the Snooze presets after \"Snooze 24 h\"; in Russian the profile reads «С призывом» (`routes.spec.ts`, `commands.spec.ts`; the Root message in the fake Mattermost server: `TestMattermost` of `mattermost_test.go`, whose Route takes the profile `paging` by its id)."
   - "[C-26.FR-11] The documentation calls the profile Paging everywhere, and the upgrade notes of 0.2.0 in Requirements and tested versions say that `route-profiles` returns `paging` instead of `on_call`, which breaks clients that type the enum, and that nothing stored changes; `make docs-check` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
@@ -92,7 +92,10 @@ issue: 451
 - **End-to-end suites**: `web/e2e/support.ts` and the specs that read the profile's policy by its id or click its
   button — among them `route-preview.spec.ts` ("Profile: On-call"), `route-message.spec.ts` and `timers.spec.ts` —
   and the screenshot specs `routes-and-templates.spec.ts` and `first-alert.spec.ts`, which click "On-call", use the
-  new id and name; `test/e2e/routing_test.go` and `internal/api/routes_test.go` (`gen.OnCall`) assert the new ids.
+  new id and name; `test/e2e/routing_test.go` and `internal/api/routes_test.go` (`gen.OnCall`) assert the new ids and
+  names, and the Route helper of `test/e2e/mattermost_test.go` takes the profile `paging` by its id rather than the
+  first in the list. `routes.spec.ts` checks the choice in "Create route", the Snooze durations Paging pre-fills and
+  «С призывом» for an Admin who reads Muster in Russian.
 - **Names in code**: the helpers `onCall()` of `internal/routing` and of the groups tests become `paging()`, and the
   comments that name the On-call profile — in `internal/api/routes.go`, the tests of `internal/groups` and
   `internal/timers`, `test/e2e/mattermost_test.go`, `route-policy-timers.test.tsx`, `lib/commands.ts` and

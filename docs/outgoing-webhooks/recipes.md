@@ -44,7 +44,7 @@ duplicates, picks the events worth a call, and calls the provider.
    [Create the Destination](events.md#create-the-destination). The relay below checks only the signature, so it needs
    the Secret `token` and its header from that example only when something in front of it asks for a credential. Keep
    the Signing secret that the answer shows once, and give it to the relay.
-2. Create a Route that matches what should ring a phone, with the Destination, and an On-call profile.
+2. Create a Route that matches what should ring a phone, with the Destination, and the Paging profile.
 3. Run the relay. This sketch is Python; the `verify` function is the one on [Verify the
    signature](events.md#verify-the-signature):
 

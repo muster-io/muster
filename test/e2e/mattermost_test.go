@@ -99,11 +99,20 @@ func (e *mm) route(name, team string, destinations []string, edit func(policy ma
 	e.t.Helper()
 	var profiles struct {
 		Items []struct {
+			ID     string         `json:"id"`
 			Policy map[string]any `json:"policy"`
 		} `json:"items"`
 	}
 	decode(e.t, e.api.do(http.MethodGet, "/api/v1/route-profiles", ""), &profiles)
-	policy := profiles.Items[0].Policy
+	var policy map[string]any
+	for _, p := range profiles.Items {
+		if p.ID == "paging" {
+			policy = p.Policy
+		}
+	}
+	if policy == nil {
+		e.t.Fatalf("no profile paging in %+v", profiles.Items)
+	}
 	if edit != nil {
 		edit(policy)
 	}

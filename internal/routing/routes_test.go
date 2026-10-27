@@ -1415,7 +1415,7 @@ func TestProfiles(t *testing.T) {
 	}
 	if !slices.Equal(ps[0].Policy.SnoozeDurationsSeconds, []int64{3600, 14400, 86400}) || !ps[0].Policy.AckTimeout.Enabled ||
 		!ps[0].Policy.Reminders.Enabled {
-		t.Errorf("on-call %+v", ps[0].Policy)
+		t.Errorf("paging %+v", ps[0].Policy)
 	}
 	if !slices.Equal(ps[1].Policy.SnoozeDurationsSeconds, []int64{86400, 259200, 604800}) ||
 		ps[1].Policy.AckTimeout.Enabled || ps[1].Policy.Reminders.Enabled {

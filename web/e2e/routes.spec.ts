@@ -5,7 +5,9 @@
 // sends the group rr2 (severity none, P5 and none at all) to the Integration "lab-routes" while only "disk" and the
 // Default route exist; then "info" (severity="info") is created with the Informational profile and dragged above
 // "disk", newly firing Disk alerts with severity="info" follow the order, a second browser moves "disk" back and a third move over the old order is refused; the Heartbeat
-// suggestion creates its Route, is dismissed for one user only, and a Responder sees everything read-only.
+// suggestion creates its Route, is dismissed for one user only, and a Responder sees everything read-only. "Create
+// route" offers the profiles Paging and Informational with their lines, Paging pre-fills its Snooze durations, and an
+// Admin who reads Muster in Russian sees Paging as «С призывом».
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
@@ -24,6 +26,8 @@ import {
 const SUGGESTION =
   "Muster raises MusterHeartbeatLost when an Integration loses its Heartbeat, and only the Default route takes it now.";
 const STALE_ORDER = "Someone else changed the order. Reload to see it.";
+const RU_ADMIN = "rt-admin-ru";
+const RU_PASSWORD = "rt-admin-ru-password-1";
 
 test.describe.configure({ mode: "serial" });
 
@@ -96,7 +100,7 @@ async function prepare(): Promise<void> {
       urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [],
-      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
     });
   }
   await admin.dispose();
@@ -358,4 +362,62 @@ test("the Alerts view shows each Alert's Route and Severity level", async ({ pag
   await order2.getByTestId("alert-route").click();
   await expect(page.getByRole("heading", { level: 1, name: "disk" })).toBeVisible();
   expect(csp).toEqual([]);
+});
+
+/** The Admin who reads Muster in Russian, created once. */
+async function ensureRussianAdmin(): Promise<void> {
+  const admin = await adminApi();
+  try {
+    const directory = await admin.call<{ items: { login?: string }[] }>(
+      "GET",
+      `/api/v1/user-directory?q=${encodeURIComponent(RU_ADMIN)}`,
+    );
+    if (!directory.items.some((u) => u.login === RU_ADMIN)) {
+      const { token } = await admin.createUser(RU_ADMIN, "admin");
+      await admin.call("POST", "/api/v1/password-setups", { token, password: RU_PASSWORD });
+    }
+  } finally {
+    await admin.dispose();
+  }
+}
+
+test("Create route offers Paging and Informational, and Paging reads «С призывом» in Russian", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await page.goto("/routes/new");
+  const paging = page.getByRole("button", { name: "Paging" });
+  await expect(paging).toHaveAccessibleDescription(
+    "For alerts someone must act on: ack timeout and Reminders on.",
+  );
+  await expect(page.getByRole("button", { name: "Informational" })).toHaveAccessibleDescription(
+    "For alerts to read later: no ack timeout, no Reminders, long Snooze durations.",
+  );
+  await paging.click();
+  await expect(page.getByTestId("route-profile")).toContainText("Profile: Paging");
+  await expect(page.getByTestId("route-snooze").getByTestId("snooze-duration")).toHaveText([
+    "1 h",
+    "4 h",
+    "24 h",
+  ]);
+  expect(csp).toEqual([]);
+
+  await ensureRussianAdmin();
+  const context = await browser.newContext();
+  const ru = await context.newPage();
+  const ruCsp = watchCsp(ru);
+  await signIn(ru, RU_ADMIN, RU_PASSWORD);
+  await ru.goto("/profile");
+  await ru.getByLabel("Language").selectOption("ru");
+  await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+  await ru.goto("/routes/new");
+  await expect(ru.getByRole("button", { name: "С призывом" })).toHaveAccessibleDescription(
+    "Для алертов, на которые кто-то должен отреагировать: тайм-аут подтверждения и напоминания включены.",
+  );
+  await expect(ru.getByRole("button", { name: "Информационный" })).toBeVisible();
+  await shot(ru, "routes-profile-choice-ru");
+  expect(ruCsp).toEqual([]);
+  await context.close();
 });

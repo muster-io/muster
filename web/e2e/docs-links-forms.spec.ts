@@ -220,7 +220,7 @@ test.beforeAll(async () => {
         urgent: false,
         group_key: ["alertname", "cluster"],
         destination_ids: [ids.alerts],
-        policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+        policy: profiles.items.find((p) => p.id === "paging")?.policy,
       })
     ).id;
     const ru = await admin.createUser(RU_ADMIN, "admin");
@@ -246,7 +246,7 @@ test.afterAll(async () => {
   }
 });
 
-/** Routes → New → On-call: the editor of a new Route. */
+/** Routes → New → Paging: the editor of a new Route. */
 async function newRoute(page: Page): Promise<void> {
   await page.goto("/routes/new");
   await expectTarget(
@@ -254,7 +254,7 @@ async function newRoute(page: Page): Promise<void> {
     "concepts/routes-and-group-keys/",
     "#route-profiles",
   );
-  await page.getByTestId("route-profile-on_call").click();
+  await page.getByTestId("route-profile-paging").click();
   await expect(page.getByRole("group", { name: "Matchers", exact: true })).toBeVisible();
 }
 
@@ -585,7 +585,7 @@ test("a Destination whose template keeps failing links its banner to the runbook
       urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [destination],
-      policy: profiles.items.find((p) => p.id === "on_call")?.policy,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
     });
     await fam("PUT", "/groups/dlf-tpl", {
       receiver: INTEGRATION,
@@ -700,7 +700,7 @@ async function russian(page: Page): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
 
   await page.goto("/routes/new");
-  await page.getByTestId("route-profile-on_call").click();
+  await page.getByTestId("route-profile-paging").click();
   const matchers = page.getByRole("link", {
     name: "Подробнее: Матчеры (откроется в новой вкладке)",
     exact: true,
