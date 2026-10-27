@@ -6,11 +6,11 @@
 -- that use it through open_group_updates, whose kind CHECK is replaced by open_group_updates_kind_v2_check with the
 -- kinds destination_buttons and organization_buttons, and whose new column destination_id names the Destination of a
 -- row of destination_buttons.
--- Expand only: a replica of 0.1 that still runs during a rolling update reads neither column, writes Organizations and
--- Destinations with the defaults — every button, and "As in the Organization" — and claims only the kind it knows,
--- route_minimum_severity, so a row of a new kind waits for a replica that handles it. Every new CHECK and the foreign
--- key are added NOT VALID, validated in a second transaction under a lock that lets writes through, and the old kind
--- CHECK is dropped in a third, as 0018 does.
+-- Expand only: a replica of 0.1 that still runs during a rolling update reads neither column and renders every button
+-- on the messages it touches; it writes Organizations and Destinations with the defaults — every button, and "As in
+-- the Organization" — and, having no open_group_updates worker, never claims or writes these rows. Every new CHECK and
+-- the foreign key are added NOT VALID, validated in a second transaction under a lock that lets writes through, and
+-- the old kind CHECK is dropped in a third, as 0018 does.
 
 BEGIN;
 

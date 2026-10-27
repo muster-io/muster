@@ -2011,7 +2011,7 @@ func TestIntegrationButtonSets(t *testing.T) {
 			"open_group_updates.open_group_updates_kind_check:true" {
 			t.Errorf("after down: the kind checks %s", got)
 		}
-		refused(t, "a row of destination_buttons after down", func() error {
+		refused(t, "a row of organization_buttons after down", func() error {
 			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, requested_at)
 				SELECT id, 'organization_buttons', '2026-10-26' FROM organizations`)
 			return err
