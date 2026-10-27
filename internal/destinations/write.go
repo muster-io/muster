@@ -485,6 +485,7 @@ func (s *Service) buttonsChanged(ctx context.Context, q TxQueries, before, d Des
 		return nil
 	}
 	if err := q.InsertDestinationButtonsUpdate(ctx, dbgen.InsertDestinationButtonsUpdateParams{OrgID: s.orgID,
+		Kind:          KindDestinationButtons,
 		DestinationID: pgtype.Int8{Int64: d.ID, Valid: true},
 		RequestedAt:   s.writer.Business.Now().UTC()}); err != nil {
 		return fmt.Errorf("re-render the root messages of the destination %s: %w", d.PublicID, err)

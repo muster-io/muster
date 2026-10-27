@@ -166,7 +166,7 @@ RETURNING p.previous;
 -- of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
 -- name: InsertOrganizationButtonsUpdate :exec
 INSERT INTO open_group_updates (org_id, kind, requested_at)
-VALUES (@org_id, 'organization_buttons', @requested_at::timestamptz);
+VALUES (@org_id, @kind, @requested_at::timestamptz);
 
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec

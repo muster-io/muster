@@ -865,7 +865,7 @@ func TestButtonSets(t *testing.T) {
 				t.Errorf("updated to its own set: stored %s, diff %s", c.updated(w), w.audit[2].Diff)
 			}
 			if len(w.buttonUpdates) != 1 || w.buttonUpdates[0] != (dbgen.InsertDestinationButtonsUpdateParams{
-				OrgID: 1, DestinationID: pgtype.Int8{Int64: c.dbID, Valid: true}, RequestedAt: t0}) ||
+				OrgID: 1, Kind: "destination_buttons", DestinationID: pgtype.Int8{Int64: c.dbID, Valid: true}, RequestedAt: t0}) ||
 				!slices.Equal(w.woken, []string{OpenGroupUpdatesChannel}) {
 				t.Errorf("re-render requested %+v, woken %v", w.buttonUpdates, w.woken)
 			}

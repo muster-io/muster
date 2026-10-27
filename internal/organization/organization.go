@@ -456,6 +456,7 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 // transaction commits.
 func (s *Service) requestButtonsUpdate(ctx context.Context, q SettingsQueries, now time.Time) error {
 	if err := q.InsertOrganizationButtonsUpdate(ctx, dbgen.InsertOrganizationButtonsUpdateParams{OrgID: s.orgID,
+		Kind:        KindOrganizationButtons,
 		RequestedAt: now}); err != nil {
 		return fmt.Errorf("re-render the root messages of the organization's button set: %w", err)
 	}

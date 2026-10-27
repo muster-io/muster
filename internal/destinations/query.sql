@@ -286,7 +286,7 @@ WHERE org_id = @org_id AND id = @id;
 -- (C-28.FR-9): the open_group_updates worker of any replica claims the row.
 -- name: InsertDestinationButtonsUpdate :exec
 INSERT INTO open_group_updates (org_id, kind, destination_id, requested_at)
-VALUES (@org_id, 'destination_buttons', @destination_id, @requested_at::timestamptz);
+VALUES (@org_id, @kind, @destination_id, @requested_at::timestamptz);
 
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec

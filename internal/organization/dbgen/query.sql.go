@@ -368,18 +368,19 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 
 const insertOrganizationButtonsUpdate = `-- name: InsertOrganizationButtonsUpdate :exec
 INSERT INTO open_group_updates (org_id, kind, requested_at)
-VALUES ($1, 'organization_buttons', $2::timestamptz)
+VALUES ($1, $2, $3::timestamptz)
 `
 
 type InsertOrganizationButtonsUpdateParams struct {
 	OrgID       int64
+	Kind        string
 	RequestedAt time.Time
 }
 
 // InsertOrganizationButtonsUpdate requests that a change of the Organization's button set reach the open Root messages
 // of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
 func (q *Queries) InsertOrganizationButtonsUpdate(ctx context.Context, arg InsertOrganizationButtonsUpdateParams) error {
-	_, err := q.db.Exec(ctx, insertOrganizationButtonsUpdate, arg.OrgID, arg.RequestedAt)
+	_, err := q.db.Exec(ctx, insertOrganizationButtonsUpdate, arg.OrgID, arg.Kind, arg.RequestedAt)
 	return err
 }
 

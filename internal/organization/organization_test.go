@@ -800,7 +800,7 @@ func TestButtonSet(t *testing.T) {
 		t.Errorf("hints = %+v", s.hints)
 	}
 	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationButtonsUpdateParams{OrgID: 7,
-		RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
+		Kind: "organization_buttons", RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
 		t.Errorf("re-render requested %+v, woken %v", s.buttonUpdates, s.woken)
 	}
 	if read, err := svc.Get(t.Context()); err != nil || !slices.Equal(read.Buttons.Items, want) {
