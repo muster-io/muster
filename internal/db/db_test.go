@@ -10,12 +10,14 @@ import (
 	"encoding/pem"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -301,10 +303,43 @@ func TestCheckSchema(t *testing.T) {
 	}
 }
 
+// TestMigrationsContiguous: the embedded migrations are numbered 1 to N without a gap or a duplicate, each with an up
+// and a down file, so that a story merged out of order fails here until it renumbers its migration.
+func TestMigrationsContiguous(t *testing.T) {
+	entries, err := fs.ReadDir(migrationFiles, migrationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[int]string{}
+	files := map[int]int{}
+	for _, e := range entries {
+		number, rest, ok := strings.Cut(e.Name(), "_")
+		v, err := strconv.Atoi(number)
+		if !ok || err != nil || len(number) != 4 {
+			t.Errorf("%s: not NNNN_<name>.{up,down}.sql", e.Name())
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimSuffix(rest, ".up.sql"), ".down.sql")
+		if other, seen := names[v]; seen && other != name {
+			t.Errorf("migration %04d is used twice: %s and %s", v, other, name)
+		}
+		names[v] = name
+		files[v]++
+	}
+	for v := 1; v <= len(names); v++ {
+		if files[v] != 2 {
+			t.Errorf("migration %04d has %d files, want an up and a down one", v, files[v])
+		}
+	}
+	if known, err := KnownVersion(); err != nil || int(known) != len(names) {
+		t.Errorf("the newest migration is %d, but there are %d: the numbers have a gap (%v)", known, len(names), err)
+	}
+}
+
 func TestKnownVersion(t *testing.T) {
 	v, err := KnownVersion()
-	if err != nil || v != 23 {
-		t.Errorf("KnownVersion = %d, %v; want 23", v, err)
+	if err != nil || v != 22 {
+		t.Errorf("KnownVersion = %d, %v; want 22", v, err)
 	}
 	fsys := fstest.MapFS{
 		"m/0001_init.up.sql":   {Data: []byte("SELECT 1;")},
@@ -736,12 +771,12 @@ func TestSchemaVersion(t *testing.T) {
 		})
 	}
 	d, pool, _ := fakeDB()
-	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(24), false}}
+	pool.rows["SELECT version, dirty"] = stubRow{values: []any{int64(23), false}}
 	var out bytes.Buffer
 	err := d.CheckSchema(t.Context(), logging.New(&out, logging.LevelInfo))
-	if err == nil || !strings.Contains(err.Error(), "database schema version 24 is newer than this binary knows (23)") ||
+	if err == nil || !strings.Contains(err.Error(), "database schema version 23 is newer than this binary knows (22)") ||
 		!strings.Contains(out.String(), `"event":"schema_too_new"`) {
-		t.Errorf("CheckSchema on version 24: %v, logged %s", err, out.String())
+		t.Errorf("CheckSchema on version 23: %v, logged %s", err, out.String())
 	}
 }
 
@@ -790,7 +825,7 @@ func TestMigrate(t *testing.T) {
 		{name: "current", m: &fakeMigrator{versions: []uint{2, 2}, upErr: migrate.ErrNoChange}, wantUps: 1,
 			wantLine: `"event":"migrations_current","version":2`},
 		{name: "newer", m: &fakeMigrator{versions: []uint{999}},
-			wantErr: "database schema version 999 is newer than this binary knows (23)", wantLine: `"event":"schema_too_new"`},
+			wantErr: "database schema version 999 is newer than this binary knows (22)", wantLine: `"event":"schema_too_new"`},
 		{name: "dirty", m: &fakeMigrator{versions: []uint{1}, dirty: true},
 			wantErr: "the database schema is dirty at version 1", wantLine: `"event":"schema_dirty"`},
 		{name: "up fails", m: &fakeMigrator{versions: []uint{0}, upErr: errors.New("syntax error")}, wantUps: 1,
@@ -924,9 +959,9 @@ func TestDriver(t *testing.T) {
 		c.execs[61] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (21, true)" ||
 		!strings.Contains(c.execs[62], "CREATE TABLE open_group_updates") ||
 		c.execs[63] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (21, false)" ||
-		c.execs[64] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (23, true)" ||
+		c.execs[64] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (22, true)" ||
 		!strings.Contains(c.execs[65], "CREATE TABLE teams") ||
-		c.execs[66] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (23, false)" {
+		c.execs[66] != "TRUNCATE schema_migrations; INSERT INTO schema_migrations (version, dirty) VALUES (22, false)" {
 		t.Errorf("statements %q", c.execs)
 	}
 

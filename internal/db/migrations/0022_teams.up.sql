@@ -1,13 +1,15 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
--- Adds the Teams of C-25: teams, with a name and a slug unique among the Teams that are not deleted, a description and
--- their own Working hours, set exactly when own_working_hours; team_users, the people in each Team, added by hand; the
--- owning Team of Routes and Destinations, owning_team_id, with partial indexes for the filters by Team; the
--- Organization's Working hours, working_days and workday_end beside workday_start (organization.working_hours); and
--- the Permissions teams:read, for every Role, and teams:write, for Admins. Expand only: the new tables are empty, the
--- new columns are nullable or have defaults, and an earlier binary writes none of them. An Organization whose working
--- day starts at 18:00 or later ends it at 23:59, at 23:58 for one that starts at 23:59, before the CHECKs that keep
--- the end later than the start are validated in a second transaction, under a lock that lets writes through.
+-- Migration 0022 adds the Teams of C-25: teams, with a name unique ignoring case and a slug unique among the Teams
+-- that are not deleted, a description and their own Working hours, set exactly when own_working_hours; team_users, the
+-- people in each Team; the owning Team of Routes and Destinations, owning_team_id, with partial indexes for the
+-- filters by Team; the Organization's Working hours, working_days and workday_end beside workday_start
+-- (organization.working_hours); and the Permissions teams:read, for every Role, and teams:write, for Admins. Expand
+-- only: the new tables are empty, the new columns are nullable or have defaults, and an earlier binary writes none of
+-- them. The CHECKs of the Organization's Working hours are added NOT VALID. Before they are validated in a second
+-- transaction, under a lock that lets writes through, an Organization whose working day starts at 18:00 or later gets
+-- the end 23:59 and, where the start is 23:59 — the latest HH:MM, after which no end exists — the start 23:58, with
+-- a new version.
 
 BEGIN;
 
@@ -76,7 +78,7 @@ ALTER TABLE organizations
 
 -- A working day that starts at 18:00 or later ends at 23:59, the latest end on the same day (P-63).
 UPDATE organizations
-SET workday_end = '23:59', workday_start = least(workday_start, '23:58')
+SET workday_end = '23:59', workday_start = least(workday_start, '23:58'), version = version + 1
 WHERE workday_start >= '18:00';
 
 INSERT INTO permissions (name) VALUES ('teams:read'), ('teams:write');

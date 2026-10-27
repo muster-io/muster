@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
--- Reverts 0023_teams.up.sql. The Teams, the people in them, the owning Team of Routes and Destinations and the
+-- Reverts 0022_teams.up.sql. The Teams, the people in them, the owning Team of Routes and Destinations and the
 -- Organization's Working hours other than the start of its working day are lost; Personal access tokens lose the
 -- Permissions teams:read and teams:write. The Audit log entries about Teams stay.
 

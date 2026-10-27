@@ -63,8 +63,8 @@ func TestIntegrationCheck(t *testing.T) {
 	})
 }
 
-// embeddedVersions are the versions of the embedded migrations in order; a number may be skipped, when a story that
-// took it is merged later and renumbers its migration.
+// embeddedVersions are the versions of the embedded migrations in order, 1 to N without a gap
+// (TestMigrationsContiguous).
 func embeddedVersions(t *testing.T) []uint {
 	t.Helper()
 	src, err := iofs.New(migrationFiles, migrationsDir)
@@ -100,7 +100,10 @@ func TestIntegrationUpDownUp(t *testing.T) {
 		}
 		mm := m.(*migrate.Migrate)
 		defer mm.Close()
-		for _, step := range embeddedVersions(t) {
+		for i, step := range embeddedVersions(t) {
+			if step != uint(i+1) {
+				t.Fatalf("migration %d follows migration %d: the numbers have a gap", step, i)
+			}
 			for _, n := range []int{1, -1, 1} {
 				if err := mm.Steps(n); err != nil {
 					t.Fatalf("step %d, migrate %+d: %v", step, n, err)
@@ -1796,7 +1799,7 @@ func TestIntegrationMinimumSeverity(t *testing.T) {
 	})
 }
 
-// TestIntegrationTeams runs 0023 over an Organization whose working day starts at 20:00: up gives it the working days
+// TestIntegrationTeams runs 0022 over an Organization whose working day starts at 20:00: up gives it the working days
 // Monday to Friday and the end 23:59, validates the CHECKs that keep the end later than the start, seeds teams:read
 // for every Role and teams:write for Admins — 33, 13 and 9 Permissions — and refuses a Team whose slug breaks
 // team.slug_format or whose Working hours do not end later than they start; down drops the Teams, the owning Teams,
@@ -1805,7 +1808,7 @@ func TestIntegrationTeams(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := newMigrationEnv(t, s, 21)
 		e.exec(t, `UPDATE organizations SET workday_start = '20:00'`)
-		// A second Organization starts its working day at 23:59, the latest HH:MM: no later end exists, so 0023 moves
+		// A second Organization starts its working day at 23:59, the latest HH:MM: no later end exists, so 0022 moves
 		// its start to 23:58.
 		e.exec(t, `INSERT INTO organizations (public_id, name, time_zone, severity_label, severity_mapping,
 			severity_styles, critical_is_urgent, instance_labels, retention_stored_snapshots_days,
@@ -1815,15 +1818,15 @@ func TestIntegrationTeams(t *testing.T) {
 			604800, '2026-10-05', '2026-10-05', '23:59')`)
 
 		e.step(t, 1)
-		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 23 {
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 22 {
 			t.Fatalf("version %d, dirty %v, %v", v, dirty, err)
 		}
 		if got := e.count(t, `SELECT count(*) FROM organizations WHERE workday_start = '20:00'
-			AND workday_end = '23:59' AND working_days = '{monday,tuesday,wednesday,thursday,friday}'`); got != 1 {
+			AND workday_end = '23:59' AND version = 2 AND working_days = '{monday,tuesday,wednesday,thursday,friday}'`); got != 1 {
 			t.Errorf("after up: %d Organizations with the late working day, want 1", got)
 		}
 		if got := e.count(t, `SELECT count(*) FROM organizations WHERE public_id = 'RG0000000000AB'
-			AND workday_start = '23:58' AND workday_end = '23:59'`); got != 1 {
+			AND workday_start = '23:58' AND workday_end = '23:59' AND version = 2`); got != 1 {
 			t.Errorf("after up: the working day that started at 23:59 is not 23:58 to 23:59")
 		}
 		e.exec(t, `DELETE FROM organizations WHERE public_id = 'RG0000000000AB'`)
@@ -1881,7 +1884,7 @@ func TestIntegrationTeams(t *testing.T) {
 		}
 
 		e.step(t, 1)
-		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 23 {
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 22 {
 			t.Errorf("up again: version %d, dirty %v, %v", v, dirty, err)
 		}
 	})
@@ -1893,18 +1896,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (23)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (22)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":23`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":22`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":23`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":22`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -1920,10 +1923,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (23)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (22)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":23`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":22`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
