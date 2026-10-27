@@ -10,13 +10,15 @@
  * |---|---|---|---|
  * | `alert-groups:read`, `alerts:read` | yes | yes | yes |
  * | `integrations:read`, `routes:read`, `connections:read`, `destinations:read`, `link-rules:read`, `lookup-tables:read` (Secrets masked) | yes | yes | yes |
+ * | `teams:read` (Teams, the people in them and their Working hours) | yes | yes | yes |
  * | `alert-groups:acknowledge` (also "Still on it"), `alert-groups:resolve`, `alert-groups:snooze`, `alert-groups:note` | yes | yes | no |
  * | `integrations:write`, `routes:write`, `connections:write`, `destinations:write`, `destinations:test`, `link-rules:write`, `lookup-tables:write`, `templates:preview` | yes | no | no |
+ * | `teams:write` (Teams and the people in them) | yes | no | no |
  * | `stored-snapshots:read` | yes | no | no |
  * | `users:read`, `users:write`, `oidc:read`, `oidc:write`, `service-accounts:read`, `service-accounts:write`, `organization:read`, `organization:write` | yes | no | no |
  * | `audit-log:read`, `system-status:read` | yes | no | no |
  *
- * `organization:read` covers the settings pages only Admins see (outbound address policy, Keyring status, severity values seen). The basic read of the `organization` resource needs no Permission.
+ * `organization:read` covers the settings pages only Admins see (outbound address policy, Keyring status, severity values seen). The basic read of the `organization` resource needs no Permission. A Team grants no Permission and limits none: every check is a check of the Role.
  *
  * The special values `authenticated` (any signed-in identity: own profile, TOTP, Account links, Personal access tokens, the basic `organization` read, system notices, live updates), `integration-token` (ingestion and Heartbeat only) and `none` (public, or authenticated by the request itself, such as a signed messenger callback) appear only in `x-permission`.
  */
@@ -55,4 +57,6 @@ export const Permission = {
   'organization:read': 'organization:read',
   'audit-log:read': 'audit-log:read',
   'system-status:read': 'system-status:read',
+  'teams:read': 'teams:read',
+  'teams:write': 'teams:write',
 } as const;

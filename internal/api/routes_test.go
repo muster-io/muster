@@ -38,6 +38,8 @@ type fakeRoutes struct {
 	accepted     [][]string
 	dismissed    []int64
 	suggestionOK bool
+	// owned are the filters of listRoutes by Team.
+	owned []routing.OwnerFilter
 }
 
 func newFakeRoutes() *fakeRoutes {

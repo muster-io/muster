@@ -122,6 +122,7 @@ nav:
       - concepts/loud-and-quiet.md
       - concepts/statuses-and-commands.md
       - concepts/broken-destinations.md
+      - concepts/teams.md
   - Operations:
       - operations/backup-and-restore.md
       - operations/upgrades.md

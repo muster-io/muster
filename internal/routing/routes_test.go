@@ -84,6 +84,10 @@ type fakeStore struct {
 
 	// membershipLocks are the Routes whose membership lock was taken, in order.
 	membershipLocks []int64
+
+	// teams are the Teams that are not deleted by public_id, and userTeams the public_ids of the Teams of each User.
+	teams     map[string]dbgen.LockOwningTeamRow
+	userTeams map[int64][]string
 }
 
 // link is a row of route_destinations.
@@ -98,7 +102,8 @@ func newStore() *fakeStore {
 		mapping: []byte(`[{"value":"critical","level":"critical"},{"value":"warning","level":"warning"},` +
 			`{"value":"info","level":"info"},{"value":"none","level":"info"}]`),
 		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{},
-		open: map[int64]int64{}, dests: map[string]int64{}, deleted: map[string]bool{}, links: map[int64][]link{}}
+		open: map[int64]int64{}, dests: map[string]int64{}, deleted: map[string]bool{}, links: map[int64][]link{},
+		teams: map[string]dbgen.LockOwningTeamRow{}, userTeams: map[int64][]string{}}
 }
 
 func (s *fakeStore) call(name string) error {
@@ -235,7 +240,39 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 		RemindersCapSeconds: arg.RemindersCapSeconds, AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now,
 		Version: 1,
 	}})
+	s.own(&s.rows[len(s.rows)-1].ListRoutesRow, arg.OwningTeamID)
 	return s.nextID, nil
+}
+
+// own sets the owning Team of the row r to the Team id, none when it is not valid.
+func (s *fakeStore) own(r *dbgen.ListRoutesRow, id pgtype.Int8) {
+	r.OwningTeamID, r.OwningTeamPublicID, r.OwningTeamName, r.OwningTeamSlug = id, pgtype.Text{}, pgtype.Text{},
+		pgtype.Text{}
+	for _, t := range s.teams {
+		if id.Valid && t.ID == id.Int64 {
+			r.OwningTeamPublicID = pgtype.Text{String: t.PublicID, Valid: true}
+			r.OwningTeamName = pgtype.Text{String: t.Name, Valid: true}
+			r.OwningTeamSlug = pgtype.Text{String: t.Slug, Valid: true}
+		}
+	}
+}
+
+func (s *fakeStore) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
+	error) {
+	if err := s.call("LockOwningTeam"); err != nil {
+		return dbgen.LockOwningTeamRow{}, err
+	}
+	if t, ok := s.teams[arg.PublicID]; ok && arg.OrgID == orgID {
+		return t, nil
+	}
+	return dbgen.LockOwningTeamRow{}, pgx.ErrNoRows
+}
+
+func (s *fakeStore) ListUserTeams(_ context.Context, arg dbgen.ListUserTeamsParams) ([]string, error) {
+	if err := s.call("ListUserTeams"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	return s.userTeams[arg.UserID], nil
 }
 
 func (s *fakeStore) EnsureDefaultRoute(_ context.Context, arg dbgen.EnsureDefaultRouteParams) (string, error) {
@@ -282,6 +319,7 @@ func (s *fakeStore) UpdateRoute(_ context.Context, arg dbgen.UpdateRouteParams) 
 			r.RemindersFirstIntervalSeconds, r.RemindersCapSeconds = arg.RemindersFirstIntervalSeconds,
 				arg.RemindersCapSeconds
 			r.AutoUnacknowledge = arg.AutoUnacknowledge
+			s.own(&r.ListRoutesRow, arg.OwningTeamID)
 			r.Version++
 		}
 	}
@@ -529,7 +567,9 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		RemindersFirstIntervalSeconds: r.RemindersFirstIntervalSeconds, RemindersCapSeconds: r.RemindersCapSeconds,
 		AutoUnacknowledge: r.AutoUnacknowledge, CreatedAt: r.CreatedAt, Version: r.Version, Place: place,
 		TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
-		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount}
+		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
+		OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName, OwningTeamSlug: r.OwningTeamSlug,
+		OwningTeamDeleted: r.OwningTeamDeleted}
 }
 
 func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
@@ -1595,5 +1635,112 @@ func TestRestampAlerts(t *testing.T) {
 	tx.err = errBoom
 	if err := RestampAlerts(t.Context(), tx, orgID, []int64{3}, 9); !errors.Is(err, errBoom) {
 		t.Errorf("a failed restamp = %v", err)
+	}
+}
+
+// TestOwningTeam is C-25.FR-2 and C-08.FR-1 revised: a Route names the Team that owns it, read back with its name and
+// slug and recorded in the Audit log diff; an update that leaves it out keeps it and an empty one clears it; an
+// unknown, malformed or deleted Team is unknown_id at /owning_team_id; and ListOwned returns the Routes of one Team or
+// of the Teams of a User.
+func TestOwningTeam(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	store.teams["TM0000000000PA"] = dbgen.LockOwningTeamRow{ID: 41, PublicID: "TM0000000000PA", Name: "Payments",
+		Slug: "payments"}
+	store.teams["TM0000000000SE"] = dbgen.LockOwningTeamRow{ID: 42, PublicID: "TM0000000000SE", Name: "Search",
+		Slug: "search"}
+	store.userTeams[5] = []string{"TM0000000000PA"}
+
+	in := input("pay", Matcher{Label: "team", Op: "=", Value: "payments"})
+	in.OwningTeamID = ptr("tm0000000000pa")
+	pay, err := svc.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := pay.OwningTeam; o == nil || o.PublicID != "TM0000000000PA" || o.Name != "Payments" ||
+		o.Slug != "payments" || o.ID != 41 || o.Deleted {
+		t.Fatalf("owning team %+v", pay.OwningTeam)
+	}
+	if diff := string(store.audit[len(store.audit)-1].Diff); !strings.Contains(diff,
+		`{"pointer":"/owning_team_id","after":"TM0000000000PA"}`) {
+		t.Errorf("created diff %s", diff)
+	}
+	search := input("search")
+	search.OwningTeamID = ptr("TM0000000000SE")
+	if _, err := svc.Create(ctx, by, search); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create(ctx, by, input("nobody's")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{"TM0000000000ZZ", "RT0000000000PA", "x"} {
+		bad := input("bad")
+		bad.OwningTeamID = ptr(id)
+		_, err := svc.Create(ctx, by, bad)
+		if f := fieldError(t, err); f.Pointer != "/owning_team_id" || f.Code != CodeUnknownID {
+			t.Errorf("%s: %+v", id, f)
+		}
+		_, err = svc.Update(ctx, by, pay.PublicID, nil, bad)
+		if f := fieldError(t, err); f.Pointer != "/owning_team_id" || f.Code != CodeUnknownID {
+			t.Errorf("update %s: %+v", id, f)
+		}
+	}
+	store.fail["LockOwningTeam"] = errBoom
+	if _, err := svc.Create(ctx, by, search); !errors.Is(err, errBoom) {
+		t.Errorf("failed lock = %v", err)
+	}
+	delete(store.fail, "LockOwningTeam")
+
+	kept := input("pay renamed", Matcher{Label: "team", Op: "=", Value: "payments"})
+	updated, err := svc.Update(ctx, by, pay.PublicID, &pay.Version, kept)
+	if err != nil || updated.OwningTeam == nil || updated.OwningTeam.PublicID != "TM0000000000PA" {
+		t.Fatalf("an update without the owner = %+v, %v", updated.OwningTeam, err)
+	}
+	kept.OwningTeamID = ptr("TM0000000000SE")
+	moved, err := svc.Update(ctx, by, pay.PublicID, nil, kept)
+	if err != nil || moved.OwningTeam == nil || moved.OwningTeam.Name != "Search" ||
+		moved.Version != updated.Version+1 {
+		t.Fatalf("moved = %+v, %v", moved, err)
+	}
+	if diff := string(store.audit[len(store.audit)-1].Diff); diff !=
+		`[{"pointer":"/owning_team_id","before":"TM0000000000PA","after":"TM0000000000SE"}]` {
+		t.Errorf("moved diff %s", diff)
+	}
+	kept.OwningTeamID = ptr("")
+	cleared, err := svc.Update(ctx, by, pay.PublicID, nil, kept)
+	if err != nil || cleared.OwningTeam != nil {
+		t.Fatalf("cleared = %+v, %v", cleared.OwningTeam, err)
+	}
+	kept.OwningTeamID = ptr("TM0000000000PA")
+	if _, err := svc.Update(ctx, by, pay.PublicID, nil, kept); err != nil {
+		t.Fatal(err)
+	}
+
+	owned := func(f OwnerFilter) string {
+		t.Helper()
+		list, err := svc.ListOwned(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return names(list)
+	}
+	if got := owned(OwnerFilter{Team: "tm0000000000se"}); got != "search" {
+		t.Errorf("owned by search: %s", got)
+	}
+	if got := owned(OwnerFilter{UserID: 5}); got != "pay renamed" {
+		t.Errorf("my teams: %s", got)
+	}
+	if got := owned(OwnerFilter{UserID: 6}) + owned(OwnerFilter{Team: "nonsense"}); got != "" {
+		t.Errorf("no teams: %s", got)
+	}
+	store.fail["ListUserTeams"] = errBoom
+	if _, err := svc.ListOwned(ctx, OwnerFilter{UserID: 5}); !errors.Is(err, errBoom) {
+		t.Errorf("failed teams = %v", err)
+	}
+	delete(store.fail, "ListUserTeams")
+	store.fail["ListRoutes"] = errBoom
+	if _, err := svc.ListOwned(ctx, OwnerFilter{Team: "TM0000000000PA"}); !errors.Is(err, errBoom) {
+		t.Errorf("failed list = %v", err)
 	}
 }

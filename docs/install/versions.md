@@ -93,6 +93,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
       both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
       `critical_is_urgent` is always `true`.
+    - Migration 0022 adds [Teams](../concepts/teams.md) and the Organization's Working hours: Monday to Friday, from
+      the start of the working day to its end, `18:00`. The end must be later than the start on the same day, so an
+      Organization whose working day started at 18:00 or later gets the end `23:59` — and one that started at 23:59,
+      the latest time with no later end, the start `23:58`. Check the Organization's settings after the upgrade if
+      yours did.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
@@ -105,12 +110,15 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
     Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
     Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
-    differently.
+    differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
+    start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
+    save the settings again on a 0.2.0 replica.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
-    and gives up after 5 seconds of waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas. Its
-    changes are one transaction, so a failure leaves the schema as 0.1.4 left it, recorded as dirty at version 21, and
-    the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
+    and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
+    waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
+    to start with `schema_dirty`. The changes of 0021 are one transaction, so a failure leaves the schema as 0.1.4 left
+    it, recorded as dirty at version 21. To recover, with the same database role as Muster:
 
     1. Check whether the migration took effect:
 
@@ -122,6 +130,23 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 20, dirty = false;`. If it
        returns 1, the migration committed and only its record failed: `UPDATE schema_migrations SET dirty = false;`.
     3. Start the 0.2.0 replica again, or run `muster migrate`, at a quieter time; it applies migration 0021 again.
+
+    Migration 0022 runs in two transactions: the first adds the Teams and the Working hours, the second validates the
+    CHECKs of the Working hours. A failure leaves the schema recorded as dirty at version 22. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect: `SELECT to_regclass('teams');`
+    2. If it returns NULL, clear the failed attempt: `UPDATE schema_migrations SET version = 21, dirty = false;`.
+    3. If it returns `teams`, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_working_days_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_end_check;
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_workday_order_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

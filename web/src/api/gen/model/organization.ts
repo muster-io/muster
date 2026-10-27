@@ -5,15 +5,20 @@
 import type { OrganizationBase } from './organizationBase';
 import type { OrganizationOutgoingHeartbeat } from './organizationOutgoingHeartbeat';
 import type { PublicId } from './publicId';
+import type { WorkingHours } from './workingHours';
 
 export type Organization = OrganizationBase & {
   id: PublicId;
+  /** The Organization's Working hours, derived (C-25.FR-9) — `working_days`, from `workday_start` to `workday_end`, in `time_zone` — which every Team without its own follows. */
+  readonly working_hours: WorkingHours;
   outgoing_heartbeat: OrganizationOutgoingHeartbeat;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
 } & Required<Pick<OrganizationBase & {
   id: PublicId;
+  /** The Organization's Working hours, derived (C-25.FR-9) — `working_days`, from `workday_start` to `workday_end`, in `time_zone` — which every Team without its own follows. */
+  readonly working_hours: WorkingHours;
   outgoing_heartbeat: OrganizationOutgoingHeartbeat;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}, 'workday_start' | 'week_start' | 'critical_is_urgent'>>;
+}, 'workday_start' | 'week_start' | 'critical_is_urgent' | 'working_days' | 'workday_end'>>;

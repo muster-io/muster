@@ -87,7 +87,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-25.FR-9** Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The
   Organization's (`organization.working_hours`) start at `organization.workday_start`, the start of the working day that
   the Snooze presets use (C-10.FR-17); a Team uses them unless it sets its own (`team.working_hours`). The end is later
-  than the start on the same day (_provisional_, P-63). Escalation steps limited to Working hours use those of the Team
+  than the start on the same day (P-63). Escalation steps limited to Working hours use those of the Team
   that owns their chain, else the Organization's (C-32.FR-3). Holidays are not part of Working hours.
 - **C-25.FR-10** Deleting a Team that has Schedules or owns Escalation chains is refused with `409` and the code
   `team_in_use`, naming them; otherwise the Team, its people, entries, Team mentions and its list of Destinations are

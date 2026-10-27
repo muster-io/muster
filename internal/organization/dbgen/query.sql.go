@@ -65,13 +65,13 @@ INSERT INTO organizations (
     public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
     critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
     retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
-    created_at, updated_at
+    working_days, workday_end, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, $11, $12,
     $13, $14, $15, $16,
-    $17, $17
+    $17::text[], $18, $19, $19
 )
 RETURNING id
 `
@@ -93,6 +93,8 @@ type CreateOrganizationParams struct {
 	RetentionAuditLogDays            int64
 	TotpRequired                     string
 	OidcTokenGraceSeconds            int64
+	WorkingDays                      []string
+	WorkdayEnd                       string
 	CreatedAt                        time.Time
 }
 
@@ -114,6 +116,8 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.RetentionAuditLogDays,
 		arg.TotpRequired,
 		arg.OidcTokenGraceSeconds,
+		arg.WorkingDays,
+		arg.WorkdayEnd,
 		arg.CreatedAt,
 	)
 	var id int64
@@ -154,7 +158,8 @@ const getOrganization = `-- name: GetOrganization :one
 
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
        instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
-       retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds
+       retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
+       working_days, workday_end
 FROM organizations
 ORDER BY id
 LIMIT 1
@@ -177,6 +182,8 @@ type GetOrganizationRow struct {
 	RetentionAuditLogDays            int64
 	TotpRequired                     string
 	OidcTokenGraceSeconds            int64
+	WorkingDays                      []string
+	WorkdayEnd                       string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -201,6 +208,8 @@ func (q *Queries) GetOrganization(ctx context.Context) (GetOrganizationRow, erro
 		&i.RetentionAuditLogDays,
 		&i.TotpRequired,
 		&i.OidcTokenGraceSeconds,
+		&i.WorkingDays,
+		&i.WorkdayEnd,
 	)
 	return i, err
 }
@@ -289,7 +298,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end
 FROM organizations
 WHERE id = $1
 `
@@ -317,6 +326,8 @@ type GetSettingsRow struct {
 	OutgoingHeartbeatProxyPasswordSet       bool
 	OutgoingHeartbeatProxyPasswordUpdatedAt pgtype.Timestamptz
 	Version                                 int64
+	WorkingDays                             []string
+	WorkdayEnd                              string
 }
 
 // GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
@@ -347,6 +358,8 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.OutgoingHeartbeatProxyPasswordSet,
 		&i.OutgoingHeartbeatProxyPasswordUpdatedAt,
 		&i.Version,
+		&i.WorkingDays,
+		&i.WorkdayEnd,
 	)
 	return i, err
 }
@@ -499,31 +512,33 @@ SET name                                         = $1,
     time_zone                                    = $2,
     workday_start                                = $3,
     week_start                                   = $4,
-    severity_label                               = $5,
-    severity_mapping                             = $6,
-    severity_styles                              = $7,
-    instance_labels                              = $8,
-    retention_stored_snapshots_days              = $9,
-    retention_alert_details_days                 = $10,
-    retention_alert_group_summaries_days         = $11,
-    retention_audit_log_days                     = $12,
-    oidc_token_grace_seconds                     = $13,
-    totp_required                                = $14,
-    outgoing_heartbeat_url_ciphertext            = $15,
-    outgoing_heartbeat_url_key_id                = $16,
-    outgoing_heartbeat_url_updated_at            = $17,
-    outgoing_heartbeat_proxy                     = $18,
-    outgoing_heartbeat_proxy_password_ciphertext = $19,
-    outgoing_heartbeat_proxy_password_key_id     = $20,
-    outgoing_heartbeat_proxy_password_updated_at = $21,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $22::boolean THEN NULL
+    working_days                                 = $5::text[],
+    workday_end                                  = $6,
+    severity_label                               = $7,
+    severity_mapping                             = $8,
+    severity_styles                              = $9,
+    instance_labels                              = $10,
+    retention_stored_snapshots_days              = $11,
+    retention_alert_details_days                 = $12,
+    retention_alert_group_summaries_days         = $13,
+    retention_audit_log_days                     = $14,
+    oidc_token_grace_seconds                     = $15,
+    totp_required                                = $16,
+    outgoing_heartbeat_url_ciphertext            = $17,
+    outgoing_heartbeat_url_key_id                = $18,
+    outgoing_heartbeat_url_updated_at            = $19,
+    outgoing_heartbeat_proxy                     = $20,
+    outgoing_heartbeat_proxy_password_ciphertext = $21,
+    outgoing_heartbeat_proxy_password_key_id     = $22,
+    outgoing_heartbeat_proxy_password_updated_at = $23,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $24::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $22::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $22::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $24::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $24::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $23,
+    updated_at = $25,
     version = version + 1
-WHERE id = $24
+WHERE id = $26
 `
 
 type UpdateSettingsParams struct {
@@ -531,6 +546,8 @@ type UpdateSettingsParams struct {
 	TimeZone                         string
 	WorkdayStart                     string
 	WeekStart                        string
+	WorkingDays                      []string
+	WorkdayEnd                       string
 	SeverityLabel                    string
 	SeverityMapping                  []byte
 	SeverityStyles                   []byte
@@ -561,6 +578,8 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.TimeZone,
 		arg.WorkdayStart,
 		arg.WeekStart,
+		arg.WorkingDays,
+		arg.WorkdayEnd,
 		arg.SeverityLabel,
 		arg.SeverityMapping,
 		arg.SeverityStyles,

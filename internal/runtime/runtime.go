@@ -61,6 +61,7 @@ import (
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
+	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
 	"github.com/muster-io/muster/internal/timers"
@@ -123,6 +124,8 @@ type database interface {
 	TokensStore() tokens.Store
 	IntegrationsStore() integrations.Store
 	RoutingStore() routing.Store
+	// TeamsStore serves the Teams.
+	TeamsStore() teams.Store
 	// HeartbeatStore serves the Heartbeat endpoint and the Heartbeat check.
 	HeartbeatStore() heartbeat.Store
 	IngestStore() ingest.Store
@@ -205,6 +208,8 @@ func (d pgDatabase) TokensStore() tokens.Store { return tokens.NewStore(d.Pool) 
 func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations.NewStore(d.Pool) }
 
 func (d pgDatabase) RoutingStore() routing.Store { return routing.NewStore(d.Pool) }
+
+func (d pgDatabase) TeamsStore() teams.Store { return teams.NewStore(d.Pool) }
 
 func (d pgDatabase) HeartbeatStore() heartbeat.Store { return heartbeat.NewStore(d.Pool) }
 
@@ -524,8 +529,10 @@ type process struct {
 	// endpoint; worker processes the Stored Snapshots, and scanner runs the Leader's Stale scan.
 	integrations *integrations.Service
 	// routes holds the Routes, and router routes the newly firing Alerts of processing with them.
-	routes    *routing.Service
-	router    *routing.Router
+	routes *routing.Service
+	router *routing.Router
+	// teams holds the Teams, which own Routes and Destinations.
+	teams     *teams.Service
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
 	worker    *ingest.Worker
@@ -933,6 +940,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.router = routing.NewRouter(orgID)
 	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
 		Business: p.clocks.Business, Real: p.clocks.Real, Router: p.router, Snapshots: p.snapshots, Log: p.log})
+	p.teams = teams.New(teams.Config{OrgID: orgID, Store: p.db.TeamsStore(), Audit: w, Business: p.clocks.Business})
 	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
 		Business: p.clocks.Business, Log: p.log,
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
@@ -1090,6 +1098,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	admin := users.NewAdmin(orgID, p.db.AdminStore(), w, p.clocks.Business, p.cfg.PublicURL)
 	admin.SetOwnerReleaser(p.groups)
 	admin.SetLinkRemover(p.links)
+	admin.SetTeamRemover(p.teams)
 	// A change of the outbound address policy applies on this replica as soon as it commits.
 	settings := organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring).
 		WithLog(p.log).WithOutboundPolicyChanged(p.policies.Invalidate)
@@ -1127,6 +1136,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			Business: p.clocks.Business, LeaderAbsence: leader.AbsenceNotice, Version: buildinfo.Version,
 			Commit: buildinfo.Commit}),
 		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
+		Teams:          p.teams,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -1329,6 +1339,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	infoTicks, stopInfoTicks := every(InfoRefreshInterval)
 	routeInfoTicks, stopRouteInfoTicks := every(InfoRefreshInterval)
 	destinationInfoTicks, stopDestinationInfoTicks := every(InfoRefreshInterval)
+	teamInfoTicks, stopTeamInfoTicks := every(InfoRefreshInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -1380,6 +1391,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.routes.InfoChanged()
 			case destinations.Hint:
 				p.destinations.InfoChanged()
+			case teams.Hint:
+				p.teams.InfoChanged()
 			case connections.Hint:
 				p.poller.Wake()
 				p.bridgePoller.Wake()
@@ -1393,6 +1406,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.router.Invalidate()
 				p.routes.InfoChanged()
 				p.destinations.InfoChanged()
+				p.teams.InfoChanged()
 				p.poller.Wake()
 				p.bridgePoller.Wake()
 				p.slackSockets.Wake()
@@ -1423,6 +1437,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		defer stopDestinationInfoTicks()
 		p.destinations.RunInfo(ctx, destinationInfoTicks)
+	})
+	wg.Go(func() {
+		defer stopTeamInfoTicks()
+		p.teams.RunInfo(ctx, teamInfoTicks)
 	})
 	return func(wait context.Context) {
 		cancel()

@@ -49,8 +49,8 @@ func (s *fakeStore) GetOrganization(context.Context) (dbgen.GetOrganizationRow, 
 	o := s.org
 	row := dbgen.GetOrganizationRow{
 		ID: 7, PublicID: o.PublicID, Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart,
-		WeekStart: o.WeekStart, SeverityLabel: o.SeverityLabel, SeverityMapping: o.SeverityMapping,
-		SeverityStyles: o.SeverityStyles,
+		WeekStart: o.WeekStart, WorkingDays: o.WorkingDays, WorkdayEnd: o.WorkdayEnd, SeverityLabel: o.SeverityLabel,
+		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles,
 		InstanceLabels: o.InstanceLabels, RetentionStoredSnapshotsDays: o.RetentionStoredSnapshotsDays,
 		RetentionAlertDetailsDays: o.RetentionAlertDetailsDays, RetentionAuditLogDays: o.RetentionAuditLogDays,
 		RetentionAlertGroupSummariesDays: o.RetentionAlertGroupSummariesDays, TotpRequired: o.TotpRequired,
@@ -235,8 +235,8 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 	styles, _ := json.Marshal(d.SeverityStyles)
 	return &fakeSettings{row: dbgen.GetSettingsRow{
 		ID: 7, PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
-		WeekStart: d.WeekStart, SeverityLabel: d.SeverityLabel, SeverityMapping: mapping, SeverityStyles: styles,
-		InstanceLabels:               d.InstanceLabels,
+		WeekStart: d.WeekStart, WorkingDays: d.WorkingDays, WorkdayEnd: d.WorkdayEnd, SeverityLabel: d.SeverityLabel,
+		SeverityMapping: mapping, SeverityStyles: styles, InstanceLabels: d.InstanceLabels,
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
 		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1,
@@ -279,6 +279,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.updates = append(s.updates, arg)
 	s.row.Name, s.row.TimeZone, s.row.SeverityLabel = arg.Name, arg.TimeZone, arg.SeverityLabel
 	s.row.WorkdayStart, s.row.WeekStart = arg.WorkdayStart, arg.WeekStart
+	s.row.WorkingDays, s.row.WorkdayEnd = arg.WorkingDays, arg.WorkdayEnd
 	s.row.SeverityMapping, s.row.SeverityStyles = arg.SeverityMapping, arg.SeverityStyles
 	s.row.InstanceLabels = arg.InstanceLabels
 	s.row.RetentionStoredSnapshotsDays = arg.RetentionStoredSnapshotsDays
@@ -464,8 +465,12 @@ func TestOrganizationUpdate(t *testing.T) {
 		{"/name", func(in *Input) { in.Name = " Ops " }, func(o Organization) bool { return o.Name == "Ops" }},
 		{"/time_zone", func(in *Input) { in.TimeZone = "Europe/Berlin" },
 			func(o Organization) bool { return o.TimeZone == "Europe/Berlin" }},
-		{"/workday_start", func(in *Input) { in.WorkdayStart = new("23:59") },
-			func(o Organization) bool { return o.WorkdayStart == "23:59" }},
+		{"/workday_start", func(in *Input) { in.WorkdayStart = new("17:59") },
+			func(o Organization) bool { return o.WorkdayStart == "17:59" }},
+		{"/working_days", func(in *Input) { in.WorkingDays = new([]string{"sunday", "monday"}) },
+			func(o Organization) bool { return slices.Equal(o.WorkingDays, []string{"monday", "sunday"}) }},
+		{"/workday_end", func(in *Input) { in.WorkdayEnd = new("23:59") },
+			func(o Organization) bool { return o.WorkdayEnd == "23:59" }},
 		{"/week_start", func(in *Input) { in.WeekStart = new("saturday") },
 			func(o Organization) bool { return o.WeekStart == "saturday" }},
 		{"/severity_label", func(in *Input) { in.SeverityLabel = "level" },
@@ -565,6 +570,16 @@ func TestOrganizationUpdateValidation(t *testing.T) {
 		{"/time_zone", CodeInvalidFormat, func(in *Input) { in.TimeZone = "Local" }},
 		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("24:00") }},
 		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("9:00") }},
+		// C-25.FR-9, P-63: the working day ends later than it starts; the field the update changes is refused.
+		{"/workday_start", CodeOutOfRange, func(in *Input) { in.WorkdayStart = new("18:00") }},
+		{"/workday_end", CodeOutOfRange, func(in *Input) { in.WorkdayEnd = new("09:00") }},
+		{"/workday_end", CodeOutOfRange, func(in *Input) {
+			in.WorkdayStart, in.WorkdayEnd = new("20:00"), new("19:00")
+		}},
+		{"/workday_end", CodeInvalidFormat, func(in *Input) { in.WorkdayEnd = new("18:0") }},
+		{"/working_days", CodeRequired, func(in *Input) { in.WorkingDays = new([]string{}) }},
+		{"/working_days/1", CodeInvalidFormat, func(in *Input) { in.WorkingDays = new([]string{"monday", "weekend"}) }},
+		{"/working_days/1", CodeDuplicate, func(in *Input) { in.WorkingDays = new([]string{"monday", "monday"}) }},
 		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("09:60") }},
 		{"/workday_start", CodeInvalidFormat, func(in *Input) { in.WorkdayStart = new("") }},
 		{"/week_start", CodeInvalidFormat, func(in *Input) { in.WeekStart = new("weekend") }},

@@ -6,10 +6,13 @@ import type { DestinationRef } from './destinationRef';
 import type { PublicId } from './publicId';
 import type { RouteInput } from './routeInput';
 import type { RouteStorm } from './routeStorm';
+import type { TeamRef } from './teamRef';
 import type { TemplateErrorState } from './templateErrorState';
 
-export type Route = RouteInput & {
+export type Route = RouteInput & ({
   id: PublicId;
+  /** The Team that owns the Route, null when none does. */
+  owning_team: TeamRef | null;
   /** Zero-based position in evaluation order; the Default route is last. */
   position: number;
   is_default: boolean;
@@ -24,8 +27,10 @@ export type Route = RouteInput & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-} & Required<Pick<RouteInput & {
+}) & Required<Pick<RouteInput & ({
   id: PublicId;
+  /** The Team that owns the Route, null when none does. */
+  owning_team: TeamRef | null;
   /** Zero-based position in evaluation order; the Default route is last. */
   position: number;
   is_default: boolean;
@@ -40,4 +45,4 @@ export type Route = RouteInput & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}, 'minimum_severity' | 'urgent'>>;
+}), 'minimum_severity' | 'urgent'>>;

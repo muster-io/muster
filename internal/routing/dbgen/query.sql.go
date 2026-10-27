@@ -260,9 +260,12 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
         FROM routes o
         WHERE o.org_id = $1 AND o.deleted_at IS NULL
           AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
-       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
+       r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = $1 AND r.public_id = $2 AND r.deleted_at IS NULL
 `
 
@@ -303,6 +306,11 @@ type GetRouteRow struct {
 	Place                          int64
 	StormSince                     pgtype.Timestamptz
 	StormAlertGroupCount           pgtype.Int8
+	OwningTeamID                   pgtype.Int8
+	OwningTeamPublicID             pgtype.Text
+	OwningTeamName                 pgtype.Text
+	OwningTeamSlug                 pgtype.Text
+	OwningTeamDeleted              bool
 }
 
 // GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
@@ -342,6 +350,11 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.Place,
 		&i.StormSince,
 		&i.StormAlertGroupCount,
+		&i.OwningTeamID,
+		&i.OwningTeamPublicID,
+		&i.OwningTeamName,
+		&i.OwningTeamSlug,
+		&i.OwningTeamDeleted,
 	)
 	return i, err
 }
@@ -445,7 +458,7 @@ INSERT INTO routes (
     thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-    reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
+    reminders_cap_seconds, auto_unacknowledge, owning_team_id, created_at, updated_at
 )
 SELECT $1, $2, $3, $4,
        coalesce((SELECT CASE WHEN $5::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -456,7 +469,8 @@ SELECT $1, $2, $3, $4,
        $11::bigint[], $12, $13, $14,
        $15, $16, $17,
        $18, $19, $20,
-       $21, $22, $23, $24, $24
+       $21, $22, $23,
+       $24::bigint, $25, $25
 RETURNING id
 `
 
@@ -484,6 +498,7 @@ type InsertRouteParams struct {
 	RemindersFirstIntervalSeconds  int64
 	RemindersCapSeconds            int64
 	AutoUnacknowledge              bool
+	OwningTeamID                   pgtype.Int8
 	Now                            time.Time
 }
 
@@ -514,6 +529,7 @@ func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64
 		arg.RemindersFirstIntervalSeconds,
 		arg.RemindersCapSeconds,
 		arg.AutoUnacknowledge,
+		arg.OwningTeamID,
 		arg.Now,
 	)
 	var id int64
@@ -906,9 +922,12 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
        r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
-       s.alert_group_count AS storm_alert_group_count
+       s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
+       t.name AS owning_team_name, t.slug AS owning_team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = $1 AND r.deleted_at IS NULL
 ORDER BY r.is_default, r.position, r.id
 `
@@ -944,6 +963,11 @@ type ListRoutesRow struct {
 	TemplateError                  pgtype.Text
 	StormSince                     pgtype.Timestamptz
 	StormAlertGroupCount           pgtype.Int8
+	OwningTeamID                   pgtype.Int8
+	OwningTeamPublicID             pgtype.Text
+	OwningTeamName                 pgtype.Text
+	OwningTeamSlug                 pgtype.Text
+	OwningTeamDeleted              bool
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -990,6 +1014,11 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.TemplateError,
 			&i.StormSince,
 			&i.StormAlertGroupCount,
+			&i.OwningTeamID,
+			&i.OwningTeamPublicID,
+			&i.OwningTeamName,
+			&i.OwningTeamSlug,
+			&i.OwningTeamDeleted,
 		); err != nil {
 			return nil, err
 		}
@@ -999,6 +1028,73 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUserTeams = `-- name: ListUserTeams :many
+SELECT t.public_id
+FROM team_users tu
+JOIN teams t ON t.org_id = tu.org_id AND t.id = tu.team_id
+WHERE tu.org_id = $1 AND tu.user_id = $2 AND t.deleted_at IS NULL
+ORDER BY t.id
+`
+
+type ListUserTeamsParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// ListUserTeams lists the public_ids of the Teams that are not deleted and that the User is in: "My Teams".
+func (q *Queries) ListUserTeams(ctx context.Context, arg ListUserTeamsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listUserTeams, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var public_id string
+		if err := rows.Scan(&public_id); err != nil {
+			return nil, err
+		}
+		items = append(items, public_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOwningTeam = `-- name: LockOwningTeam :one
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
+FOR SHARE
+`
+
+type LockOwningTeamParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type LockOwningTeamRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// LockOwningTeam reads the Team that is not deleted that a Route is to name as its owner, in share mode, so that the
+// Team's deletion, which locks it for update, either waits for the save or is seen by it.
+func (q *Queries) LockOwningTeam(ctx context.Context, arg LockOwningTeamParams) (LockOwningTeamRow, error) {
+	row := q.db.QueryRow(ctx, lockOwningTeam, arg.OrgID, arg.PublicID)
+	var i LockOwningTeamRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Slug,
+	)
+	return i, err
 }
 
 const lockRoute = `-- name: LockRoute :one
@@ -1165,9 +1261,9 @@ SET name = $1, description = $2, minimum_severity = $3,
     template_line = $13, template_ack_timeout_notice = $14,
     ack_timeout_enabled = $15, ack_timeout_first_interval_seconds = $16,
     reminders_enabled = $17, reminders_first_interval_seconds = $18,
-    reminders_cap_seconds = $19, auto_unacknowledge = $20, updated_at = $21,
-    version = version + 1
-WHERE org_id = $22 AND id = $23
+    reminders_cap_seconds = $19, auto_unacknowledge = $20,
+    owning_team_id = $21::bigint, updated_at = $22, version = version + 1
+WHERE org_id = $23 AND id = $24
 `
 
 type UpdateRouteParams struct {
@@ -1191,6 +1287,7 @@ type UpdateRouteParams struct {
 	RemindersFirstIntervalSeconds  int64
 	RemindersCapSeconds            int64
 	AutoUnacknowledge              bool
+	OwningTeamID                   pgtype.Int8
 	Now                            time.Time
 	OrgID                          int64
 	ID                             int64
@@ -1220,6 +1317,7 @@ func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error 
 		arg.RemindersFirstIntervalSeconds,
 		arg.RemindersCapSeconds,
 		arg.AutoUnacknowledge,
+		arg.OwningTeamID,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

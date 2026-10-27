@@ -499,3 +499,14 @@ var RequestLogPruned = newCounter(Definition{
 		"request_log.max_records of their owner.",
 	Capability: "C-23",
 })
+
+// TeamInfo is 1 for every Team that is not deleted; its labels carry the Team's name (C-25.FR-11).
+var TeamInfo = newGauge(Definition{
+	Name: "muster_team_info",
+	Help: "Always 1, one series per Team that is not deleted; the labels carry its public_id and name.",
+	Labels: []Label{
+		entity("team"),
+		info("name", "the name of the Team"),
+	},
+	Capability: "C-25",
+})

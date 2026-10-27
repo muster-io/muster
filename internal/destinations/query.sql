@@ -4,7 +4,8 @@
 -- Destinations (C-11.FR-18): reading every type with its health and Routes. Secrets are read only as their status.
 
 -- ListDestinations reads a page of the Destinations that are not deleted, in id order after a cursor, filtered by
--- type, health and the public_id of a Route that is not deleted.
+-- type, health, the public_id of a Route that is not deleted, and the public_id of the Team that owns them or a User
+-- in the Team that owns them.
 -- name: ListDestinations :many
 SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d.mattermost_team_id,
        d.mattermost_channel_id, d.mattermost_team_name, d.mattermost_channel_name, d.telegram_channel_id,
@@ -14,9 +15,11 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
-       d.created_at, d.version
+       d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
+       t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM destinations d
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+LEFT JOIN teams t ON t.org_id = d.org_id AND t.id = d.owning_team_id
 WHERE d.org_id = @org_id AND d.deleted_at IS NULL
   AND (sqlc.narg('type')::text IS NULL OR d.type = sqlc.narg('type')::text)
   AND (sqlc.narg('health')::text IS NULL OR d.health = sqlc.narg('health')::text)
@@ -26,6 +29,12 @@ WHERE d.org_id = @org_id AND d.deleted_at IS NULL
                   JOIN routes r ON r.org_id = rd.org_id AND r.id = rd.route_id
                   WHERE rd.org_id = d.org_id AND rd.destination_id = d.id AND r.public_id = sqlc.narg('route')::text
                     AND r.deleted_at IS NULL))
+  AND (sqlc.narg('team')::text IS NULL OR t.public_id = sqlc.narg('team')::text)
+  AND (sqlc.narg('team_user')::bigint IS NULL
+       OR EXISTS (SELECT 1
+                  FROM team_users tu
+                  WHERE tu.org_id = d.org_id AND tu.team_id = d.owning_team_id
+                    AND tu.user_id = sqlc.narg('team_user')::bigint))
   AND (sqlc.narg('after_id')::bigint IS NULL OR d.id > sqlc.narg('after_id')::bigint)
 ORDER BY d.id
 LIMIT @page_size;
@@ -40,9 +49,11 @@ SELECT d.id, d.public_id, d.type, d.name, c.public_id AS connection_public_id, d
        d.proxy_password_updated_at, (d.signing_secret_ciphertext IS NOT NULL)::boolean AS signing_secret_set,
        d.signing_secret_updated_at, d.previous_signing_secret_since, d.mentions, d.limiter_limit,
        d.limiter_per_seconds, d.health, d.broken_since, d.broken_reason, d.template_error_since, d.template_error,
-       d.created_at, d.version
+       d.created_at, d.version, d.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name,
+       t.slug AS owning_team_slug, (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM destinations d
 LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+LEFT JOIN teams t ON t.org_id = d.org_id AND t.id = d.owning_team_id
 WHERE d.org_id = @org_id AND d.public_id = @public_id AND d.deleted_at IS NULL;
 
 -- ListDestinationRoutes lists the Routes that are not deleted of the Destinations, by name.
@@ -246,3 +257,18 @@ SET name = @name, webhook_mode = @webhook_mode, webhook_events_config = sqlc.nar
     mentions = @mentions, limiter_limit = @limiter_limit, limiter_per_seconds = @limiter_per_seconds,
     updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id AND type = 'webhook';
+
+-- LockOwningTeam reads the Team that is not deleted that a Destination is to name as its owner, in share mode, so that
+-- the Team's deletion, which locks it for update, either waits for the save or is seen by it.
+-- name: LockOwningTeam :one
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
+FOR SHARE;
+
+-- SetDestinationOwningTeam writes the owning Team of a Destination in the transaction that saved it, which moved its
+-- version.
+-- name: SetDestinationOwningTeam :exec
+UPDATE destinations
+SET owning_team_id = sqlc.narg('owning_team_id')::bigint
+WHERE org_id = @org_id AND id = @id;

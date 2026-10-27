@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
@@ -97,6 +98,14 @@ func (f *fakeWriter) UpdateWebhookDestination(context.Context, dbgen.UpdateWebho
 	return errBoom
 }
 
+func (f *fakeWriter) LockOwningTeam(context.Context, dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error) {
+	return dbgen.LockOwningTeamRow{}, errBoom
+}
+
+func (f *fakeWriter) SetDestinationOwningTeam(context.Context, dbgen.SetDestinationOwningTeamParams) error {
+	return errBoom
+}
+
 // saveWriter is the database of the saves in memory: the Mattermost Connections that are not deleted, the inserted
 // and updated rows, the versions the locks read, the Audit log and the hints.
 type saveWriter struct {
@@ -116,6 +125,29 @@ type saveWriter struct {
 	hints    []db.Hint
 	fail     map[string]error
 	auditErr error
+	// teams are the Teams that are not deleted by public_id, and owners the owning Teams written.
+	teams  map[string]dbgen.LockOwningTeamRow
+	owners []dbgen.SetDestinationOwningTeamParams
+}
+
+func (w *saveWriter) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
+	error) {
+	if err := w.fail["LockOwningTeam"]; err != nil {
+		return dbgen.LockOwningTeamRow{}, err
+	}
+	t, ok := w.teams[arg.PublicID]
+	if !ok || arg.OrgID != 1 {
+		return dbgen.LockOwningTeamRow{}, pgx.ErrNoRows
+	}
+	return t, nil
+}
+
+func (w *saveWriter) SetDestinationOwningTeam(_ context.Context, arg dbgen.SetDestinationOwningTeamParams) error {
+	if err := w.fail["SetDestinationOwningTeam"]; err != nil {
+		return err
+	}
+	w.owners = append(w.owners, arg)
+	return nil
 }
 
 func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error { return fn(w) }
@@ -461,7 +493,9 @@ func newSaver(t *testing.T) (*Service, *fakeStore, *saveWriter, *fakeChecker, *[
 	t.Helper()
 	store := newStore()
 	w := &saveWriter{conns: map[int64]bool{5: true, 6: true, 7: true, 8: true},
-		versions: map[string]int64{"DSAAAAAAAAAAA1": 2, "DSAAAAAAAAAAA3": 4}, fail: map[string]error{}}
+		versions: map[string]int64{"DSAAAAAAAAAAA1": 2, "DSAAAAAAAAAAA3": 4}, fail: map[string]error{},
+		teams: map[string]dbgen.LockOwningTeamRow{"TM0000000000PA": {ID: 41, PublicID: "TM0000000000PA",
+			Name: "Payments", Slug: "payments"}}}
 	checker := &fakeChecker{}
 	var healed []int64
 	s := New(1, store)
@@ -1883,5 +1917,97 @@ func TestDeleteSlack(t *testing.T) {
 		!slices.Equal(f.bumped, []int64{9}) || len(f.audit) != 1 || f.audit[0].Action != ActionDeleted ||
 		f.audit[0].ResourcePublicID.String != "DSAAAAAAAAAAA5" {
 		t.Errorf("deleted %+v, retired %v, routes %v, audit %+v", d, *called, f.bumped, f.audit)
+	}
+}
+
+// TestOwningTeam is C-25.FR-2 and C-08.FR-1 revised for Destinations: every type takes the owning Team, read in share
+// mode in the save's transaction and written with it, recorded in the Audit log diff and read back with its name and
+// slug; an update that leaves it out keeps it, an empty one clears it, and an unknown, malformed or deleted Team is
+// unknown_id at /owning_team_id. The list filters by a Team and by the Teams of a User.
+func TestOwningTeam(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	ctx := t.Context()
+	owned := func(in Input, id string) Input {
+		in.OwningTeamID = &id
+		return in
+	}
+	d, err := s.Create(ctx, saver, owned(mattermostInput("alerts", "ch-alerts"), "tm0000000000pa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := d.OwningTeam; o == nil || o.ID != 41 || o.PublicID != "TM0000000000PA" || o.Name != "Payments" ||
+		o.Slug != "payments" {
+		t.Fatalf("owning team %+v", d.OwningTeam)
+	}
+	if len(w.owners) != 1 || w.owners[0].ID != d.ID || w.owners[0].OwningTeamID.Int64 != 41 {
+		t.Errorf("owners %+v", w.owners)
+	}
+	if diff := string(w.audit[0].Diff); !strings.Contains(diff,
+		`{"pointer":"/owning_team_id","after":"TM0000000000PA"}`) {
+		t.Errorf("created diff %s", diff)
+	}
+	for _, in := range []Input{webhookInput("hook", "https://example.org/x"), telegramInput("tg", "@muster_alerts"),
+		bridgeInput("br", "ch-alerts"), slackInput("sl", "C0FAKEALERTS")} {
+		got, err := s.Create(ctx, saver, owned(in, "TM0000000000PA"))
+		if err != nil || got.OwningTeam == nil || got.OwningTeam.Slug != "payments" {
+			t.Errorf("%s: %+v, %v", in.Type, got.OwningTeam, err)
+		}
+	}
+
+	for _, id := range []string{"TM0000000000ZZ", "DS0000000000PA", "x"} {
+		assertField(t, id, func() error {
+			_, err := s.Create(ctx, saver, owned(mattermostInput("bad", "ch-alerts"), id))
+			return err
+		}, "/owning_team_id", CodeUnknownID)
+	}
+	w.fail["LockOwningTeam"] = errBoom
+	if _, err := s.Create(ctx, saver, owned(mattermostInput("bad", "ch-alerts"), "TM0000000000PA")); !errors.Is(err,
+		errBoom) {
+		t.Errorf("failed lock = %v", err)
+	}
+	delete(w.fail, "LockOwningTeam")
+	w.fail["SetDestinationOwningTeam"] = errBoom
+	if _, err := s.Create(ctx, saver, mattermostInput("bad", "ch-alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("failed write = %v", err)
+	}
+	delete(w.fail, "SetDestinationOwningTeam")
+
+	// DSAAAAAAAAAAA1 is owned by Payments: an update without the owner keeps it, an empty one clears it.
+	store.rows[0].OwningTeamID = pgtype.Int8{Int64: 41, Valid: true}
+	store.rows[0].OwningTeamPublicID, store.rows[0].OwningTeamName = txt("TM0000000000PA"), txt("Payments")
+	store.rows[0].OwningTeamSlug = txt("payments")
+	w.owners = nil
+	kept, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, mattermostInput("ops", "chan"))
+	if err != nil || kept.OwningTeam == nil || kept.OwningTeam.PublicID != "TM0000000000PA" || len(w.owners) != 1 ||
+		w.owners[0].OwningTeamID.Int64 != 41 {
+		t.Fatalf("kept = %+v, %+v, %v", kept.OwningTeam, w.owners, err)
+	}
+	cleared, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, owned(mattermostInput("ops", "chan"), ""))
+	if err != nil || cleared.OwningTeam != nil || w.owners[1].OwningTeamID.Valid {
+		t.Fatalf("cleared = %+v, %+v, %v", cleared.OwningTeam, w.owners, err)
+	}
+	if diff := string(w.audit[len(w.audit)-1].Diff); !strings.Contains(diff,
+		`{"pointer":"/owning_team_id","before":"TM0000000000PA"}`) {
+		t.Errorf("cleared diff %s", diff)
+	}
+	assertField(t, "update", func() error {
+		_, err := s.Update(ctx, saver, "DSAAAAAAAAAAA1", nil, owned(mattermostInput("ops", "chan"), "TM0000000000ZZ"))
+		return err
+	}, "/owning_team_id", CodeUnknownID)
+
+	page, err := s.List(ctx, ListFilter{Team: new("nonsense"), Limit: 10})
+	if err != nil || len(page.Destinations) != 0 {
+		t.Errorf("a Team that cannot exist: %+v, %v", page, err)
+	}
+	lists := len(store.lists)
+	if _, err := s.List(ctx, ListFilter{Team: new("tm0000000000pa"), TeamUser: new(int64(5)), Limit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.lists[lists]; got.Team.String != "TM0000000000PA" || got.TeamUser.Int64 != 5 {
+		t.Errorf("list params %+v", got)
+	}
+	ref := s.Get
+	if got, err := ref(ctx, "DSAAAAAAAAAAA1"); err != nil || got.OwningTeam == nil || got.OwningTeam.Name != "Payments" {
+		t.Errorf("read %+v, %v", got.OwningTeam, err)
 	}
 }

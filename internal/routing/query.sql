@@ -10,9 +10,12 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        r.template_ack_timeout_notice, r.ack_timeout_enabled, r.ack_timeout_first_interval_seconds,
        r.reminders_enabled, r.reminders_first_interval_seconds, r.reminders_cap_seconds, r.auto_unacknowledge,
        r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
-       s.alert_group_count AS storm_alert_group_count
+       s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
+       t.name AS owning_team_name, t.slug AS owning_team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = @org_id AND r.deleted_at IS NULL
 ORDER BY r.is_default, r.position, r.id;
 
@@ -29,9 +32,12 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
         FROM routes o
         WHERE o.org_id = @org_id AND o.deleted_at IS NULL
           AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
-       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count
+       s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
+       r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
 FROM routes r
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
+LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = @org_id AND r.public_id = @public_id AND r.deleted_at IS NULL;
 
 -- LockRoute locks a Route that is not deleted for a change; the lock leaves the key alone, so that routing, whose
@@ -73,7 +79,7 @@ INSERT INTO routes (
     thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-    reminders_cap_seconds, auto_unacknowledge, created_at, updated_at
+    reminders_cap_seconds, auto_unacknowledge, owning_team_id, created_at, updated_at
 )
 SELECT @org_id, @public_id, @name, @description,
        coalesce((SELECT CASE WHEN @first::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -84,7 +90,8 @@ SELECT @org_id, @public_id, @name, @description,
        @snooze_durations_seconds::bigint[], @thread_batching_window_seconds, @storm_threshold, @language,
        sqlc.narg('template_root_message'), sqlc.narg('template_line'), sqlc.narg('template_ack_timeout_notice'),
        @ack_timeout_enabled, @ack_timeout_first_interval_seconds, @reminders_enabled,
-       @reminders_first_interval_seconds, @reminders_cap_seconds, @auto_unacknowledge, @now, @now
+       @reminders_first_interval_seconds, @reminders_cap_seconds, @auto_unacknowledge,
+       sqlc.narg('owning_team_id')::bigint, @now, @now
 RETURNING id;
 
 -- EnsureDefaultRoute creates the Default route of the Organization when it has none, and returns its public_id only
@@ -120,8 +127,8 @@ SET name = @name, description = @description, minimum_severity = @minimum_severi
     template_line = sqlc.narg('template_line'), template_ack_timeout_notice = sqlc.narg('template_ack_timeout_notice'),
     ack_timeout_enabled = @ack_timeout_enabled, ack_timeout_first_interval_seconds = @ack_timeout_first_interval_seconds,
     reminders_enabled = @reminders_enabled, reminders_first_interval_seconds = @reminders_first_interval_seconds,
-    reminders_cap_seconds = @reminders_cap_seconds, auto_unacknowledge = @auto_unacknowledge, updated_at = @now,
-    version = version + 1
+    reminders_cap_seconds = @reminders_cap_seconds, auto_unacknowledge = @auto_unacknowledge,
+    owning_team_id = sqlc.narg('owning_team_id')::bigint, updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteRouteMatchers removes the Matchers of a Route before they are written again.
@@ -305,3 +312,19 @@ VALUES (@org_id, @kind, @route_id, @requested_at);
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec
 SELECT pg_notify(@channel::text, '');
+
+-- LockOwningTeam reads the Team that is not deleted that a Route is to name as its owner, in share mode, so that the
+-- Team's deletion, which locks it for update, either waits for the save or is seen by it.
+-- name: LockOwningTeam :one
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL
+FOR SHARE;
+
+-- ListUserTeams lists the public_ids of the Teams that are not deleted and that the User is in: "My Teams".
+-- name: ListUserTeams :many
+SELECT t.public_id
+FROM team_users tu
+JOIN teams t ON t.org_id = tu.org_id AND t.id = tu.team_id
+WHERE tu.org_id = @org_id AND tu.user_id = @user_id AND t.deleted_at IS NULL
+ORDER BY t.id;

@@ -11,8 +11,9 @@ change goes only into a new minor version, with the next layer.
 ## How the spec is organised
 
 - **One file.** `paths` are grouped by tag, one tag per capability area: Sessions, Profile, Users, OIDC, Audit log, API
-  tokens, Organization, Integrations, Ingest, Messenger callbacks, Routes, Alert groups, Live updates, Connections,
-  Destinations, Links, Templates, Account links, Request log, System, Health and metrics, Outgoing webhooks.
+  tokens, Organization, Integrations, Ingest, Messenger callbacks, Routes, Teams, Alert groups, Live updates,
+  Connections, Destinations, Links, Templates, Account links, Request log, System, Health and metrics, Outgoing
+  webhooks.
 - **Servers and listeners.** The default server is the app listener, `{public_url}/api/v1`. Operations on the other
   listeners carry their own `servers` entry: ingestion, Heartbeat and messenger callbacks use `{ingest_url}/api/v1`; health
   and metrics use the internal listener. Every operation also names its listener in `x-listener`.
@@ -52,12 +53,12 @@ here, so a change of `bridge.yaml` reaches each library as a pull request there 
 | Identifiers | Plural kebab-case nouns; URLs use the opaque `public_id`, never internal ids or `#N`. |
 | Public ids | A type prefix of one or two letters and 12 random characters of Crockford base32 (60 bits), such as `AGK7M3QX9P2RTA`; see [`public_id` format](#public_id-format). Responses use the canonical upper case; input is case-insensitive and normalized. |
 | Actions | A state change of an existing resource is a verb sub-path (`/acknowledge`, `/disable`, `/accept`, `/reset-totp`); a result the server computes or creates is a plural noun (`/checks`, `/tests`, `/previews`, `/confirmation`). |
-| Pagination | `cursor` and `limit` (default 50, maximum 500); responses carry `next_cursor`. No offsets. |
+| Pagination | `cursor` and `limit` (default 50, maximum 500); responses carry `next_cursor`. No offsets. Short lists that a page always shows whole are complete and not paginated: `listMySessions`, `listSystemNotices`, `listRoles`, `listPersonalAccessTokens`, `listServiceAccountTokens`, `listSeverityValues`, `listIntegrationTokens`, `listAlertmanagerRoutes`, `listRoutes`, `listRouteProfiles`, `listRouteSuggestions`, `listTeamUsers`, `listAlertGroupDeliveries`, `listSnoozePresets`, `listConnectionChannels`, `listDestinationSecrets`, `listMyAccountLinks`, `listLinkableConnections` and `listUserAccountLinks`. |
 | Filters and sorting | Query parameters: `status`, `route`, `from`, `to`, `q`, `number`, `label`, `sort` with an allowed list (`-` sorts descending). `label` is a whole Alertmanager-syntax Matcher, repeated and combined with AND: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22`. There is no per-label shorthand. Alert Group queries default to the last 7 days; `number` ignores the range. |
 | Errors | RFC 9457 `application/problem+json` (`Problem`) with a stable `type` URI, a stable `code` where a refusal needs one, and `errors[]` items with a JSON `pointer` and a stable `code`. `x-problem-types` lists the types; `x-problem-codes` lists every code per type. An operation that this build does not implement yet answers `501` (`not-implemented`). |
 | Concurrency | Configuration resources return `ETag` and the same value as `etag` in the body; updates are `PUT` with `If-Match`; `412` on a mismatch, `428` without the header. The Routes list ETag covers the order for `PUT /route-order`. Deletes and `setDestinationSecret` take an optional `If-Match`. |
 | Omitted and null | On an update an omitted optional field keeps its stored value and an explicit `null` clears a nullable one (an optional Secret such as a proxy password or the outgoing heartbeat URL included). A deliberate choice is a field of its own: a Snooze is `{until}` or `{no_end: true}`, never a missing value. |
-| Conflicts | `409` for natural-key conflicts, resources in use and refused Commands (`command-refused` with a `code`). |
+| Conflicts | `409` for natural-key conflicts, resources in use and refused Commands (`command-refused` with a `code`). Adding a person to a Team they are in already is idempotent instead: `addTeamUser` answers `201` with `Location` when it adds the person and `200` when they were in the Team by hand already. |
 | Rate limits | `429` with `Retry-After`, per token; ingestion is not rate-limited. Calls on the interactive path (checks, channel lists, link codes) answer `503` with `Retry-After` when no limiter token is free in time. |
 | Time and units | RFC 3339 UTC; durations are integer seconds in `*_seconds`. Exceptions: retention periods are whole days in `*_days`, measured latencies are milliseconds in `*_ms`. |
 | Enums | snake_case values. Kebab-case stays in URL segments, problem types and the `type` of live-update hints. |
@@ -99,6 +100,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `ST` | Service account token | `api_tokens` |
 | `TB` | Lookup table | `lookup_tables` |
 | `TE` | Timeline entry (lifecycle and system entries) | `timeline_entries` |
+| `TM` | Team (from S-115) | `teams` |
 
 ## Security
 
@@ -121,6 +123,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `x-permission` | operation | The Permission needed (`<resource>:<verb>`, see the `Permission` schema for the Role matrix), a list of alternatives, or `authenticated` (any signed-in identity), `integration-token` or `none`. |
 | `x-permission-check` | operation | `dispatcher` on the Command operations: the middleware checks only that the caller is authenticated, and the dispatcher of `internal/groups` checks the Permission of `x-permission` as its first step, logs `command_refused` and answers the same `403` `forbidden` (ADR-0016). Without it the middleware checks `x-permission`. |
 | `x-listener` | operation, server | `app`, `ingest` or `internal`. |
+| `x-unprocessable` | top-level property of a request body | When every failure of the request validation is the `pattern`, `maxLength` or `minLength` of such properties, the answer is the `422` `invalid_format` at each of them that the domain gives for the same value, instead of `400`. A missing property (`required`), a wrong type or `null` (`type`, `nullable`), any other keyword, and any failure elsewhere in the request keep the `400`. A Team's `slug` carries it. |
 | `x-problem-types` | `Problem` schema | Stable problem types with their statuses. |
 | `x-problem-codes` | `Problem` schema | The stable `code` values of each problem type, and whether they appear in `code` or in `errors[].code`. |
 | `x-event-kinds` | `LifecycleEvent` schema | The Timeline kind of each lifecycle event. |

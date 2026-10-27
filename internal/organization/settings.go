@@ -78,7 +78,11 @@ type Settings struct {
 	// WorkdayStart is organization.workday_start, HH:MM on the 24-hour clock.
 	WorkdayStart string
 	// WeekStart is organization.week_start, monday to sunday.
-	WeekStart       string
+	WeekStart string
+	// WorkingDays and WorkdayEnd are the days and the end of organization.working_hours, which start at
+	// WorkdayStart in TimeZone.
+	WorkingDays     []string
+	WorkdayEnd      string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -123,6 +127,8 @@ func Current(ctx context.Context, s Store) (Settings, error) {
 		TimeZone:         org.TimeZone,
 		WorkdayStart:     org.WorkdayStart,
 		WeekStart:        org.WeekStart,
+		WorkingDays:      org.WorkingDays,
+		WorkdayEnd:       org.WorkdayEnd,
 		SeverityLabel:    org.SeverityLabel,
 		CriticalIsUrgent: true,
 		InstanceLabels:   org.InstanceLabels,

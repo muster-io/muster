@@ -2,9 +2,9 @@
 // Copyright The Muster Authors
 
 // Complete Destination reads for the web tests, one builder per Destination type. Every required field holds a neutral
-// value — healthy, no Routes, nobody mentioned, the limiter the form proposes — and a test passes, field by field, only
-// what it cares about; the type stays the builder's. A required field added to a read is set here, the one place the
-// TypeScript check names, instead of in every test that builds a Destination.
+// value — healthy, no Routes, no owning Team, nobody mentioned, the limiter the form proposes — and a test passes, field
+// by field, only what it cares about; the type stays the builder's. A required field added to a read is set here, the
+// one place the TypeScript check names, instead of in every test that builds a Destination.
 
 import type {
   BridgeDestination,
@@ -22,6 +22,7 @@ type DestinationOverrides<T extends { type: string }> = Partial<Omit<T, "type">>
 /** The read-only fields every Destination type shares, neutral. */
 function readFields(): Omit<DestinationReadFields, "id"> {
   return {
+    owning_team: null,
     health: { state: "healthy" },
     routes: [],
     created_at: "2026-10-13T09:00:00Z",

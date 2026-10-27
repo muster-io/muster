@@ -115,10 +115,10 @@ func referenceMatrix(t *testing.T) map[string][]auth.Permission {
 }
 
 // TestIntegrationRoleMatrix is C-03.FR-2: the allocation seeded by the migration is the matrix of reference.md —
-// 31, 12 and 8 Permissions.
+// 33, 13 and 9 Permissions, teams:read and teams:write of 0022 included.
 func TestIntegrationRoleMatrix(t *testing.T) {
 	want := referenceMatrix(t)
-	if len(want[auth.RoleAdmin]) != 31 || len(want[auth.RoleResponder]) != 12 || len(want[auth.RoleViewer]) != 8 {
+	if len(want[auth.RoleAdmin]) != 33 || len(want[auth.RoleResponder]) != 13 || len(want[auth.RoleViewer]) != 9 {
 		t.Fatalf("reference.md matrix: %d, %d, %d", len(want[auth.RoleAdmin]), len(want[auth.RoleResponder]),
 			len(want[auth.RoleViewer]))
 	}
@@ -170,7 +170,7 @@ func TestIntegrationSessions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sess.User.Role != auth.RoleAdmin || len(svc.Permissions(sess)) != 31 {
+		if sess.User.Role != auth.RoleAdmin || len(svc.Permissions(sess)) != 33 {
 			t.Errorf("session %+v with %d permissions", sess.User, len(svc.Permissions(sess)))
 		}
 		token, err := svc.CSRFToken(sess)

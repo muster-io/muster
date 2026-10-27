@@ -27,6 +27,7 @@ import type {
   ForbiddenResponse,
   GroupKeyPreview,
   GroupKeyPreviewRequest,
+  ListRoutesParams,
   MovedAlertGroups,
   NotFoundResponse,
   PreconditionFailedResponse,
@@ -65,21 +66,28 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getListRoutesUrl = () => {
+export const getListRoutesUrl = (params?: ListRoutesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/routes`
+  return stringifiedParams.length > 0 ? `/api/v1/routes?${stringifiedParams}` : `/api/v1/routes`
 }
 
 /**
  * The first Route whose Matchers all match takes an Alert. The Default route is always last. The ETag covers the order and is what `reorderRoutes` expects in `If-Match`.
  * @summary List Routes in evaluation order
  */
-export const listRoutes = async ( options?: Parameters<typeof apiFetch>[1]): Promise<RouteList> => {
+export const listRoutes = async (params?: ListRoutesParams, options?: Parameters<typeof apiFetch>[1]): Promise<RouteList> => {
 
-  return apiFetch<RouteList>(getListRoutesUrl(),
+  return apiFetch<RouteList>(getListRoutesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -92,23 +100,23 @@ export const listRoutes = async ( options?: Parameters<typeof apiFetch>[1]): Pro
 
 
 
-export const getListRoutesQueryKey = () => {
+export const getListRoutesQueryKey = (params?: ListRoutesParams,) => {
     return [
-    `/api/v1/routes`
+    `/api/v1/routes`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export const getListRoutesQueryOptions = <TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: ListRoutesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListRoutesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListRoutesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoutes>>> = ({ signal }) => listRoutes({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRoutes>>> = ({ signal }) => listRoutes(params, { signal, ...requestOptions });
 
 
 
@@ -118,11 +126,11 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListRoutesQueryResult = NonNullable<Awaited<ReturnType<typeof listRoutes>>>
-export type ListRoutesQueryError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+export type ListRoutesQueryError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
 
 
-export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>> & Pick<
+export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params: undefined |  ListRoutesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRoutes>>,
           TError,
@@ -131,8 +139,8 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>> & Pick<
+export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListRoutesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listRoutes>>,
           TError,
@@ -141,20 +149,20 @@ export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TE
       >, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListRoutesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary List Routes in evaluation order
  */
 
-export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+export function useListRoutes<TData = Awaited<ReturnType<typeof listRoutes>>, TError = UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: ListRoutesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRoutes>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListRoutesQueryOptions(options)
+  const queryOptions = getListRoutesQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

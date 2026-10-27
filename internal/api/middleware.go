@@ -17,6 +17,7 @@ import (
 	"github.com/getkin/kin-openapi/routers"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 
+	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/metrics"
@@ -41,6 +42,96 @@ type operation struct {
 	sessionOnly bool
 	// validate is false for the ingestion operations, which take any body (ADR-0002).
 	validate bool
+	// unprocessable are the top-level fields of the request body marked x-unprocessable: a string that breaks their
+	// pattern, maxLength or minLength is a rule of the domain, refused with 422 invalid_format, not 400.
+	unprocessable map[string]bool
+}
+
+// xUnprocessable marks a field whose pattern and length the domain also checks, such as a Team's slug.
+const xUnprocessable = "x-unprocessable"
+
+// unprocessableFields are the pointers of the top-level properties of op's JSON request body marked x-unprocessable,
+// through allOf.
+func unprocessableFields(op *openapi3.Operation) map[string]bool {
+	if op.RequestBody == nil || op.RequestBody.Value == nil {
+		return nil
+	}
+	media := op.RequestBody.Value.Content.Get("application/json")
+	if media == nil || media.Schema == nil {
+		return nil
+	}
+	out := map[string]bool{}
+	var walk func(s *openapi3.Schema)
+	walk = func(s *openapi3.Schema) {
+		for name, prop := range s.Properties {
+			if prop.Value != nil && prop.Value.Extensions[xUnprocessable] == true {
+				out["/"+escapePointer(name)] = true
+			}
+		}
+		for _, sub := range s.AllOf {
+			if sub.Value != nil {
+				walk(sub.Value)
+			}
+		}
+	}
+	if media.Schema.Value != nil {
+		walk(media.Schema.Value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// formatKeywords are the schema keywords that x-unprocessable covers: the format of a value of the right type. A
+// missing field (required), a wrong type or null (type, nullable) and every other keyword stay a 400.
+var formatKeywords = map[string]bool{"pattern": true, "maxLength": true, "minLength": true}
+
+// unprocessableProblem answers the failed request validation err as the 422 the domain answers for the same value —
+// one invalid_format item per field — when every failure is a format keyword of a field marked x-unprocessable;
+// otherwise it answers the 400 of validationProblem.
+func (o *operation) unprocessableProblem(err error) *Problem {
+	if o == nil || len(o.unprocessable) == 0 {
+		return validationProblem(err)
+	}
+	var pointers []string
+	if !formatFailures(err, o.unprocessable, &pointers) || len(pointers) == 0 {
+		return validationProblem(err)
+	}
+	out := problem(http.StatusUnprocessableEntity, typeValidationFailed, "", detailSemanticValidation)
+	for _, ptr := range pointers {
+		if !slices.ContainsFunc(out.Errors, func(e gen.ProblemError) bool { return e.Pointer == ptr }) {
+			out.Errors = append(out.Errors, item(ptr, fieldInvalidFormat))
+		}
+	}
+	return out
+}
+
+// formatFailures reports whether every leaf of err is a schema error of a format keyword at one of the fields, and
+// adds their pointers.
+func formatFailures(err error, fields map[string]bool, pointers *[]string) bool {
+	switch e := err.(type) { //nolint:errorlint // the tree of the validation errors, walked by its direct types
+	case openapi3.MultiError:
+		for _, x := range e {
+			if !formatFailures(x, fields, pointers) {
+				return false
+			}
+		}
+		return true
+	case *openapi3filter.RequestError:
+		return e.Parameter == nil && e.Err != nil && formatFailures(e.Err, fields, pointers)
+	case *openapi3.SchemaError:
+		if multi, ok := errors.AsType[openapi3.MultiError](e.Origin); ok {
+			return formatFailures(multi, fields, pointers)
+		}
+		ptr := pointerOf(e.JSONPointer())
+		if !formatKeywords[e.SchemaField] || !fields[ptr] {
+			return false
+		}
+		*pointers = append(*pointers, ptr)
+		return true
+	}
+	return false
 }
 
 // permissionCheckDispatcher is the value of x-permission-check that leaves the Permission to the dispatcher.
@@ -71,7 +162,8 @@ func readOperations(doc *openapi3.T) map[*openapi3.Operation]*operation {
 			if ext, _ := op.Extensions["x-listener"].(string); ext != "app" {
 				continue
 			}
-			o := &operation{id: op.OperationID, path: path, permissions: xPermission(op), validate: true}
+			o := &operation{id: op.OperationID, path: path, permissions: xPermission(op), validate: true,
+				unprocessable: unprocessableFields(op)}
 			check, _ := op.Extensions["x-permission-check"].(string)
 			o.dispatcherChecks = check == permissionCheckDispatcher
 			if op.Security != nil {
@@ -359,7 +451,7 @@ func (s *Server) validator(doc *openapi3.T) func(http.Handler) http.Handler {
 				writeProblem(w, r, errTooLarge)
 				return
 			}
-			writeProblem(w, r, validationProblem(err))
+			writeProblem(w, r, infoFrom(r.Context()).operation.unprocessableProblem(err))
 		},
 	})
 }

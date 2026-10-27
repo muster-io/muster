@@ -5,10 +5,13 @@
 import type { DestinationHealth } from './destinationHealth';
 import type { EntityRef } from './entityRef';
 import type { PublicId } from './publicId';
+import type { TeamRef } from './teamRef';
 import type { TemplateErrorState } from './templateErrorState';
 
 export interface DestinationReadFields {
   id: PublicId;
+  /** The Team that owns the Destination, null when none does. */
+  owning_team: TeamRef | null;
   health: DestinationHealth;
   routes: EntityRef[];
   template_error?: TemplateErrorState;

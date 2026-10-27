@@ -9,6 +9,8 @@
   `MusterNoLeader` names, as the metric catalogue and ADR-0007 have had them since Bridge Connections (ADR-0017)
 - Amended: 2026-10-19 — `slack` joins the values of the `transport` label, and Slack's Socket Mode connections the
   Leader's tasks that `MusterNoLeader` names (ADR-0007)
+- Amended: 2026-10-27 — the entity labels of metrics are a closed list, which 0.2.0 extends with `team`, `schedule`,
+  `connection` and `chain` (C-25, C-27, C-30, C-32); each joins the code with the story that exports its first metric
 
 ## Context
 
@@ -31,9 +33,12 @@ code turns into noise nobody reads.
 
 **Metric labels.**
 
-- Allowed: configuration entities — `integration`, `route`, `destination` — always by **immutable id**, never by name, so
-  renaming breaks no series. Names come from info metrics (`muster_route_info{route, name}`, `muster_integration_info`,
-  `muster_destination_info`) joined in PromQL.
+- Allowed: configuration entities — `integration`, `route`, `destination`, and from 0.2.0 `team`, `schedule`,
+  `connection` and `chain` — always by **immutable id**, never by name, so renaming breaks no series. The list is
+  closed: adding an entity label is a reviewed change to this decision, and each label joins the label policy in code
+  with the story that exports the first metric that carries it. Names come from info metrics
+  (`muster_route_info{route, name}`, `muster_integration_info`, `muster_destination_info`, `muster_team_info`, …)
+  joined in PromQL.
 - Never: alert labels (`alertname`, `severity`, …), Alert Group numbers, users, `org_id`. Analysis by alert content
   belongs in the Alert Group list in the UI.
 - A future hosted mode that serves several Organizations turns the entity labels off with a switch.

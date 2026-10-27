@@ -177,6 +177,7 @@ type Alerts interface {
 // suggestions.
 type Routes interface {
 	List(ctx context.Context) (routing.List, error)
+	ListOwned(ctx context.Context, f routing.OwnerFilter) (routing.List, error)
 	Get(ctx context.Context, publicID string) (routing.Route, error)
 	Create(ctx context.Context, r routing.Requester, in routing.Input) (routing.Route, error)
 	Update(ctx context.Context, r routing.Requester, publicID string, version *int64, in routing.Input) (
@@ -219,6 +220,7 @@ type Config struct {
 	AccountLinks AccountLinks
 	SystemStatus SystemStatus
 	RequestLog   RequestLog
+	Teams        Teams
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -257,6 +259,7 @@ type Server struct {
 	accountLinks   AccountLinks
 	systemStatus   SystemStatus
 	requestLog     RequestLog
+	teams          Teams
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -315,6 +318,8 @@ var implemented = map[string]bool{
 	"StartSlackLink": true, "ConfirmSlackLink": true,
 	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true, "GetKeyring": true,
 	"ListRequestLog": true, "GetRequestRecord": true,
+	"ListTeams": true, "CreateTeam": true, "GetTeam": true, "UpdateTeam": true, "DeleteTeam": true,
+	"ListTeamUsers": true, "AddTeamUser": true, "RemoveTeamUser": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -345,7 +350,7 @@ func New(cfg Config) (*Server, error) {
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
-		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog,
+		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

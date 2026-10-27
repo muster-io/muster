@@ -139,6 +139,13 @@ sql:
         out: internal/routing/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/teams/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/teams/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/groups/query.sql
     gen:
       go:

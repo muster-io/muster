@@ -40,6 +40,7 @@ const (
 	ServiceToken       Prefix = "ST"
 	LookupTable        Prefix = "TB"
 	TimelineEntry      Prefix = "TE"
+	Team               Prefix = "TM"
 )
 
 // Alphabet is Crockford base32: the digits and the upper-case letters without I, L, O and U.

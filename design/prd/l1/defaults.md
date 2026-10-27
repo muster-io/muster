@@ -221,7 +221,7 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `organization.name` | `Muster` | Organization | C-02, C-20 | decided |
 | `organization.time_zone` | UTC (for messages) | Organization | C-02, C-20 | decided |
-| `organization.workday_start` | 09:00, the start of the working day, at which the Snooze presets end (C-10.FR-17); `HH:MM` on the 24-hour clock | Organization | C-10, C-20 | P-58 |
+| `organization.workday_start` | 09:00, the start of the working day, at which the Snooze presets end (C-10.FR-17); `HH:MM` on the 24-hour clock; from 0.2.0 earlier than the end of the working day (`organization.working_hours`), so at most 23:58 | Organization | C-10, C-20 | P-58 |
 | `organization.week_start` | Monday, the first day of the week, on which "Until Monday 09:00" ends (C-10.FR-17); any day of the week | Organization | C-10, C-20 | P-58 |
 | `organization.severity_label` | `severity` | Organization | C-02, C-20 | decided |
 | `organization.severity_mapping` | `critical` → critical; `warning` → warning; `info` and `none` → info; any other value → warning, shown as received; label missing → info | Organization | C-08, C-20 | decided |
@@ -230,7 +230,7 @@ Other lifecycle values:
 | `organization.critical_is_urgent` | on; from 0.2.0 it no longer acts — critical is always Urgent — reads `true` and is ignored in requests, and 0.3.0 removes it (C-26.FR-10) | Organization | C-08, C-20, C-26 | decided |
 | `organization.team_label` | `team` | Organization | C-25 | decided |
 | `organization.team_values_window` | values of the Team label without a Team seen in the last 14 days, like `organization.severity_values_window` | built in | C-25 | P-75 |
-| `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone` | Organization | C-25 | decided |
+| `organization.working_hours` | Monday to Friday, from `organization.workday_start` to 18:00, in `organization.time_zone`; the end is later than the start on the same day, so Working hours never span midnight (P-63, confirmed by S-115), and 0.2.0 sets the end to 23:59 where the start was 18:00 or later, and the start to 23:58 where it was 23:59, the latest time with no later end | Organization | C-25 | decided |
 | `organization.notification_rules` | normal: a Mention in the Thread; important: a Mention, a wait of 5 minutes, a Mention; a User follows them "As in the Organization" until they choose "Call" or "Don't call", which keep the rules as they were then, or custom rules are set through the API or by an Admin (C-31.FR-2) | Organization | C-31 | decided |
 | `organization.instance_labels` | `pod`, `instance`, `container`, `endpoint` | Organization | C-09, C-20 | decided |
 | `retention.stored_snapshots` | 14 days | Organization | C-05, C-20 | decided |
@@ -244,8 +244,8 @@ Other lifecycle values:
 
 | Name | Default | Set on | Capability | Status |
 |---|---|---|---|---|
-| `team.slug_format` | 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — starting with a letter or a digit; unique in the Organization | built in | C-25 | P-74 |
-| `team.working_hours` | the Organization's (`organization.working_hours`) | Team | C-25 | decided |
+| `team.slug_format` | 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — starting with a letter or a digit; unique in the Organization among the Teams that are not deleted (P-74, confirmed by S-115) | built in | C-25 | decided |
+| `team.working_hours` | the Organization's (`organization.working_hours`); a Team's own end later than they start on the same day (P-63) | Team | C-25 | decided |
 | `schedule.time_zone` | `organization.time_zone` | Schedule | C-27 | P-77 |
 | `schedule.gap_view` | the next 14 days | built in | C-27 | decided |
 | `schedule.gap_alert` | by default: on while the Schedule is its Team's main one, off otherwise; an Admin may set it on or off | Schedule | C-27 | decided |

@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -89,6 +90,8 @@ const (
 	codeSuggestionObsolete    = "suggestion_obsolete"
 	codeInUse                 = "in_use"
 	codeCheckFailed           = "destination_check_failed"
+	codeSlugTaken             = "slug_taken"
+	codeTeamInUse             = "team_in_use"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -364,6 +367,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*organization.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*teams.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return errInvalidCredentials
@@ -442,6 +448,20 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 		return problem(http.StatusConflict, typeConflict, codeSuggestionObsolete,
 			"The Route suggestion no longer applies: a Route other than the Default route takes its alerts, or it "+
 				"needs a Destination.")
+	case errors.Is(err, teams.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Team.")
+	case errors.Is(err, teams.ErrNotInTeam):
+		return problem(http.StatusNotFound, typeNotFound, "", "The User is not in the Team.")
+	case errors.Is(err, teams.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken,
+			"Another Team has this name; names are compared case-insensitively.")
+	case errors.Is(err, teams.ErrSlugTaken):
+		return problem(http.StatusConflict, typeConflict, codeSlugTaken, "Another Team has this slug.")
+	case errors.Is(err, teams.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, teams.ErrInUse):
+		return problem(http.StatusConflict, typeConflict, codeTeamInUse,
+			"The Team has Schedules or owns Escalation chains; delete them or give them another Team first.")
 	case errors.Is(err, groups.ErrNotFound), errors.Is(err, delivery.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Alert Group.")
 	case errors.Is(err, groups.ErrRouteNotFound):
