@@ -3044,7 +3044,7 @@ paths:
       tags:
       - Routes
       summary: List Route profiles
-      description: The two starting sets of Route settings, On-call and Informational, read from the built-in defaults. They
+      description: The two starting sets of Route settings, Paging and Informational, read from the built-in defaults. They
         only pre-fill the create form; they cannot be edited or stored.
       x-permission: routes:read
       x-listener: app
@@ -10688,7 +10688,7 @@ components:
         id:
           type: string
           enum:
-          - on_call
+          - paging
           - informational
         name:
           type: string

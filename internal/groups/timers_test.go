@@ -19,9 +19,9 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-// onCall gives the Route db the timer policy of the On-call profile (defaults.md): an ack timeout of 15 minutes,
+// paging gives the Route db the timer policy of the Paging profile (defaults.md): an ack timeout of 15 minutes,
 // and Reminders from 4 hours doubling up to 24 hours.
-func (h *harness) onCall() {
+func (h *harness) paging() {
 	h.db.routes[2].timers = dbgen.GetTimerPolicyRow{AckTimeoutEnabled: true, AckTimeoutFirstIntervalSeconds: 900,
 		RemindersEnabled: true, RemindersFirstIntervalSeconds: 4 * 3600, RemindersCapSeconds: 24 * 3600}
 }
@@ -168,7 +168,7 @@ func (h *harness) hintsOf(typ string, g *dbgen.LockGroupsRow) int {
 // to the list — and no fourth notice follows. A second MarkPublished, as after a republication, changes nothing.
 func TestAckTimeoutNotices(t *testing.T) {
 	h := newHarness(t)
-	h.onCall()
+	h.paging()
 	var unclaimedRenders []bool
 	h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
 		for _, e := range r.Events {
@@ -240,7 +240,7 @@ func TestAckTimeoutNotices(t *testing.T) {
 func TestAckTimeoutStartsOver(t *testing.T) {
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.firing(t, "x")
 	h.publish(t, g, t0)
 	h.runUntil(t, g, t0.Add(20*time.Minute))
@@ -324,7 +324,7 @@ func TestAckTimeoutStartsOver(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.people()
-			h.onCall()
+			h.paging()
 			var firedAt time.Time
 			g := c.run(t, h, func(g *dbgen.LockGroupsRow) {
 				h.publish(t, g, h.clock.Now())
@@ -367,7 +367,7 @@ func firingAgain(do func(h *harness, g *dbgen.LockGroupsRow) (Result, error)) fu
 func TestSnoozeEndStartsAckTimeout(t *testing.T) {
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.firing(t, "x")
 	h.publish(t, g, t0)
 	if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
@@ -422,7 +422,7 @@ func TestUnclaimedEnds(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.people()
-			h.onCall()
+			h.paging()
 			g := h.firing(t, "x")
 			h.publish(t, g, t0)
 			h.runUntil(t, g, t0.Add(2*time.Hour))
@@ -439,7 +439,7 @@ func TestUnclaimedEnds(t *testing.T) {
 	}
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.firing(t, "x")
 	h.publish(t, g, t0)
 	h.runUntil(t, g, t0.Add(2*time.Hour))
@@ -464,7 +464,7 @@ func TestUnclaimedEnds(t *testing.T) {
 func TestMarkPublished(t *testing.T) {
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.firing(t, "x")
 	if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
 		t.Fatal(err)
@@ -511,7 +511,7 @@ func TestFireAckTimeout(t *testing.T) {
 	setup := func(t *testing.T) (*harness, *dbgen.LockGroupsRow) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		g := h.firing(t, "x")
 		h.publish(t, g, t0)
 		return h, g
@@ -649,7 +649,7 @@ func TestReminders(t *testing.T) {
 	t.Run("the schedule and an answer", func(t *testing.T) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		g := h.acknowledgedBy(t, bob, "x")
 		if d, n := h.reminderTimer(g); d == nil || !d.Equal(t0.Add(4*time.Hour)) || n != 1 {
 			t.Fatalf("reminder timer %v notice %d", d, n)
@@ -687,7 +687,7 @@ func TestReminders(t *testing.T) {
 	t.Run("a takeover at hour 13", func(t *testing.T) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		g := h.acknowledgedBy(t, alice, "x")
 		h.runUntil(t, g, t0.Add(13*time.Hour))
 		if _, err := h.svc.Acknowledge(t.Context(), bob, g.PublicID); err != nil {
@@ -706,7 +706,7 @@ func TestReminders(t *testing.T) {
 	t.Run("snoozed", func(t *testing.T) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		g := h.acknowledgedBy(t, bob, "x")
 		if _, err := h.svc.Snooze(t.Context(), bob, g.PublicID, SnoozeEnd{NoEnd: true}); err != nil {
 			t.Fatal(err)
@@ -719,7 +719,7 @@ func TestReminders(t *testing.T) {
 	t.Run("a reopen into acknowledged", func(t *testing.T) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
 		h.changes(t, ingest.ChangeFired, a)
 		g := h.groupOf(t, a)
@@ -743,7 +743,7 @@ func TestReminders(t *testing.T) {
 	t.Run("a route without reminders", func(t *testing.T) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		h.db.routes[2].timers.RemindersEnabled = false
 		g := h.acknowledgedBy(t, bob, "x")
 		h.runUntil(t, g, t0.Add(100*time.Hour))
@@ -762,7 +762,7 @@ func TestAutoUnacknowledge(t *testing.T) {
 	setup := func(t *testing.T, check ReminderCheck) *harness {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		h.db.routes[2].timers.AutoUnacknowledge = true
 		h.svc.SetReminderReached(check)
 		return h
@@ -876,7 +876,7 @@ func TestReminderCollapse(t *testing.T) {
 	var asked []int64
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	h.db.routes[2].timers.AutoUnacknowledge = true
 	h.svc.SetReminderReached(reachedAll(&asked))
 	g := h.acknowledgedBy(t, bob, "x")
@@ -909,7 +909,7 @@ func TestFireReminder(t *testing.T) {
 	setup := func(t *testing.T) (*harness, *dbgen.LockGroupsRow) {
 		h := newHarness(t)
 		h.people()
-		h.onCall()
+		h.paging()
 		h.db.routes[2].timers.AutoUnacknowledge = true
 		var asked []int64
 		h.svc.SetReminderReached(reachedAll(&asked))
@@ -999,7 +999,7 @@ func TestReleaseEndsReminders(t *testing.T) {
 			var asked []int64
 			h := newHarness(t)
 			h.people()
-			h.onCall()
+			h.paging()
 			h.db.routes[2].timers.AutoUnacknowledge = true
 			h.svc.SetReminderReached(reachedAll(&asked))
 			g := h.acknowledgedBy(t, bob, "x")
@@ -1034,7 +1034,7 @@ func TestReleaseEndsReminders(t *testing.T) {
 func TestAnswerReminder(t *testing.T) {
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.acknowledgedBy(t, bob, "x")
 	allowed := func(c Caller) bool {
 		t.Helper()
@@ -1098,7 +1098,7 @@ func TestAnswerReminder(t *testing.T) {
 func TestOwnerAnswers(t *testing.T) {
 	h := newHarness(t)
 	h.people()
-	h.onCall()
+	h.paging()
 	g := h.acknowledgedBy(t, bob, "x")
 	h.runUntil(t, g, t0.Add(4*time.Hour))
 	h.clock.Advance(time.Minute)

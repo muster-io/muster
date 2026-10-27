@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TestAckNoticeSchedule is C-17.FR-2 with the On-call profile (route.ack_timeout, 15 minutes): the notices come 15,
+// TestAckNoticeSchedule is C-17.FR-2 with the Paging profile (route.ack_timeout, 15 minutes): the notices come 15,
 // 45 and 105 minutes after the start, at intervals of 15, 30 and 60 minutes, and there is no fourth.
 func TestAckNoticeSchedule(t *testing.T) {
 	start, first := business0, 15*time.Minute
@@ -55,7 +55,7 @@ func TestDueAckNotices(t *testing.T) {
 	}
 }
 
-// TestReminderSchedule is C-17.FR-4 with the On-call profile (route.reminders, 4 hours doubling up to 24 hours): the
+// TestReminderSchedule is C-17.FR-4 with the Paging profile (route.reminders, 4 hours doubling up to 24 hours): the
 // intervals are 4, 8, 16, 24 and 24 hours, so the Reminders come 4, 12, 28, 52 and 76 hours after the
 // acknowledgement.
 func TestReminderSchedule(t *testing.T) {

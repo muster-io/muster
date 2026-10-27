@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The choice of a Route profile that starts "Create route" (C-08.FR-7): On-call and Informational, as listRouteProfiles
+// The choice of a Route profile that starts "Create route" (C-08.FR-7): Paging and Informational, as listRouteProfiles
 // serves them from the built-in defaults, each with a line on what it is for, and "Learn more" beside the heading. A
 // profile only pre-fills the editor.
 
@@ -14,15 +14,17 @@ import type { RouteProfile, RouteProfileId } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
 
+// Any id but informational reads as Paging: during a rolling update a 0.1 replica still answers with the old id.
+
 /** The name of a Route profile in the language of the page. */
 export function profileName(t: TFunction, id: RouteProfileId): string {
-  return id === "on_call" ? t("routes.profiles.onCall") : t("routes.profiles.informational");
+  return id === "informational" ? t("routes.profiles.informational") : t("routes.profiles.paging");
 }
 
 function profileLine(t: TFunction, id: RouteProfileId): string {
-  return id === "on_call"
-    ? t("routes.profiles.onCallLine")
-    : t("routes.profiles.informationalLine");
+  return id === "informational"
+    ? t("routes.profiles.informationalLine")
+    : t("routes.profiles.pagingLine");
 }
 
 export function ProfilePicker({

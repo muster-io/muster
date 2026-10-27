@@ -613,7 +613,7 @@ export const MoveOpenAlertGroupsResponse = zod.object({
 })
 
 /**
- * The two starting sets of Route settings, On-call and Informational, read from the built-in defaults. They only pre-fill the create form; they cannot be edited or stored.
+ * The two starting sets of Route settings, Paging and Informational, read from the built-in defaults. They only pre-fill the create form; they cannot be edited or stored.
  * @summary List Route profiles
  */
 export const listRouteProfilesResponseItemsItemPolicyReopenWindowSecondsMin = 0;
@@ -631,7 +631,7 @@ export const listRouteProfilesResponseItemsItemPolicyThreadBatchingWindowSeconds
 
 export const ListRouteProfilesResponse = zod.object({
   "items": zod.array(zod.object({
-  "id": zod.enum(['on_call', 'informational']),
+  "id": zod.enum(['paging', 'informational']),
   "name": zod.string(),
   "minimum_severity": zod.enum(['none', 'warning', 'critical']).describe('`none` for both profiles: neither sets a Minimum severity.'),
   "urgent": zod.boolean().describe('Read-only from 0.2.0: true exactly when `minimum_severity` is `critical`, so `false` for both profiles; removed in 0.3.0.'),

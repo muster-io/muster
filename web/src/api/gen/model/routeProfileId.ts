@@ -7,6 +7,6 @@ export type RouteProfileId = typeof RouteProfileId[keyof typeof RouteProfileId];
 
 
 export const RouteProfileId = {
-  on_call: 'on_call',
+  paging: 'paging',
   informational: 'informational',
 } as const;

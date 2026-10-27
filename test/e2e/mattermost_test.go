@@ -93,7 +93,7 @@ func (e *mm) destination(name, connection, channel string, mentions map[string]s
 	return created["destination"].(map[string]any)["id"].(string)
 }
 
-// route creates a Route for the label team=team with the Group key [alertname, cluster] and the On-call profile,
+// route creates a Route for the label team=team with the Group key [alertname, cluster] and the Paging profile,
 // changed by edit.
 func (e *mm) route(name, team string, destinations []string, edit func(policy map[string]any)) string {
 	e.t.Helper()

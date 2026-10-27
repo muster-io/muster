@@ -984,7 +984,7 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
-// route adds a Route with the policy of the On-call profile.
+// route adds a Route with the policy of the Paging profile.
 func (h *harness) route(id int64, publicID, name string, isDefault bool, key []string) {
 	h.db.routes[id] = &fakeRoute{LockRoutesRow: dbgen.LockRoutesRow{ID: id, PublicID: publicID, IsDefault: isDefault,
 		MinimumSeverity: "none", GroupKey: key,
