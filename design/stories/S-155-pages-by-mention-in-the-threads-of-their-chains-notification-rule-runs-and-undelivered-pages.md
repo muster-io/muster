@@ -60,7 +60,7 @@ acceptance:
   - "[C-32.AC-17] `listEscalationChainRuns` lists, with each step made, its Pages with their people and outcome (`pages_integration_test.go`); Concepts → Escalation chains has \"Where chains Page\" and \"How a Page reaches a person\" with the table of C-32.FR-11 and the note that the push of Mentions in Threads is still to be verified; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 444
 ---
 
 # S-155. Pages by Mention in the Threads of their own chains, the runs of Notification rules, and undelivered Pages (BE)

@@ -22,7 +22,7 @@ acceptance:
   - "[C-29.FR-8] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included, and the release pull request that release-please opens names the types in its changelog."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 416
 ---
 
 # S-127. Types for the message layout in the Go bridge library (BE)

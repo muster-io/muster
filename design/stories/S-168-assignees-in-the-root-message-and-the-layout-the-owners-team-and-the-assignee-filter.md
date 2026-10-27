@@ -57,7 +57,7 @@ acceptance:
   - "[C-15.FR-2] The `alert_group` of every outgoing webhook event carries `assignees` and the Owner's `teams` (`body_test.go`)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 457
 ---
 
 # S-168. Assignees — the people the chains Paged last — in the Root message and the layout, the Owner's Team, and the Assignee filter (BE)

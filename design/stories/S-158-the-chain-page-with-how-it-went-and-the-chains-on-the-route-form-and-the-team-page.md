@@ -43,7 +43,7 @@ acceptance:
   - "Every new text exists in English and Russian; the chain page has \"Learn more\" to Concepts → Escalation chains and the Route form's section to \"Naming chains on Routes and Teams\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 447
 ---
 
 # S-158. The Escalation chain page with its steps and "How it went", and the chains on the Route form and the Team page (FE)

@@ -21,7 +21,7 @@ acceptance:
   - "[C-25.FR-8, C-28.FR-2] The items \"Mattermost groups\" and \"Slack user groups\" leave Pending in `design/facts.md`, and S-139, S-140 and S-171 cite the new entries: the fake Mattermost and Slack servers, the Connections' checks and the rendering of group mentions follow the facts, any assumption the facts contradict is corrected in those contracts or proposed as a change of C-25.FR-8 or C-28.FR-2 in the pull request; S-143 gains the reasons and texts the facts call for, such as Mattermost groups that need a licence, and S-144 cites what the documentation must say."
 verify: "make lint"
 operator_attention: true
-issue: null
+issue: 427
 ---
 
 # S-138. Spike: Mattermost groups and Slack user groups — reading them, mentioning them, and everyone from a bot

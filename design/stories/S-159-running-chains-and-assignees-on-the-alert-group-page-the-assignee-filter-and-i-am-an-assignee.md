@@ -38,7 +38,7 @@ acceptance:
   - "Every new text exists in English and Russian; the running chains have \"Learn more\" to Concepts → Escalation chains; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 448
 ---
 
 # S-159. Running chains and Assignees on the Alert Group page at phone width, the Assignee filter, and "I am an Assignee" on the Home page (FE)

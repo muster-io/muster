@@ -45,7 +45,7 @@ acceptance:
   - "P-82, the token's prefix `mstr_cal_`, 32 random bytes and one feed per User, is confirmed in defaults.md and L2.md §5.3 (Notes); P-81, `ical.window`, stays provisional."
 verify: "make ci test-integration lint-arch e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 423
 ---
 
 # S-134. The personal iCal feed of On-call times with its token (BE)

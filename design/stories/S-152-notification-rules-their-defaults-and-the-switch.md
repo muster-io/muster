@@ -44,7 +44,7 @@ acceptance:
   - "[C-31.FR-5] The documentation has the page Concepts → Notification rules with \"Normal and important\", \"The switch\" and \"Custom rules\" in the navigation; deleting a User deletes their rules; P-85 is confirmed in defaults.md and L2.md §5.3; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 441
 ---
 
 # S-152. Notification rules, the Organization's defaults, the four states and the switch that adds a call (BE)

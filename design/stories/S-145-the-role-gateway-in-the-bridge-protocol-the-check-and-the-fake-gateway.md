@@ -53,7 +53,7 @@ acceptance:
   - "[C-30.FR-10] A request to a gateway is recorded in the Request log like any request to a bridge, and `sendNotification` logs `gateway_notification_sent` with the Connection, the key and the outcome class, never the contact or the text; the log event is in the registry and its reference page."
 verify: "make ci e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 434
 ---
 
 # S-145. The role gateway in the Bridge protocol, sendNotification and notification_acknowledged, the check of the role and the fake gateway (BE)

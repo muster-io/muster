@@ -42,7 +42,7 @@ acceptance:
   - "Every new text exists in English and Russian; the Schedule page has \"Guide\" to Concepts → Schedules, the Overrides section \"Learn more\" to its section \"Overrides\" and the gap alert \"Learn more\" to \"Gaps and the Internal alert\"; `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 424
 ---
 
 # S-135. The Schedule page with its two-week view, Rotation layers, Overrides with the Override form, and warnings (FE)

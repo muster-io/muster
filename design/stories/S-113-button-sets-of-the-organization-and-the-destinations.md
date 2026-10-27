@@ -55,7 +55,7 @@ acceptance:
   - "The documentation page Statuses and commands has the section \"Button sets\": which buttons a Root message shows from a set, that Unsnooze always shows, and that Reminders, Text commands, the UI and the API keep every action; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 402
 ---
 
 # S-113. Button sets of the Organization and the Destinations (BE)

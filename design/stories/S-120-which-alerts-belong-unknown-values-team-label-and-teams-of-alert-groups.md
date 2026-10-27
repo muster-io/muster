@@ -46,7 +46,7 @@ acceptance:
   - "At 360 CSS pixels the Alert Group list with \"Teams\" and the Alert Group page with its Teams do not scroll horizontally, in either language (`phone-width.spec.ts`); every new text exists in English and Russian."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 409
 ---
 
 # S-120. "Which Alerts belong" on the Team page, unknown values with "Create Team", the Team label setting, and the Teams of Alert Groups and Alerts on their pages (FE)

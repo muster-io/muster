@@ -54,7 +54,7 @@ acceptance:
   - "[C-25.FR-12] The documentation of GitLab sign-in maps Roles with GitLab's role claims and subtrees as the facts of S-116 say, the Keycloak page names the claim of an entry, and Concepts → Teams has the section \"Membership from the identity provider\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 406
 ---
 
 # S-117. The claim of every mapping entry and subtrees for Roles and Teams, and Team membership from the identity provider (BE)

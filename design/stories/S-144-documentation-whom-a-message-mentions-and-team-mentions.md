@@ -29,7 +29,7 @@ acceptance:
   - "`make docs-screenshots GUIDES=mentions` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the page in a scenario on mentioning the right people."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 433
 ---
 
 # S-144. Documentation: whom a message mentions, with the entries, what each messenger supports and Team mentions

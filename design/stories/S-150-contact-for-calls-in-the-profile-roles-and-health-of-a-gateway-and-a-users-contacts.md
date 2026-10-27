@@ -48,7 +48,7 @@ acceptance:
   - "Every new text exists in English and Russian; \"How to connect a Notification gateway\" and the link of the Connection page open sections of the page on Notification gateways (`docs-links.json`); `make e2e` passes."
 verify: "make ci e2e"
 operator_attention: false
-issue: null
+issue: 439
 ---
 
 # S-150. The contact for calls and SMS in the profile, the roles and health of a Notification gateway, and a User's contacts (FE)

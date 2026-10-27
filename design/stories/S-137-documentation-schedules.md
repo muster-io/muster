@@ -20,7 +20,7 @@ acceptance:
   - "`make docs-screenshots GUIDES=schedules` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the page in a scenario on setting up who is On-call."
 verify: "make docs-check"
 operator_attention: false
-issue: null
+issue: 426
 ---
 
 # S-137. Documentation: Schedules with Rotation layers, several Schedules, Overrides, gaps and the iCal feed

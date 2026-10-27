@@ -26,7 +26,7 @@ acceptance:
   - "[C-28.FR-2] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included, and the release pull request that release-please opens names the change in its changelog."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 430
 ---
 
 # S-141. Group mentions and mentions of everyone in the chat in the Go bridge library (BE)

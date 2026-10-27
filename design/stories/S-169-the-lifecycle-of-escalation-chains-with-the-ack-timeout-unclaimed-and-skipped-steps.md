@@ -59,7 +59,7 @@ acceptance:
   - "[C-32.FR-5] Steps are `timers` rows of the kind `escalation_step` that any replica claims with its lease, and every step runs as a system transition of the dispatcher with Muster as the actor; two replicas make each step once, so a lost Leader never stops a chain (NFR-4) (`runs_integration_test.go`)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 458
 ---
 
 # S-169. The lifecycle of Escalation chains on Alert Groups, with the ack timeout, Unclaimed, waits, repeats and skipped steps (BE)

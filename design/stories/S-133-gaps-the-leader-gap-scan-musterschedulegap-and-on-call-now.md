@@ -55,7 +55,7 @@ acceptance:
   - "[C-27.FR-14] Concepts → Schedules has \"Gaps and the Internal alert\": the people whose Shifts are skipped, `schedule.gap_alert`, and that a Schedule which covers only part of the day, such as a second line in working hours, keeps it off; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: false
-issue: null
+issue: 422
 ---
 
 # S-133. Gaps of Schedules, the Leader's gap scan with MusterScheduleGap, its chart rule and runbook, and On call now (BE)

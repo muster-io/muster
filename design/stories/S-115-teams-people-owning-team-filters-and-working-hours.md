@@ -62,7 +62,7 @@ acceptance:
   - "The migration adds the Permissions `teams:read` (Admin, Responder, Viewer) and `teams:write` (Admin), and reference.md moves them, and `muster_team_info`, from their tables of L2 into the main tables, so that the matrix `TestIntegrationRoleMatrix` reads from reference.md and the migrations seed has 33, 13 and 9 Permissions for Admin, Responder and Viewer instead of 31, 12 and 8 (`auth_integration_test.go`); the provisional values P-63 (Working hours end later than they start) and P-74 (the slug format) are confirmed in defaults.md and L2.md §5.3 (Notes)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: true
-issue: null
+issue: 404
 ---
 
 # S-115. Teams, people added by hand, the owning Team of Routes and Destinations, the filters by Team, and Working hours (BE)

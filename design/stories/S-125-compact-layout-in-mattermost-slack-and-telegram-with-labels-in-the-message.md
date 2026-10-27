@@ -59,7 +59,7 @@ acceptance:
   - "[C-29.FR-9] The documentation page Messages and templates shows the new default message and has the section \"Labels in the message\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 414
 ---
 
 # S-125. The compact message layout in Mattermost, Slack and Telegram, with "Labels in the message" (BE)

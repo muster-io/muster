@@ -25,7 +25,7 @@ acceptance:
   - "[C-26.FR-13] Routing to Teams has the section \"Preview where alerts go\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 411
 ---
 
 # S-122. The preview "Where alerts go" for the unsaved settings of a Route (BE)

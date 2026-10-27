@@ -26,7 +26,7 @@ acceptance:
   - "[C-28.FR-2] `make ci conformance` passes, the conformance check from `ghcr.io/muster-io/muster:edge` included."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 431
 ---
 
 # S-142. Group mentions and mentions of everyone in the chat in the Python bridge library (BE)

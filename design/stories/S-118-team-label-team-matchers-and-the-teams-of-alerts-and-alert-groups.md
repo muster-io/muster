@@ -65,7 +65,7 @@ acceptance:
   - "[C-25.FR-12] Concepts → Teams has the sections \"Which Alerts belong to a Team\" — the Team label, Team matchers on any label, test clusters with one shared namespace — and \"Values without a Team\", and the page on outgoing webhook events names the new events and `teams`; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
-issue: null
+issue: 407
 ---
 
 # S-118. The Team label and Team matchers, the Teams of Alerts and Alert Groups with team_joined, and unknown values (BE)

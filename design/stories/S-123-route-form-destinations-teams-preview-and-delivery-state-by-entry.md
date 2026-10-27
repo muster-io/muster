@@ -45,7 +45,7 @@ acceptance:
   - "Every new text exists in English and Russian; \"Learn more\" next to the option opens Routing to Teams; the screenshot of the Route's Destinations is taken again, and `make e2e` passes."
 verify: "make ci e2e docs-check"
 operator_attention: false
-issue: null
+issue: 412
 ---
 
 # S-123. The Route form with Destination conditions, the Teams from the label and the preview, the Destinations of a Team, and the delivery state by entry (FE)

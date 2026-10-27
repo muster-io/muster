@@ -56,7 +56,7 @@ acceptance:
   - "[C-30.FR-4] Under `muster dev`, `POST localhost:8082/_dev/gateway-calls` with a User, a gateway and Alert Groups queues their Pages as a Notification rule's call would, and is refused outside development mode (`devmode_test.go`)."
 verify: "make ci test-integration e2e-go"
 operator_attention: false
-issue: null
+issue: 437
 ---
 
 # S-148. The queue of calls through Notification gateways with combining and retries (BE)

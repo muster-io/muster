@@ -31,7 +31,7 @@ acceptance:
   - "[C-30.FR-2] `examples/gateway` is a gateway bridge of one file that prints each notification and acknowledges it from a `/demo/acknowledge` page; `Example_gateway` is checked; README.md and `doc.go` describe the role, the answer during a call in the push mode and the example; `make conformance` runs `muster bridge check` from `ghcr.io/muster-io/muster:edge` against it with `--contact` and passes interactively."
 verify: "make ci conformance"
 operator_attention: true
-issue: null
+issue: 435
 ---
 
 # S-146. The role gateway in the Go bridge library (BE)

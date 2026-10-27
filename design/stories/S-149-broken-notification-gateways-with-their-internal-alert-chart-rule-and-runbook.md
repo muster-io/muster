@@ -48,7 +48,7 @@ acceptance:
   - "[C-30.FR-8] The runbook page MusterNotificationGatewayBroken says what the alert means, how to read the reason on the Connection page and in the Request log, how to fix the bridge's credentials or its provider, and that calls due meanwhile were not sent; it is in the runbook index and the monitoring page; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: true
-issue: null
+issue: 438
 ---
 
 # S-149. Broken Notification gateways with MusterNotificationGatewayBroken, its chart rule and runbook, and the probe (BE)
