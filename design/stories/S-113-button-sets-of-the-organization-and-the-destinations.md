@@ -48,6 +48,7 @@ files_touched:
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - internal/groups/dispatcher_test.go
+  - internal/groups/groups_integration_test.go
   - internal/groups/query.sql
   - test/e2e/button_sets_test.go
   - web/src/test/fixtures/destinations.ts
