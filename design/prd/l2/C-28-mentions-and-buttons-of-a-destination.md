@@ -74,10 +74,13 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   same effect: each target chosen for a kind of Loud event becomes an entry for the kinds it was chosen for, and an
   entry for `new_alert_group` also applies to `storm_started`, since an L1 Storm summary mentioned the targets of
   `new_alert_group`. A Destination that mentioned nobody keeps an empty list. Until 0.3.0 the API also returns the L1
-  form of the settings, read-only, computed from the entries that L1 can express — everyone in the chat, chosen Users
-  and messenger groups, for the six kinds of L1 — so that the other entries are not seen in it, and ignores it in
-  requests. The L1 column keeps what the migration found and is not written after it, so that 0.1 replicas of a rolling
-  update mention as before; 0.3.0 removes the field and the column. The upgrade notes say so.
+  form of the settings, computed from the entries that L1 can express — the everyone choices, chosen Users and messenger
+  groups that L1 took on the Destination's type (C-12.FR-8), for the six kinds of L1 — so that the other entries are not
+  seen in it; a request that sends the L1 form without entries is converted the same way, replacing only the entries
+  that L1 can express for the Destination's type and keeping the others, and changing nothing when it equals the form
+  read, so that 0.1 clients keep working, and a request with entries ignores it. The L1 column keeps what the migration
+  found and is not written after it, so that 0.1 replicas of a rolling update mention as before; 0.3.0 removes the field
+  and the column. The upgrade notes say so.
 - **C-28.FR-6** When a Destination becomes a Destination of a Team (C-26.FR-1) and has no entry naming that Team, Muster
   adds the entry "Team {Team}" for every Loud event, recorded in the Audit log; it mentions someone only where the Team
   has a Team mention for the Destination's Connection. A Telegram Destination gets no such entry, since Telegram cannot
@@ -132,9 +135,9 @@ the Organization's button set.
 
 ## API surface
 
-The Mention entries — target and Loud events — on `destinations`, with the L1 form read-only until 0.3.0; the button set
-(`buttons`: the Organization's, or the Destination's own list) on `destinations` and `organization`; per entry, what it
-resolves to now, on the Destination read.
+The Mention entries — target and Loud events — on `destinations`, with the L1 form derived and converted until 0.3.0;
+the button set (`buttons`: the Organization's, or the Destination's own list) on `destinations` and `organization`; per
+entry, what it resolves to now, on the Destination read.
 
 ## Acceptance
 

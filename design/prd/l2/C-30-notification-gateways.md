@@ -32,7 +32,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-30.FR-1** A bridge declares its roles in `info`: `messenger`, the default when it declares none, and `gateway`,
   which makes its Bridge Connection a Notification gateway; a bridge may have both. A Bridge Connection whose only role
   is `gateway` cannot be a Destination: creating a Destination for it is refused with `422` and the code `gateway_only`.
-  The Connection page and its check show the roles.
+  Nor is it offered for Account links, Team mentions or Mention entries, which need a messenger. The Connection page
+  and its check show the roles.
 - **C-30.FR-2** The Bridge protocol gains, additively in version 1 (ADR-0017): `sendNotification` (`POST
   /v1/notifications`), which takes the person's contact, a plain text, signed action data like a button's (C-22.FR-5)
   and an `Idempotency-Key`; and the event `notification_acknowledged`, which returns that action data when the person
@@ -84,10 +85,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   becomes Broken: its Connection page shows it with the reason, the Leader's gauge
   `muster_notification_gateway_broken{connection}` is 1, and the Internal alert `MusterNotificationGatewayBroken`
   ([reference.md](../l1/reference.md#internal-alerts-added-in-l2)) is raised, with a chart rule and a runbook page of
-  the same name. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or check
-  ends the state. Calls that come due while it is Broken end Not delivered and are not sent after it recovers, as Pages
-  that a Broken Destination could not deliver are not (ADR-0018). A gateway's failures never make a Destination Broken,
-  nor do a Destination's make its gateway Broken, even for a bridge with both roles.
+  the same name; the suggested Route for Internal alerts (C-08.FR-11) gains `connection` in its Group key, so that each
+  Broken gateway has its own Alert Group, and the upgrade notes of 0.2.0 tell an installation that accepted it in 0.1 to
+  add `connection` too. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe
+  or check ends the state. Calls that come due while it is Broken end Not delivered and are not sent after it recovers,
+  as Pages that a Broken Destination could not deliver are not (ADR-0018). A gateway's failures never make a Destination
+  Broken, nor do a Destination's make its gateway Broken, even for a bridge with both roles.
 - **C-30.FR-9** Escalation steps and Notification rule actions that call through a gateway are offered only while a
   Bridge Connection in the role `gateway` exists; otherwise the UI shows "Unavailable: a Notification gateway is needed
   (a bridge for calls and SMS)" with a link to the documentation, and a step or action whose gateway was deleted is

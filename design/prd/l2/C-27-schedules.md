@@ -85,7 +85,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   it is past. A second scan finds the same gaps and the Internal alert is deduplicated by its fingerprint, so the scan
   is safe to run twice (ADR-0007). The Leader exports `muster_schedule_gap{schedule}` — 1 while there is a gap now or
   within the horizon — for the chart rule of the same name, and the runbook page of `MusterScheduleGap` says how to fill
-  a gap.
+  a gap. The suggested Route for Internal alerts (C-08.FR-11) gives one Alert Group per Internal alert and entity, so
+  its Group key gains `schedule`: the gaps of two Schedules make two Alert Groups, each reaching its own Team. The
+  upgrade notes of 0.2.0 tell an installation that accepted the suggestion in 0.1 to add `schedule` to that Route's
+  Group key.
 - **C-27.FR-8** The Schedule warns that its On-call, now or in a segment of its Result in the next `schedule.gap_view`,
   is unreachable where the Destinations of their Team (C-26.FR-1) — and, from C-32 on, all the Destinations in whose
   Threads the Escalation chains that Page this Schedule write (C-32.FR-8) — cannot mention them: the person has no

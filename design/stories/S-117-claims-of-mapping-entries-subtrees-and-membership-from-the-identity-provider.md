@@ -39,6 +39,9 @@ files_touched:
   - internal/fakes/fakeoidc/fakeoidc_test.go
   - test/e2e/oidc_test.go
   - test/e2e/team_membership_test.go
+  - web/src/components/group-mapping-editor.tsx
+  - web/src/components/group-mapping-editor.test.tsx
+  - web/src/test/fixtures/teams.ts
   - docs/sign-in/oidc-gitlab.md
   - docs/sign-in/oidc-keycloak.md
   - docs/concepts/teams.md
@@ -51,6 +54,7 @@ acceptance:
   - "[C-25.FR-4, C-25.AC-3] A Team takes `idp_entries` (`{claim, group}`, the claim optional), matched as the Role mapping's; at every OIDC sign-in and every successful background re-check, with or without `oidc.sync_role`, a User joins each Team with an entry that matches them and leaves each Team they are in only through entries that no longer match; a person added by hand stays and, when an entry also matches, has both sources: against the fake OIDC server, `teams/payments/*` takes in a User with `teams/payments` and one with `teams/payments/oncall`, not one with `teams/paymentsx`; after the second User's group is removed, their next sign-in takes them out; the Audit log has `team.user_added` and `team.user_removed` by the system with the source `idp` and the entry; the Roles of all three are unchanged (`idp_test.go`, `team_membership_test.go`)."
   - "[C-25.FR-4, C-25.AC-4, C-03.FR-30] An entry naming `https://gitlab.org/claims/groups/maintainer` matches a User whose ID token carries that claim with the group, and also when only userinfo carries it; with an identity provider that grants no offline token, membership changes only at sign-in; a refused or unavailable re-check changes no membership (`idp_test.go`, `recheck_test.go`)."
   - "[C-25.FR-1, C-25.FR-11] `idp_entries` are part of `TeamInput`, saved with `If-Match` and recorded in the diff of `team.updated`; `listTeamUsers` gives a person the source `idp` with the entries that matched them; a change of a Team's entries changes nobody's membership until their next sign-in or re-check (`teams_test.go`)."
+  - "[C-03.FR-5] Until S-119 gives the Role mapping editor its claim column, the L1 editor of the OIDC settings keeps the `claim` of every entry it loads and sends it back unchanged on save, so an entry of another claim is never saved against the groups claim (`group-mapping-editor.test.tsx`)."
   - "[C-25.FR-12] The documentation of GitLab sign-in maps Roles with GitLab's role claims and subtrees as the facts of S-116 say, the Keycloak page names the claim of an entry, and Concepts → Teams has the section \"Membership from the identity provider\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
@@ -124,12 +128,20 @@ issue: 406
   a test can put them in either; discovery lists them in `claims_supported` as the facts say.
 - **AGENTS.md**: the paragraph on development mode names the GitLab mode of the fake OIDC server and the role claims it
   serves.
+- **Role mapping editor of L1** (`web/src/components/group-mapping-editor.tsx`, used by
+  `web/src/routes/admin.oidc.tsx`): `MappingRow` gains `claim`, which `mappingRows` takes from each entry and
+  `mappingsOf` sends back unchanged; the page shows no claim until S-119. Without it, saving the OIDC page between this
+  story and S-119 would re-save an entry such as `…/owner` `example/platform/infra` → Admin without its claim, against
+  the groups claim, making Admin anyone whose groups list that group.
+- **Web test fixtures** (`web/src/test/fixtures/teams.ts`, S-115): the builders of Team reads set `idp_entries` to `[]`
+  and those of `TeamUser` reads `idp_entries` to `[]`, so that `make generate` keeps the TypeScript check green.
 - **Settings**: `oidc.sync_role`, `oidc.unmatched_role`, `auth.oidc_recheck_interval`.
 - **Log events, metrics**: none new; `muster_oidc_checks_total` counts the re-checks as before.
 - **Documentation**: `docs/sign-in/oidc-gitlab.md` — "Map groups to Roles" with the role claims and subtrees;
   `docs/sign-in/oidc-keycloak.md` — the claim of an entry; `docs/concepts/teams.md` — "Membership from the identity
   provider", with the claim of each entry, subtrees, sign-in and re-checks, people added by hand and GitLab without an
-  offline token; `docs/install/versions.md` — the rolling-update note of 0.2.0 below.
+  offline token; `docs/install/versions.md` — the rolling-update note of 0.2.0 below, in the paragraph on the rolling
+  upgrade from 0.1 (S-111).
 
 ## Steps
 
@@ -142,7 +154,9 @@ issue: 406
    the highest Role; `signin_test.go`, `link_test.go`, `recheck_test.go`, `settings_test.go`.
 4. Write the Team entries and `SyncMembership`. Check: `idp_test.go` covers joining, leaving, both sources, a refused
    re-check and the Audit log; `teams_test.go` covers the entries in the API.
-5. Write the end-to-end tests and the documentation. Check: the Verification below; `make docs-check`.
+5. Carry `claim` through the L1 Role mapping editor and set the new Team fields in the fixtures. Check:
+   `group-mapping-editor.test.tsx`; `make lint`.
+6. Write the end-to-end tests and the documentation. Check: the Verification below; `make docs-check`.
 
 ## Verification
 

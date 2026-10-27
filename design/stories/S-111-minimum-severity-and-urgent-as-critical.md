@@ -17,6 +17,8 @@ files_touched:
   - internal/routing/profiles.go
   - internal/routing/query.sql
   - internal/routing/routes_test.go
+  - internal/routing/suggestions.go
+  - internal/routing/suggestions_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
   - internal/api/alertgroups.go
@@ -37,11 +39,14 @@ files_touched:
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - internal/groups/groups_integration_test.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/list_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
   - web/src/components/timeline.tsx
   - test/e2e/routing_test.go
   - test/e2e/minimum_severity_test.go
+  - test/e2e/routing_preview_test.go
   - docs/concepts/routes-and-group-keys.md
   - docs/install/versions.md
 acceptance:
@@ -50,7 +55,8 @@ acceptance:
   - "[C-26.FR-9, C-26.AC-7, C-26.AC-11, C-09.AC-8] Raising a Route's Minimum severity to critical writes one `open_group_updates` row of the kind `route_minimum_severity` in the transaction of `updateRoute`; a worker on any replica claims it with a lease and records, on each open warning Alert Group of the Route, the Quiet `urgency_raised` that removes nothing, with the `reason_code` `minimum_severity`, keeping an acknowledgement, a Snooze and its Owner; raising it to warning records the Quiet `severity_raised` with the same `reason_code` on its open info Alert Groups; lowering it records nothing and lowers their level; the open Root messages are re-rendered Quietly; a second run of the same row changes nothing (`updates_test.go`, `minimum_severity_test.go`)."
   - "[C-26.FR-10, C-26.AC-8, C-20.FR-1] Migration `0021_minimum_severity` gives every Route with `urgent` the Minimum severity critical, sets `organizations.critical_is_urgent` to true and computes the `severity_level` and `urgent` of every open Alert Group and of its pending deliveries once by the new rule, writing no Timeline entry, no delivery and no `open_group_updates` row; up, down and up again work on PostgreSQL 14 and 17 (`TestIntegrationMinimumSeverity`)."
   - "[C-26.FR-10, C-26.AC-8] After the migration a Route that was marked urgent reads `minimum_severity` `critical` and `urgent` true, and an `updateRoute` that sends `urgent: false` changes neither; `createRoute` without `urgent` is accepted, and one with `minimum_severity` `critical` stores `routes.urgent` true; `getOrganization` reads `critical_is_urgent: true` whatever `updateOrganization` sends, and an update without it is accepted; `listRouteProfiles` gives both profiles `minimum_severity` `none`."
-  - "[C-26.FR-13] The documentation page Routes and Group keys explains the Minimum severity under its own heading, says that an Urgent Alert Group is a critical one and that the urgent mark and \"critical is Urgent\" no longer act, and the upgrade notes of 0.2.0 in Requirements and tested versions say what C-26.FR-10 lists; `make docs-check` passes."
+  - "[C-26.FR-8] The suggested Route \"Muster: Heartbeat lost\" has the Minimum severity critical instead of the urgent mark, so accepting it still makes its Alert Groups critical and Urgent (`suggestions_test.go`, `routing_preview_test.go`)."
+  - "[C-26.FR-13] The documentation page Routes and Group keys explains the Minimum severity under its own heading, says that an Urgent Alert Group is a critical one and that the urgent mark and \"critical is Urgent\" no longer act, and the upgrade notes of 0.2.0 in Requirements and tested versions say what C-26.FR-10 lists and open the paragraph on the rolling upgrade from 0.1; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
 issue: 400
@@ -134,12 +140,18 @@ issue: 400
 - **Routing** (`internal/routing`): `Route`, `Input`, `Profile` and the view gain `MinimumSeverity`; `Input.Urgent` is
   ignored; a changed Minimum severity inserts the `open_group_updates` row in the update's transaction when the Route
   has open Alert Groups, and appears in the Audit log diff of `route.updated` (`/minimum_severity`, with `/urgent`
-  changing with it).
+  changing with it). The suggestion `heartbeat_lost` of `suggestions.go` sets `MinimumSeverity: critical` instead of
+  `Urgent: true`, as C-26 scenario 6 and the rule "Urgent exactly when critical" ask; `suggestions_test.go` and the
+  Go end-to-end test of the suggestions (`test/e2e/routing_preview_test.go`, which asserts `Route.Urgent`) read the
+  Minimum severity, with `urgent` still true.
 - **Organization** (`internal/organization`, `internal/api/organization.go`): reads return `critical_is_urgent: true`;
   updates ignore the field, so it never appears in the diff of `organization.updated`.
 - **Groups** (`internal/groups`): `urgentOf` becomes `level == critical`; the level of `grouping.go` and
   `transitions.go` is raised to the Route's Minimum severity (`routeInfo` gains it, the `GetRoute*` queries read it);
-  the derived urgency of the list, counts and reads (`query.sql`) becomes `g.severity_level = 'critical'`.
+  the derived urgency of the list, counts and reads (`query.sql`) becomes `g.severity_level = 'critical'`. The fakes of
+  the unit tests follow: the route rows of `dispatcher_test.go` gain `MinimumSeverity` and its emulation of the read's
+  urgency (`urgent`) becomes the stored level; `TestUrgencyFollowsConfiguration` of `list_test.go`, which asserts the L1
+  rule that an urgent Route makes its open Alert Groups Urgent, is replaced by a test of the new rule.
   `updates.go` is the worker of `open_group_updates` on every replica: woken at start, by a `NOTIFY` from the inserting
   transaction and by the development clock, it claims a row with `FOR UPDATE SKIP LOCKED` and a lease of 60 s on the
   real clock, renewed per batch, and walks the open Alert Groups of its scope by id from `after_alert_group_id` in
@@ -151,13 +163,22 @@ issue: 400
   silently, as a falling Severity level does; then the re-render step updates the Root messages Quietly. An Alert Group
   already at the computed level is skipped, so a second run of a row records nothing. The worker is not a Leader task,
   and delivery's tables need no new row.
-- **Log events** (`internal/logging/events.go`): `open_group_update_done` (INFO; `kind`, `route`, `alert_groups` — how
-  many changed) and `open_group_update_failed` (WARN; `kind`, `route`, `error`), both C-26. No metric.
+- **Log events** (`internal/logging/events.go`): `open_group_update_done` (INFO; `kind`, `route`, `destination`,
+  `team`, `alert_groups` — how many changed) and `open_group_update_failed` (WARN; `kind`, `route`, `destination`,
+  `team`, `error`), both C-26. A row names the scope its kind has — `route` here and for S-125, `destination` for the
+  button set of a Destination (S-113), `team` for S-163's and S-170's kinds, none for the Organization's button set —
+  and logs only that field, so the later
+  kinds need no change of `events.go`, whose strict logger refuses an undeclared field in tests. No metric.
 - **Settings**: `route.minimum_severity`, `route.urgent`, `organization.critical_is_urgent` and
   `route.urgent_rise_removes_ack`, whose meaning does not change.
 - **Documentation**: `docs/concepts/routes-and-group-keys.md` replaces "### Urgent" with "### Minimum severity" and
   "### Urgent" (both anchors exist afterwards, so `field.urgent` of `docs-links.json` keeps working until S-112 points
-  it elsewhere); `docs/install/versions.md` gains the entry 0.2.0 of its upgrade notes for C-26.FR-10.
+  it elsewhere); `docs/install/versions.md` gains the entry 0.2.0 of its upgrade notes for C-26.FR-10, with its
+  paragraph "Rolling upgrade from 0.1": every migration of 0.2.0 applies when the first 0.2.0 replica starts, while
+  0.1 replicas still run until the rollout ends; a 0.1 replica ignores the Minimum severity — it stores a lower Severity
+  level on the Alert Groups it changes, while `urgent` agrees, since 0.2.0 writes `routes.urgent` — and the stories that
+  add more of what 0.1 replicas ignore add one sentence each (S-115, S-117, S-121, S-140). The window lasts as long as
+  the rollout, and nothing of it remains afterwards.
 
 ## Steps
 

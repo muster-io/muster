@@ -89,8 +89,12 @@ issue: 454
   posted for them (ADR-0005, journal D567).
 - **Groups** (`internal/groups/read.go`): the Timeline merges `mention_not_delivered` with its `mention` fields, and
   leaves `mention_delivered` out.
-- **Destinations** (`internal/destinations/warnings.go`): `mention_warnings`, the latest event per person and entry of
-  the Destination's delivery events still kept, those whose latest is `mention_not_delivered`.
+- **Destinations** (`internal/destinations/warnings.go`, `query.sql`): `mention_warnings`, the latest event per person
+  and entry of the Destination's delivery events still kept, those whose latest is `mention_not_delivered`. The field is
+  required on every Destination read, so `listDestinations` computes it in one query for the whole page — the
+  Destinations of the page as an array parameter, the latest event per Destination, person and entry over the
+  partitioned `delivery_events` — and never once per item; `warnings_test.go` covers a page of several Destinations
+  (plan review, L9).
 - **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): `mention_warnings` empty in the builders of
   Destination reads.
 - **Exhaustive switches of the SPA** (S-166's rule): the `delivery_event` switch of `web/src/components/timeline.tsx`

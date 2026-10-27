@@ -28,6 +28,7 @@ files_touched:
   - web/src/routes/teams.index.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/escalation-chains.spec.ts
@@ -75,12 +76,16 @@ issue: 447
 - **Components**: `escalation-chain-form.tsx` — name, description, owning Team, the Destinations it writes in, the start
   and stop texts, the Team's "Run for", whose Alert Groups it runs on, the warnings; `escalation-steps-editor.tsx` — the
   numbered steps, "Add step" with the seven kinds and their fields, the chips of limits ("only in the working hours of
-  {Team} ({hours})", or "of the Organization" for a chain without an owning Team), the call step through
+  {Team} ({hours})", or "of the Organization" for a chain without an owning Team), "Wait" in whole minutes, which
+  the form sends as `wait_seconds` (minutes × 60, S-154) and reads back in minutes, the call step through
   `gateway-unavailable.tsx` of S-150; `lib/escalation-steps.ts` — a step and its limits in words;
   `escalation-chain-runs.tsx` — "How it went"; `route-chains.tsx` — the chains of the Route form with their conditions,
   the hint and the warning; `team-chains.tsx` — the Team page's section; `route-list.tsx` — the chains column;
   `audit-diff.tsx` — the entries `escalation_chain.*` and `chain_entries`.
-- **Documentation links** (`docs-links.json`): `title.escalation_chain` → `concepts/escalation-chains.md`,
+- **Documentation links** (`docs-links.json`): `page.escalation_chain` → `concepts/escalation-chains.md`, the Guide
+  link beside the chain page's title, which `PageTitle` takes, with its entry `docs.guides.escalationChain` ("Escalation
+  chains" / «Цепочки эскалации») in `GUIDE_ABOUT` of `web/src/components/docs-link.tsx` (`satisfies
+  Record<PageDocsKey, …>`), so that the TypeScript check passes;
   `field.route_chains` → `concepts/escalation-chains.md#naming-chains-on-routes-and-teams`, `field.chain_steps` →
   `concepts/escalation-chains.md#steps`; the sections exist from S-154.
 - **Texts** (EN / RU), from C-32's UI and the approved Escalation mockup: "Escalation chain of the Team" / «Цепочка

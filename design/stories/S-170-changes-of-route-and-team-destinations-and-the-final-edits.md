@@ -9,21 +9,31 @@ covers: [C-26.FR-6, C-26.FR-13, C-26.AC-6, C-26.AC-10, C-25.FR-10, C-11.FR-14]
 files_touched:
   - internal/routing/routes.go
   - internal/routing/routes_test.go
+  - internal/routing/query.sql
   - internal/delivery/membership.go
   - internal/delivery/membership_test.go
   - internal/delivery/query.sql
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/delivery/lockorder_integration_test.go
+  - internal/delivery/worker.go
+  - internal/db/checks.go
   - internal/teams/destinations.go
   - internal/teams/teams.go
+  - internal/teams/query.sql
   - internal/teams/teams_test.go
   - internal/groups/updates.go
   - internal/groups/updates_test.go
+  - internal/groups/dispatcher.go
   - internal/groups/query.sql
+  - internal/runtime/runtime.go
   - test/e2e/routing_changes_test.go
   - docs/concepts/routing-to-teams.md
 acceptance:
   - "[C-26.FR-6, C-26.AC-6, C-11.FR-14] Changing a Route Destination's condition from `critical` to `any` publishes the Route's open warning Alert Groups there Quietly, within its limiters, and records no `destination_joined`; changing it back removes none; a Destination added to a Route with the condition `critical` receives only its open critical Alert Groups, Quietly; turning `deliver_to_teams` on publishes the Route's open Alert Groups Quietly in the Destinations of their Teams whose condition they meet (`membership_test.go`, `routing_changes_test.go`)."
   - "[C-26.FR-6, C-11.FR-14] Saving a Team whose Destination entries were added, removed or changed writes, in the save's transaction, one `open_group_updates` row of the kind `team_destinations` (the kind of S-121's migration); a worker on any replica claims it with a lease and runs the dispatcher's re-render, without a lifecycle event, for each open Alert Group that has the Team, which publishes it Quietly in the Destinations it now reaches; a second run of the row changes nothing (`updates_test.go`)."
   - "[C-26.FR-6, C-26.AC-10, C-11.FR-14] A Destination taken off a Route or a Team, or reached no longer because `deliver_to_teams` was turned off, gets the final edit \"No longer updated here\" for each open Alert Group for which no entry that still exists names that Destination — an entry of its Route or, while `deliver_to_teams` is on, of one of its Teams — whether or not that entry's condition is met now; the candidates are the deliveries whose `entries` hold the entry taken away; a Destination named by the Route for `critical` and by a Team for `below_critical`, whose Team entry is removed while the Alert Group is warning, keeps its Root message, current until its final state (`membership_test.go`, `updates_test.go`)."
+  - "[C-26.FR-6, C-11.FR-14] A change of a Team's Destination entries and an Enqueue of an Alert Group that has the Team serialize on the Team's membership lock: a save that adds a Destination to the Team and commits while an Alert of the Team is being grouped leaves the Destination neither out of that Enqueue nor out of the run of its `team_destinations` row, and the lock order of `worker.go` admits no deadlock (`enqueue_test.go`, `lockorder_integration_test.go`)."
   - "[C-25.FR-10] Deleting a Team takes its Destination entries away in the transaction of `deleteTeam` and writes the same `team_destinations` row, so the Destinations of the deleted Team get the final edit for each open Alert Group that had the Team, wherever no other entry still names them (`teams_test.go`, `updates_test.go`)."
   - "[C-26.FR-13] Routing to Teams has the section \"When you change a Route or a Team\": a new Destination, condition or Team adds Root messages Quietly and removes none by a condition, and a Destination taken away gets the final edit; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -59,22 +69,56 @@ issue: 459
   `0027`, which this story's handler uses; `deliveries.entries` (S-121) names the entries that reached each delivery.
 - **Routing** (`internal/routing/routes.go`): `updateRoute` calls the membership hook of delivery, in its transaction,
   with the entries before and after the save and `deliver_to_teams` before and after, instead of the Destinations added
-  and removed only; an unchanged save calls nothing.
+  and removed only; an unchanged save calls nothing. The hook's type `routing.Membership` changes with it, and
+  `internal/runtime/runtime.go`, which wires `routes.SetMembership` to `delivery.RouteDestinationsChanged`, follows.
 - **Delivery** (`internal/delivery/membership.go`, `query.sql`): `RouteDestinationsChanged` takes the Route's
   membership lock as before and, for its open Alert Groups, publishes Quietly in each Destination that their reach
   (S-121's rule) gains, appending the entry to `entries`, and gives the final edit of C-11.FR-14 to each delivery that
   lost an entry when no entry that still exists names its Destination for the Alert Group — an entry of its Route or,
   while `deliver_to_teams` is on, of one of its Teams — met or not; otherwise the delivery stays and is kept current
-  until its final state (C-26.FR-4). A condition that is no longer met removes nothing. The lock order is that of
-  `worker.go`, as for the L1 hook.
+  until its final state (C-26.FR-4). A condition that is no longer met removes nothing. After the Route's exclusive
+  lock it takes, shared and by Team id, the membership lock of each Team whose entries it reads, so that a Team save
+  never commits between its read and its deliveries. The lock order is that of `worker.go`, as for the L1 hook.
+- **Team membership lock** (`internal/db/checks.go`, `internal/teams/query.sql`, `internal/delivery/query.sql`,
+  `internal/groups/query.sql`, `internal/routing/query.sql`): a new class `db.TeamMembershipLockClass` =
+  `0x6d75_0008` — the classes `0x6d75_0001` to `0x6d75_0007` are taken (`internal/auth`, `internal/db`,
+  `internal/delivery`'s `postCopyLockClass` and `buttonKeyLockClass`, `internal/connections`' `bridgeEventLockClass`) —
+  second key `hashint8` of the Team's id, as `RouteMembershipLockClass` is for a Route (plan review, M3). Who takes it:
+  - shared, for each Team of the Alert Group in the order of their ids: the dispatcher before it reads the reach,
+    after the Route's lock that S-121 takes there, and `Enqueue` after the Route's lock; the membership hook of a Route
+    after the Route's exclusive lock, for the Teams whose entries it reads;
+  - exclusively: a Team save that changes its Destination entries, after its own row and before it writes
+    `team_destinations`; `deleteTeam`, last — it first updates the Destinations the Team owns, then the Routes it owns
+    (S-115; a Team that owns a chain is refused, S-154), and only then takes the lock and deletes its
+    `team_destinations`. Taking the lock before those rows would close a cycle: grouping holds a Route's row FOR SHARE
+    and then waits for the Team's lock shared, and a Route save holds its row and the Route's membership lock and then
+    waits for it too, while `deleteTeam` would hold the lock and wait for that Route's row. The Destinations come before
+    the Routes because the deletion of a Destination locks its row before the Routes that name it;
+  - exclusively, by the deletion of a Destination (`DestinationDeleted`, `internal/routing/routes.go` and a query of
+    `internal/routing/query.sql`): after the Routes' membership locks, in id order, the lock of each Team whose
+    `team_destinations` name the Destination, whose rows it then deletes, as the Destination's `route_destinations`
+    are, so that no Enqueue reads such an entry and delivers to the deleted Destination while the deletion commits.
+  So an Enqueue that reads a Team's entries and a change of them serialize, as L1's lock does for a Route. The order of
+  `worker.go` gains it after the Route's membership lock: the Alert Groups, the Route's membership lock, the Teams'
+  membership locks by id, the active Storm, the deliveries. S-121 writes the dispatcher's Route lock into the lock-order
+  comment of `worker.go` (`:40`), and this story adds the Teams' locks to it; `lockorder_integration_test.go` covers a
+  Team save against grouping, `deleteTeam` of a Team that owns a Route against grouping on that Route and against a
+  save of it, and a Destination's deletion against an Enqueue that reaches it through a Team.
 - **Teams** (`internal/teams/destinations.go`, `teams.go`): a save that adds, removes or changes an entry writes the
-  `team_destinations` row with the Team in its transaction; `deleteTeam` deletes the Team's entries in its transaction
-  and writes the same row, which keeps the Team's id, since the soft-deleted Team stays.
-- **Groups** (`internal/groups/updates.go`, `query.sql`): the handler of `team_destinations` walks the open Alert Groups
-  that have the Team (`alert_group_teams`) by id from the row's cursor in batches of 50; for each, one dispatcher
-  transaction runs the re-render step without a lifecycle event — so `Enqueue` publishes Quietly where the reach grew —
-  and then asks delivery for the final edits of the Destinations the Team's entries no longer name, by the rule above.
-  A second run finds every delivery in place and changes nothing.
+  `team_destinations` row with the Team in its transaction; `deleteTeam` deletes the Team's entries in its transaction,
+  after nulling its owned Destinations and Routes and taking the lock as above, and writes the same row, which keeps the
+  Team's id, since the soft-deleted Team stays.
+- **Groups** (`internal/groups/updates.go`, `dispatcher.go`, `query.sql`): the handler of `team_destinations` walks the
+  open Alert Groups that have the Team (`alert_group_teams`) by id from the row's cursor in batches of 50; for each,
+  one dispatcher transaction runs the re-render step without a lifecycle event — so `Enqueue` publishes Quietly where
+  the reach grew — and then asks delivery for the final edits of the Destinations the Team's entries no longer name, by
+  the rule above. `groups` cannot import `delivery`, so it asks through a new interface it declares, `FinalEdits`
+  (`FinalEditsFor(ctx, tx, group, team)`), set with `SetFinalEdits` in `updates.go`, which delivery implements in
+  `membership.go` and `internal/runtime/runtime.go` wires, as it wires `SetRerender`. A second run finds every
+  delivery in place and changes nothing. `dispatcher.go` takes the Teams' membership locks where S-121 takes the
+  Route's.
+- **Delivery** (`internal/delivery/enqueue.go`): `Enqueue` takes the Teams' membership locks shared after the Route's
+  and before it reads the Teams' entries.
 - **Settings**: `route.deliver_to_teams`, the Severity condition of a Route's or a Team's Destination.
 - **Log events, metrics**: none new; `open_group_update_done` names the kind.
 - **Documentation**: `docs/concepts/routing-to-teams.md` — "When you change a Route or a Team".
@@ -84,8 +128,10 @@ issue: 459
 1. Pass the entries and the option to the membership hook, and publish and give final edits by the rule. Check:
    `routes_test.go`; `membership_test.go` covers a condition widened and narrowed, a Destination added with `critical`,
    the option on and off, a Destination named twice, and a remaining entry that is not met.
-2. Write the Team's row and its handler, deletion included. Check: `teams_test.go`; `updates_test.go` covers an entry
-   added, removed and changed, a deleted Team, two workers and a second run.
+2. Write the Team's membership lock, the Team's row and its handler with the hook of the final edits, deletion
+   included, and wire it. Check: `teams_test.go`; `updates_test.go` covers an entry added, removed and changed, a
+   deleted Team, two workers and a second run; `enqueue_test.go` and `lockorder_integration_test.go` cover a Team save
+   that commits while an Alert of the Team is grouped; `go vet ./...` finds no import cycle.
 3. Write `test/e2e/routing_changes_test.go` and the section of the page. Check: the Verification below;
    `make docs-check`.
 
@@ -147,6 +193,9 @@ None.
   configuration publishes Quietly without it and starts no Escalation chain.
 - A Destination is taken away only by its last entry: a Root message whose remaining entry is not met now stays and is
   kept current (C-26.FR-4).
+- The plan review added the Team's membership lock (M3) and the files that wire the changed hooks (M5): without the
+  lock, an Enqueue reading a Team's entries and a save of them could each miss the Destination the other adds, which
+  L1's lock prevents for Routes.
 
 ## Coverage
 

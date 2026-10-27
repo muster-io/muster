@@ -62,20 +62,19 @@ issue: 448
 - **API used**: `getAlertGroup` (`escalation_chains`, `assignees`, `owner_teams`), `listAlertGroups` (`assignee`),
   `getAlertGroupTimeline` (`kind=escalation`), `acknowledgeAlertGroup`, `snoozeAlertGroup`, `getMe`.
 - **Components**: `alert-group-chains.tsx` — the running chains of the page, linked to their chain pages;
-  `alert-group-header.tsx` — the Assignees or the Owner with their Teams; `timeline.tsx` — the kind "Escalation chains"
-  and its entries, the Transport `gateway`; `alert-group-table.tsx` and `alert-group-filters.tsx` — the column and the
-  filter, with `lib/alert-group-search.ts` keeping `assignee` in the URL; `i-am-an-assignee.tsx` — the section of the
-  Home page, with the command buttons of S-033; `web/src/test/fixtures/alert-groups.ts` — builders with chains and
-  Assignees for the tests.
+  `alert-group-header.tsx` — the Assignees or the Owner with their Teams; `timeline.tsx` — the entries of the kind
+  "Escalation chains", whose filter label S-148 added, the Transport `gateway`; `alert-group-table.tsx` and
+  `alert-group-filters.tsx` — the column and the filter, with `lib/alert-group-search.ts` keeping `assignee` in the URL;
+  `i-am-an-assignee.tsx` — the section of the Home page, with the command buttons of S-033;
+  `web/src/test/fixtures/alert-groups.ts` — builders with chains and Assignees for the tests.
 - **Documentation links** (`docs-links.json`): `field.alert_group_chains` → `concepts/escalation-chains.md#assignees`;
   the section exists from S-168.
 - **Texts** (EN / RU), from C-32's UI and the approved Home and Lifecycle mockups: "I am an Assignee" / «Назначено мне»,
-  "Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged." / «Группы,
-  куда вас позвала цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Назначенные», "Chain" /
-  «Цепочка», "step {{n}}" / «шаг {{n}}», "next step at {{time}}" / «следующий шаг в {{time}}», "ran out" /
-  «закончилась», "stopped" / «остановлена», "Escalation chains" / «Цепочки эскалации» (the Timeline kind `escalation`),
-  "Paged" / «Позвала», "Page not delivered" / «Призыв не доставлен», "skipped" / «пропущен», "Escalation chains stopped"
-  / «Цепочки остановлены», "me" / «я».
+  "Alert Groups that an Escalation chain Paged you about. They leave this list once acknowledged." / «Группы, куда вас
+  позвала цепочка. После подтверждения они уходят отсюда.», "Assignees" / «Назначенные», "Chain" / «Цепочка», "step
+  {{n}}" / «шаг {{n}}», "next step at {{time}}" / «следующий шаг в {{time}}», "ran out" / «закончилась», "stopped" /
+  «остановлена», "Paged" / «Позвала», "Page not delivered" / «Призыв не доставлен», "skipped" / «пропущен», "Escalation
+  chains stopped" / «Цепочки остановлены», "me" / «я».
 
 ## Steps
 

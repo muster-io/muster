@@ -594,7 +594,7 @@ show the links.
 | [S-136](S-136-schedules-on-the-team-page-on-call-now-and-the-ical-section.md) | C-27 | Schedules on the Team page, On call now on the Home page, the Team page and the Teams list, and the iCal section (FE) | fe | S-134, S-135 |
 | [S-137](S-137-documentation-schedules.md) | C-27 | Documentation: Schedules with Rotation layers, several Schedules, Overrides, gaps and the iCal feed | docs | S-136 |
 | [S-138](S-138-spike-mattermost-groups-and-slack-user-groups.md) | C-25 | Spike: Mattermost groups and Slack user groups — reading them, mentioning them, and everyone from a bot | docs | — |
-| [S-139](S-139-team-mentions-with-the-connections-checks-and-connection-groups.md) | C-25 | Team mentions per Connection, with the groups a Connection reads and the group mentions a bridge declares (BE) | be | S-115, S-119, S-126, S-138 |
+| [S-139](S-139-team-mentions-with-the-connections-checks-and-connection-groups.md) | C-25 | Team mentions per Connection, with the groups a Connection reads and the group mentions a bridge declares (BE) | be | S-115, S-126, S-138 |
 | [S-140](S-140-mention-entries-their-resolution-the-migration-of-the-l1-settings-and-storm-started.md) | C-28 | Mention entries with their Loud events and their resolution, the migration of the L1 Mention settings, and storm_started (BE) | be | S-121, S-131, S-139 |
 | [S-171](S-171-group-and-everyone-mentions-in-slack-and-through-bridges.md) | C-28 | Group mentions and mentions of everyone in Slack and through bridges, with the kind of a Mention in the Bridge protocol (BE) | be | S-140 |
 | [S-165](S-165-undelivered-mentions-in-the-timeline-and-the-destination-warnings.md) | C-28 | Undelivered Mentions in the Timeline and the warnings of a Destination (BE) | be | S-140 |
@@ -608,7 +608,7 @@ show the links.
 | ID | Capability | Title | Kind | Depends on |
 |---|---|---|---|---|
 | [S-145](S-145-the-role-gateway-in-the-bridge-protocol-the-check-and-the-fake-gateway.md) | C-30 | The role gateway in the Bridge protocol, sendNotification and notification_acknowledged, the check of the role and the fake gateway (BE) | be | S-166 |
-| [S-167](S-167-contacts-at-notification-gateways-confirmed-by-a-code.md) | C-30 | Contacts at Notification gateways confirmed by a code, erased with their User and masked in the Request log (BE) | be | S-145, S-164 |
+| [S-167](S-167-contacts-at-notification-gateways-confirmed-by-a-code.md) | C-30 | Contacts at Notification gateways confirmed by a code, erased with their User and masked in the Request log (BE) | be | S-145 |
 | [S-146](S-146-go-bridge-library-the-role-gateway.md) | C-30 | The role gateway in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-145, S-141 |
 | [S-147](S-147-python-bridge-library-the-role-gateway.md) | C-30 | The role gateway in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-145, S-142 |
 | [S-148](S-148-the-queue-of-calls-through-notification-gateways-with-combining-and-retries.md) | C-30 | The queue of calls through Notification gateways with combining and retries (BE) | be | S-167 |
@@ -671,6 +671,14 @@ the SPA joined S-148, which would then have touched about 47 files: S-148 keeps 
 Acknowledge of the Transport `gateway` with its answers; it follows S-148, and S-151 and S-157 depend on it. The spike
 on the push of Mentions, S-160, depends on nothing and may run at any time; only the documentation of S-161 waits for
 it.
+
+The plan review of the L2 core against the code removed two edges that tied much of the plan to the maintainer's spikes:
+with them, the spike S-116 held up 33 stories and S-132 23; without them, 18 and 15. S-139 no longer depends on S-119:
+the builder of Team reads in the web tests (`web/src/test/fixtures/teams.ts`), for which alone it waited, is created by
+S-115 with the Team read, and S-117, S-118 and S-121 extend it. S-167 no longer depends on S-164: `gateway_reaches` on
+the warnings about unreachable On-calls, for which alone it waited, moved with its Go code to S-150, which shows it and
+already follows both S-164 (through S-136) and S-167 (through S-149); S-155 still follows S-164, and S-139 still waits
+for the spike S-138.
 
 The backend stories of a stage follow the dependencies between capabilities in the
 [capability map](../prd/L1.md#13-capability-map): snapshot processing before routing, routing before the Alert Group

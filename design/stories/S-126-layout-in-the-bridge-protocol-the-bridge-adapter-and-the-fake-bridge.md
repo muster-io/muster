@@ -83,7 +83,13 @@ issue: 415
 
 ## Steps
 
-1. Add `Layout` to `api/bridge.yaml`. Check: `make generate-check` (the models of `internal/bridge/gen/`); `make lint`.
+1. Add `Layout` to `api/bridge.yaml`. Check: `make generate-check` (the models of `internal/bridge/gen/`); `make lint`;
+   the two comparisons of the CI step "oasdiff breaking, api/bridge.yaml" (`.github/workflows/ci.yml`) run locally —
+   `oasdiff breaking --fail-on ERR --flatten-allof` of `origin/master:api/bridge.yaml` against the new file, and the
+   reverse with the step's `--severity-levels` — report no ERR: run on a draft of this change with oasdiff v1.33.0 in
+   the plan review, the reverse direction reports `request-property-removed` for `layout` on `POST /v1/messages` and
+   `PATCH /v1/messages/{message_id}` as WARN only, which the step lets pass. A bridge ignores request fields it does
+   not know (`api/bridge.yaml`, "Version"), so the warning is no breakage.
 2. Write `LayoutOf` and fill `layout` in the adapter, with the references and the cut. Check: `layout_test.go`,
    `envelope_test.go`, `delivery_test.go`, `testmsg_test.go`.
 3. Send it in the check and record it in the fake bridge. Check: `conformance_test.go`, `fakebridge_test.go`.
