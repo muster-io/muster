@@ -153,7 +153,8 @@ func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, ro
 		}
 	}
 	for _, d := range dests {
-		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
+		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID),
+			Buttons: buttonSetOf(d.Buttons, d.OrganizationButtons)}
 		for i, g := range open {
 			view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
 				Status: groups.Status(g.Status), Urgent: g.Urgent}

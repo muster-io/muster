@@ -131,7 +131,8 @@ func (s *Service) rerenderGroup(ctx context.Context, id int64, activeKeyID strin
 		now := s.clock.Now().UTC()
 		for _, r := range rows {
 			d := Destination{ID: r.DestinationID, PublicID: r.DestinationPublicID, Name: r.DestinationName,
-				Type: r.DestinationType, Connection: int8Of(r.ConnectionID)}
+				Type: r.DestinationType, Connection: int8Of(r.ConnectionID),
+				Buttons: buttonSetOf(r.Buttons, r.OrganizationButtons)}
 			msg, err := s.desiredOf(ctx, tx, d, roots)
 			if err != nil {
 				return fmt.Errorf("render alert group #%d in %s: %w", g.Number, d.PublicID, err)

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
@@ -85,13 +86,15 @@ const (
 )
 
 // Destination is a Destination as delivery calls it: Connection is the internal id of its Connection, nil for an
-// outgoing webhook.
+// outgoing webhook. Buttons is its effective button set — its own, else the Organization's — which its Root messages
+// show (C-28.FR-8); nil shows every button.
 type Destination struct {
 	ID         int64
 	PublicID   string
 	Name       string
 	Type       string
 	Connection *int64
+	Buttons    *buttons.Set
 }
 
 // OutcomeKind classifies what an adapter call ended with (C-11.FR-8).

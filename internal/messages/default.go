@@ -397,10 +397,12 @@ func (r *Renderer) TestExample(ctx context.Context) (*Source, error) {
 }
 
 // TestRoot renders the Root message of src in markup as a Destination test sends it, without recording anything about
-// its Route's templates: with destination, the public_id of the Destination under test, its buttons carry action ids of
-// the subject test that name that Destination, whose presses change nothing; with an empty one they are unsigned.
+// its Route's templates: with the buttons of the Destination's set, src.Buttons (C-16.FR-4, C-28.FR-9); with
+// destination, the public_id of the Destination under test, its buttons carry action ids of the subject test that name
+// that Destination, whose presses change nothing; with an empty one they are unsigned.
 func (r *Renderer) TestRoot(src *Source, markup Markup, destination string) Rendered {
 	out := r.root(src, markup, false)
+	out.Message = ShownButtons(out.Message, src.Buttons, src.Route.SnoozeDurations)
 	if destination == "" || r.keys == nil {
 		return out
 	}

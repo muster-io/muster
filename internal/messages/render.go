@@ -136,7 +136,9 @@ const ReadAlerts = 1000
 
 // Source is an Alert Group as its messages show it, read through the transaction of the change, with the
 // Organization's time zone, start of the working day (organization.workday_start, HH:MM) and first day of the week
-// (organization.week_start, monday to sunday), which the labels of the Snooze presets name (C-10.FR-18).
+// (organization.week_start, monday to sunday), which the labels of the Snooze presets name (C-10.FR-18). Buttons is the
+// button set of the Destination a test message or a preview is for, which TestRoot applies (C-16.FR-4); nil shows
+// every button. Delivery applies each Destination's set to the Root messages it stores (ShownButtons).
 type Source struct {
 	ID                int64
 	PublicID          string
@@ -171,6 +173,7 @@ type Source struct {
 	// where their Account link lets the messenger mention them.
 	Links       []links.Link
 	FooterUsers map[string]mentions.User
+	Buttons     *buttons.Set
 }
 
 // RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — and the
@@ -353,6 +356,23 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 		out.Rendered = append(out.Rendered, TemplateLine)
 	}
 	out.Message = m
+	return out
+}
+
+// ShownButtons is the Root message m with only the buttons that set shows on a Route with the Snooze durations given,
+// in seconds, in their order (C-28.FR-8): Unsnooze always; a Thread reply, a Storm summary and a nil set keep every
+// button, and so does a set of every button, which leaves m as it is.
+func ShownButtons(m Message, set *buttons.Set, durations []int64) Message {
+	if set == nil || set.All || m.Kind != KindRoot {
+		return m
+	}
+	out := m
+	out.Buttons = slices.DeleteFunc(slices.Clone(m.Buttons), func(b Button) bool {
+		return !set.Shows(buttons.Button{Command: b.Command, Argument: b.Argument}, durations)
+	})
+	if out.Buttons == nil {
+		out.Buttons = []Button{}
+	}
 	return out
 }
 

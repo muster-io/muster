@@ -75,7 +75,8 @@ func (f *fakeDB) LockRerenderDeliveries(_ context.Context, arg dbgen.LockRerende
 		ds := f.dests[d.dest]
 		out = append(out, dbgen.LockRerenderDeliveriesRow{ID: d.id, DesiredHash: d.hash,
 			DesiredButtonKeyID: txt(&d.buttonKeyID), DestinationID: ds.id, DestinationPublicID: ds.publicID,
-			DestinationName: ds.name, DestinationType: ds.typ, ConnectionID: nullInt(ds.connection)})
+			DestinationName: ds.name, DestinationType: ds.typ, ConnectionID: nullInt(ds.connection),
+			Buttons: ds.buttons, OrganizationButtons: f.orgButtons})
 	}
 	slices.SortFunc(out, func(a, b dbgen.LockRerenderDeliveriesRow) int {
 		return int(a.DestinationID - b.DestinationID)

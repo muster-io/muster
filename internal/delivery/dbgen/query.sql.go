@@ -2694,9 +2694,11 @@ const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 
 SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
-       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE rd.org_id = $1 AND rd.route_id = $2 AND d.deleted_at IS NULL
 ORDER BY d.id
 `
@@ -2707,14 +2709,16 @@ type ListRouteDestinationsParams struct {
 }
 
 type ListRouteDestinationsRow struct {
-	ID             int64
-	PublicID       string
-	Name           string
-	Type           string
-	ConnectionID   pgtype.Int8
-	Health         string
-	WebhookMode    pgtype.Text
-	WebhookReplies bool
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	ConnectionID        pgtype.Int8
+	Health              string
+	WebhookMode         pgtype.Text
+	WebhookReplies      bool
+	Buttons             []byte
+	OrganizationButtons []byte
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -2726,7 +2730,8 @@ type ListRouteDestinationsRow struct {
 // lock order of the delivery worker (worker.go): an explicit lock on a row of deliveries, storms or destinations is FOR
 // NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
 // ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
-// outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
+// outgoing webhook and whether it has a "reply in thread" request, and their button set with the Organization's, which
+// a Destination without its own follows, in id order, for Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listRouteDestinations, arg.OrgID, arg.RouteID)
 	if err != nil {
@@ -2745,6 +2750,8 @@ func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestin
 			&i.Health,
 			&i.WebhookMode,
 			&i.WebhookReplies,
+			&i.Buttons,
+			&i.OrganizationButtons,
 		); err != nil {
 			return nil, err
 		}
@@ -3022,9 +3029,11 @@ func (q *Queries) LockReplyDelivery(ctx context.Context, arg LockReplyDeliveryPa
 
 const lockRerenderDeliveries = `-- name: LockRerenderDeliveries :many
 SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
-       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id
+       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id, ds.buttons,
+       o.buttons AS organization_buttons
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE d.org_id = $1 AND d.alert_group_id = $2::bigint
   AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> $3::text AND NOT d.desired_retire
   AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))
@@ -3047,10 +3056,12 @@ type LockRerenderDeliveriesRow struct {
 	DestinationName     string
 	DestinationType     string
 	ConnectionID        pgtype.Int8
+	Buttons             []byte
+	OrganizationButtons []byte
 }
 
 // LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
-// the order Enqueue locks them (by Destination), with their Destination.
+// the order Enqueue locks them (by Destination), with their Destination and its button set with the Organization's.
 func (q *Queries) LockRerenderDeliveries(ctx context.Context, arg LockRerenderDeliveriesParams) ([]LockRerenderDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, lockRerenderDeliveries, arg.OrgID, arg.AlertGroupID, arg.ActiveKeyID)
 	if err != nil {
@@ -3069,6 +3080,8 @@ func (q *Queries) LockRerenderDeliveries(ctx context.Context, arg LockRerenderDe
 			&i.DestinationName,
 			&i.DestinationType,
 			&i.ConnectionID,
+			&i.Buttons,
+			&i.OrganizationButtons,
 		); err != nil {
 			return nil, err
 		}

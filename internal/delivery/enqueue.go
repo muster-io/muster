@@ -287,7 +287,8 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		how.heldBy = &st.id
 	}
 	for _, d := range dests {
-		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID)}
+		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID),
+			Buttons: buttonSetOf(d.Buttons, d.OrganizationButtons)}
 		h := how
 		if sendsRequests(d.Type) && !d.WebhookReplies {
 			h.replies = nil // an outgoing webhook without a "reply in thread" request has no Thread

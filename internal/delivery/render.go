@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/messages"
@@ -56,13 +57,15 @@ type ReplyView struct {
 // Roots are the Root messages of one Alert Group, one per markup of its Destinations, as one render produced them:
 // the Route templates that failed, whose messages are the Fallback template, and what to run once the transaction
 // committed. Data is the Alert Group as the request templates of outgoing webhooks read it, with alert data as
-// received, and Language the language of its Route.
+// received, Language the language of its Route and SnoozeSeconds its Route's Snooze durations, which the button set of
+// each Destination names (C-28.FR-8).
 type Roots struct {
-	Messages map[messages.Markup]messages.Rendered
-	Failures []messages.Failure
-	After    func(ctx context.Context)
-	Data     *templates.Data
-	Language string
+	Messages      map[messages.Markup]messages.Rendered
+	Failures      []messages.Failure
+	After         func(ctx context.Context)
+	Data          *templates.Data
+	Language      string
+	SnoozeSeconds []int64
 }
 
 // Renderer renders what delivery stores and sends (C-12), declared here by its consumer: Root messages, read through
@@ -107,7 +110,7 @@ func (r MessageRenderer) Roots(ctx context.Context, db messages.DBTX, g GroupVie
 		return Roots{}, err
 	}
 	data := r.Data(src)
-	out.Data, out.Language = &data, src.Route.Language
+	out.Data, out.Language, out.SnoozeSeconds = &data, src.Route.Language, src.Route.SnoozeDurations
 	return out, nil
 }
 
@@ -219,12 +222,41 @@ func (s *Service) encodeRequest(ctx context.Context, db dbgen.DBTX, destinationI
 }
 
 // desiredOf is the Desired state of an Alert Group rendered as roots in the Destination d, through db: its Root
-// message in the markup of d, or for an outgoing webhook its request state.
+// message in the markup of d with only the buttons of d's button set, or for an outgoing webhook its request state.
+// The buttons the set does not show are dropped before the hash, so that a set that changes nothing changes no hash.
 func (s *Service) desiredOf(ctx context.Context, db dbgen.DBTX, d Destination, roots Roots) (encoded, error) {
 	if !sendsRequests(d.Type) {
-		return encodeRoot(roots.Messages[markupOf(d.Type)]), nil
+		return encodeShown(roots.Messages[markupOf(d.Type)], d.Buttons, roots.SnoozeSeconds), nil
 	}
 	return s.encodeRequest(ctx, db, d.ID, RequestState{Language: roots.Language, Group: roots.Data})
+}
+
+// encodeShown is the Root message rd with only the buttons that set shows on a Route with the Snooze durations given
+// (C-28.FR-8), with the key that signed the buttons it keeps; a set of every button, or nil, keeps rd as it is.
+func encodeShown(rd messages.Rendered, set *buttons.Set, durations []int64) encoded {
+	if set == nil || set.All {
+		return encodeRoot(rd)
+	}
+	m := messages.ShownButtons(rd.Message, set, durations)
+	e := encode(m)
+	e.keyID = buttonKeyOf(m)
+	return e
+}
+
+// buttonSetOf is the button set of a Destination from what destinations.buttons and organizations.buttons store: its
+// own, else the Organization's (C-28.FR-8); nil, every button, when neither is a set, as for a row of an outgoing
+// webhook or a row read without them.
+func buttonSetOf(own, organization []byte) *buttons.Set {
+	o, err := buttons.ParseOwn(own)
+	if err != nil {
+		return nil
+	}
+	org, err := buttons.ParseSet(organization)
+	if err != nil {
+		return nil
+	}
+	set := o.Effective(org)
+	return &set
 }
 
 // summaryOf is the Desired state of a Storm summary in the Destination destinationID of the type given, through db:

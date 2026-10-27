@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
@@ -240,6 +242,40 @@ func TestDestinationPreview(t *testing.T) {
 	if _, err := e.s.Preview(t.Context(), "DSAAAAAAAAAAA9", Source{Kind: SourceExample}); !errors.Is(err,
 		ErrNotFound) {
 		t.Errorf("unknown %v", err)
+	}
+}
+
+// TestDestinationTestButtons is C-16.FR-4 revised for L2 and C-28.FR-9 at the service: the test and the preview of a
+// Destination render its button set — its own, else the Organization's, which a Destination "As in the Organization"
+// follows — on the source the Tester receives and on the Destination it names.
+func TestDestinationTestButtons(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := t.Context()
+	org := `{"all": false, "items": [{"button": "acknowledge"}]}`
+	e.store.rows[0].OrganizationButtons = []byte(org)
+	if _, err := e.s.Test(ctx, saver, "DSAAAAAAAAAAA1", Source{Kind: SourceExample}); err != nil {
+		t.Fatal(err)
+	}
+	want := []buttons.Item{{Button: buttons.ItemAcknowledge}}
+	in := e.tester.ins[0]
+	if in.Source.Buttons == nil || in.Source.Buttons.All || !slices.Equal(in.Source.Buttons.Items, want) ||
+		in.Destination.Buttons == nil || !slices.Equal(in.Destination.Buttons.Items, want) {
+		t.Errorf("as in the organization: %+v, %+v", in.Source.Buttons, in.Destination.Buttons)
+	}
+	e.store.rows[0].Buttons = []byte(`[{"button": "resolve"}, {"button": "snooze", "snooze_seconds": 3600}]`)
+	if _, err := e.s.Preview(ctx, "DSAAAAAAAAAAA1", Source{Kind: SourceAlertGroup,
+		AlertGroupID: "AGAAAAAAAAAA21"}); err != nil {
+		t.Fatal(err)
+	}
+	want = []buttons.Item{{Button: buttons.ItemResolve}, {Button: buttons.ItemSnooze, SnoozeSeconds: 3600}}
+	if in := e.tester.ins[1]; in.Source.Buttons == nil || in.Source.Number != 21 ||
+		!slices.Equal(in.Source.Buttons.Items, want) {
+		t.Errorf("its own set in the preview: %+v", in.Source.Buttons)
+	}
+	e.store.rows[0].Buttons, e.store.rows[0].OrganizationButtons = nil, nil
+	if _, err := e.s.Test(ctx, saver, "DSAAAAAAAAAAA1", Source{Kind: SourceExample}); err != nil ||
+		!e.tester.ins[2].Source.Buttons.All {
+		t.Errorf("every button: %v, %+v", err, e.tester.ins[2].Source.Buttons)
 	}
 }
 

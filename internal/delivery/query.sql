@@ -9,12 +9,15 @@
 -- NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
 
 -- ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
--- outgoing webhook and whether it has a "reply in thread" request, in id order, for Enqueue.
+-- outgoing webhook and whether it has a "reply in thread" request, and their button set with the Organization's, which
+-- a Destination without its own follows, in id order, for Enqueue.
 -- name: ListRouteDestinations :many
 SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
-       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND d.deleted_at IS NULL
 ORDER BY d.id;
 
@@ -1866,12 +1869,14 @@ WHERE org_id = @org_id AND id = @id AND status <> 'resolved'
 FOR NO KEY UPDATE SKIP LOCKED;
 
 -- LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
--- the order Enqueue locks them (by Destination), with their Destination.
+-- the order Enqueue locks them (by Destination), with their Destination and its button set with the Organization's.
 -- name: LockRerenderDeliveries :many
 SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
-       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id
+       ds.name AS destination_name, ds.type AS destination_type, ds.connection_id, ds.buttons,
+       o.buttons AS organization_buttons
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+JOIN organizations o ON o.id = d.org_id
 WHERE d.org_id = @org_id AND d.alert_group_id = @alert_group_id::bigint
   AND d.desired_button_key_id IS NOT NULL AND d.desired_button_key_id <> @active_key_id::text AND NOT d.desired_retire
   AND (d.state IN ('pending', 'delivered') OR (d.state = 'not_delivered' AND d.published_at IS NOT NULL))

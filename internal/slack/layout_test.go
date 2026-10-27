@@ -540,6 +540,47 @@ func TestNoMenuWithoutDurations(t *testing.T) {
 	}
 }
 
+// TestButtonSetLayout is C-28.FR-9 and C-24.FR-5: a Root message with the buttons of a set lays out only those; a set
+// without a Snooze duration or preset leaves the menu "Snooze…" out, and one with "Snooze 24 h" and "Until tomorrow"
+// puts only those in the menu, named by the Route's durations, which the message still carries in full; a test
+// message of a Destination with its own set has exactly its buttons.
+func TestButtonSetLayout(t *testing.T) {
+	e := newLayoutEnv(t)
+	noSnooze := &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemAcknowledge}, {Button: buttons.ItemResolve}}}
+	ac7 := &buttons.Set{Items: []buttons.Item{{Button: buttons.ItemAcknowledge},
+		{Button: buttons.ItemSnooze, SnoozeSeconds: 86400}, {Button: buttons.ItemSnoozePreset,
+			Preset: buttons.PresetTomorrow}}}
+	src := layoutSource(messages.ColourFiring)
+	for _, c := range []struct {
+		name string
+		m    messages.Message
+		want string
+	}{
+		{"no snooze, firing", messages.ShownButtons(e.root(t, src), noSnooze, src.Route.SnoozeDurations),
+			"[{ack primary Ack []} {resolve  Resolve []}]"},
+		{"no snooze, acknowledged", messages.ShownButtons(e.root(t, layoutSource(messages.ColourAcknowledged)),
+			noSnooze, src.Route.SnoozeDurations), "[{unack  Unack []} {resolve primary Resolve []}]"},
+		{"AC-7, firing", messages.ShownButtons(e.root(t, src), ac7, src.Route.SnoozeDurations),
+			"[{ack primary Ack []} {snooze  Snooze… [24h Until tomorrow 09:00]}]"},
+	} {
+		o := layout(c.m, testLook(), nil)
+		slackRules(t, c.name, o)
+		if got, _ := actionsShown(t, o); fmt.Sprint(got) != c.want {
+			t.Errorf("%s: %v", c.name, got)
+		}
+		if len(c.m.SnoozeSeconds) != 3 {
+			t.Errorf("%s: the durations %v", c.name, c.m.SnoozeSeconds)
+		}
+	}
+	test := layoutSource(messages.ColourFiring)
+	test.Buttons = noSnooze
+	m := e.r.TestRoot(test, messages.MarkupMrkdwn, "DSAAAAAAAAAAA1").Message
+	if got, _ := actionsShown(t, layout(m, testLook(), nil)); fmt.Sprint(got) !=
+		"[{ack primary Ack []} {resolve  Resolve []}]" {
+		t.Errorf("the test message: %v", got)
+	}
+}
+
 // TestUnusableButtons: a button without a signed action id that fits an option's value, or of a Command Slack has no
 // action id for, is left out, and a message left without buttons has no actions block; the menu keeps the presets
 // within Block Kit's 100 options, and an option whose duration is unknown takes its button's label.
