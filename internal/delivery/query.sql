@@ -52,7 +52,9 @@ RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_
 -- buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
 -- now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
 -- so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
--- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+-- (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
+-- change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
+-- severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 -- before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 -- name: SetDesired :one
 UPDATE deliveries
@@ -68,6 +70,7 @@ SET desired_version     = desired_version + 1,
                               ELSE 'pending'
                           END,
     publication_loud    = CASE
+                              WHEN @quiet::boolean AND state = 'not_delivered' AND published_at IS NULL THEN false
                               WHEN (state = 'withheld' OR (late_note AND published_at IS NULL)) AND @open::boolean
                                   THEN @firing::boolean
                               ELSE publication_loud

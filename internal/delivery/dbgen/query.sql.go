@@ -4781,15 +4781,16 @@ SET desired_version     = desired_version + 1,
                               ELSE 'pending'
                           END,
     publication_loud    = CASE
+                              WHEN $7::boolean AND state = 'not_delivered' AND published_at IS NULL THEN false
                               WHEN (state = 'withheld' OR (late_note AND published_at IS NULL)) AND $6::boolean
-                                  THEN $7::boolean
+                                  THEN $8::boolean
                               ELSE publication_loud
                           END,
     late_note           = CASE WHEN $6::boolean THEN false ELSE late_note END,
-    urgent              = $8,
-    next_attempt_at     = $9,
-    updated_at          = $9
-WHERE org_id = $10 AND id = $11
+    urgent              = $9,
+    next_attempt_at     = $10,
+    updated_at          = $10
+WHERE org_id = $11 AND id = $12
 RETURNING state
 `
 
@@ -4800,6 +4801,7 @@ type SetDesiredParams struct {
 	ButtonKeyID    pgtype.Text
 	ReceivedAt     pgtype.Timestamptz
 	Open           bool
+	Quiet          bool
 	Firing         bool
 	Urgent         bool
 	Now            time.Time
@@ -4811,7 +4813,9 @@ type SetDesiredParams struct {
 // buttons, the receipt time of the oldest Snapshot it carries that is not delivered yet, and makes the delivery due
 // now, and returns the state it leaves. A delivery deleted in the messenger or retired stays so; a withheld one stays
 // so unless its Alert Group is open again (@open), when it is published after all, Loud when it is @firing
-// (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
+// (C-11.FR-19); a Not delivered one starts a new delivery (C-11.FR-10), Quiet when it was never published and the
+// change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
+// severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 // before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string, error) {
 	row := q.db.QueryRow(ctx, setDesired,
@@ -4821,6 +4825,7 @@ func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string,
 		arg.ButtonKeyID,
 		arg.ReceivedAt,
 		arg.Open,
+		arg.Quiet,
 		arg.Firing,
 		arg.Urgent,
 		arg.Now,

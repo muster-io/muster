@@ -432,7 +432,10 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if d.receivedAt == nil && arg.ReceivedAt.Valid {
 		d.receivedAt = at(arg.ReceivedAt.Time)
 	}
-	if arg.Open && (d.state == "withheld" || (d.lateNote && d.publishedAt == nil)) {
+	switch {
+	case arg.Quiet && d.state == "not_delivered" && d.publishedAt == nil:
+		d.loud = pgtype.Bool{Bool: false, Valid: true}
+	case arg.Open && (d.state == "withheld" || (d.lateNote && d.publishedAt == nil)):
 		d.loud = pgtype.Bool{Bool: arg.Firing, Valid: true}
 	}
 	if arg.Open {

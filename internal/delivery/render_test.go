@@ -440,6 +440,105 @@ func TestButtonSets(t *testing.T) {
 	}
 }
 
+// TestQuietConfigurationRerender is ADR-0018 for the re-render without lifecycle events: a change of configuration —
+// a changed button set, or a rise that the Route's Minimum severity made — that revives a Not delivered Publication
+// which was never published publishes it Quietly, while an Alert that revives it keeps its Loud Publication; and an
+// Urgent Alert Group that a Storm holds is released Quietly by a re-render without events.
+func TestQuietConfigurationRerender(t *testing.T) {
+	notDelivered := func(t *testing.T) *env {
+		t.Helper()
+		e := newEnv(t)
+		e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+		d := e.only(t)
+		if !d.loud.Bool {
+			t.Fatalf("the first publication is not loud: %+v", d.loud)
+		}
+		d.state, d.publishedAt = "not_delivered", nil
+		return e
+	}
+	for _, c := range []struct {
+		name   string
+		render func(e *env)
+		want   groups.Loudness
+	}{
+		{"a changed button set", func(e *env) {
+			e.db.dests[destMM].buttons = []byte(`[{"button": "resolve"}]`)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System)
+		}, groups.Quiet},
+		{"a raised Minimum severity", func(e *env) {
+			g := e.group(groups.StatusFiring, "disk full")
+			g.Urgent = true
+			e.enqueue(t, g, groups.System, groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised,
+				Variant: groups.VariantRemovesNone, Loudness: groups.Quiet, Reason: groups.ReasonMinimumSeverity})
+		}, groups.Quiet},
+		{"new Alerts", func(e *env) {
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full again"), groups.System, groups.Recorded{Seq: 2,
+				Event: groups.EventAlertsAdded, Variant: groups.VariantFiring, Loudness: groups.Loud,
+				Mentions: []groups.Mention{groups.MentionNewAlerts}})
+		}, groups.Loud},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := notDelivered(t)
+			c.render(e)
+			if d := e.only(t); d.state != "pending" {
+				t.Fatalf("the delivery is %s", d.state)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != c.want {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+
+	e := stormEnv(t)
+	r := e.db.routes[routeID]
+	r.threshold = 2
+	e.db.routes[routeID] = r
+	id := int64(5000)
+	for range 4 {
+		id++
+		e.addGroup(t, id, false)
+	}
+	e.onlyStorm(t)
+	e.round(t)
+	e.rec.Reset()
+	g := e.view(id, groups.StatusFiring)
+	g.Urgent = true
+	e.db.groups[id].urgent = true
+	e.enqueue(t, g, groups.System)
+	e.round(t)
+	if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet ||
+		!strings.HasPrefix(textOf(p[0]), fmt.Sprintf("#%d ", id)) {
+		t.Errorf("released without events %+v", p)
+	}
+}
+
+// TestJoinedDestinationButtonSet is C-28.FR-8 for a Destination added to a Route: the Route's open Alert Groups are
+// published into it with its own button set, and into a second added Destination that follows the Organization with
+// every button.
+func TestJoinedDestinationButtonSet(t *testing.T) {
+	e := newEnv(t)
+	key := "k-1"
+	r := setRenderer{key: &key}
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: e.w.Log,
+		Renderer: r})
+	e.w.Renderer = r
+	e.db.routeDests[routeID] = nil
+	e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+	conn := int64(connID)
+	e.db.dests[destMM2] = &fakeDest{id: destMM2, publicID: "DSAAAAAAAAAA13", name: "ops-prod",
+		typ: delivery.TypeMattermost, connection: &conn, health: "healthy", limit: 600, per: 60}
+	e.db.dests[destMM].buttons = []byte(`[{"button": "acknowledge"}, {"button": "snooze", "snooze_seconds": 3600}]`)
+	e.db.routeDests[routeID] = []int64{destMM, destMM2}
+	e.changed(t, routeID, []int64{destMM, destMM2}, nil)
+	if got := e.desiredLabels(t, destMM); !slices.Equal(got, []string{"Ack", "Snooze 1 h"}) {
+		t.Errorf("the added destination with its own set: %v", got)
+	}
+	if got := e.desiredLabels(t, destMM2); len(got) != 7 {
+		t.Errorf("the added destination that follows the organization: %v", got)
+	}
+}
+
 // TestSlackMarkup is C-24.FR-7 on delivery: the Root messages of a Slack Destination are rendered in mrkdwn, beside
 // the markups of the Route's other Destinations, and so are its Thread replies.
 func TestSlackMarkup(t *testing.T) {
