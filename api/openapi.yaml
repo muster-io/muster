@@ -14279,6 +14279,8 @@ components:
         required:
         - buttons
         properties:
+          buttons:
+            $ref: '#/components/schemas/DestinationButtonSet'
           team_name:
             type:
             - string
@@ -14295,6 +14297,8 @@ components:
         required:
         - buttons
         properties:
+          buttons:
+            $ref: '#/components/schemas/DestinationButtonSet'
           channel_title:
             type:
             - string
@@ -14326,6 +14330,8 @@ components:
         required:
         - buttons
         properties:
+          buttons:
+            $ref: '#/components/schemas/DestinationButtonSet'
           channel_name:
             type:
             - string
@@ -14341,6 +14347,8 @@ components:
         required:
         - buttons
         properties:
+          buttons:
+            $ref: '#/components/schemas/DestinationButtonSet'
           channel_name:
             type:
             - string

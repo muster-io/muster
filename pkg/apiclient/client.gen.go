@@ -4216,7 +4216,7 @@ type BridgeConnectionInputType string
 
 // BridgeDestination defines model for BridgeDestination.
 type BridgeDestination struct {
-	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	// Buttons A Destination's button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization's set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination's open Root messages, as edits.
 	Buttons DestinationButtonSet `json:"buttons"`
 
 	// ChannelId The channel as its messenger names it, an opaque string of up to 512 characters; surrounding white space is trimmed.
@@ -5415,7 +5415,7 @@ type MattermostConnectionInputType string
 
 // MattermostDestination defines model for MattermostDestination.
 type MattermostDestination struct {
-	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	// Buttons A Destination's button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization's set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination's open Root messages, as edits.
 	Buttons     DestinationButtonSet      `json:"buttons"`
 	ChannelId   string                    `json:"channel_id"`
 	ChannelName nullable.Nullable[string] `json:"channel_name,omitempty"`
@@ -6976,7 +6976,7 @@ type SlackConnectionInputType string
 
 // SlackDestination defines model for SlackDestination.
 type SlackDestination struct {
-	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	// Buttons A Destination's button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization's set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination's open Root messages, as edits.
 	Buttons DestinationButtonSet `json:"buttons"`
 
 	// ChannelId The channel's id as Slack shows it in the channel's details — `C…`, or `G…` for a private channel of an older workspace — in upper-case letters and digits, kept as entered without surrounding white space. Any other id, such as a direct chat's `D…`, a user's `U…` or a `#name`, is refused with `invalid_format`.
@@ -7429,7 +7429,7 @@ type TelegramConnectionInputType string
 
 // TelegramDestination defines model for TelegramDestination.
 type TelegramDestination struct {
-	// Buttons The Destination's button set (C-28.FR-8, FR-10); omitted on create is `organization`, omitted on an update keeps it.
+	// Buttons A Destination's button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization's set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination's open Root messages, as edits.
 	Buttons DestinationButtonSet `json:"buttons"`
 
 	// ChannelChatId The channel's numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.

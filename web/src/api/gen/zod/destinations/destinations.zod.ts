@@ -176,6 +176,14 @@ export const ListDestinationsResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "team_name": zod.string().nullish(),
   "channel_name": zod.string().nullish()
 })).and(zod.object({
@@ -255,6 +263,14 @@ export const ListDestinationsResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_title": zod.string().nullish(),
   "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
@@ -485,6 +501,14 @@ export const ListDestinationsResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name as the bridge\'s `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
@@ -563,6 +587,14 @@ export const ListDestinationsResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.')
 })).and(zod.object({
   "type": zod.enum(['slack'])
@@ -1103,6 +1135,14 @@ export const CreateDestinationResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "team_name": zod.string().nullish(),
   "channel_name": zod.string().nullish()
 })).and(zod.object({
@@ -1182,6 +1222,14 @@ export const CreateDestinationResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_title": zod.string().nullish(),
   "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
@@ -1412,6 +1460,14 @@ export const CreateDestinationResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name as the bridge\'s `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
@@ -1490,6 +1546,14 @@ export const CreateDestinationResponse = zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.')
 })).and(zod.object({
   "type": zod.enum(['slack'])
@@ -1659,6 +1723,14 @@ export const GetDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "team_name": zod.string().nullish(),
   "channel_name": zod.string().nullish()
 })).and(zod.object({
@@ -1738,6 +1810,14 @@ export const GetDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_title": zod.string().nullish(),
   "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
@@ -1968,6 +2048,14 @@ export const GetDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name as the bridge\'s `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
@@ -2046,6 +2134,14 @@ export const GetDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.')
 })).and(zod.object({
   "type": zod.enum(['slack'])
@@ -2594,6 +2690,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "team_name": zod.string().nullish(),
   "channel_name": zod.string().nullish()
 })).and(zod.object({
@@ -2673,6 +2777,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_title": zod.string().nullish(),
   "channel_chat_id": zod.string().nullish().describe('The channel\'s numeric chat id, found by the Destination check (`getChat` on the channel). Null until a check has found it. Two Destinations with one `channel_chat_id` deliver to one chat.'),
   "discussion_group_id": zod.string().nullish().describe('The channel\'s linked discussion group, where comments live, found by the Destination check through `getChat` on the channel (`linked_chat_id`). Not an input. Null until a check has found it.'),
@@ -2903,6 +3015,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name as the bridge\'s `checkChannel` answered it when the Destination was last saved. Untrusted text from the bridge.')
 })).and(zod.object({
   "type": zod.enum(['bridge'])
@@ -2981,6 +3101,14 @@ export const UpdateDestinationResponse = zod.union([zod.object({
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })).and(zod.object({
+  "buttons": zod.object({
+  "source": zod.enum(['organization', 'own']),
+  "items": zod.array(zod.object({
+  "button": zod.enum(['acknowledge', 'resolve', 'snooze', 'snooze_preset']),
+  "snooze_seconds": zod.int().optional().describe('The Snooze duration in seconds, as `route.snooze_durations` names it; at least 1.'),
+  "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
+}).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required with `own`, ignored with `organization`.')
+}).describe('A Destination\'s button set, `destination.buttons` (C-28.FR-8): `organization`, "As in the Organization", the default, follows the Organization\'s set and its later changes; `own` shows only `items`, which are then required. A change re-renders the Destination\'s open Root messages, as edits.'),
   "channel_name": zod.string().nullish().describe('The channel\'s name without `#`, as `conversations.info` answered it when the Destination was last saved. Untrusted text from Slack.')
 })).and(zod.object({
   "type": zod.enum(['slack'])
