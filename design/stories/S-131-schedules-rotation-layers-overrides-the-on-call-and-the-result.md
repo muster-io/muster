@@ -153,7 +153,7 @@ issue: 420
     `created_by_service_account_id` (exactly one, by a CHECK), `version`, `created_at`, `updated_at`; index
     `(org_id, schedule_id, ends_at)` for the period reads.
   - `permissions` gains the three Permissions and `role_permissions` their allocation — reference data, as in `0001`
-    and `0023`. The down migration drops all of it.
+    and `0022`. The down migration drops all of it.
 - **Schedules** (`internal/schedules`, a flat domain package, ADR-0016): validates, writes through its queries,
   records the Audit log (`schedule.created`, `schedule.updated`, `schedule.deleted`, `schedule_override.created`,
   `schedule_override.updated`, `schedule_override.deleted`) and sends the hint `schedule`:

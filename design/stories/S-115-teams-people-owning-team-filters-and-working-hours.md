@@ -57,6 +57,7 @@ files_touched:
   - internal/tools/refgen/main.go
   - internal/api/middleware.go
   - design/adr/0014-metrics-and-logging-policy.md
+  - design/stories/S-131-schedules-rotation-layers-overrides-the-on-call-and-the-result.md
   - sqlc.yaml
   - internal/api/server_test.go
   - internal/api/routes_test.go
@@ -283,12 +284,12 @@ curl -s localhost:8082/metrics | grep -c '^muster_team_info{'                   
   chains — because `team_id` is taken by the Mattermost team of a Mattermost Destination.
 - A Team grants no Permission and limits none (ADR-0018): no check of this story looks at a Team; the only one that
   ever will is the precondition of Overrides (S-131).
-- With 61 files — 13 of them test fakes, counts and call sites that the new fields and Permissions touch, and the
-  request validation and ADR-0014 changes the review asked for — the story
+- With 62 files — 13 of them test fakes, counts and call sites that the new fields and Permissions touch, and the
+  request validation, ADR-0014 and S-131 changes the review asked for — the story
   is past the size signal and kept whole: the Working hours of the Organization and of a Team are one rule
   (C-25.FR-9), and the owning Team of Routes and Destinations is needed by the filter that checks it.
-- Migration `0022` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0022_teams` takes 0022, the next free number; S-113 (`0022_button_sets`) renumbers when it merges, and
+  `TestMigrationsContiguous` enforces it.
 
 ## Coverage
 
