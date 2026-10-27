@@ -8,8 +8,8 @@ depends_on: [S-111, S-166]
 covers: [C-28.FR-8, C-28.FR-9, C-28.FR-10, C-28.AC-7, C-10.AC-23, C-16.FR-4, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0022_button_sets.up.sql
-  - internal/db/migrations/0022_button_sets.down.sql
+  - internal/db/migrations/0023_button_sets.up.sql
+  - internal/db/migrations/0023_button_sets.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -32,6 +32,9 @@ files_touched:
   - internal/api/destinations.go
   - internal/api/destinations_test.go
   - internal/delivery/delivery.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/membership.go
+  - internal/delivery/rerender.go
   - internal/delivery/render.go
   - internal/delivery/render_test.go
   - internal/delivery/query.sql
@@ -97,7 +100,7 @@ issue: 402
     `preset` twice), `required` (`snooze_seconds` or `preset` missing, `items` missing with `own` or `all: false`),
     `out_of_range` (`snooze_seconds` below 1). An item of a duration that no Route has is accepted and simply never
     shown.
-- **Schema** (migration `0022_button_sets`, expand only; `schema.md` §4.2 and §4.5): `organizations.buttons jsonb NOT
+- **Schema** (migration `0023_button_sets`, expand only; `schema.md` §4.2 and §4.5): `organizations.buttons jsonb NOT
   NULL DEFAULT '{"all": true}'` with `CHECK (jsonb_typeof(buttons) = 'object')`; `destinations.buttons jsonb` (null =
   "As in the Organization") with `CHECK (buttons IS NULL OR jsonb_typeof(buttons) = 'array')`; the CHECK of
   `open_group_updates.kind` is replaced by `open_group_updates_kind_v2_check`, which lists every kind present —
@@ -210,8 +213,9 @@ set `all` and finds "Snooze 2 h" after the next re-render, and checks a Telegram
 - A press on a button that a set no longer shows still runs its Command: the action id stays valid, and the Command is
   checked as any other (C-28.FR-9).
 - Depends on S-111 for `open_group_updates`; it needs neither Teams nor Schedules.
-- Migration `0022` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
+- Migration `0023`: the story map gave it `0022`, which S-115 (`0022_teams`) took by merging first, so it takes the
+  next free number as §4 of the stories README says; a story merged out of that order renumbers its migration to the
+  next free number in its own pull request and re-versions the CHECKs it replaces, listing every value present
   when it merges (S-131's Notes).
 
 ## Coverage
