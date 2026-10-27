@@ -373,7 +373,18 @@ func TestButtonSets(t *testing.T) {
 	own := e.deliveryTo(t, destMM).hash
 	e.db.orgButtons = []byte(`{"all": false, "items": [{"button": "acknowledge"}, {"button": "snooze",
 		"snooze_seconds": 86400}]}`)
-	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System)
+	changed := 0
+	rerender := func() {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+			"disk full"), Actor: groups.System, Changed: func() { changed++ }}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rerender()
+	if changed != 1 {
+		t.Errorf("the re-render changed %d desired states, want 1", changed)
+	}
 	if got := e.desiredLabels(t, destMM2); !slices.Equal(got, []string{"Unack", "Snooze 24 h"}) ||
 		!bytes.Equal(e.deliveryTo(t, destMM).hash, own) {
 		t.Errorf("the organization's set: %v", got)
@@ -384,10 +395,11 @@ func TestButtonSets(t *testing.T) {
 		t.Errorf("the re-render of the organization's set: %+v, %+v", calls, e.callsTo(destMM))
 	}
 	e.rec.Reset()
-	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System)
+	changed = 0
+	rerender()
 	e.round(t)
-	if len(e.rec.Calls()) != 0 {
-		t.Errorf("a second re-render called %+v", e.rec.Calls())
+	if len(e.rec.Calls()) != 0 || changed != 0 {
+		t.Errorf("a second re-render changed %d desired states and called %+v", changed, e.rec.Calls())
 	}
 
 	// A key rotation re-renders with each Destination's set.

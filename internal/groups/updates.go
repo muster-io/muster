@@ -171,46 +171,40 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 	return changed, nil
 }
 
-// buttonsChanged is the system transition of an open Alert Group whose Root messages a changed button set re-renders
-// (C-28.FR-9): it changes nothing of the Alert Group and records nothing, and the dispatcher's re-render step then runs
-// without a lifecycle event, which edits, Quietly, each Root message whose Desired state the set changed and leaves
-// the others, whose hashes are unchanged; a second run changes nothing.
-type buttonsChanged struct{}
-
-func (buttonsChanged) precondition(g *Group) error {
-	if g.Status == StatusResolved {
-		return errNotOpen
-	}
-	return nil
-}
-
-func (buttonsChanged) apply(_ context.Context, _ Queries, _ *Group, c *change) error {
-	c.written = true
-	return nil
-}
-
-// rerenderButtons runs the re-render step of the dispatcher on the open Alert Groups ids, locked in id order, in the
-// transaction of q, and returns how many it re-rendered; after collects what runs once the transaction committed.
+// rerenderButtons runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids,
+// locked in id order in the transaction of q, after a change of a button set (C-28.FR-9): delivery edits, Quietly,
+// each Root message whose Desired state the set changed and leaves the others, whose hashes are unchanged, so that a
+// second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint is
+// sent; a Route template that failed is recorded as the dispatcher records it. It returns how many Alert Groups had a
+// Desired state changed; after collects what runs once the transaction committed.
 func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
-	if len(ids) == 0 {
+	if len(ids) == 0 || s.d.rerender == nil {
 		return 0, nil
 	}
 	locked, err := lock(ctx, q, s.orgID, ids)
 	if err != nil {
 		return 0, err
 	}
+	now := s.d.clock.Now().UTC()
 	n := 0
 	for _, id := range ids {
 		g := locked[id]
-		if g == nil {
+		if g == nil || g.Status == StatusResolved {
 			continue
 		}
-		if err := s.d.dispatch(ctx, q, g, System, buttonsChanged{}, after); errors.Is(err, errNotOpen) {
-			continue
-		} else if err != nil {
+		changed := false
+		var failures []TemplateFailure
+		if err := s.d.rerender(ctx, q, Rendering{Group: g, Actor: System, After: after.add,
+			Fallback: func(f TemplateFailure) { failures = append(failures, f) },
+			Changed:  func() { changed = true }}); err != nil {
+			return 0, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
+		}
+		if err := s.d.recordFallbacks(ctx, q, g, failures, now); err != nil {
 			return 0, err
 		}
-		n++
+		if changed {
+			n++
+		}
 	}
 	return n, nil
 }

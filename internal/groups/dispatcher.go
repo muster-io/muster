@@ -407,7 +407,8 @@ func (c committed) run(ctx context.Context) {
 // recorded in their order, and ReceivedAt, the receipt time of the Stored Snapshot behind it, nil when a Command, a
 // timer or a person's change made it. After queues a function, such as a log line, to run once the transaction
 // committed, never when it rolls back; Fallback reports a Route template that failed, which the dispatcher records
-// in the Timeline once the re-render step returned. Both are nil outside the dispatcher.
+// in the Timeline once the re-render step returned. Both are nil outside the dispatcher. Changed, when set, is called
+// for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
 type Rendering struct {
 	Group      *Group
 	Actor      Actor
@@ -415,6 +416,7 @@ type Rendering struct {
 	ReceivedAt *time.Time
 	After      func(f func(ctx context.Context))
 	Fallback   func(f TemplateFailure)
+	Changed    func()
 }
 
 // TemplateFailure is a Route template that failed while the re-render step rendered a message of the Alert Group,

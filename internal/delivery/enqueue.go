@@ -391,6 +391,9 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 			Now: now}); err != nil {
 			return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
+		if r.Changed != nil {
+			r.Changed()
+		}
 	} else if err := q.SetDeliveryUrgent(ctx, dbgen.SetDeliveryUrgentParams{OrgID: s.orgID, ID: row.ID,
 		Urgent: g.Urgent, Now: now}); err != nil {
 		return fmt.Errorf("set the urgency of alert group #%d in %s: %w", g.Number, d.PublicID, err)

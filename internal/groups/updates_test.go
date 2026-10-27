@@ -217,12 +217,13 @@ func (f *fakeDB) ListOpenGroupsFollowingOrganizationAfter(_ context.Context,
 	}), nil
 }
 
-// openDelivered are the open Alert Groups after the id after with a delivery in a Destination that matches, by id, at
-// most lim.
+// openDelivered are the open Alert Groups after the id after with a delivery that is not being retired in a
+// Destination that matches, by id, at most lim.
 func (f *fakeDB) openDelivered(org, after int64, lim int32, match func(dest int64) bool) []int64 {
 	var out []int64
 	for _, g := range f.sortedGroups() {
-		if g.Status != "resolved" && g.ID > after && org == orgID && slices.ContainsFunc(f.delivered[g.ID], match) {
+		if g.Status != "resolved" && g.ID > after && org == orgID && slices.ContainsFunc(f.delivered[g.ID],
+			func(dest int64) bool { return match(dest) && !f.retired[[2]int64{g.ID, dest}] }) {
 			out = append(out, g.ID)
 		}
 	}
@@ -458,36 +459,47 @@ func TestUpdateFailures(t *testing.T) {
 }
 
 // TestButtonsUpdate is C-28.FR-9 on the worker: a row destination_buttons runs the dispatcher's re-render step,
-// without a lifecycle event, on each open Alert Group with a delivery in its Destination — whatever its Route — and a
-// row organization_buttons on each with a delivery in a Destination that follows the Organization; neither records a
-// Timeline entry or changes an Alert Group, both are deleted with their last batch and logged as open_group_update_done
-// with their scope, and a second run renders again and records nothing. An Alert Group resolved after the batch
-// listed it is left alone, and the batches walk by id.
+// without a lifecycle event, on each open Alert Group with a delivery in its Destination that is not being retired —
+// whatever its Route — and a row organization_buttons on each with such a delivery in a Destination that follows the
+// Organization. Neither saves an Alert Group, records a Timeline entry or sends a live-update hint; a Route template
+// that failed is recorded as the dispatcher records it. Both are deleted with their last batch and logged as
+// open_group_update_done with their scope and the number of Alert Groups whose Desired state changed, so a second run,
+// which changes no Desired state, counts none. An Alert Group resolved after the batch listed it is left alone, and the
+// batches walk by id.
 func TestButtonsUpdate(t *testing.T) {
 	u := newUpdates(t)
 	var rendered []int64
+	changes := map[int64]bool{}
 	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
-		if len(r.Events) != 0 || r.Actor != System {
+		if len(r.Events) != 0 || r.Actor != System || r.Changed == nil || r.Fallback == nil || r.After == nil {
 			t.Errorf("a re-render with events %+v as %+v", r.Events, r.Actor)
 		}
 		rendered = append(rendered, r.Group.ID)
+		if changes[r.Group.ID] {
+			r.Changed()
+			r.Changed()
+		}
 		return nil
 	})
 	u.db.delivered = map[int64][]int64{u.acked.ID: {21}, u.firing.ID: {21, 22}, u.snoozed.ID: {22},
-		u.elsewhere.ID: {21}}
+		u.elsewhere.ID: {21, 23}}
+	u.db.retired = map[[2]int64]bool{{u.elsewhere.ID, 21}: true}
 	u.db.following = []int64{22}
+	changes[u.acked.ID], changes[u.firing.ID] = true, true
 	before := []dbgen.LockGroupsRow{*u.acked, *u.snoozed, *u.firing, *u.elsewhere}
-	entries := len(u.db.entries)
+	entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
 		requested: u.clock.Now()})
 	u.round(t, u.worker)
-	if want := []int64{u.acked.ID, u.firing.ID, u.elsewhere.ID}; !slices.Equal(rendered, want) {
+	if want := []int64{u.acked.ID, u.firing.ID}; !slices.Equal(rendered, want) {
 		t.Errorf("rendered %v, want %v", rendered, want)
 	}
-	if len(u.db.updates) != 0 || len(u.db.entries) != entries || !strings.Contains(u.log.String(),
+	if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
+		len(u.db.hints) != hints || !strings.Contains(u.log.String(),
 		`"event":"open_group_update_done","kind":"destination_buttons","destination":"DS000000000021",`+
-			`"alert_groups":3`) {
-		t.Errorf("rows %d, entries %d, log %s", len(u.db.updates), len(u.db.entries)-entries, u.log)
+			`"alert_groups":2`) {
+		t.Errorf("rows %d, entries %d, saves %d, hints %d, log %s", len(u.db.updates), len(u.db.entries)-entries,
+			u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.log)
 	}
 	for i, g := range []*dbgen.LockGroupsRow{u.acked, u.snoozed, u.firing, u.elsewhere} {
 		if g.Status != before[i].Status || g.SeverityLevel != before[i].SeverityLevel ||
@@ -496,7 +508,18 @@ func TestButtonsUpdate(t *testing.T) {
 		}
 	}
 
+	// A second run changes no Desired state and counts none.
+	rendered, changes = nil, map[int64]bool{}
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if !slices.Equal(rendered, []int64{u.acked.ID, u.firing.ID}) || !strings.Contains(u.log.String(),
+		`"kind":"destination_buttons","destination":"DS000000000021","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
+	}
+
 	rendered = nil
+	changes[u.snoozed.ID] = true
 	u.worker.Batch = 1
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
 		requested: u.clock.Now()})
@@ -510,19 +533,32 @@ func TestButtonsUpdate(t *testing.T) {
 			`"alert_groups":1`) || u.db.calls["ListOpenGroupsFollowingOrganizationAfter"] != 2 {
 		t.Errorf("the organization's set: rendered %v, log %s, calls %v", rendered, u.log, u.db.calls)
 	}
-	rendered = nil
+
+	// A Route template that fails is recorded as the dispatcher records it.
+	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		r.Fallback(TemplateFailure{Template: "root_message", Detail: "root_message template failed: boom"})
+		return nil
+	})
 	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindOrganizationButtons,
 		requested: u.clock.Now()})
+	entries = len(u.db.entries)
 	u.round(t, u.worker)
-	if !slices.Equal(rendered, []int64{u.snoozed.ID}) || len(u.db.entries) != entries {
-		t.Errorf("a second run: rendered %v, %d entries", rendered, len(u.db.entries)-entries)
+	if e := u.last(t, u.snoozed); len(u.db.entries) != entries+1 || e.SystemEvent.String != "fallback_template_used" {
+		t.Errorf("the failed template: %d entries, %+v", len(u.db.entries)-entries, e.InsertTimelineEntryParams)
 	}
 
 	for kind, q := range map[string]string{KindDestinationButtons: "ListOpenGroupsOfDestinationAfter",
 		KindOrganizationButtons: "ListOpenGroupsFollowingOrganizationAfter"} {
-		for _, failing := range []string{q, "LockGroups", "SaveGroup"} {
+		for _, failing := range []string{q, "LockGroups", "rerender", "InsertTimelineEntry"} {
 			u := newUpdates(t)
 			u.db.delivered, u.db.following = map[int64][]int64{u.acked.ID: {21}}, []int64{21}
+			u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+				if failing == "rerender" {
+					return errBoom
+				}
+				r.Fallback(TemplateFailure{Template: "root_message", Detail: "failed"})
+				return nil
+			})
 			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: kind, destinationID: 21,
 				requested: u.clock.Now()})
 			u.db.fail[failing] = errBoom
@@ -531,6 +567,15 @@ func TestButtonsUpdate(t *testing.T) {
 				t.Errorf("%s with %s failing: log %s", kind, failing, u.log)
 			}
 		}
+	}
+	// Without a re-render step, as in some tests, nothing is rendered and the row is done.
+	u = newUpdates(t)
+	u.db.delivered = map[int64][]int64{u.acked.ID: {21}}
+	u.svc.d.rerender = nil
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationButtons, destinationID: 21,
+		requested: u.clock.Now()})
+	if u.round(t, u.worker); len(u.db.updates) != 0 {
+		t.Errorf("without a re-render step: %d rows", len(u.db.updates))
 	}
 }
 

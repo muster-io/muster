@@ -110,6 +110,8 @@ type fakeDB struct {
 	updates   []*fakeUpdate
 	delivered map[int64][]int64
 	following []int64
+	// retired are the deliveries being retired, by Alert Group and Destination.
+	retired map[[2]int64]bool
 }
 
 func newDB() *fakeDB {
