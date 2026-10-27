@@ -71,6 +71,14 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 	var after committed
 	err = s.store.InTx(ctx, func(q Queries) error {
 		moved, after = 0, nil
+		// The Default route is locked FOR SHARE first, as grouping locks it, so that its Minimum severity holds
+		// meanwhile: Routes are locked in id order elsewhere (BumpRoutesOfDestination), and the Default route usually
+		// has the lowest id.
+		policy, err := q.LockDefaultRoute(ctx, s.orgID)
+		if err != nil {
+			return fmt.Errorf("lock the default route: %w", err)
+		}
+		def := policy.ID
 		route, err := q.LockRouteForMove(ctx, dbgen.LockRouteForMoveParams{OrgID: s.orgID, PublicID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRouteNotFound
@@ -81,12 +89,6 @@ func (s *Service) MoveOpenAlertGroups(ctx context.Context, r Requester, publicID
 		if route.IsDefault {
 			return ErrDefaultRoute
 		}
-		// The Default route is locked FOR SHARE, as grouping locks it, so that its Minimum severity holds meanwhile.
-		policy, err := q.LockDefaultRoute(ctx, s.orgID)
-		if err != nil {
-			return fmt.Errorf("lock the default route: %w", err)
-		}
-		def := policy.ID
 		ids, err := q.ListOpenGroupsOfRoute(ctx, dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID,
 			RouteID: route.ID})
 		if err != nil {

@@ -81,7 +81,8 @@ func TestMinimumSeverity(t *testing.T) {
 		}
 	}
 
-	// C-26.FR-10, C-26.AC-8: urgent follows the Minimum severity and is ignored in requests.
+	// C-26.FR-10, C-26.AC-8: urgent follows the Minimum severity; urgent false changes nothing, and urgent true without
+	// minimum_severity, as a 0.1 client sends it, is converted to the Minimum severity critical.
 	hook := e.webhook("sev-events", "sev", `[]`)
 	hb := route("hb", "critical", hook["id"].(string))
 	if v, _, _ := readRoute(hb); v != (routeView{"critical", true}) ||
@@ -91,6 +92,18 @@ func TestMinimumSeverity(t *testing.T) {
 	update(hb, func(b map[string]any) { b["urgent"] = false })
 	if v, _, _ := readRoute(hb); v != (routeView{"critical", true}) {
 		t.Errorf("after urgent false %+v", v)
+	}
+	var old routeView
+	decode(t, api.do(http.MethodPost, "/api/v1/routes", `{"name":"old-client","matchers":[{"label":"team","op":"=",`+
+		`"value":"old-client"}],"urgent":true,"group_key":["alertname"],"destination_ids":[],"policy":`+policy+`}`),
+		&old)
+	if old != (routeView{"critical", true}) {
+		t.Errorf("created by a 0.1 client %+v", old)
+	}
+	none := route("none0", "none")
+	update(none, func(b map[string]any) { b["urgent"] = true })
+	if v, _, _ := readRoute(none); v != (routeView{"critical", true}) {
+		t.Errorf("updated by a 0.1 client %+v", v)
 	}
 	for _, change := range []func(m map[string]any){
 		func(m map[string]any) { m["critical_is_urgent"] = false },

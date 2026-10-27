@@ -625,7 +625,8 @@ func TestEnsureDefault(t *testing.T) {
 
 // TestCreate is C-08.FR-1 and FR-4: a Route is stored with its name, description, Matchers, Minimum severity, Group
 // key and every policy field, before the Default route; routes.urgent is written as the Minimum severity critical, and
-// the urgent mark of the input is ignored (C-26.FR-10); the list ETag moves, the Audit log has the creation with its
+// the urgent mark of the input, as a 0.1 client sends it, sets the Minimum severity critical only without an explicit
+// one (C-26.FR-10); the list ETag moves, the Audit log has the creation with its
 // values, the live hint names it and muster_route_info exports it.
 func TestCreate(t *testing.T) {
 	svc, store, _ := newService(t)
