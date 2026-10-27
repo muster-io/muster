@@ -16,6 +16,7 @@ import (
 	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakemattermost"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
@@ -81,6 +82,39 @@ func (e *mm) buttonsOf(dest string) string {
 	return string(b)
 }
 
+// slackShown are the elements of the actions block of the Slack Root message of the Alert Group g in the Destination
+// dest, each its label and, for a menu, its options, as the fake Slack server holds it; none until it is posted.
+func (e *mm) slackShown(g, dest string) []string {
+	e.t.Helper()
+	if e.h.count(e.t, `SELECT count(*) FROM deliveries d JOIN destinations x ON x.id = d.destination_id
+		JOIN alert_groups a ON a.id = d.alert_group_id WHERE x.public_id = '`+dest+`' AND a.public_id = '`+g+`'
+		AND d.message_id IS NOT NULL`) == 0 {
+		return nil
+	}
+	ts := e.h.text(e.t, `SELECT d.message_id FROM deliveries d JOIN destinations x ON x.id = d.destination_id
+		JOIN alert_groups a ON a.id = d.alert_group_id WHERE x.public_id = '`+dest+`' AND a.public_id = '`+g+`'`)
+	var raw []fakeslack.Message
+	decode(e.t, call(e.t, http.MethodGet, e.h.Fakes.Slack+"/_fake/messages?app="+fakeslack.AppA+"&channel="+
+		fakeslack.ChannelAlerts, ""), &raw)
+	for _, m := range raw {
+		if m.TS != ts {
+			continue
+		}
+		sm := slackMessage{Message: m}
+		_ = json.Unmarshal(m.Attachments, &sm.Attachments)
+		out := []string{}
+		for _, el := range sm.actions() {
+			label := el.label()
+			for _, o := range el.Options {
+				label += "|" + o.Text.Text
+			}
+			out = append(out, label)
+		}
+		return out
+	}
+	return nil
+}
+
 // refusal is the status of an answer with the pointer and the code of its first error.
 func refusal(t *testing.T, a answer) string {
 	t.Helper()
@@ -94,19 +128,20 @@ func refusal(t *testing.T, a answer) string {
 	return fmt.Sprintf("%d %s %s", a.status, p.Errors[0].Pointer, p.Errors[0].Code)
 }
 
-// TestButtonSets is the Verification of S-113 against `muster dev` and its fake Mattermost, Telegram and bridge
-// servers (C-28.FR-8 to FR-10, C-28.AC-7, C-10.AC-23, C-16.FR-4, C-20.FR-1). On a Route with the Snooze durations
-// 1 h, 4 h and 24 h, the Mattermost Destination "alerts" with its own set — Acknowledge, "Snooze 24 h" and "Until
-// tomorrow" — shows on a firing Root message exactly Ack, "Snooze 24 h" and "Until tomorrow 09:00", acknowledged Unack,
-// "Snooze 24 h" and "Until tomorrow 09:00", snoozed Ack and Unsnooze; "alerts-prod", which follows the Organization's
-// set of every button, shows every button. The change of the set re-renders the open Root messages as edits through an
-// open_group_updates row destination_buttons, and a press on a button of the full set sent before still runs its
-// Command; a Reminder keeps "Still on it" and "Unack" and the API still resolves. A Telegram Destination with its own
-// set lays out only its buttons. A change of the Organization's set re-renders the Destinations that follow it, the
-// bridge's included, through a row organization_buttons; with the set back at every button, a Snooze duration of 2 h
-// added to the Route shows on the next re-render. The refusals are 422 at the item's pointer and a stale If-Match is
-// 412; the changes are in the Audit log; the test message and the preview show the Destination's set; and the Text
-// command resolve through a Bridge whose own set has no Resolve still resolves.
+// TestButtonSets is the Verification of S-113 against `muster dev` and its fake Mattermost, Telegram, Slack and bridge
+// servers (C-28.FR-8 to FR-10, C-28.AC-7, C-10.AC-23, C-16.FR-4, C-20.FR-1). On a Route with the Snooze durations 1 h,
+// 4 h and 24 h, the Mattermost Destination "alerts" with its own set — Acknowledge, "Snooze 24 h" and "Until tomorrow"
+// — shows on a firing Root message exactly Ack, "Snooze 24 h" and "Until tomorrow 09:00", acknowledged Unack, "Snooze
+// 24 h" and "Until tomorrow 09:00", snoozed Ack and Unsnooze; "alerts-prod", which follows the Organization's set of
+// every button, shows every button; a Slack Destination with its own set shows only its buttons, without the menu
+// "Snooze…" while the set has no Snooze duration or preset. The change of the set re-renders the open Root messages as
+// edits through an open_group_updates row destination_buttons, and a press on a button of the full set sent before
+// still runs its Command; a Reminder keeps "Still on it" and "Unack" and the API still resolves. A Telegram Destination
+// with its own set lays out only its buttons. A change of the Organization's set re-renders the Destinations that
+// follow it, the bridge's included, through a row organization_buttons; with the set back at every button, a Snooze
+// duration of 2 h added to the Route shows on the next re-render. The refusals are 422 at the item's pointer and a
+// stale If-Match is 412; the changes are in the Audit log; the test message and the preview show the Destination's set;
+// and the Text command resolve through a Bridge whose own set has no Resolve still resolves.
 func TestButtonSets(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -119,10 +154,23 @@ func TestButtonSets(t *testing.T) {
 		}
 	}
 	br := b.destination("alerts-br", fakebridge.ChannelAlerts)
+	sc := ""
+	for _, item := range e.api.json(http.MethodGet, "/api/v1/connections", "", http.StatusOK)["items"].([]any) {
+		if c := item.(map[string]any); c["name"] == devmode.SlackConnectionName {
+			sc = c["id"].(string)
+		}
+	}
+	if c := e.api.json(http.MethodPost, "/api/v1/connections/"+sc+"/checks", "", http.StatusOK); c["ok"] != true {
+		t.Fatalf("the check of %s: %v", devmode.SlackConnectionName, c)
+	}
+	sd := e.api.json(http.MethodPost, "/api/v1/destinations", fmt.Sprintf(`{"type":"slack","name":"alerts-sl",
+		"connection_id":%q,"channel_id":%q,"mentions":%s,"limiter":{"limit":50,"per_seconds":1},
+		"buttons":{"source":"own","items":[{"button":"acknowledge"},{"button":"resolve"}]}}`, sc,
+		fakeslack.ChannelAlerts, mentionSettings(nil)), http.StatusCreated)["destination"].(map[string]any)["id"].(string)
 	h.exec(t, `INSERT INTO account_links (org_id, public_id, user_id, messenger, connection_id, external_id,
 		display_name, created_at) SELECT 1, 'AK0000000000S7', u.id, 'bridge', c.id, '`+fakebridge.BobID+`', u.name, now()
 		FROM users u, connections c WHERE u.login = 'bob' AND c.public_id = '`+b.conn+`'`)
-	route := e.route("bs", "bs", []string{e.mmDest, prod, e.tgDest, br}, func(p map[string]any) {
+	route := e.route("bs", "bs", []string{e.mmDest, prod, e.tgDest, br, sd}, func(p map[string]any) {
 		p["snooze_durations_seconds"] = []int64{3600, 14400, 86400}
 		p["ack_timeout"] = map[string]any{"enabled": false, "first_interval_seconds": 300}
 		p["reminders"] = map[string]any{"enabled": true, "first_interval_seconds": 14400, "cap_seconds": 86400}
@@ -171,6 +219,21 @@ func TestButtonSets(t *testing.T) {
 		if stale.Integration.URL == "" {
 			t.Fatalf("no Resolve on %+v", staleRoot)
 		}
+	})
+
+	t.Run("a slack set", func(t *testing.T) {
+		e := e.on(t)
+		if got := e.buttonsOf(sd); got != `{"items":[{"button":"acknowledge"},{"button":"resolve"}],"source":"own"}` {
+			t.Errorf("the slack set read %s", got)
+		}
+		waitLabels(t, "the slack root message without a Snooze menu", []string{"Ack", "Resolve"}, func() []string {
+			return e.slackShown(g, sd)
+		})
+		if a := e.putButtons(sd, ac7, ""); a.status != http.StatusOK {
+			t.Fatalf("the slack set = %d %s", a.status, a.body)
+		}
+		waitLabels(t, "the slack root message of its set", []string{"Ack", "Snooze…|24h|Until tomorrow 09:00"},
+			func() []string { return e.slackShown(g, sd) })
 	})
 
 	t.Run("the own set of alerts", func(t *testing.T) {
