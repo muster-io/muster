@@ -40,6 +40,11 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import {
+  bridgeConnection,
+  mattermostConnection,
+  slackConnection,
+} from "../test/fixtures/connections";
 import { CallbackHint } from "./callback-hint";
 import { ConnectionCheck, checkErrorText } from "./connection-check";
 import {
@@ -68,24 +73,21 @@ import { limiterErrors, limiterInput } from "./limiter-field";
 
 const CALLBACK = "http://localhost:8081/api/v1/callbacks/mattermost/CN0000000000AA";
 
-const CONNECTION: MattermostConnection = {
+const CONNECTION: MattermostConnection = mattermostConnection({
   id: "CN0000000000AA",
-  type: "mattermost",
   name: "mm",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-08T09:30:00Z" },
   bot_username: "muster-dev-bot",
-  proxy: { enabled: false },
   destination_count: 1,
   callback_url: CALLBACK,
   created_at: "2026-10-08T09:30:00Z",
   etag: '"1"',
-};
+});
 
-const BRIDGE: BridgeConnection = {
+const BRIDGE: BridgeConnection = bridgeConnection({
   id: "CN0000000000BR",
-  type: "bridge",
   name: "br",
   base_url: "http://127.0.0.1:18094",
   event_delivery: "push",
@@ -95,32 +97,26 @@ const BRIDGE: BridgeConnection = {
   callback_url: "http://localhost:8081/api/v1/callbacks/bridge/CN0000000000BR",
   info: null,
   info_read_at: null,
-  proxy: { enabled: false },
-  destination_count: 0,
   created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
-};
+});
 
-const SLACK: SlackConnection = {
+const SLACK: SlackConnection = slackConnection({
   id: "CN0000000000SL",
-  type: "slack",
   name: "Example Slack",
   event_mode: "socket",
   limiter: { limit: 1, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-20T09:30:00Z" },
   app_token_status: { set: true, updated_at: "2026-10-20T09:30:00Z" },
-  slack_signing_secret_status: { set: false },
   callback_url: "http://localhost:8081/api/v1/callbacks/slack/CN0000000000SL",
   bot_name: "muster",
   bot_user_id: "U0MUSTERDEVA",
   team_id: "T0MUSTERDEVA",
   team_name: "Muster Dev",
   app_id: "A0MUSTERDEVA",
-  proxy: { enabled: false },
-  destination_count: 0,
   created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const WARNING =
   "The bot @muster-dev-bot has the role system_user, which does not grant the create_post_ephemeral permission, so it may not make ephemeral messages and answers to button presses show in the Thread of the Root message. Give the bot account itself that permission, for example the system admin role, to show them in the channel.";

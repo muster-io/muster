@@ -31,30 +31,24 @@ import type {
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { Route as NewDestinationRoute } from "../routes/destinations.new";
+import { webhookDestination } from "../test/fixtures/destinations";
 import { DestinationSecrets } from "./destination-secrets";
-import { defaultMentions } from "./mention-settings";
 import { SigningSecret } from "./signing-secret";
 
 const ID = "DS0000000000WH";
 const SECRET_VALUE = "s3cr3t-value";
 const SIGNING = "whsec_bmV3IHNpZ25pbmcgc2VjcmV0IGZvciB0ZXN0cw==";
 
-const DESTINATION: WebhookDestination = {
+const DESTINATION: WebhookDestination = webhookDestination({
   id: ID,
-  type: "webhook",
   name: "automation",
   mode: "events",
   events: { url: "http://127.0.0.1:18093/hook/ops", headers: [] },
-  mentions: defaultMentions(),
   limiter: { limit: 5, per_seconds: 1 },
-  proxy: { enabled: false },
   signing_secret_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
-  warnings: [],
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"4"',
-};
+});
 
 const WRITE: Permission[] = ["destinations:read", "destinations:write"];
 const READ: Permission[] = ["destinations:read"];

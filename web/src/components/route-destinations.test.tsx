@@ -34,66 +34,31 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { defaultMentions } from "./mention-settings";
+import { mattermostConnection, telegramConnection } from "../test/fixtures/connections";
+import {
+  mattermostDestination,
+  telegramDestination,
+  webhookDestination,
+} from "../test/fixtures/destinations";
 import { RouteDestinations } from "./route-destinations";
 
-const READ: Pick<
-  MattermostDestination,
-  "health" | "routes" | "created_at" | "etag" | "mentions" | "limiter"
-> = {
-  health: { state: "healthy" },
-  routes: [],
-  created_at: "2026-10-13T09:00:00Z",
-  etag: '"1"',
-  mentions: defaultMentions(),
-  limiter: { limit: 10, per_seconds: 1 },
-};
-
 function mmConnection(id: string, name: string, serverUrl: string): MattermostConnection {
-  return {
-    id,
-    type: "mattermost",
-    name,
-    server_url: serverUrl,
-    limiter: { limit: 50, per_seconds: 1 },
-    bot_token_status: { set: true, updated_at: "2026-10-13T09:00:00Z" },
-    proxy: { enabled: false },
-    destination_count: 1,
-    callback_url: `http://127.0.0.1:8081/api/v1/callbacks/mattermost/${id}`,
-    created_at: "2026-10-13T09:00:00Z",
-    etag: '"1"',
-  };
+  return mattermostConnection({ id, name, server_url: serverUrl });
 }
 
 function tgConnection(id: string, name: string): TelegramConnection {
-  return {
-    id,
-    type: "telegram",
-    name,
-    bot_api_base_url: "http://127.0.0.1:18081",
-    update_mode: "long_polling",
-    limiter: { limit: 30, per_seconds: 1 },
-    bot_token_status: { set: true, updated_at: "2026-10-13T09:00:00Z" },
-    bot_username: "muster_dev_bot",
-    proxy: { enabled: false },
-    destination_count: 1,
-    warnings: [],
-    created_at: "2026-10-13T09:00:00Z",
-    etag: '"1"',
-  };
+  return telegramConnection({ id, name, bot_username: "muster_dev_bot" });
 }
 
 function mm(id: string, name: string, connectionId: string): MattermostDestination {
-  return {
-    ...READ,
+  return mattermostDestination({
     id,
-    type: "mattermost",
     name,
     connection_id: connectionId,
     team_id: "team-dev",
     channel_id: "ch-alerts",
     channel_name: "alerts",
-  };
+  });
 }
 
 function tg(
@@ -102,29 +67,22 @@ function tg(
   connectionId: string,
   extra: Partial<TelegramDestination> = {},
 ): TelegramDestination {
-  return {
-    ...READ,
+  return telegramDestination({
     id,
-    type: "telegram",
     name,
     connection_id: connectionId,
     channel_id: "@muster_alerts",
     channel_title: "Muster alerts",
     ...extra,
-  };
+  });
 }
 
-const HOOK: WebhookDestination = {
-  ...READ,
+const HOOK: WebhookDestination = webhookDestination({
   id: "DS00000000HOOK",
-  type: "webhook",
   name: "hook",
   mode: "events",
   events: { url: "http://127.0.0.1:18093/hook/s070", headers: [] },
-  proxy: { enabled: false },
-  signing_secret_status: { set: false },
-  warnings: [],
-};
+});
 
 const CONNECTIONS: Connection[] = [
   mmConnection("CN000000000MMA", "mm-a", "http://127.0.0.1:18065"),

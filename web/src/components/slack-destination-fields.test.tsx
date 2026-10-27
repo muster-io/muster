@@ -29,6 +29,8 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { mattermostConnection, slackConnection } from "../test/fixtures/connections";
+import { slackDestination } from "../test/fixtures/destinations";
 import { DestinationCheck } from "./destination-check";
 import { DestinationForm } from "./destination-form";
 import { defaultMentions } from "./mention-settings";
@@ -42,45 +44,38 @@ import {
 
 const SET = { set: true, updated_at: "2026-10-20T09:30:00Z" };
 
-function slackConnection(id: string, name: string, bot: string | null): SlackConnection {
-  return {
+function slConnection(id: string, name: string, bot: string | null): SlackConnection {
+  return slackConnection({
     id,
-    type: "slack",
     name,
     event_mode: "socket",
     limiter: { limit: 50, per_seconds: 60 },
     bot_token_status: SET,
     app_token_status: SET,
-    slack_signing_secret_status: { set: false },
     callback_url: `http://localhost:8081/api/v1/callbacks/slack/${id}`,
     bot_name: bot,
     bot_user_id: bot === null ? null : "U0MUSTERBOTB",
     team_id: bot === null ? null : "T0MUSTERDEVB",
     team_name: bot === null ? null : "Example workspace B",
     app_id: null,
-    proxy: { enabled: false },
-    destination_count: 0,
     created_at: "2026-10-20T09:30:00Z",
     etag: '"1"',
-  };
+  });
 }
 
-const UI = slackConnection("CN0000000000SL", "ui", "muster-dev-bot-b");
-const UNCHECKED = slackConnection("CN0000000000SU", "ui-unchecked", null);
+const UI = slConnection("CN0000000000SL", "ui", "muster-dev-bot-b");
+const UNCHECKED = slConnection("CN0000000000SU", "ui-unchecked", null);
 
-const MM: MattermostConnection = {
+const MM: MattermostConnection = mattermostConnection({
   id: "CN0000000000MM",
-  type: "mattermost",
   name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: SET,
-  proxy: { enabled: false },
-  destination_count: 0,
   callback_url: "http://localhost:8081/api/v1/callbacks/mattermost/CN0000000000MM",
   created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const CHANNELS: SlackChannelList = {
   items: [
@@ -90,20 +85,16 @@ const CHANNELS: SlackChannelList = {
   truncated: false,
 };
 
-const DESTINATION: SlackDestination = {
+const DESTINATION: SlackDestination = slackDestination({
   id: "DS0000000000SL",
-  type: "slack",
   name: "alerts",
   connection_id: UI.id,
   channel_id: "C0FAKEALERTS",
   channel_name: "alerts",
-  mentions: defaultMentions(),
   limiter: { limit: 30, per_seconds: 60 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const WRITE: Permission[] = [
   "destinations:read",

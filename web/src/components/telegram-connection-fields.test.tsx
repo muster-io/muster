@@ -26,6 +26,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { telegramConnection } from "../test/fixtures/connections";
 import { ConnectionCheck, connectionCheckErrorText } from "./connection-check";
 import {
   BASE_URL_FORMAT,
@@ -56,21 +57,18 @@ const BASE_URL_TEXT =
   "Enter an absolute http or https URL without user information, query or fragment, such as https://api.telegram.org. A path prefix is allowed.";
 const WEBHOOK_SET = "A webhook is set: long polling fails with 409 while it stays.";
 
-const CONNECTION: TelegramConnection = {
+const CONNECTION: TelegramConnection = telegramConnection({
   id: "CN0000000000TG",
-  type: "telegram",
   name: "tg",
   bot_api_base_url: "http://127.0.0.1:18081",
   update_mode: "long_polling",
   limiter: { limit: 15, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
   bot_username: "muster_dev_bot",
-  proxy: { enabled: false },
-  destination_count: 0,
   warnings: ["base_url_uses_http"],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"1"',
-};
+});
 
 function refusal(status: number, problem: Record<string, unknown>): ApiError {
   return new ApiError(

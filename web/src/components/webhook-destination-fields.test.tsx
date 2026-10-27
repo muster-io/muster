@@ -30,6 +30,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { webhookDestination } from "../test/fixtures/destinations";
 import { DestinationDeleteDialog, deleteDescription } from "./destination-delete-dialog";
 import { DestinationForm, versionAction } from "./destination-form";
 import { shownProblem } from "./header-editor";
@@ -48,9 +49,8 @@ import {
 const LITERAL =
   "Store credentials as Secrets: this value is shown to everyone who can read Destinations.";
 
-const DESTINATION: WebhookDestination = {
+const DESTINATION: WebhookDestination = webhookDestination({
   id: "DS0000000000WH",
-  type: "webhook",
   name: "automation",
   mode: "events",
   events: {
@@ -60,16 +60,12 @@ const DESTINATION: WebhookDestination = {
       { name: "X-Team", value: "ops" },
     ],
   },
-  mentions: defaultMentions(),
   limiter: { limit: 5, per_seconds: 1 },
-  proxy: { enabled: false },
   signing_secret_status: { set: true, updated_at: "2026-10-09T09:30:00Z" },
   warnings: [{ kind: "literal_credential", field: "/events/headers/0/value" }],
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"4"',
-};
+});
 
 const TEMPLATE_DESTINATION: WebhookDestination = {
   ...DESTINATION,

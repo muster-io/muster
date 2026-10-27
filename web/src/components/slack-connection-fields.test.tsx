@@ -26,6 +26,7 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { slackConnection } from "../test/fixtures/connections";
 import { ConnectionCheck } from "./connection-check";
 import {
   ConnectionForm,
@@ -40,15 +41,13 @@ const BOT = "xoxb-muster-dev-slack-token-b";
 const APP = "xapp-muster-dev-slack-token-b";
 const SET = { set: true, updated_at: "2026-10-20T09:30:00Z" };
 
-const SLACK: SlackConnection = {
+const SLACK: SlackConnection = slackConnection({
   id: "CN0000000000SL",
-  type: "slack",
   name: "ui",
   event_mode: "socket",
   limiter: { limit: 50, per_seconds: 60 },
   bot_token_status: SET,
   app_token_status: SET,
-  slack_signing_secret_status: { set: false },
   callback_url: CALLBACK,
   bot_name: "muster-dev-bot-b",
   bot_user_id: "U0MUSTERBOTB",
@@ -56,11 +55,9 @@ const SLACK: SlackConnection = {
   team_name: "Example workspace B",
   app_id: "A0MUSTERDEVB",
   socket: null,
-  proxy: { enabled: false },
-  destination_count: 0,
   created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const NO_PROXY = { enabled: false, type: "http", username: null } as const;
 

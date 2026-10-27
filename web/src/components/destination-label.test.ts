@@ -29,6 +29,19 @@ import type {
   WebhookDestination,
 } from "../api/gen/model";
 import i18n from "../i18n";
+import {
+  bridgeConnection,
+  mattermostConnection,
+  slackConnection,
+  telegramConnection,
+} from "../test/fixtures/connections";
+import {
+  bridgeDestination,
+  mattermostDestination,
+  slackDestination,
+  telegramDestination,
+  webhookDestination,
+} from "../test/fixtures/destinations";
 import { destinationTypeName } from "./destination-health";
 import {
   bridgeMessengerName,
@@ -42,52 +55,21 @@ import {
   normalizedServer,
   webhookHost,
 } from "./destination-label";
-import { defaultMentions } from "./mention-settings";
-
-const READ: Pick<
-  MattermostDestination,
-  "health" | "routes" | "created_at" | "etag" | "mentions" | "limiter"
-> = {
-  health: { state: "healthy" },
-  routes: [],
-  created_at: "2026-10-13T09:00:00Z",
-  etag: '"1"',
-  mentions: defaultMentions(),
-  limiter: { limit: 10, per_seconds: 1 },
-};
 
 function mmConnection(id: string, name: string, serverUrl: string): MattermostConnection {
-  return {
+  return mattermostConnection({
     id,
-    type: "mattermost",
     name,
     server_url: serverUrl,
-    limiter: { limit: 50, per_seconds: 1 },
-    bot_token_status: { set: true, updated_at: "2026-10-13T09:00:00Z" },
-    proxy: { enabled: false },
-    destination_count: 1,
-    callback_url: `http://127.0.0.1:8081/api/v1/callbacks/mattermost/${id}`,
-    created_at: "2026-10-13T09:00:00Z",
-    etag: '"1"',
-  };
+  });
 }
 
 function tgConnection(id: string, name: string): TelegramConnection {
-  return {
+  return telegramConnection({
     id,
-    type: "telegram",
     name,
-    bot_api_base_url: "http://127.0.0.1:18081",
-    update_mode: "long_polling",
-    limiter: { limit: 30, per_seconds: 1 },
-    bot_token_status: { set: true, updated_at: "2026-10-13T09:00:00Z" },
     bot_username: null,
-    proxy: { enabled: false },
-    destination_count: 1,
-    warnings: [],
-    created_at: "2026-10-13T09:00:00Z",
-    etag: '"1"',
-  };
+  });
 }
 
 function brConnection(
@@ -96,16 +78,10 @@ function brConnection(
   baseUrl: string,
   messenger: string | null = "Example chat",
 ): BridgeConnection {
-  return {
+  return bridgeConnection({
     id,
-    type: "bridge",
     name,
     base_url: baseUrl,
-    event_delivery: "poll",
-    limiter: { limit: 10, per_seconds: 1 },
-    bot_token_status: { set: true, updated_at: "2026-10-17T09:00:00Z" },
-    push_secret_status: { set: false },
-    callback_url: `http://127.0.0.1:8081/api/v1/callbacks/bridge/${id}`,
     info:
       messenger === null
         ? null
@@ -119,35 +95,19 @@ function brConnection(
             event_delivery: ["poll", "push"],
           },
     info_read_at: messenger === null ? null : "2026-10-17T09:00:00Z",
-    proxy: { enabled: false },
-    destination_count: 1,
-    created_at: "2026-10-17T09:00:00Z",
-    etag: '"1"',
-  };
+  });
 }
 
-function slackConnection(id: string, name: string, botName: string | null): SlackConnection {
-  const set = { set: true, updated_at: "2026-10-20T09:00:00Z" };
-  return {
+function slConnection(id: string, name: string, botName: string | null): SlackConnection {
+  return slackConnection({
     id,
-    type: "slack",
     name,
-    event_mode: "socket",
-    limiter: { limit: 50, per_seconds: 60 },
-    bot_token_status: set,
-    app_token_status: set,
-    slack_signing_secret_status: { set: false },
-    callback_url: `http://127.0.0.1:8081/api/v1/callbacks/slack/${id}`,
     bot_name: botName,
     bot_user_id: botName === null ? null : "U0000000001",
     team_id: botName === null ? null : "T0000000001",
     team_name: botName === null ? null : "Example workspace",
     app_id: botName === null ? null : "A0000000001",
-    proxy: { enabled: false },
-    destination_count: 0,
-    created_at: "2026-10-20T09:00:00Z",
-    etag: '"1"',
-  };
+  });
 }
 
 function br(
@@ -156,16 +116,14 @@ function br(
   connectionId: string,
   extra: Partial<BridgeDestination> = {},
 ): BridgeDestination {
-  return {
-    ...READ,
+  return bridgeDestination({
     id,
-    type: "bridge",
     name,
     connection_id: connectionId,
     channel_id: "ch-alerts",
     channel_name: "alerts",
     ...extra,
-  };
+  });
 }
 
 function mm(
@@ -174,17 +132,15 @@ function mm(
   connectionId: string,
   extra: Partial<MattermostDestination> = {},
 ): MattermostDestination {
-  return {
-    ...READ,
+  return mattermostDestination({
     id,
-    type: "mattermost",
     name,
     connection_id: connectionId,
     team_id: "team-dev",
     channel_id: "ch-alerts",
     channel_name: "alerts",
     ...extra,
-  };
+  });
 }
 
 function sl(
@@ -193,16 +149,14 @@ function sl(
   connectionId: string,
   extra: Partial<SlackDestination> = {},
 ): SlackDestination {
-  return {
-    ...READ,
+  return slackDestination({
     id,
-    type: "slack",
     name,
     connection_id: connectionId,
     channel_id: "C0FAKEALERTS",
     channel_name: "alerts",
     ...extra,
-  };
+  });
 }
 
 function tg(
@@ -211,24 +165,20 @@ function tg(
   connectionId: string,
   extra: Partial<TelegramDestination> = {},
 ): TelegramDestination {
-  return {
-    ...READ,
+  return telegramDestination({
     id,
-    type: "telegram",
     name,
     connection_id: connectionId,
     channel_id: "@muster_alerts",
     channel_title: "Muster alerts",
     ...extra,
-  };
+  });
 }
 
 function hook(url: string, mode: WebhookDestination["mode"] = "events"): WebhookDestination {
   const request: RequestTemplate = { method: "POST", url, headers: [] };
-  return {
-    ...READ,
+  return webhookDestination({
     id: "DS0000000000WH",
-    type: "webhook",
     name: "hook",
     mode,
     events: mode === "template" ? undefined : { url, headers: [] },
@@ -236,10 +186,7 @@ function hook(url: string, mode: WebhookDestination["mode"] = "events"): Webhook
       mode === "events"
         ? undefined
         : { create: request, update: { ...request, url: "http://other.example.org/u" } },
-    proxy: { enabled: false },
-    signing_secret_status: { set: false },
-    warnings: [],
-  };
+  });
 }
 
 const CONNECTIONS = new Map<string, Connection>(
@@ -253,10 +200,10 @@ const CONNECTIONS = new Map<string, Connection>(
     brConnection("CN000000000BRB", "br-b", "HTTP://127.0.0.1:18094/"),
     brConnection("CN000000000BR2", "br-2", "http://127.0.0.1:18095", "Other chat"),
     brConnection("CN000000000BRU", "br-unread", "http://127.0.0.1:18096", null),
-    slackConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot"),
-    slackConnection("CN000000000SLB", "slack-b", "muster-dev-slack-bot-b"),
-    { ...slackConnection("CN000000000SL2", "slack-2", "other-bot"), team_id: "T0000000002" },
-    slackConnection("CN000000000SLU", "slack-unchecked", null),
+    slConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot"),
+    slConnection("CN000000000SLB", "slack-b", "muster-dev-slack-bot-b"),
+    { ...slConnection("CN000000000SL2", "slack-2", "other-bot"), team_id: "T0000000002" },
+    slConnection("CN000000000SLU", "slack-unchecked", null),
   ].map((c) => [c.id, c]),
 );
 
@@ -448,8 +395,8 @@ describe("the Connections list", () => {
   });
 
   test("names a Slack Connection Slack, with its bot and workspace once a check found them and no address", async () => {
-    const checked = slackConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot");
-    const unchecked = slackConnection("CN000000000SLU", "slack-unchecked", null);
+    const checked = slConnection("CN000000000SLA", "Example Slack", "muster-dev-slack-bot");
+    const unchecked = slConnection("CN000000000SLU", "slack-unchecked", null);
     expect(connectionMessengerName(i18n.t, checked)).toBe("Slack");
     expect(connectionAccount(checked)).toBe("muster-dev-slack-bot · Example workspace");
     expect(connectionAccount({ ...checked, team_name: null })).toBe("muster-dev-slack-bot");

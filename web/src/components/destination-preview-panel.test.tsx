@@ -28,6 +28,11 @@ import type {
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import {
+  bridgeDestination,
+  slackDestination,
+  telegramDestination,
+} from "../test/fixtures/destinations";
+import {
   DestinationPreviewPanel,
   frameDocument,
   mattermostNodes,
@@ -35,24 +40,19 @@ import {
   telegramButtons,
   telegramMessageNodes,
 } from "./destination-preview-panel";
-import { defaultMentions } from "./mention-settings";
 import { EXAMPLE, type PickedSource, TestSourcePicker } from "./test-source-picker";
 
 const ID = "DS0000000000TG";
 
-const DESTINATION: TelegramDestination = {
+const DESTINATION: TelegramDestination = telegramDestination({
   id: ID,
-  type: "telegram",
   name: "tg-alerts",
   connection_id: "CN0000000000TG",
   channel_id: "-1001000000001",
-  mentions: defaultMentions(),
   limiter: { limit: 30, per_seconds: 1 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-09T09:30:00Z",
   etag: '"2"',
-};
+});
 
 const TELEGRAM_TEXT =
   '🔴 <b><a href="http://localhost:8080/alert-groups/AG1">#1 HighErrorRate</a></b>\n' +
@@ -392,20 +392,16 @@ const SLACK_ITEM: DestinationPreviewItem = {
   },
 };
 
-const SLACK_DESTINATION: SlackDestination = {
+const SLACK_DESTINATION: SlackDestination = slackDestination({
   id: ID,
-  type: "slack",
   name: "slack-alerts",
   connection_id: "CN0000000000SL",
   channel_id: "C0FAKEALERTS",
   channel_name: "alerts",
-  mentions: defaultMentions(),
   limiter: { limit: 30, per_seconds: 60 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-20T09:30:00Z",
   etag: '"1"',
-};
+});
 
 describe("the frame of a Slack message", () => {
   test("draws the summary, the colour bar, the sections as plain text and the buttons, never as markup", () => {
@@ -544,20 +540,16 @@ function WithPicker() {
   );
 }
 
-const BRIDGE_DESTINATION: BridgeDestination = {
+const BRIDGE_DESTINATION: BridgeDestination = bridgeDestination({
   id: ID,
-  type: "bridge",
   name: "alerts",
   connection_id: "CN0000000000BR",
   channel_id: "ch-alerts",
   channel_name: "alerts",
-  mentions: defaultMentions(),
   limiter: { limit: 30, per_seconds: 60 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
-};
+});
 
 /** The envelope as the server sends it: indented JSON, with Secrets masked. */
 const ENVELOPE = JSON.stringify(

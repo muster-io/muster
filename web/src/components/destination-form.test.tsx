@@ -39,6 +39,8 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { mattermostConnection } from "../test/fixtures/connections";
+import { bridgeDestination, mattermostDestination } from "../test/fixtures/destinations";
 import { channelLabel, teamChannels, teamsOf } from "./channel-picker";
 import { DestinationCheck } from "./destination-check";
 import { DestinationDeleteDialog } from "./destination-delete-dialog";
@@ -47,20 +49,16 @@ import { BrokenBanner, brokenText } from "./destination-health";
 import { MATTERMOST_KIND } from "./mattermost-destination-fields";
 import { defaultMentions } from "./mention-settings";
 
-const CONNECTION: MattermostConnection = {
+const CONNECTION: MattermostConnection = mattermostConnection({
   id: "CN0000000000AA",
-  type: "mattermost",
   name: "mm",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 7, per_seconds: 2 },
   bot_token_status: { set: true, updated_at: "2026-10-08T09:30:00Z" },
   bot_username: "muster-dev-bot",
-  proxy: { enabled: false },
-  destination_count: 0,
   callback_url: "http://localhost:8081/api/v1/callbacks/mattermost/CN0000000000AA",
   created_at: "2026-10-08T09:30:00Z",
-  etag: '"1"',
-};
+});
 
 function channel(
   id: string,
@@ -86,22 +84,19 @@ const CHANNELS: MattermostChannel[] = [
   channel("ch-dm", "dm", "dm", { type: "direct" }),
 ];
 
-const DESTINATION: MattermostDestination = {
+const DESTINATION: MattermostDestination = mattermostDestination({
   id: "DS0000000000AA",
-  type: "mattermost",
   name: "alerts",
   connection_id: CONNECTION.id,
   team_id: "team-dev",
   channel_id: "ch-alerts",
   team_name: "dev",
   channel_name: "alerts",
-  mentions: defaultMentions(),
   limiter: { limit: 5, per_seconds: 1 },
-  health: { state: "healthy" },
   routes: [{ id: "RT0000000000AA", name: "db" }],
   created_at: "2026-10-08T09:30:00Z",
   etag: '"3"',
-};
+});
 
 const WRITE: Permission[] = [
   "destinations:read",
@@ -661,20 +656,14 @@ describe("Check", () => {
   });
 
   test("names the Bridge check item Channel", async () => {
-    const bridge: BridgeDestination = {
+    const bridge: BridgeDestination = bridgeDestination({
       id: "DS0000000000BR",
-      type: "bridge",
       name: "alerts",
       connection_id: "CN0000000000BR",
       channel_id: "ch-nobot",
       channel_name: null,
-      mentions: defaultMentions(),
-      limiter: { limit: 30, per_seconds: 60 },
-      health: { state: "healthy" },
-      routes: [],
       created_at: "2026-10-17T09:30:00Z",
-      etag: '"1"',
-    };
+    });
     const forbidden = {
       ok: false,
       checks: [

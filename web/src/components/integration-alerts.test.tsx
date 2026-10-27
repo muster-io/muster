@@ -15,6 +15,7 @@ import { render } from "vitest-browser-react";
 import type { IntegrationAlert } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { integrationAlert } from "../test/fixtures/alert-groups";
 import { IntegrationAlerts, orderedLabels, severityText } from "./integration-alerts";
 import type { AlertSearch } from "./integration-alerts-search";
 
@@ -23,7 +24,7 @@ const GONE_TEXT =
 const MARKUP = "<img src=x onerror=alert(1)>";
 const TEMPLATE = "{{count}} $t(errors.generic) <b>bold</b>";
 
-const FIRING: IntegrationAlert = {
+const FIRING: IntegrationAlert = integrationAlert({
   fingerprint: "a1",
   labels: { instance: "db-a", cluster: "a", alertname: "DiskFull" },
   state: "firing",
@@ -34,8 +35,8 @@ const FIRING: IntegrationAlert = {
   last_seen_at: "2026-10-07T09:00:00Z",
   alertmanager_groups: ['{}/{team="db"}:{alertname="DiskFull"}'],
   static_label_warnings: ["cluster"],
-};
-const GONE: IntegrationAlert = {
+});
+const GONE: IntegrationAlert = integrationAlert({
   fingerprint: "c1",
   labels: { alertname: "DiskFull", instance: "db-c", cluster: "b" },
   state: "resolved",
@@ -46,15 +47,15 @@ const GONE: IntegrationAlert = {
   last_seen_at: "2026-10-07T08:20:00Z",
   alertmanager_groups: [],
   static_label_warnings: [],
-};
-const MARKED: IntegrationAlert = {
+});
+const MARKED: IntegrationAlert = integrationAlert({
   fingerprint: "m1",
   labels: { payload: MARKUP, note: TEMPLATE, alertname: "Markup" },
   state: "firing",
   starts_at: "2026-10-07T08:00:00Z",
   last_seen_at: "2026-10-07T09:00:00Z",
   alertmanager_groups: ["g1", "g2"],
-};
+});
 
 let requests: URL[] = [];
 

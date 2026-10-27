@@ -25,6 +25,8 @@ import type {
 } from "../api/gen/model";
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { bridgeConnection, mattermostConnection } from "../test/fixtures/connections";
+import { bridgeDestination } from "../test/fixtures/destinations";
 import { connectionLimiterProposal } from "./bridge-connection-fields";
 import { BRIDGE_KIND, bridgeValues, destinationLimiterProposal } from "./bridge-destination-fields";
 import { DestinationForm } from "./destination-form";
@@ -49,58 +51,47 @@ function withRates(rates: { send_per_second?: number; send_per_second_per_channe
   return { ...INFO, limits: { ...INFO.limits, ...rates } };
 }
 
-function bridgeConnection(id: string, name: string, info: BridgeInfo | null): BridgeConnection {
-  return {
+function brConnection(id: string, name: string, info: BridgeInfo | null): BridgeConnection {
+  return bridgeConnection({
     id,
-    type: "bridge",
     name,
     base_url: "http://127.0.0.1:18094",
     event_delivery: "poll",
     limiter: { limit: 10, per_seconds: 1 },
     bot_token_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
-    push_secret_status: { set: false },
     callback_url: `http://localhost:8081/api/v1/callbacks/bridge/${id}`,
     info,
     info_read_at: info === null ? null : "2026-10-17T09:31:00Z",
-    proxy: { enabled: false },
-    destination_count: 0,
     created_at: "2026-10-17T09:30:00Z",
     etag: '"1"',
-  };
+  });
 }
 
-const BR = bridgeConnection("CN0000000000BR", "br", withRates({ send_per_second_per_channel: 2 }));
-const PLAIN = bridgeConnection("CN0000000000BP", "br-plain", INFO);
-const UNREAD = bridgeConnection("CN0000000000BU", "br-unread", null);
+const BR = brConnection("CN0000000000BR", "br", withRates({ send_per_second_per_channel: 2 }));
+const PLAIN = brConnection("CN0000000000BP", "br-plain", INFO);
+const UNREAD = brConnection("CN0000000000BU", "br-unread", null);
 
-const MM: MattermostConnection = {
+const MM: MattermostConnection = mattermostConnection({
   id: "CN0000000000MM",
-  type: "mattermost",
   name: "Example Mattermost",
   server_url: "http://127.0.0.1:18065",
   limiter: { limit: 5, per_seconds: 1 },
   bot_token_status: { set: true, updated_at: "2026-10-17T09:30:00Z" },
-  proxy: { enabled: false },
-  destination_count: 0,
   callback_url: "http://localhost:8081/api/v1/callbacks/mattermost/CN0000000000MM",
   created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
-};
+});
 
-const DESTINATION: BridgeDestination = {
+const DESTINATION: BridgeDestination = bridgeDestination({
   id: "DS0000000000BR",
-  type: "bridge",
   name: "alerts",
   connection_id: BR.id,
   channel_id: "ch-alerts",
   channel_name: "alerts",
-  mentions: defaultMentions(),
   limiter: { limit: 30, per_seconds: 60 },
-  health: { state: "healthy" },
-  routes: [],
   created_at: "2026-10-17T09:30:00Z",
   etag: '"1"',
-};
+});
 
 const WRITE: Permission[] = [
   "destinations:read",
