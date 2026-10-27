@@ -1021,6 +1021,49 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
 ## Upgrade notes
 
+0.2.0
+:   The urgent mark of a Route (`route.urgent`) and the Organization's "critical is Urgent"
+    (`organization.critical_is_urgent`) no longer act: an Alert Group is Urgent exactly when its Severity level is
+    critical, and a Route raises the level of its Alert Groups with its
+    [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity).
+
+    - Routes marked urgent got the Minimum severity critical, which also makes their Alert Groups critical, also for
+      Severity conditions.
+    - An Organization that had turned "critical is Urgent" off now sees its critical Alert Groups as Urgent: a rise to
+      critical ends their Snoozes and, where `route.urgent_rise_removes_ack` is on, their acknowledgements.
+    - Migration 0021 computes the Severity level and the urgency of the open Alert Groups and of their deliveries once,
+      by the new rule: without lifecycle events or Mentions, without ending a Snooze or an acknowledgement, and without
+      publishing anywhere new.
+    - `urgent` in the input of a Route and `critical_is_urgent` in the input of the Organization are optional. A Route
+      request with `urgent: true` and no `minimum_severity`, as a 0.1 client sends it, sets the Minimum severity
+      critical; `urgent: false`, `urgent` beside `minimum_severity`, and `critical_is_urgent` change nothing. Reads keep
+      both until 0.3.0 removes them: `urgent` is `true` exactly when the Minimum severity is critical, and
+      `critical_is_urgent` is always `true`.
+
+    **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
+    replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
+    level on the Alert Groups it changes, with `urgent` true, since 0.2.0 writes `routes.urgent`. Until a later change
+    of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
+    Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
+    Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
+    differently.
+
+    Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
+    and gives up after 5 seconds of waiting for a lock (`lock_timeout`) or on a deadlock with the running replicas. Its
+    changes are one transaction, so a failure leaves the schema as 0.1.4 left it, recorded as dirty at version 21, and
+    the 0.2.0 replica refuses to start with `schema_dirty`. To recover, with the same database role as Muster:
+
+    1. Check whether the migration took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'routes' AND column_name = 'minimum_severity';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 20, dirty = false;`. If it
+       returns 1, the migration committed and only its record failed: `UPDATE schema_migrations SET dirty = false;`.
+    3. Start the 0.2.0 replica again, or run `muster migrate`, at a quieter time; it applies migration 0021 again.
+
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
     are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back
@@ -1379,6 +1422,8 @@ info.
 
 **Critical is Urgent** (`organization.critical_is_urgent`, on)
 :   An Alert Group whose Severity level is critical is **Urgent**. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md).
+    From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
+    [upgrade notes of 0.2.0](https://muster-io.github.io/muster/latest/install/versions.md#upgrade-notes).
 
 **Instance labels** (`organization.instance_labels`, `pod`, `instance`, `container`, `endpoint`)
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
@@ -1494,7 +1539,8 @@ tables** and **Link rules** in [Messages and templates](https://muster-io.github
 `GET /api/v1/organization` reads the Organization and its `ETag`; `PUT /api/v1/organization` replaces the fields above
 with `If-Match` set to that ETag, as [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md#conventions) shows. The fields are
 `name`, `time_zone`, `workday_start`, `week_start`, `severity_label`, `severity_mapping`, `severity_styles`,
-`critical_is_urgent`, `instance_labels`, `outgoing_heartbeat` (required, with `proxy`, whose `enabled` is
+`critical_is_urgent` (ignored from 0.2.0, and always read as `true`), `instance_labels`, `outgoing_heartbeat`
+(required, with `proxy`, whose `enabled` is
 required; `url` is write-only and kept when omitted), `retention` (`stored_snapshots_days`, `alert_details_days`,
 `alert_group_summaries_days`, `audit_log_days`), `totp_required` (`nobody`, `local_users` or `everyone`) and
 `oidc_token_grace_seconds`. The outbound policy is `GET` and `PUT /api/v1/organization/outbound-policy`, and the values
@@ -7475,11 +7521,11 @@ Route
 :   The [Route](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) that took its Alerts. It decides the Destinations and the timers.
 
 Severity level
-:   The highest Severity level of its firing Alerts: critical, warning or info.
+:   The highest Severity level of its firing Alerts — critical, warning or info — raised to the
+    [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route.
 
 Urgent
-:   Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as
-    Urgent (`organization.critical_is_urgent`, on by default).
+:   Set exactly when its Severity level is critical. See [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent).
 
 Reopen count
 :   How many times Muster reopened it.
@@ -7695,7 +7741,7 @@ A Route has:
 - a **name**, unique in the Organization, and a description;
 - **Matchers**, which pick the Alerts;
 - a **position** in the list;
-- an **urgent** mark;
+- a [**Minimum severity**](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity);
 - a **Group key**;
 - the **Destinations** that receive its Alert Groups;
 - policy fields for how its Alert Groups are handled: the Reopen window and the Grace period, whether a rise to Urgent
@@ -7763,15 +7809,40 @@ Choose **Informational** for alerts nobody needs to act on at once, such as a ce
 notices, no Reminders, and long Snooze durations. Choose **On-call** for the rest. See [Statuses and
 commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) for what the timers do.
 
-### Urgent
+### Minimum severity
 
-An Alert Group is **Urgent** when its Route is marked urgent, or when its Severity level is critical and the Organization
-has `organization.critical_is_urgent` on (the default). An Urgent Alert Group is posted first when many arrive at once,
-and a rise to Urgent can end a Snooze or remove an acknowledgement.
+The **Minimum severity** of a Route (`route.minimum_severity`: none, `warning` or `critical`; none by default) is the
+lowest Severity level of its Alert Groups. An Alert Group's Severity level is the highest Severity level of its firing
+Alerts, raised to the Minimum severity of its Route. The Minimum severity only raises: it never lowers an Alert Group,
+and it never changes the level of an Alert, which the Alerts of the Alert Group page, the Alerts view and the `alerts[]`
+of outgoing webhook events still show as received.
+
+Use it for a Route whose Alerts all matter as much as a critical one, whatever their `severity` label says: with the
+Minimum severity critical, a warning Alert of the Route starts a critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), Alert Group. The
+Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical.
+
+A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
+`severity_raised`, or the Quiet `urgency_raised` of an Alert Group it makes critical, with the reason "Minimum severity
+of the Route"; it never removes an acknowledgement or a Snooze. A lowered one records nothing and lowers their level,
+as a falling Severity level does. The Root messages show the new level.
 
 By default the `severity` label maps to a Severity level: `critical` is critical, `warning` is warning, `info` and
 `none` are info, any other value counts as warning and is shown as received, and an Alert without the label counts as
 info. The Organization can change the label and the mapping.
+
+### Urgent
+
+An Alert Group is **Urgent** when its Severity level is critical — from its Alerts, or from the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route. An Urgent Alert Group is posted first when many arrive at once, is
+published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
+Route's "rise to Urgent removes the acknowledgement" is on.
+
+From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
+got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
+`critical_is_urgent` on the Organization until 0.3.0. A Route request with `urgent: true` and no `minimum_severity`, as
+a 0.1 client sends it, sets the Minimum severity critical; `urgent: false`, `urgent` beside `minimum_severity`, and
+`critical_is_urgent` change nothing. See the
+[upgrade notes of 0.2.0](https://muster-io.github.io/muster/latest/install/versions.md#upgrade-notes).
 
 ## Group keys
 
@@ -7852,9 +7923,8 @@ labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#s
 
     ![Create route: the choice between the profiles On-call and Informational](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/04-choose-profile.png){ .screenshot }
 
-2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#matchers), turn on **Urgent** if every
-   Alert Group of the Route is [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), and check the [Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#group-keys) with its
-   [preview](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#preview-before-you-save).
+2. Enter a **Name** and, if you like, a **Description**. Add the [Matchers](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#matchers) and check the
+   [Group key](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#group-keys) with its [preview](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#preview-before-you-save).
 
     ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
 
@@ -7884,9 +7954,9 @@ Destination to the Default route and everything reaches one place. This is the s
 plus a messenger.
 
 **Pages for payments.** Create the Route `payments-critical` with the Matchers `team="payments"` and
-`severity="critical"`, the On-call profile, the urgent mark on, and a Destination that is the payments team's channel.
-Put it above the Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other
-alerts fall through to the Default route.
+`severity="critical"`, the On-call profile and a Destination that is the payments team's channel. Put it above the
+Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
+to the Default route.
 
 **Certificates.** Create the Route `certificates` with the Matcher `alertname=~"Cert.*"`, the Informational profile and a
 Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer
@@ -7904,6 +7974,7 @@ alerts](https://muster-io.github.io/muster/latest/reference/internal-alerts.md).
   messages are brought up to date.
 - A new Group key or new Matchers apply to Alerts that start firing afterwards. A fingerprint already in an open Alert
   Group stays there until that Alert Group is resolved.
+- A changed [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) raises or lowers the Severity level of the open Alert Groups, Quietly.
 - No edit changes the status of any Alert Group.
 - Adding a Destination to a Route gives it the Route's open Alert Groups, Quietly. Removing one gives each open Root
   message one last edit that says it is no longer updated and links to Muster.
@@ -11445,6 +11516,18 @@ The OIDC client secret expires within oidc.secret_expiry_lead, so MusterOIDCSecr
 WARN · fields: `reason`, `error` · C-03
 
 An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a link; the error is masked and carries no token or secret.
+
+### `open_group_update_done`
+
+INFO · fields: `kind`, `route`, `destination`, `team`, `alert_groups` · C-26
+
+A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as route_minimum_severity; the scope is named by route, destination or team, the public_id of the Route, the Destination or the Team, whichever the kind has, and by none for the Organization; alert_groups is how many open Alert Groups it changed.
+
+### `open_group_update_failed`
+
+WARN · fields: `kind`, `route`, `destination`, `team`, `error` · C-26
+
+A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, route, destination or team names its scope as in open_group_update_done, and error is what failed. Any replica runs it again from the last Alert Group it reached once its lease runs out.
 
 ### `organization_created`
 

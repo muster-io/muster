@@ -2946,6 +2946,51 @@ channel. CI runs against a fake. See <a href="../../messengers/slack/">Slack</a>
 </ul>
 <h2 id="upgrade-notes">Upgrade notes<a class="headerlink" href="#upgrade-notes" title="Permanent link">&para;</a></h2>
 <dl>
+<dt>0.2.0</dt>
+<dd>
+<p>The urgent mark of a Route (<code>route.urgent</code>) and the Organization's "critical is Urgent"
+(<code>organization.critical_is_urgent</code>) no longer act: an Alert Group is Urgent exactly when its Severity level is
+critical, and a Route raises the level of its Alert Groups with its
+<a href="../../concepts/routes-and-group-keys/#minimum-severity">Minimum severity</a>.</p>
+<ul>
+<li>Routes marked urgent got the Minimum severity critical, which also makes their Alert Groups critical, also for
+  Severity conditions.</li>
+<li>An Organization that had turned "critical is Urgent" off now sees its critical Alert Groups as Urgent: a rise to
+  critical ends their Snoozes and, where <code>route.urgent_rise_removes_ack</code> is on, their acknowledgements.</li>
+<li>Migration 0021 computes the Severity level and the urgency of the open Alert Groups and of their deliveries once,
+  by the new rule: without lifecycle events or Mentions, without ending a Snooze or an acknowledgement, and without
+  publishing anywhere new.</li>
+<li><code>urgent</code> in the input of a Route and <code>critical_is_urgent</code> in the input of the Organization are optional. A Route
+  request with <code>urgent: true</code> and no <code>minimum_severity</code>, as a 0.1 client sends it, sets the Minimum severity
+  critical; <code>urgent: false</code>, <code>urgent</code> beside <code>minimum_severity</code>, and <code>critical_is_urgent</code> change nothing. Reads keep
+  both until 0.3.0 removes them: <code>urgent</code> is <code>true</code> exactly when the Minimum severity is critical, and
+  <code>critical_is_urgent</code> is always <code>true</code>.</li>
+</ul>
+<p><strong>Rolling upgrade from 0.1.</strong> Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
+replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
+level on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0 writes <code>routes.urgent</code>. Until a later change
+of their Alerts or of the Route's Minimum severity computes the level again, the API and the list show such an Alert
+Group as not Urgent, while its messages and outgoing webhooks treat it as Urgent. Do not edit Routes or "critical is
+Urgent" until every replica runs 0.2.0: a 0.1 replica writes the urgent mark and the switch, which 0.2.0 reads
+differently.</p>
+<p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
+and gives up after 5 seconds of waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas. Its
+changes are one transaction, so a failure leaves the schema as 0.1.4 left it, recorded as dirty at version 21, and
+the 0.2.0 replica refuses to start with <code>schema_dirty</code>. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the migration took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">columns</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'routes'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">column_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'minimum_severity'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 20, dirty = false;</code>. If it
+   returns 1, the migration committed and only its record failed: <code>UPDATE schema_migrations SET dirty = false;</code>.</p>
+</li>
+<li>Start the 0.2.0 replica again, or run <code>muster migrate</code>, at a quieter time; it applies migration 0021 again.</li>
+</ol>
+</dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
 are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back

@@ -386,6 +386,18 @@ WARN · fields: `reason`, `error` · C-03
 
 An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a link; the error is masked and carries no token or secret.
 
+### `open_group_update_done`
+
+INFO · fields: `kind`, `route`, `destination`, `team`, `alert_groups` · C-26
+
+A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as route_minimum_severity; the scope is named by route, destination or team, the public_id of the Route, the Destination or the Team, whichever the kind has, and by none for the Organization; alert_groups is how many open Alert Groups it changed.
+
+### `open_group_update_failed`
+
+WARN · fields: `kind`, `route`, `destination`, `team`, `error` · C-26
+
+A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, route, destination or team names its scope as in open_group_update_done, and error is what failed. Any replica runs it again from the last Alert Group it reached once its lease runs out.
+
 ### `organization_created`
 
 INFO · fields: `organization` · C-02

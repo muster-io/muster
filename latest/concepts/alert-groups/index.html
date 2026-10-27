@@ -2855,10 +2855,10 @@ once, at that switch.</dd>
 <dt>Route</dt>
 <dd>The <a href="../routes-and-group-keys/">Route</a> that took its Alerts. It decides the Destinations and the timers.</dd>
 <dt>Severity level</dt>
-<dd>The highest Severity level of its firing Alerts: critical, warning or info.</dd>
+<dd>The highest Severity level of its firing Alerts — critical, warning or info — raised to the
+<a href="../routes-and-group-keys/#minimum-severity">Minimum severity</a> of its Route.</dd>
 <dt>Urgent</dt>
-<dd>Set when its Route is marked urgent, or when its Severity level is critical and the Organization treats critical as
-Urgent (<code>organization.critical_is_urgent</code>, on by default).</dd>
+<dd>Set exactly when its Severity level is critical. See <a href="../routes-and-group-keys/#urgent">Urgent</a>.</dd>
 <dt>Reopen count</dt>
 <dd>How many times Muster reopened it.</dd>
 <dt>Alerts</dt>

@@ -3231,6 +3231,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#open_group_update_done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>open_group_update_done</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open_group_update_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>open_group_update_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#organization_created" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4677,6 +4699,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#open_group_update_done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>open_group_update_done</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open_group_update_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>open_group_update_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#organization_created" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5454,6 +5498,12 @@ the event.</p>
 <h3 id="oidc_sign_in_failed"><code>oidc_sign_in_failed</code><a class="headerlink" href="#oidc_sign_in_failed" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>reason</code>, <code>error</code> · C-03</p>
 <p>An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at the profile page, with idp_error: the identity provider reported an error, could not be reached through the back channel or its proxy, or answered with an ID token that did not verify. The reason names the step, prefixed with link for a link; the error is masked and carries no token or secret.</p>
+<h3 id="open_group_update_done"><code>open_group_update_done</code><a class="headerlink" href="#open_group_update_done" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>kind</code>, <code>route</code>, <code>destination</code>, <code>team</code>, <code>alert_groups</code> · C-26</p>
+<p>A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as route_minimum_severity; the scope is named by route, destination or team, the public_id of the Route, the Destination or the Team, whichever the kind has, and by none for the Organization; alert_groups is how many open Alert Groups it changed.</p>
+<h3 id="open_group_update_failed"><code>open_group_update_failed</code><a class="headerlink" href="#open_group_update_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>kind</code>, <code>route</code>, <code>destination</code>, <code>team</code>, <code>error</code> · C-26</p>
+<p>A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, route, destination or team names its scope as in open_group_update_done, and error is what failed. Any replica runs it again from the last Alert Group it reached once its lease runs out.</p>
 <h3 id="organization_created"><code>organization_created</code><a class="headerlink" href="#organization_created" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>organization</code> · C-02</p>
 <p>The first start created the Organization with the defaults of its settings and its outbound address policy.</p>

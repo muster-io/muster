@@ -3005,7 +3005,9 @@ counts as warning" and has a <strong>Map</strong> action. If your alerts use <co
 <p><strong>Organization → Alert handling</strong></p>
 <dl>
 <dt><strong>Critical is Urgent</strong> (<code>organization.critical_is_urgent</code>, on)</dt>
-<dd>An Alert Group whose Severity level is critical is <strong>Urgent</strong>. See <a href="../../concepts/loud-and-quiet/">Loud and Quiet</a>.</dd>
+<dd>An Alert Group whose Severity level is critical is <strong>Urgent</strong>. See <a href="../../concepts/loud-and-quiet/">Loud and Quiet</a>.
+From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
+<a href="../../install/versions/#upgrade-notes">upgrade notes of 0.2.0</a>.</dd>
 <dt><strong>Instance labels</strong> (<code>organization.instance_labels</code>, <code>pod</code>, <code>instance</code>, <code>container</code>, <code>endpoint</code>)</dt>
 <dd>A new Alert that differs from a firing one only in these labels is a <strong>Replacement</strong>: it stays in the same Alert
 Group, and the Timeline names the label that changed.</dd>
@@ -3113,7 +3115,8 @@ tables</strong> and <strong>Link rules</strong> in <a href="../messages-and-temp
 <p><code>GET /api/v1/organization</code> reads the Organization and its <code>ETag</code>; <code>PUT /api/v1/organization</code> replaces the fields above
 with <code>If-Match</code> set to that ETag, as <a href="../api-tokens/#conventions">API tokens and automation</a> shows. The fields are
 <code>name</code>, <code>time_zone</code>, <code>workday_start</code>, <code>week_start</code>, <code>severity_label</code>, <code>severity_mapping</code>, <code>severity_styles</code>,
-<code>critical_is_urgent</code>, <code>instance_labels</code>, <code>outgoing_heartbeat</code> (required, with <code>proxy</code>, whose <code>enabled</code> is
+<code>critical_is_urgent</code> (ignored from 0.2.0, and always read as <code>true</code>), <code>instance_labels</code>, <code>outgoing_heartbeat</code>
+(required, with <code>proxy</code>, whose <code>enabled</code> is
 required; <code>url</code> is write-only and kept when omitted), <code>retention</code> (<code>stored_snapshots_days</code>, <code>alert_details_days</code>,
 <code>alert_group_summaries_days</code>, <code>audit_log_days</code>), <code>totp_required</code> (<code>nobody</code>, <code>local_users</code> or <code>everyone</code>) and
 <code>oidc_token_grace_seconds</code>. The outbound policy is <code>GET</code> and <code>PUT /api/v1/organization/outbound-policy</code>, and the values
