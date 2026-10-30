@@ -474,8 +474,8 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
     (r) => r.url().endsWith("/api/v1/routes") && r.method() === "POST",
   );
   await page.getByRole("button", { name: "Create" }).click();
-  const body = (await request).postDataJSON() as Record<string, unknown>;
-  expect(body.minimum_severity).toBe("critical");
+  const body: unknown = (await request).postDataJSON();
+  expect(body).toMatchObject({ minimum_severity: "critical" });
   expect(body).not.toHaveProperty("urgent");
 
   await expect(

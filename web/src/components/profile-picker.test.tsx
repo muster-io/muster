@@ -30,10 +30,10 @@ const POLICY: RouteProfile["policy"] = {
   auto_unacknowledge: false,
 };
 
-function profile(id: string): RouteProfile {
+/** A profile as the API serves it; the id is a plain string, as a 0.1 replica's on_call is outside the typed enum. */
+function profile(id: string) {
   return {
-    // A 0.1 replica's id is outside the enum the client types.
-    id: id as RouteProfile["id"],
+    id,
     name: id,
     minimum_severity: "none",
     urgent: false,

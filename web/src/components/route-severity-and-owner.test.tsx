@@ -99,6 +99,11 @@ async function renderSection(initial: MinimumSeverity = "none", error?: string) 
 
 const select = () => page.getByLabelText("Minimum severity", { exact: true });
 
+/** The value and the text of each option of a select. */
+function optionsOf(el: Element): string[][] {
+  return [...el.querySelectorAll<HTMLOptionElement>("option")].map((o) => [o.value, o.text]);
+}
+
 beforeEach(async () => {
   await i18n.changeLanguage("en");
 });
@@ -107,13 +112,12 @@ describe("the Minimum severity of a Route", () => {
   test("offers None, warning and critical, with None selected by default", async () => {
     await renderSection();
     await expect.element(page.getByText("Severity, Escalation chains and owner")).toBeVisible();
-    const el = select().element() as HTMLSelectElement;
-    expect([...el.options].map((o) => [o.value, o.text])).toEqual([
+    expect(optionsOf(select().element())).toEqual([
       ["none", "None"],
       ["warning", "warning"],
       ["critical", "critical"],
     ]);
-    expect(el.value).toBe("none");
+    await expect.element(select()).toHaveValue("none");
   });
 
   test("shows the hint and a Learn more to the section Minimum severity", async () => {
@@ -143,7 +147,7 @@ describe("the Minimum severity of a Route", () => {
 
   test("a Route read as warning starts on warning", async () => {
     await renderSection("warning");
-    expect((select().element() as HTMLSelectElement).value).toBe("warning");
+    await expect.element(select()).toHaveValue("warning");
   });
 
   test("shows the code of a refusal at the field", async () => {
@@ -157,10 +161,10 @@ describe("the Minimum severity of a Route", () => {
     await renderSection();
     await expect.element(page.getByText("Важность, эскалация и владелец")).toBeVisible();
     const el = page.getByLabelText("Минимальная важность маршрута", { exact: true }).element();
-    expect([...(el as HTMLSelectElement).options].map((o) => o.text)).toEqual([
-      "Нет",
-      "warning",
-      "critical",
+    expect(optionsOf(el)).toEqual([
+      ["none", "Нет"],
+      ["warning", "warning"],
+      ["critical", "critical"],
     ]);
     await expect
       .element(

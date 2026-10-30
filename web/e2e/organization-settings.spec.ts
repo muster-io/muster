@@ -361,9 +361,9 @@ test("Alert handling has no Critical is Urgent, and saves the Instance labels wi
     (r) => r.url().endsWith("/api/v1/organization") && r.method() === "PUT",
   );
   await save(page);
-  const body = (await request).postDataJSON() as Record<string, unknown>;
+  const body: unknown = (await request).postDataJSON();
   expect(body).not.toHaveProperty("critical_is_urgent");
-  expect(body.instance_labels).toContain("zone");
+  expect(body).toMatchObject({ instance_labels: expect.arrayContaining(["zone"]) });
   await expect(page.getByTestId("alert-handling-status")).toHaveText("Saved.");
   expect(csp).toEqual([]);
 });
