@@ -4,16 +4,26 @@
   "additionalProperties": false,
   "properties": {
     "global": {
-      "description": "Helm's global values, shared with subcharts; Muster reads none of them.",
-      "type": "object"
+      "description": "Helm's global values, shared with subcharts; Muster reads only imageRegistry.",
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "description": "Replaces image.registry when set, for every image the chart renders.",
+          "type": ["string", "null"]
+        }
+      }
     },
     "image": {
       "description": "The container image of Muster.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "registry": {
+          "description": "The registry host of the image; global.imageRegistry wins over it.",
+          "type": "string"
+        },
         "repository": {
-          "description": "The image repository.",
+          "description": "The path of the image in the registry. A value that starts with a registry host (a first path segment with a dot or a colon, or localhost) is used as it is, with neither registry applied.",
           "type": "string"
         },
         "tag": {
@@ -270,15 +280,15 @@
           "type": "string"
         },
         "annotations": {
-          "description": "Extra annotations of the Ingresses.",
+          "description": "Extra annotations of both Ingresses; app.annotations and ingest.annotations are merged over a copy of them for their own Ingress, and their keys win.",
           "type": "object"
         },
         "app": {
-          "description": "The hosts and tls of the Ingress of the app listener, as in an Ingress spec.",
+          "description": "The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.",
           "type": "object"
         },
         "ingest": {
-          "description": "The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.",
+          "description": "The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.",
           "type": "object"
         }
       }
@@ -297,7 +307,7 @@
           "type": "array"
         },
         "annotations": {
-          "description": "Extra annotations of the HTTPRoutes.",
+          "description": "Extra annotations of both HTTPRoutes; app.annotations and ingest.annotations are merged over a copy of them for their own HTTPRoute, and their keys win.",
           "type": "object"
         },
         "labels": {
@@ -305,11 +315,11 @@
           "type": "object"
         },
         "app": {
-          "description": "The hostnames of the HTTPRoute of the app listener.",
+          "description": "The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.",
           "type": "object"
         },
         "ingest": {
-          "description": "The hostnames of the HTTPRoute of the ingest listener.",
+          "description": "The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.",
           "type": "object"
         }
       }

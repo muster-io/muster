@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright The Muster Authors
 
+global:
+  # Replaces image.registry when set, for every image the chart renders.
+  imageRegistry: ""
+
 image:
-  repository: ghcr.io/muster-io/muster
+  # The registry host. global.imageRegistry wins over it. Point it at a pull-through proxy to pull the image through it.
+  registry: ghcr.io
+  # The path of the image in the registry. A value that starts with a registry host (a first path segment with a "." or
+  # ":", or localhost), such as ghcr.io/muster-io/muster, is used as it is, with neither registry applied.
+  repository: muster-io/muster
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -85,22 +93,30 @@ service:
 ingress:
   enabled: false
   className: ""
+  # Annotations of both Ingresses. app.annotations and ingest.annotations are merged over a copy of it for their own
+  # Ingress, and their keys win.
   annotations: {}
   app:
+    annotations: {}
     hosts: []
     tls: []
   ingest:
+    annotations: {}
     hosts: []
     tls: []
 
 httpRoute:
   enabled: false
   parentRefs: []
+  # Annotations of both HTTPRoutes. app.annotations and ingest.annotations are merged over a copy of it for their own
+  # HTTPRoute, and their keys win.
   annotations: {}
   labels: {}
   app:
+    annotations: {}
     hostnames: []
   ingest:
+    annotations: {}
     hostnames: []
 
 serviceMonitor:

@@ -266,14 +266,25 @@ route; do not expose it outside the cluster.
 `ingress.enabled` creates two Ingress objects, one for the app Service and one for the ingest Service. List the hosts of
 each under `ingress.app.hosts` and `ingress.ingest.hosts`, with their `tls` blocks, and set `ingress.className` and
 `ingress.annotations` for your controller. A host takes an optional `path` (`/` by default) and `pathType` (`Prefix`).
-Annotations apply to both Ingress objects. Set the body size limit of your controller to at least 16 MB for the ingest
+`ingress.annotations` applies to both Ingress objects; `ingress.app.annotations` and `ingress.ingest.annotations` are
+merged over a copy of it for their own Ingress, and their keys win. Restrict the web UI to your networks with an
+annotation of `ingress.app.annotations`, and keep the ingest host public for Alertmanagers and messengers.
+Set the body size limit of your controller to at least 16 MB for the ingest
 host, because Muster accepts Snapshots up to that size.
+
+## Image registry
+
+The image is `<registry>/<repository>:<tag>`, with `image.registry` `ghcr.io` and `image.repository` `muster-io/muster`
+by default. Set `image.registry` to pull the image through a mirror or a pull-through proxy, or `global.imageRegistry`,
+which wins over it, for every image the chart renders. An `image.repository` that starts with a registry host, such as
+`nexus.example.org/muster-io/muster`, is used as it is, with neither registry applied.
 
 ## Gateway API
 
 `httpRoute.enabled` creates two `HTTPRoute` objects (`gateway.networking.k8s.io/v1`) instead of Ingress objects, one
 for each Service. Name the Gateway in `httpRoute.parentRefs` and the host names in `httpRoute.app.hostnames` and
-`httpRoute.ingest.hostnames`:
+`httpRoute.ingest.hostnames`. `httpRoute.annotations` applies to both routes, and `httpRoute.app.annotations` and
+`httpRoute.ingest.annotations` are merged over a copy of it for their own route, as for the Ingress objects:
 
 ```yaml
 httpRoute:

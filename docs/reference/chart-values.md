@@ -8,9 +8,15 @@ The values of the Helm chart `deploy/helm/muster`. The types and the description
 
 ### `global`
 
-object · no default
+object
 
-Helm's global values, shared with subcharts; Muster reads none of them.
+Helm's global values, shared with subcharts; Muster reads only imageRegistry.
+
+### `global.imageRegistry`
+
+string or null · default: `""`
+
+Replaces image.registry when set, for every image the chart renders.
 
 ### `image`
 
@@ -18,11 +24,17 @@ object
 
 The container image of Muster.
 
+### `image.registry`
+
+string · default: `ghcr.io`
+
+The registry host of the image; global.imageRegistry wins over it.
+
 ### `image.repository`
 
-string · default: `ghcr.io/muster-io/muster`
+string · default: `muster-io/muster`
 
-The image repository.
+The path of the image in the registry. A value that starts with a registry host (a first path segment with a dot or a colon, or localhost) is used as it is, with neither registry applied.
 
 ### `image.tag`
 
@@ -364,19 +376,19 @@ The class of the Ingresses; empty uses the cluster's default.
 
 object · default: `{}`
 
-Extra annotations of the Ingresses.
+Extra annotations of both Ingresses; app.annotations and ingest.annotations are merged over a copy of them for their own Ingress, and their keys win.
 
 ### `ingress.app`
 
-object · default: `{"hosts":[],"tls":[]}`
+object · default: `{"annotations":{},"hosts":[],"tls":[]}`
 
-The hosts and tls of the Ingress of the app listener, as in an Ingress spec.
+The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.
 
 ### `ingress.ingest`
 
-object · default: `{"hosts":[],"tls":[]}`
+object · default: `{"annotations":{},"hosts":[],"tls":[]}`
 
-The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.
+The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.
 
 ### `httpRoute`
 
@@ -400,7 +412,7 @@ The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec.
 
 object · default: `{}`
 
-Extra annotations of the HTTPRoutes.
+Extra annotations of both HTTPRoutes; app.annotations and ingest.annotations are merged over a copy of them for their own HTTPRoute, and their keys win.
 
 ### `httpRoute.labels`
 
@@ -410,15 +422,15 @@ Extra labels of the HTTPRoutes.
 
 ### `httpRoute.app`
 
-object · default: `{"hostnames":[]}`
+object · default: `{"annotations":{},"hostnames":[]}`
 
-The hostnames of the HTTPRoute of the app listener.
+The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.
 
 ### `httpRoute.ingest`
 
-object · default: `{"hostnames":[]}`
+object · default: `{"annotations":{},"hostnames":[]}`
 
-The hostnames of the HTTPRoute of the ingest listener.
+The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.
 
 ### `serviceMonitor`
 
