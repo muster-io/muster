@@ -8,7 +8,8 @@
 // the Snooze presets in the web UI); Retention shows the server's retention_order refusal at the summaries field;
 // Severity levels lists the unmapped value P5 and maps it; Outbound addresses saves a denied network and refuses an
 // entry that is not one; Keyring follows an activation by the CLI without a reload; Security saves the token grace and
-// shows a conflict; a Responder sees only Lookup tables and Link rules. The spec puts the Organization, the Admin's
+// shows a conflict; Alert handling lists the buttons of Root messages, which a Destination that follows shows in the
+// fake Mattermost server; a Responder sees only Lookup tables and Link rules. The spec puts the Organization, the Admin's
 // language and the outbound address policy back as it found them, and no Content Security Policy violation occurs.
 
 import { spawnSync } from "node:child_process";
@@ -22,6 +23,9 @@ import {
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  removeNamed,
+  removeRoute,
   shot,
   signIn,
   signInAdmin,
@@ -419,6 +423,195 @@ test("Severity levels lists the unmapped value P5 and maps it", async ({ page })
   await page.reload();
   await expect(page.getByText("This value is already mapped.")).toHaveCount(0);
   expect(csp).toEqual([]);
+});
+
+interface FakePost {
+  root_id: string;
+  channel_id: string;
+  props: { attachments?: { title_link?: string; actions?: { name: string }[] }[] };
+}
+
+/** The names of the buttons of the newest Root message of an Alert Group in a channel of the fake Mattermost server. */
+async function rootActions(group: string, channel: string): Promise<string[]> {
+  const res = await fetch("http://127.0.0.1:18065/_fake/posts");
+  expect(res.ok).toBe(true);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the fake's own list of posts
+  const posts = (await res.json()) as FakePost[];
+  const roots = posts.filter(
+    (p) =>
+      p.root_id === "" &&
+      p.channel_id === channel &&
+      p.props.attachments?.[0]?.title_link?.includes(group),
+  );
+  return (roots.at(-1)?.props.attachments?.[0]?.actions ?? []).map((a) => a.name);
+}
+
+test("Alert handling lists the buttons of Root messages, which a Destination that follows shows", async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  const csp = watchCsp(page);
+  const all = [
+    "Ack",
+    "Resolve",
+    "Snooze 1 h",
+    "Snooze 4 h",
+    "Snooze 24 h",
+    "Until tomorrow 09:00",
+    "Until Monday 09:00",
+  ];
+  const nobody = { everyone: "none", user_ids: [], groups: [] };
+  const mentions = Object.fromEntries(
+    [
+      "new_alert_group",
+      "new_alerts",
+      "reopen",
+      "ack_timeout",
+      "snooze_ended",
+      "rise_to_urgent",
+    ].map((k) => [k, nobody]),
+  );
+  const language = await withAdmin(async (admin) => {
+    const me = await admin.call<{ user: { language?: Language } }>("GET", "/api/v1/me");
+    return me.user.language ?? null;
+  });
+  // A Mattermost Destination that follows the Organization, on a Route with the Paging policy, and a firing Alert Group.
+  const integration = await fakeIntegration("org-btn");
+  const member = await fetch(
+    "http://127.0.0.1:18065/_fake/channels/ch-alerts-prod/members/musterdevbotuserfake000000",
+    { method: "PUT" },
+  );
+  expect(member.ok, `the bot's membership: ${member.status}`).toBe(true);
+  const group = await withAdmin(async (admin) => {
+    await admin.call("POST", "/api/v1/connections", {
+      type: "mattermost",
+      name: "org-btn-mm",
+      server_url: "http://127.0.0.1:18065",
+      bot_token: "mm-dev-token",
+      proxy: { enabled: false },
+      limiter: { limit: 50, per_seconds: 1 },
+    });
+    const connections = await admin.call<{ items: { id: string; name: string }[] }>(
+      "GET",
+      "/api/v1/connections?limit=500",
+    );
+    const created = await admin.call<{ destination: { id: string } }>(
+      "POST",
+      "/api/v1/destinations",
+      {
+        type: "mattermost",
+        name: "org-btn",
+        connection_id: connections.items.find((c) => c.name === "org-btn-mm")?.id,
+        team_id: "team-dev",
+        channel_id: "ch-alerts-prod",
+        mentions,
+        limiter: { limit: 50, per_seconds: 1 },
+      },
+    );
+    const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
+      "GET",
+      "/api/v1/route-profiles",
+    );
+    await admin.call("POST", "/api/v1/routes", {
+      name: "org-btn",
+      matchers: [{ label: "team", op: "=", value: "org-btn" }],
+      group_key: ["alertname", "cluster"],
+      destination_ids: [created.destination.id],
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
+    });
+    await fam("PUT", "/groups/obt", {
+      receiver: "org-btn",
+      route: "{}",
+      labels: { alertname: "OrgButtons" },
+    });
+    await fam("PUT", "/groups/obt/alerts/b1", { labels: { team: "org-btn", cluster: "b1" } });
+    await notify(integration, "obt", { reason: "first notification" });
+    const found = await admin.call<{ items: { alert_group?: { id: string } }[] }>(
+      "GET",
+      `/api/v1/integrations/${integration}/alerts`,
+    );
+    return found.items[0]?.alert_group?.id ?? "";
+  });
+  expect(group).not.toBe("");
+  try {
+    await expect.poll(() => rootActions(group, "ch-alerts-prod"), { timeout: 30_000 }).toEqual(all);
+
+    // 4. Alert handling → "Buttons of Root messages" → "All buttons" → "Only the buttons I tick" → untick Resolve → Save.
+    await signInAdmin(page);
+    await page.goto("/admin/organization/alert-handling");
+    await expect(page.getByText("Buttons of Root messages", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("button-set-source")).toHaveAttribute("data-value", "all");
+    await expect(page.getByLabel("All buttons")).toBeChecked();
+    await expect(page.getByText("What a Root message shows")).toBeVisible();
+    const firing = page.getByTestId("button-set-preview-firing").getByRole("listitem");
+    await expect(firing).toHaveText(all);
+    await page.getByLabel("Only the buttons I tick").check();
+    await page.getByTestId("button-set-item-resolve").uncheck();
+    const without = all.filter((name) => name !== "Resolve");
+    await expect(firing).toHaveText(without);
+    await expect(
+      page.getByTestId("button-set-preview-acknowledged").getByRole("listitem"),
+    ).toHaveText(["Unack", ...without.slice(1)]);
+    await shot(page, "organization-alert-handling-buttons");
+    await save(page);
+    await expect(page.getByTestId("alert-handling-status")).toHaveText("Saved.");
+    const stored = await withAdmin((admin) =>
+      admin.call<{ buttons: unknown }>("GET", "/api/v1/organization"),
+    );
+    expect(stored.buttons).toEqual({
+      all: false,
+      items: [
+        { button: "acknowledge" },
+        { button: "snooze", snooze_seconds: 3600 },
+        { button: "snooze", snooze_seconds: 14400 },
+        { button: "snooze", snooze_seconds: 86400 },
+        { button: "snooze_preset", preset: "tomorrow" },
+        { button: "snooze_preset", preset: "week_start" },
+      ],
+    });
+    // The Root message of the Destination that follows loses Resolve within seconds.
+    await expect
+      .poll(() => rootActions(group, "ch-alerts-prod"), { timeout: 30_000 })
+      .toEqual(without);
+
+    // 5. The Audit log names the field.
+    await page.goto("/admin/audit-log?action=organization.updated");
+    const newest = page.getByRole("table", { name: "Audit log" }).getByRole("row").nth(1);
+    await expect(newest).toContainText("organization.updated");
+    await expect(newest.getByTestId("audit-diff")).toContainText("Buttons:");
+
+    // 6. In Russian the section reads «Кнопки корневых сообщений» with «Только отмеченные».
+    await adminLanguage("ru");
+    await page.goto("/admin/organization/alert-handling");
+    await expect(page.getByText("Кнопки корневых сообщений", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Только отмеченные")).toBeChecked();
+    await expect(page.getByText("Так выглядит корневое сообщение")).toBeVisible();
+    await expect(page.getByTestId("button-set-preview-firing").getByRole("listitem")).toHaveText([
+      "Подтвердить",
+      "Отложить на 1 ч",
+      "Отложить на 4 ч",
+      "Отложить на 24 ч",
+      "До завтра 09:00",
+      "До понедельника 09:00",
+    ]);
+    await adminLanguage(language);
+
+    // Back to "All buttons": the Root message shows every button again.
+    await page.goto("/admin/organization/alert-handling");
+    await page.getByLabel("All buttons").check();
+    await save(page);
+    await expect(page.getByTestId("alert-handling-status")).toHaveText("Saved.");
+    await expect.poll(() => rootActions(group, "ch-alerts-prod"), { timeout: 30_000 }).toEqual(all);
+    expect(csp).toEqual([]);
+  } finally {
+    await adminLanguage(language);
+    await withAdmin(async (admin) => {
+      await removeRoute(admin, "org-btn");
+      await removeNamed(admin, "/api/v1/destinations", "org-btn", "?limit=500");
+      await removeNamed(admin, "/api/v1/connections", "org-btn-mm", "?limit=500");
+      await removeIntegration(admin, "org-btn");
+    });
+  }
 });
 
 test("Outbound addresses saves a denied network and refuses an entry that is not one", async ({

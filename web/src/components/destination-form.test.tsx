@@ -40,13 +40,23 @@ import type {
 import i18n from "../i18n";
 import { ApiError, SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { mattermostConnection } from "../test/fixtures/connections";
-import { bridgeDestination, mattermostDestination } from "../test/fixtures/destinations";
+import {
+  bridgeDestination,
+  mattermostDestination,
+  webhookDestination,
+} from "../test/fixtures/destinations";
 import { channelLabel, teamChannels, teamsOf } from "./channel-picker";
 import { DestinationCheck } from "./destination-check";
 import { DestinationDeleteDialog } from "./destination-delete-dialog";
-import { DestinationForm, destinationErrorText, serverErrors } from "./destination-form";
+import {
+  DestinationForm,
+  destinationErrorText,
+  destinationErrors,
+  serverErrors,
+} from "./destination-form";
 import { BrokenBanner, brokenText } from "./destination-health";
 import { MATTERMOST_KIND } from "./mattermost-destination-fields";
+import { WEBHOOK_KIND } from "./webhook-destination-fields";
 import { defaultMentions } from "./mention-settings";
 
 const CONNECTION: MattermostConnection = mattermostConnection({
@@ -241,6 +251,7 @@ describe("a new Mattermost Destination", () => {
       team_id: "team-dev",
       channel_id: "ch-alerts",
       mentions,
+      buttons: { source: "organization" },
       limiter: { limit: 7, per_seconds: 2 },
     });
   });
@@ -508,6 +519,117 @@ describe("a stored Destination", () => {
     await expect.element(page.getByLabelText("Подключение", { exact: true })).toBeVisible();
     await expect.element(page.getByLabelText("Канал", { exact: true })).toBeVisible();
     await expect.element(page.getByLabelText("Новые алерты", { exact: true })).toBeVisible();
+  });
+});
+
+describe("the Buttons section", () => {
+  test("sends its own set in the order of a message and the Organization's set again after it", async () => {
+    mockReads();
+    const save = vi.fn((_input: DestinationInput) => Promise.resolve(undefined));
+    await renderForm(save, { destination: DESTINATION });
+    await expect.element(page.getByLabelText("As in the Organization")).toBeChecked();
+    await userEvent.click(page.getByLabelText("Own for this Destination"));
+    for (const key of ["resolve", "preset:week_start"]) {
+      await userEvent.click(page.getByTestId(`button-set-item-${key}`));
+    }
+    await expect.element(page.getByText("What alerts shows")).toBeVisible();
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      type: "mattermost",
+      buttons: {
+        source: "own",
+        items: [{ button: "acknowledge" }, { button: "snooze_preset", preset: "tomorrow" }],
+      },
+    });
+    await userEvent.click(page.getByLabelText("As in the Organization"));
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]?.[0]).toMatchObject({ buttons: { source: "organization" } });
+  });
+
+  test("shows a stored own set, and a change of it makes the form dirty", async () => {
+    mockReads();
+    const dirty = vi.fn();
+    await render(
+      providers(
+        <DestinationForm
+          kind={MATTERMOST_KIND}
+          destination={{
+            ...DESTINATION,
+            buttons: { source: "own", items: [{ button: "resolve" }] },
+          }}
+          submitLabel="Save"
+          save={() => Promise.resolve(undefined)}
+          onDirtyChange={dirty}
+        />,
+        WRITE,
+      ),
+    );
+    await expect.element(page.getByLabelText("Own for this Destination")).toBeChecked();
+    await expect.element(page.getByTestId("button-set-item-resolve")).toBeChecked();
+    await expect.element(page.getByTestId("button-set-item-acknowledge")).not.toBeChecked();
+    await userEvent.click(page.getByTestId("button-set-item-acknowledge"));
+    await vi.waitFor(() => expect(dirty).toHaveBeenLastCalledWith(true));
+  });
+
+  test("shows a refused item at the section and clears it when the set changes", async () => {
+    mockReads();
+    await renderForm(
+      () =>
+        Promise.reject(
+          refusal(422, {
+            errors: [{ pointer: "/buttons/items/1", code: "out_of_range" }],
+          }),
+        ),
+      {
+        destination: { ...DESTINATION, buttons: { source: "own", items: [{ button: "resolve" }] } },
+      },
+    );
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect
+      .element(page.getByTestId("button-set-error"))
+      .toHaveTextContent("This value is out of range.");
+    await userEvent.click(page.getByTestId("button-set-item-acknowledge"));
+    await expect.element(page.getByTestId("button-set-error")).not.toBeInTheDocument();
+  });
+
+  test("repeats the check that a Snooze item has a duration of at least 1 s", async () => {
+    mockReads();
+    const kind = MATTERMOST_KIND;
+    const values = {
+      name: "alerts",
+      mentions: defaultMentions(),
+      buttons: { follows: false, items: [{ button: "snooze" as const, snooze_seconds: 0 }] },
+      limiter: { limit: "5", per_seconds: "1" },
+      fields: kind.values(DESTINATION),
+    };
+    expect(destinationErrors(kind, values)["/buttons/items/0"]).toEqual({ code: "out_of_range" });
+    expect(
+      destinationErrors(kind, { ...values, buttons: { follows: true, items: [] } })[
+        "/buttons/items/0"
+      ],
+    ).toBeUndefined();
+  });
+
+  test("is not on the form of an outgoing webhook, which sends no buttons", async () => {
+    mockReads();
+    const save = vi.fn((_input: DestinationInput) => Promise.resolve(undefined));
+    await render(
+      providers(
+        <DestinationForm
+          kind={WEBHOOK_KIND}
+          destination={webhookDestination({ name: "hook" })}
+          submitLabel="Save"
+          save={save}
+        />,
+        WRITE,
+      ),
+    );
+    await expect.element(page.getByTestId("button-set")).not.toBeInTheDocument();
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).not.toHaveProperty("buttons");
   });
 });
 

@@ -7,7 +7,9 @@
 // a Storm threshold, which the Audit log names, accepts the suggestion "Send Muster's own alerts to a Destination", sees
 // the Broken banner on the list and on the Route after the bot leaves the channel, "Check passed" and "Healthy" without
 // a reload after it is back, and the Storm banner of "db". An Admin reading Russian sees the pages at phone width; a
-// Viewer sees them read-only. No page scrolls sideways at 360 px; no Content Security Policy violation.
+// Viewer sees them read-only. The Buttons section of the Destination chooses the buttons of its Root message, which
+// the fake server shows exactly, in English and in Russian. No page scrolls sideways at 360 px; no Content Security
+// Policy violation.
 
 import { type Browser, expect, test, type Page } from "@playwright/test";
 
@@ -100,6 +102,37 @@ function brokenText(h: Health): string {
   const reason = (h.reason ?? "").trim().replace(/\.$/, "");
   return `Broken since ${berlinTime(h.since ?? "")}: ${reason}. Muster tries again every 5 min.`;
 }
+
+interface FakePost {
+  root_id: string;
+  channel_id: string;
+  props: { attachments?: { title_link?: string; actions?: { name: string }[] }[] };
+}
+
+/** The names of the buttons of the newest Root message of an Alert Group in a channel of the fake server. */
+async function rootActions(group: string, channel: string): Promise<string[]> {
+  const res = await fetch(`${FMM}/posts`);
+  expect(res.ok).toBe(true);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the fake's own list of posts
+  const posts = (await res.json()) as FakePost[];
+  const roots = posts.filter(
+    (p) =>
+      p.root_id === "" &&
+      p.channel_id === channel &&
+      p.props.attachments?.[0]?.title_link?.includes(group),
+  );
+  return (roots.at(-1)?.props.attachments?.[0]?.actions ?? []).map((a) => a.name);
+}
+
+const ALL_BUTTONS = [
+  "Ack",
+  "Resolve",
+  "Snooze 1 h",
+  "Snooze 4 h",
+  "Snooze 24 h",
+  "Until tomorrow 09:00",
+  "Until Monday 09:00",
+];
 
 function nav(page: Page, name: string, label = "Main") {
   return page.getByRole("navigation", { name: label }).getByRole("link", { name, exact: true });
@@ -280,6 +313,106 @@ test("accepts the suggestion to send Muster's own alerts to the Destination", as
   expect(csp).toEqual([]);
 });
 
+test("chooses the buttons of the Destination, whose Root message then shows exactly them", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const csp = watchCsp(page);
+  await put("buttons-1");
+  await notify(integrationId, "dest", { reason: "buttons" });
+  const admin = await adminApi();
+  try {
+    const found = await admin.call<{ items: { alert_group?: { id: string } }[] }>(
+      "GET",
+      `/api/v1/integrations/${integrationId}/alerts?q=buttons-1`,
+    );
+    const group = found.items[0]?.alert_group?.id ?? "";
+    expect(group).not.toBe("");
+    await expect
+      .poll(() => rootActions(group, "ch-alerts"), { timeout: 30_000 })
+      .toEqual(ALL_BUTTONS);
+
+    await signInAdmin(page);
+    await page.goto(`/destinations/${destinationId}`);
+    // 1. "As in the Organization" is chosen, and the preview shows every button of a firing Root message.
+    await expect(page.getByTestId("button-set-source")).toHaveAttribute(
+      "data-value",
+      "organization",
+    );
+    await expect(page.getByLabel("As in the Organization")).toBeChecked();
+    await expect(
+      page.getByText(
+        "Which buttons the Root message shows. Hidden actions stay in Muster and in the Text commands of Bridges.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText("What alerts shows")).toBeVisible();
+    const firing = page.getByTestId("button-set-preview-firing").getByRole("listitem");
+    const acknowledged = page.getByTestId("button-set-preview-acknowledged").getByRole("listitem");
+    await expect(firing).toHaveText(ALL_BUTTONS);
+    await expect(page.getByTestId("button-set-item-acknowledge")).toHaveCount(0);
+
+    // 2. Its own set: Acknowledge, "24 h" and "Until tomorrow", which the preview follows at once.
+    await page.getByLabel("Own for this Destination").check();
+    for (const key of ["resolve", "snooze:3600", "snooze:14400", "preset:week_start"]) {
+      await page.getByTestId(`button-set-item-${key}`).uncheck();
+    }
+    await expect(firing).toHaveText(["Ack", "Snooze 24 h", "Until tomorrow 09:00"]);
+    await expect(acknowledged).toHaveText(["Unack", "Snooze 24 h", "Until tomorrow 09:00"]);
+    await shot(page, "destination-buttons");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
+
+    // 3. The API stores it, and the open Root message in the channel has exactly these actions.
+    const stored = await admin.call<{ buttons: unknown }>(
+      "GET",
+      `/api/v1/destinations/${destinationId}`,
+    );
+    expect(stored.buttons).toEqual({
+      source: "own",
+      items: [
+        { button: "acknowledge" },
+        { button: "snooze", snooze_seconds: 86400 },
+        { button: "snooze_preset", preset: "tomorrow" },
+      ],
+    });
+    await expect
+      .poll(() => rootActions(group, "ch-alerts"), { timeout: 30_000 })
+      .toEqual(["Ack", "Snooze 24 h", "Until tomorrow 09:00"]);
+    await admin.call("POST", `/api/v1/alert-groups/${group}/acknowledge`);
+    await expect
+      .poll(() => rootActions(group, "ch-alerts"), { timeout: 30_000 })
+      .toEqual(["Unack", "Snooze 24 h", "Until tomorrow 09:00"]);
+
+    // 4. The Audit log names the field.
+    await page.goto(`/admin/audit-log?resource_type=destination&resource_id=${destinationId}`);
+    await expect(
+      page
+        .getByRole("row")
+        .filter({ hasText: "destination.updated" })
+        .first()
+        .getByTestId("audit-diff"),
+    ).toContainText("Buttons:");
+
+    // 5. Back to the Organization's set: every button again, as an edit of the same message.
+    await page.goto(`/destinations/${destinationId}`);
+    await expect(page.getByLabel("Own for this Destination")).toBeChecked();
+    await page.getByLabel("As in the Organization").check();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("destination-status")).toHaveText("Saved.");
+    await expect
+      .poll(() => rootActions(group, "ch-alerts"), { timeout: 30_000 })
+      .toEqual(["Unack", ...ALL_BUTTONS.slice(1)]);
+    const again = await admin.call<{ buttons: unknown }>(
+      "GET",
+      `/api/v1/destinations/${destinationId}`,
+    );
+    expect(again.buttons).toEqual({ source: "organization" });
+  } finally {
+    await admin.dispose();
+  }
+  expect(csp).toEqual([]);
+});
+
 test("shows the Broken banner on the list and on the Route, and Check makes it healthy without a reload", async ({
   page,
 }) => {
@@ -384,6 +517,18 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByTestId("mention-note")).toHaveText(
     "Напоминания и автоматическая отмена подтверждения всегда упоминают владельца, а перехват — прежнего владельца.",
   );
+  await expect(page.getByTestId("button-set")).toContainText("Кнопки");
+  await expect(page.getByLabel("Как в Организации")).toBeChecked();
+  await expect(page.getByText("Так увидят в alerts")).toBeVisible();
+  await expect(page.getByTestId("button-set-preview-firing").getByRole("listitem")).toHaveText([
+    "Подтвердить",
+    "Закрыть",
+    "Отложить на 1 ч",
+    "Отложить на 4 ч",
+    "Отложить на 24 ч",
+    "До завтра 09:00",
+    "До понедельника 09:00",
+  ]);
   await expect(page.getByRole("button", { name: "Проверить", exact: true })).toBeVisible();
   await expectNoHorizontalScroll(page);
   await shot(page, "destination-ru-360");

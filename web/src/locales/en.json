@@ -401,6 +401,7 @@
       "ackTimeoutFirstIntervalSeconds": "First ack timeout notice after (seconds)",
       "ackTimeoutNoticeTemplate": "Ack timeout notice template",
       "autoUnacknowledge": "Auto-unacknowledge",
+      "buttons": "Buttons",
       "deletedAt": "Deleted at",
       "duplicateWindowSeconds": "Duplicate window (seconds)",
       "email": "Email",
@@ -463,6 +464,34 @@
       "ui": "Web UI"
     },
     "yes": "yes"
+  },
+  "buttons": {
+    "acknowledge": "Ack",
+    "acknowledged": "Acknowledged",
+    "firing": "Firing",
+    "hint": "Which buttons the Root message shows. Hidden actions stay in Muster and in the Text commands of Bridges.",
+    "hintOrganization": "Which buttons the Root messages of every Destination show, unless a Destination has a set of its own. Hidden actions stay in Muster and in the Text commands of Bridges.",
+    "items": {
+      "acknowledge": "Acknowledge (with Unacknowledge)",
+      "list": "Buttons",
+      "resolve": "Resolve",
+      "snooze": "Snooze {{duration}}"
+    },
+    "none": "No buttons",
+    "preview": "What {{destination}} shows",
+    "previewOrganization": "What a Root message shows",
+    "resolve": "Resolve",
+    "snooze": "Snooze {{duration}}",
+    "source": {
+      "all": "All buttons",
+      "list": "Only the buttons I tick",
+      "organization": "As in the Organization",
+      "own": "Own for this Destination"
+    },
+    "thisDestination": "this Destination",
+    "title": "Buttons",
+    "titleOrganization": "Buttons of Root messages",
+    "unacknowledge": "Unack"
   },
   "checks": {
     "codes": {
@@ -1167,6 +1196,7 @@
   "docs": {
     "fields": {
       "bridgeEvents": "Bridge event delivery",
+      "buttons": "Button sets",
       "groupKey": "Group key",
       "heartbeat": "Heartbeat",
       "integrationSnippet": "Alertmanager configuration",

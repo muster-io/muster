@@ -10,6 +10,7 @@ files_touched:
   - web/src/components/destination-form.tsx
   - web/src/components/destination-form.test.tsx
   - web/src/components/button-set-editor.tsx
+  - web/src/components/profile-picker.tsx
   - web/src/components/button-set-editor.test.tsx
   - web/src/lib/button-sets.ts
   - web/src/lib/button-sets.test.ts
@@ -59,7 +60,8 @@ issue: 403
 - **API used**: `getDestination`, `updateDestination`, `createDestination` (`buttons`), `getOrganization`,
   `updateOrganization` (`buttons`, `workday_start`, `week_start`), `listRoutes` (the distinct
   `policy.snooze_durations_seconds` of the Organization's Routes, offered as tick boxes in ascending order, with any
-  duration the stored set names that no Route has, so that saving never drops it).
+  duration the stored set names that no Route has, so that saving never drops it), `listRouteProfiles` (the Paging
+  profile's durations, offered and previewed when no Route has any, so that a fresh Organization has tick boxes).
 - **Components**: `button-set-editor.tsx` — the choice (the radio "As in the Organization" / "Own for this
   Destination" on a Destination, "All buttons" / a list on the Organization), the tick boxes and the preview;
   `lib/button-sets.ts` computes what a set shows, as `internal/buttons` does: for a firing Root message Ack, Resolve,

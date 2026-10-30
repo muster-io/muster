@@ -684,6 +684,22 @@ test("a check that passes and an empty state show no link of their own", async (
   await expect(docsLink(page, "Guide", "Alert Groups")).toBeVisible();
 });
 
+test("the Buttons sections of a Destination and of Alert handling link to the button sets", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  for (const path of [`/destinations/${ids.alerts}`, "/admin/organization/alert-handling"]) {
+    await page.goto(path);
+    await expectTarget(
+      docsLink(page.getByTestId("button-set"), "Learn more", "Button sets"),
+      "concepts/statuses-and-commands/",
+      "#button-sets",
+    );
+  }
+  expect(csp).toEqual([]);
+});
+
 test("the links read «Подробнее» and «Как исправить» in Russian", async ({ browser }) => {
   const context = await browser.newContext();
   try {
@@ -715,6 +731,14 @@ async function russian(page: Page): Promise<void> {
   });
   await expect(fix).toHaveText("Как исправить");
   await expectTarget(fix, "integrations/heartbeat/", "#turn-it-on");
+
+  await page.goto(`/destinations/${ids.alerts}`);
+  const buttons = page.getByTestId("button-set").getByRole("link", {
+    name: "Подробнее: Наборы кнопок (откроется в новой вкладке)",
+    exact: true,
+  });
+  await expect(buttons).toHaveText("Подробнее");
+  await expectTarget(buttons, "concepts/statuses-and-commands/", "#button-sets");
 }
 
 /** Runs the steps in a new context at 360 px wide, signed in as the Admin. */
