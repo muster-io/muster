@@ -47,8 +47,8 @@ type Row struct {
 	EventMentions bool
 }
 
-// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15 and C-17.FR-11 that delivery turns into
-// messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
+// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11 and C-25 that delivery turns
+// into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
 // variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those it
 // leaves, a Quiet Publication in those it joins, an update in those of both.
 var Table = []Row{
@@ -63,6 +63,7 @@ var Table = []Row{
 	{groups.EventAlertContinued, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventAnnotationsChanged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventSeverityRaised, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventTeamJoined, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUrgencyRaised, groups.VariantRemoves, FormReply, groups.Loud,
 		[]groups.Mention{groups.MentionOwner, groups.MentionRiseToUrgent}, false},
 	{groups.EventUrgencyRaised, groups.VariantRemovesNone, FormUpdate, groups.Quiet, nil, false},
@@ -74,6 +75,7 @@ var Table = []Row{
 		false},
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventUnacknowledged, groups.VariantOwnerReleased, FormReplyAndUpdate, groups.Loud, nil, false},
 	{groups.EventAcknowledged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventTakeover, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPreviousOwner},

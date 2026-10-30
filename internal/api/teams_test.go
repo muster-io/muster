@@ -423,3 +423,39 @@ func TestSlugUnprocessable(t *testing.T) {
 		t.Error("a refused slug reached the Teams")
 	}
 }
+
+// TestTeamMatchersAPI is C-25.FR-1, FR-5 and FR-11 on the API: a Team takes matchers in the syntax of Route Matchers,
+// given to the Teams as written and read back with the Team, saved with If-Match; an update that omits them keeps
+// them; an invalid regular expression the Teams refuse answers 422 invalid_regex at its pointer.
+func TestTeamMatchersAPI(t *testing.T) {
+	x, ft, _ := newTeamsAPI(t)
+	ft.team.Matchers = []teams.Matcher{{Label: "namespace", Op: "=~", Value: "checkout|billing"}}
+	a := x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams", `{"name":"Checkout","slug":"checkout-team",`+
+		`"own_working_hours":false,"matchers":[{"label":"namespace","op":"=~","value":"checkout|billing"},`+
+		`{"label":"pod","op":"=~","value":"checkout-.*"}]}`)
+	if a.status != http.StatusCreated || !strings.Contains(string(a.body),
+		`"matchers":[{"label":"namespace","op":"=~","value":"checkout|billing"}]`) {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	if in := ft.inputs[0]; in.Matchers == nil || len(*in.Matchers) != 2 || (*in.Matchers)[1] != (teams.Matcher{
+		Label: "pod", Op: "=~", Value: "checkout-.*"}) {
+		t.Errorf("input %+v", in.Matchers)
+	}
+	a = x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID, `{"name":"Checkout","slug":"checkout-team",`+
+		`"own_working_hours":false}`, "If-Match", `"1"`)
+	if a.status != http.StatusOK || ft.inputs[1].Matchers != nil || *ft.versions[0] != 1 {
+		t.Errorf("an update without matchers = %d %s, %+v", a.status, a.body, ft.inputs[1].Matchers)
+	}
+	ft.team.Matchers = []teams.Matcher{}
+	if a := x.as(t, teamsReader, http.MethodGet, "/api/v1/teams/"+teamID, ""); a.status != http.StatusOK ||
+		!strings.Contains(string(a.body), `"matchers":[]`) {
+		t.Errorf("a team without matchers = %d %s", a.status, a.body)
+	}
+	ft.err = &teams.FieldError{Pointer: "/matchers/1/value", Code: teams.CodeInvalidRegex, Detail: "missing )"}
+	status, _, ptr, code := firstProblemError(t, x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID,
+		`{"name":"Checkout","slug":"checkout-team","own_working_hours":false,"matchers":[{"label":"a","op":"=",`+
+			`"value":"b"},{"label":"pod","op":"=~","value":"checkout-("}]}`, "If-Match", `"1"`))
+	if status != http.StatusUnprocessableEntity || ptr != "/matchers/1/value" || code != "invalid_regex" {
+		t.Errorf("invalid regex = %d %s %s", status, ptr, code)
+	}
+}

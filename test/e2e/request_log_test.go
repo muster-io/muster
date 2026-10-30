@@ -189,6 +189,7 @@ func TestRequestLog(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
 	e := newMM(t, h, r)
+	withoutTeamLabel(e.api)
 	t.Cleanup(func() {
 		for _, u := range []string{h.Fakes.Telegram, h.Fakes.Bridge, webhookBase} {
 			restore(t, http.MethodDelete, u+"/_fake/faults", "")

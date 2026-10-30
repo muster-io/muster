@@ -3,9 +3,9 @@
 
 // Complete Team reads for the web tests: a Team, the reference to a Team that an object it owns carries, and a person
 // in a Team. Every required field holds a neutral value — a Team that follows the Organization's Working hours, with
-// nobody in it; a Responder added by hand who linked no messenger — and a test passes, field by field, only what it
-// cares about. A required field added to a read is set here, the one place the TypeScript check names, instead of in
-// every test that builds a Team.
+// no Team matchers and nobody in it; a Responder added by hand who linked no messenger — and a test passes, field by
+// field, only what it cares about. A required field added to a read is set here, the one place the TypeScript check
+// names, instead of in every test that builds a Team.
 
 import type { Team, TeamRef, TeamUser, WorkingHours } from "../../api/gen/model";
 
@@ -28,6 +28,7 @@ export function team(overrides: Partial<Team> = {}): Team {
     description: "",
     own_working_hours: false,
     working_hours: workingHours(),
+    matchers: [],
     user_count: 0,
     created_at: "2026-10-13T09:00:00Z",
     etag: '"1"',

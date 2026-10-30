@@ -31,6 +31,9 @@ export const listTeamsResponseItemsItemOneDescriptionMax = 2000;
 
 export const listTeamsResponseItemsItemOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const listTeamsResponseItemsItemOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const listTeamsResponseItemsItemOneMatchersMax = 50;
+
 export const listTeamsResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -45,7 +48,12 @@ export const ListTeamsResponse = zod.object({
   "start": zod.string().regex(listTeamsResponseItemsItemOneWorkingHoursStartRegExp),
   "end": zod.string().regex(listTeamsResponseItemsItemOneWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(listTeamsResponseItemsItemOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 }).and(zod.object({
   "id": zod.string().regex(listTeamsResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -71,6 +79,9 @@ export const createTeamBodyDescriptionMax = 2000;
 export const createTeamBodyWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const createTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
+export const createTeamBodyMatchersMax = 50;
+
+
 
 export const CreateTeamBody = zod.object({
   "name": zod.string().min(1).max(createTeamBodyNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
@@ -82,7 +93,12 @@ export const CreateTeamBody = zod.object({
   "start": zod.string().regex(createTeamBodyWorkingHoursStartRegExp),
   "end": zod.string().regex(createTeamBodyWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 })
 
 export const createTeamResponseOneNameMax = 200;
@@ -96,6 +112,9 @@ export const createTeamResponseOneDescriptionMax = 2000;
 
 export const createTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const createTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const createTeamResponseOneMatchersMax = 50;
+
 export const createTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -109,7 +128,12 @@ export const CreateTeamResponse = zod.object({
   "start": zod.string().regex(createTeamResponseOneWorkingHoursStartRegExp),
   "end": zod.string().regex(createTeamResponseOneWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 }).and(zod.object({
   "id": zod.string().regex(createTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -138,6 +162,9 @@ export const getTeamResponseOneDescriptionMax = 2000;
 
 export const getTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const getTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const getTeamResponseOneMatchersMax = 50;
+
 export const getTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -151,7 +178,12 @@ export const GetTeamResponse = zod.object({
   "start": zod.string().regex(getTeamResponseOneWorkingHoursStartRegExp),
   "end": zod.string().regex(getTeamResponseOneWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(getTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 }).and(zod.object({
   "id": zod.string().regex(getTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -186,6 +218,9 @@ export const updateTeamBodyDescriptionMax = 2000;
 export const updateTeamBodyWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
+export const updateTeamBodyMatchersMax = 50;
+
+
 
 export const UpdateTeamBody = zod.object({
   "name": zod.string().min(1).max(updateTeamBodyNameMax).describe('Unique, ignoring case, among the Teams that are not deleted.'),
@@ -197,7 +232,12 @@ export const UpdateTeamBody = zod.object({
   "start": zod.string().regex(updateTeamBodyWorkingHoursStartRegExp),
   "end": zod.string().regex(updateTeamBodyWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).optional().describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 })
 
 export const updateTeamResponseOneNameMax = 200;
@@ -211,6 +251,9 @@ export const updateTeamResponseOneDescriptionMax = 2000;
 
 export const updateTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 export const updateTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const updateTeamResponseOneMatchersMax = 50;
+
 export const updateTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -224,7 +267,12 @@ export const UpdateTeamResponse = zod.object({
   "start": zod.string().regex(updateTeamResponseOneWorkingHoursStartRegExp),
   "end": zod.string().regex(updateTeamResponseOneWorkingHoursEndRegExp).describe('Later than `start` on the same day, else `422` `out_of_range` at the end.'),
   "time_zone": zod.string().describe('IANA time zone, such as `Europe/Berlin`.')
-}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.')
+}).describe('The Team\'s own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization\'s when the Team has none of its own.'),
+  "matchers": zod.array(zod.object({
+  "label": zod.string().min(1),
+  "op": zod.enum(['=', '!=', '=~', '!~']),
+  "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
 }).and(zod.object({
   "id": zod.string().regex(updateTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),

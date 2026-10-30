@@ -2026,24 +2026,231 @@ func TestIntegrationButtonSets(t *testing.T) {
 	})
 }
 
+// TestIntegrationTeamLabelAndMatchers runs 0024 over a database at 23 with an Alert Group, a Timeline entry and an
+// outgoing webhook event of 0023: up gives the Organization the Team label team and teams_version 0, the Alert Group no
+// unknown values, keeps the rows, validates the _v2 CHECKs on the parent and the partition of timeline_entries and on
+// webhook_events and drops the old ones, so that team_joined (kind alerts, with its Team and rule) and
+// unknown_team_value (kind system, with the same system_event and the value) are taken in both tables, in the right
+// kind only, and an unknown event, rule or Team label is not; the Teams of Alerts and Alert Groups take one row per
+// Team with the rule label or a matcher. Down deletes the rows of the two events, keeps the older ones, drops the new
+// tables and columns and restores the old CHECKs, validated; up again works.
+func TestIntegrationTeamLabelAndMatchers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 23)
+		e.exec(t, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, 'NT0000000000T1', 'am', 'webhook_only', '{}', 45, false, 300, 'not_configured', '2026-10-30',
+				'2026-10-30'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000T1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-10-30', '2026-10-30'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels, annotations, status, starts_at,
+			fired_at, first_seen_at, last_seen_at, updated_at)
+			SELECT org_id, id, 'a1', '{"team":"payments"}', '{}', 'firing', '2026-10-30', '2026-10-30', '2026-10-30',
+				'2026-10-30', '2026-10-30'
+			FROM integrations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000T1', 1, id, '{alertname}', '{}', sha256('t1'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-10-30', '2026-10-30'
+			FROM routes`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000T1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-10-30', '{}', 1, 1,
+				'healthy', '2026-10-30', '2026-10-30'
+			FROM organizations`)
+		n := 0
+		// entry records a lifecycle event of the kind, with the system event, Team, rule and value of extra.
+		entry := func(t *testing.T, event, kind, extra string) error {
+			t.Helper()
+			n++
+			columns, values := "", ""
+			if extra != "" {
+				parts := strings.SplitN(extra, "|", 2)
+				columns, values = ", "+parts[0], ", "+parts[1]
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at,
+				kind, event, event_seq, loudness, actor_kind, transport`+columns+`)
+				SELECT org_id, $1, id, '2026-10-30 12:00:00+00', $2, $3, $4, 'quiet', 'system', 'system'`+values+`
+				FROM alert_groups`, fmt.Sprintf("TE0000000%05d", n), kind, event, n)
+			return err
+		}
+		hook := func(t *testing.T, event string) error {
+			t.Helper()
+			n++
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO webhook_events (org_id, destination_id, alert_group_id,
+				sequence, webhook_id, event, notify, occurred_at, body, state, next_attempt_at, created_at)
+				SELECT g.org_id, d.id, g.id, $1, $2, $3, false, '2026-10-30', '{}', 'pending', '2026-10-30',
+					'2026-10-30'
+				FROM alert_groups g, destinations d`, n, fmt.Sprintf("wh-%d", n), event)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		if err := entry(t, "created", "status", ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := hook(t, "created"); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, "team_joined before 0024", entry(t, "team_joined", "alerts", ""), "timeline_entries_event_check")
+		refused(t, "a webhook event team_joined before 0024", hook(t, "team_joined"), "webhook_events_event_check")
+		checks := func(t *testing.T) string {
+			t.Helper()
+			return e.constraints(t, []string{"timeline_entries", "timeline_entries_p202610"}, "timeline_entries_event") +
+				" " + e.constraints(t, []string{"timeline_entries", "timeline_entries_p202610"},
+				"timeline_entries_system") + " " + e.constraints(t, []string{"webhook_events"}, "webhook_events_event")
+		}
+		old := "timeline_entries.timeline_entries_event_check:true timeline_entries.timeline_entries_event_kind_check:true " +
+			"timeline_entries_p202610.timeline_entries_event_check:true " +
+			"timeline_entries_p202610.timeline_entries_event_kind_check:true " +
+			"timeline_entries.timeline_entries_system_check:true " +
+			"timeline_entries.timeline_entries_system_event_check:true " +
+			"timeline_entries_p202610.timeline_entries_system_check:true " +
+			"timeline_entries_p202610.timeline_entries_system_event_check:true " +
+			"webhook_events.webhook_events_event_check:true"
+		if got := checks(t); got != old {
+			t.Fatalf("before 0024: constraints\n%s\nwant\n%s", got, old)
+		}
+
+		e.step(t, 1)
+		v2 := "timeline_entries.timeline_entries_event_kind_v2_check:true " +
+			"timeline_entries.timeline_entries_event_v2_check:true " +
+			"timeline_entries_p202610.timeline_entries_event_kind_v2_check:true " +
+			"timeline_entries_p202610.timeline_entries_event_v2_check:true " +
+			"timeline_entries.timeline_entries_system_event_v2_check:true " +
+			"timeline_entries.timeline_entries_system_v2_check:true " +
+			"timeline_entries_p202610.timeline_entries_system_event_v2_check:true " +
+			"timeline_entries_p202610.timeline_entries_system_v2_check:true " +
+			"webhook_events.webhook_events_event_v2_check:true"
+		if got := checks(t); got != v2 {
+			t.Errorf("after up: constraints\n%s\nwant\n%s", got, v2)
+		}
+		for what, sql := range map[string]string{
+			"the Team label team": `SELECT count(*) FROM organizations WHERE team_label = 'team' AND teams_version = 0`,
+			"no unknown values":   `SELECT count(*) FROM alert_groups WHERE unknown_team_values = '{}'`,
+			"the entry of 0023":   `SELECT count(*) FROM timeline_entries WHERE event = 'created'`,
+			"the event of 0023":   `SELECT count(*) FROM webhook_events WHERE event = 'created'`,
+			"the validated label check": `SELECT count(*) FROM pg_constraint
+				WHERE conname = 'organizations_team_label_check' AND convalidated`,
+		} {
+			if got := e.count(t, sql); got != 1 {
+				t.Errorf("after up: %d rows of %s", got, what)
+			}
+		}
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000T1', 'Payments', 'payments', '2026-10-30', '2026-10-30' FROM organizations`)
+		const team = `team_id, team_rule|(SELECT id FROM teams), 'label'`
+		for name, err := range map[string]error{
+			"team_joined":              entry(t, "team_joined", "alerts", team),
+			"team_joined by a matcher": entry(t, "team_joined", "alerts", `team_id, team_rule, team_matcher|(SELECT id FROM teams), 'matcher', 'pod=~"x"'`),
+			"unknown_team_value": entry(t, "unknown_team_value", "system",
+				`system_event, team_value|'unknown_team_value', 'Payments'`),
+			"a webhook event team_joined":        hook(t, "team_joined"),
+			"a webhook event unknown_team_value": hook(t, "unknown_team_value"),
+		} {
+			if err != nil {
+				t.Errorf("after up, %s: %v", name, err)
+			}
+		}
+		refused(t, "team_joined of kind system", entry(t, "team_joined", "system", `system_event|'unknown_team_value'`),
+			"timeline_entries_event_kind_v2_check")
+		refused(t, "unknown_team_value of kind alerts", entry(t, "unknown_team_value", "alerts", ""),
+			"timeline_entries_event_kind_v2_check")
+		refused(t, "unknown_team_value as moved_to_default_route", entry(t, "unknown_team_value", "system",
+			`system_event|'moved_to_default_route'`), "timeline_entries_system_v2_check")
+		refused(t, "an unknown rule", entry(t, "team_joined", "alerts", `team_id, team_rule|(SELECT id FROM teams), 'x'`),
+			"timeline_entries_team_rule_check")
+		refused(t, "an unknown event", entry(t, "team_left", "alerts", ""), "timeline_entries_event_kind_v2_check")
+		refused(t, "an unknown webhook event", hook(t, "team_left"), "webhook_events_event_v2_check")
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE organizations SET team_label = 'team-name'`)
+		refused(t, "a Team label that is no label name", err, "organizations_team_label_check")
+		e.exec(t, `INSERT INTO team_matchers (org_id, team_id, label, op, value, position)
+			SELECT org_id, id, 'pod', '=~', 'x', 0 FROM teams`)
+		e.exec(t, `INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
+			SELECT a.org_id, a.id, t.id, 'matcher', 'pod=~"x"' FROM alerts a, teams t`)
+		e.exec(t, `UPDATE alerts SET unknown_team_value = 'Payments'`)
+		e.exec(t, `INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, joined_at)
+			SELECT g.org_id, g.id, t.id, 'label', '2026-10-30' FROM alert_groups g, teams t`)
+		_, err = e.d.Pool.Exec(t.Context(), `INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule,
+			joined_at) SELECT g.org_id, g.id, t.id, 'label', '2026-10-30' FROM alert_groups g, teams t`)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23505" {
+			t.Errorf("a Team twice in an Alert Group: %v", err)
+		}
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE alert_group_teams SET matcher = 'pod=~"x"'`)
+		refused(t, "a matcher with the rule label", err, "alert_group_teams_matcher_check")
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE alert_teams SET matcher = NULL`)
+		refused(t, "the rule matcher without a matcher", err, "alert_teams_matcher_check")
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'alert_group_teams_team_idx'
+			AND indexdef LIKE '%(org_id, team_id, alert_group_id)'`); got != 1 {
+			t.Error("after up: no alert_group_teams_team_idx")
+		}
+
+		e.step(t, -1)
+		if got := checks(t); got != old {
+			t.Errorf("after down: constraints\n%s\nwant\n%s", got, old)
+		}
+		for what, sql := range map[string]string{
+			"the entries of the new events": `SELECT count(*) FROM timeline_entries
+				WHERE event IN ('team_joined', 'unknown_team_value')`,
+			"the webhook events of the new events": `SELECT count(*) FROM webhook_events
+				WHERE event IN ('team_joined', 'unknown_team_value')`,
+			"the new tables": `SELECT count(*) FROM pg_class
+				WHERE relname IN ('team_matchers', 'alert_teams', 'alert_group_teams')`,
+			"the new columns": `SELECT count(*) FROM information_schema.columns
+				WHERE (table_name = 'organizations' AND column_name IN ('team_label', 'teams_version'))
+				   OR (table_name = 'alerts' AND column_name = 'unknown_team_value')
+				   OR (table_name = 'alert_groups' AND column_name = 'unknown_team_values')
+				   OR (table_name = 'timeline_entries' AND column_name LIKE 'team_%')`,
+		} {
+			if got := e.count(t, sql); got != 0 {
+				t.Errorf("after down: %d %s are left", got, what)
+			}
+		}
+		if got := e.count(t, `SELECT count(*) FROM timeline_entries`) + e.count(t, `SELECT count(*) FROM webhook_events`); got != 2 {
+			t.Errorf("after down: %d rows, want the entry and the event of 0023", got)
+		}
+		refused(t, "team_joined after down", entry(t, "team_joined", "alerts", ""), "timeline_entries_event_check")
+
+		e.step(t, 1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 24 || checks(t) != v2 {
+			t.Errorf("up again: version %d, dirty %v, %v, constraints %s", v, dirty, err, checks(t))
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (23)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (24)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":23`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":24`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":23`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":24`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2059,10 +2266,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (23)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (24)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":23`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":24`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

@@ -100,8 +100,16 @@ func TestTestEvent(t *testing.T) {
 		b.Actor.Transport != "ui" || !b.OccurredAt.Equal(t0) {
 		t.Fatalf("body %s %v", e.ep.bodies[0], err)
 	}
-	if !strings.Contains(string(e.ep.bodies[0]), `"test":true`) {
-		t.Errorf("test field %s", e.ep.bodies[0])
+	if !strings.Contains(string(e.ep.bodies[0]), `"test":true`) || !strings.Contains(string(e.ep.bodies[0]),
+		`"teams":[]`) {
+		t.Errorf("test field and teams %s", e.ep.bodies[0])
+	}
+	var doc any
+	if err := json.Unmarshal(e.ep.bodies[0], &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventSchema(t).VisitJSON(doc); err != nil {
+		t.Errorf("the test event against OutgoingWebhookEvent: %v\n%s", err, e.ep.bodies[0])
 	}
 	v := steps[0].Request
 	if v.Method != http.MethodPost || !strings.HasSuffix(v.URL, "/hook/auto?k=[redacted]") ||

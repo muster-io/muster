@@ -49,7 +49,10 @@
   S-115) and
   [`0023_button_sets`](../../internal/db/migrations/0023_button_sets.up.sql)
   (`organizations.buttons`, `destinations.buttons` and the re-render of their open Root messages through
-  `open_group_updates`, C-28.FR-8 to FR-10), in
+  `open_group_updates`, C-28.FR-8 to FR-10) and
+  [`0024_team_label_and_matchers`](../../internal/db/migrations/0024_team_label_and_matchers.up.sql)
+  (the Team label, Team matchers, the Teams of Alerts and Alert Groups and the lifecycle events `team_joined` and
+  `unknown_team_value`, C-25.FR-5 to FR-7, S-118), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -144,8 +147,9 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 
 57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
 indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `request_log` (0013), the queue of
-changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), and the Teams, `teams` and
-`team_users` (0022), which makes 62 tables.
+changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), the Teams, `teams` and
+`team_users` (0022), and the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
+`alert_group_teams` (0024), which makes 65 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -156,11 +160,11 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | API tokens | `service_accounts`, `api_tokens`, `api_token_permissions` | users / auth | — |
 | Messengers | `connections`, `destinations`, `destination_secrets`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections; `teams` clears `destinations.owning_team_id` when it deletes the Team | expired requests and handled Bridge event ids pruned |
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
-| Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences` | ingest, routing | 90 days after resolution, batched delete |
+| Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
-| Teams | `teams`, `team_users` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
-| Alert Groups | `alert_groups`, `alert_group_alerts`, **`timeline_entries`**, `notes` | `groups` only | summaries and their Notes 2 years; details 90 days |
+| Teams | `teams`, `team_users`, `team_matchers` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
+| Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
 | Request log | `request_log` | requestlog | newest `request_log.max_records` per owner and `request_log.max_age`; batched `DELETE` every minute |
@@ -661,6 +665,13 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   `{"button": "snooze_preset", "preset": "tomorrow" | "week_start"}`); a `CHECK` keeps it an object. A change of it
   inserts a row `organization_buttons` of `open_group_updates` in the same transaction
   ([section 5](#5-queues-and-claims)).
+  `team_label` (migration 0024, C-25.FR-5, `organization.team_label`, default `team`) is the label whose value names a
+  Team by its slug; a `CHECK` keeps it a label name, and the API refuses a label that an Internal alert sets itself
+  (`internalalerts.ReservedLabels`) with `422` `reserved_label`. `teams_version` is the stamp of the Teams that every
+  replica caches for the classification of Alerts ([4.7](#47-snapshot-semantics-alertmanager-routes-and-groups-alerts-presence)):
+  every creation, change or deletion of a Team raises it in its transaction, after taking the Organization's row
+  `FOR NO KEY UPDATE` ahead of the Team's own — the order of a Route saved with an owning Team, which bumps the
+  Route list first — and an update of the Organization that changes the Team label raises it in the same `UPDATE`.
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.
@@ -934,6 +945,16 @@ Serves C-06, C-07.FR-5, C-08.FR-13; [ADR-0002](../adr/0002-webhook-only-ingestio
   (C-20.FR-1), which range over the last `organization.severity_values_window` of every Integration of the Organization
   at once, where the sorting index leads with `integration_id`. Internal alerts are the rows of the built-in
   Integration, deduplicated by fingerprint through the same unique key.
+  `unknown_team_value` (migration 0024) is the value of the Team label that named no Team when the Alert last started
+  firing (C-25.FR-7), null for none.
+- **`alert_teams`** (migration 0024, C-25.FR-5) — the Teams an Alert belongs to, primary key `(alert_id, team_id)`, with
+  the rule that decided each: `label` (the value of the Team label, with the Static labels, equals the Team's slug) or
+  `matcher` with the Team matcher in the Alertmanager syntax (`CHECK` keeps the matcher exactly with the rule
+  `matcher`). Routing writes them, with `alerts.unknown_team_value`, in the Snapshot's transaction for every fired
+  change — the first firing of an Alert and each firing after a resolve, a Continuation being none — replacing those of
+  the previous firing; the classification reads the Teams that are not deleted and their Team matchers, compiled and
+  cached per replica under `organizations.team_label` and `teams_version`, which the Snapshot reads with the Routes'
+  stamp. The rows go with their Alert (`ON DELETE CASCADE`); from S-163 the evaluation on save adds to them.
 - **`alert_presences`** — the presence of an Alert in one `groupKey`: `state` (`listed`, `missed`, `gone`, `stale`),
   `last_seen_at`, `last_listed_window`, `last_seen_clock_ms` and `missed_since`, the receipt time of the first window
   that missed it (set only while `missed`; `CHECK` keeps them together). An Alert listed in several Alertmanager groups
@@ -1102,10 +1123,26 @@ and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cl
 Transport CHECK is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the
 lifecycle event tables: every event has its Timeline kind (`x-event-kinds` of the API specification), a lifecycle
 event always carries loudness and a sequence number, an entry without an event is a `system` entry,
-`moved_to_default_route` is both, and `mentions` only uses the eight symbolic names. Delivery events are not stored
+`moved_to_default_route` and `unknown_team_value` are both, and `mentions` only uses the eight symbolic names.
+Migration 0024 replaced the `CHECK`s of the events, event kinds, system events and the system rule of `0001` by `_v2`
+ones with `team_joined` (kind `alerts`) and `unknown_team_value` (kind `system`, with the same `system_event`), added
+`NOT VALID`, validated in a second transaction and the old ones dropped in a third, and added the columns of the Teams:
+`team_id`, `team_rule` and `team_matcher` of `team_joined`, `team_value` of `unknown_team_value`; `team_id` has no
+foreign key, as the actor columns have none, and names a Team that may be deleted since. Delivery events are not stored
 here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
 ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
 `(org_id, alert_group_id, at, id)`, serves the Timeline (both directions, kind filter).
+
+**`alert_group_teams`** (migration 0024, C-25.FR-6) — the Teams of an Alert Group, primary key
+`(alert_group_id, team_id)`: the Teams of every Alert that ever joined it, with the rule of the first that brought each
+(`label` before `matcher` among the Alerts of one change), its Team matcher and `joined_at`. They only grow: the
+dispatcher adds, when Alerts join — `created`, `alerts_added`, `reopened`, a Replacement, the end of a Grace period —
+the Teams of the joining Alerts that are not deleted with `INSERT ... ON CONFLICT DO NOTHING RETURNING`, and records one
+Quiet `team_joined` per Team it returns; nothing removes a row but the deletion of its Alert Group (`ON DELETE
+CASCADE`), so a deleted Team stays by its name (C-25.FR-10). `alert_groups.unknown_team_values` holds the values of the
+Team label without a Team already recorded, each recorded once as a Quiet `unknown_team_value`. The index
+`alert_group_teams_team_idx` `(org_id, team_id, alert_group_id)` serves the filter by Team of the list and the counts
+and "My Teams" (the Teams of the caller from `team_users`). Written only by `groups` (lint 2).
 
 **`notes`** — the Notes: text a User or a Service account adds from the UI or the API, with its author, the token used,
 the Transport and the `event_seq` of the `note_added` lifecycle event it records (always Quiet, without Mentions).
@@ -1212,7 +1249,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   timers, from which the call that delivers the event observes `muster_delivery_latency_seconds`.
   `UNIQUE (destination_id, alert_group_id, sequence)`; only the head event of an Alert Group and Destination is
   attempted, the next waits until it is `delivered` or `not_delivered` (at least once, in order, never collapsed). Not
-  subject to Storms and never dropped while the Destination is Broken, with no age limit.
+  subject to Storms and never dropped while the Destination is Broken, with no age limit. The `CHECK` of `event` lists
+  every lifecycle event; migration 0024 replaced the one of `0001` by `webhook_events_event_v2_check` with
+  `team_joined` and `unknown_team_value`, in the three transactions of the Timeline's.
 - **`delivery_events`** (partitioned by month on `occurred_at`) — what happened while delivering: Publication, possible
   duplicate, Not delivered with its error class and error, delivered late, deleted in the messenger, republished, Thread
   not attached, rejected markup, Broken and recovered, Storm summary, final edit, republished past the edit window
@@ -1367,6 +1406,9 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   the Routes, that the Team owned, raising their `version` as their own saves do and recording each in the Audit log
   by the system, with the queries of `internal/teams` — the package stays a leaf of the import graph; a save that names
   an owner reads the Team `FOR SHARE` before it locks its own row, the order the deletion takes.
+- **`team_matchers`** (migration 0024, C-25.FR-1, FR-5) — the Team matchers of each Team in their order (`position`),
+  in the syntax of Route Matchers; a save replaces them as a whole and the deletion of the Team removes them. Each is
+  enough on its own: an Alert that any one picks belongs to the Team.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3). The index `team_users_user_idx` on `(org_id, user_id)` serves "My Teams" and the deletion of a
   user, which removes their rows in its transaction; disabling a user keeps them.

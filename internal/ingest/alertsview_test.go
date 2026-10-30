@@ -29,6 +29,24 @@ type fakeView struct {
 	rows    []viewRow
 	batches []int32
 	fail    error
+	// teamsFail fails ListViewAlertTeams alone.
+	teamsFail error
+}
+
+// ListViewAlertTeams gives every third Alert the Team payments by the label and the deleted Team checkout by a matcher.
+func (f *fakeView) ListViewAlertTeams(_ context.Context, arg dbgen.ListViewAlertTeamsParams) (
+	[]dbgen.ListViewAlertTeamsRow, error) {
+	var out []dbgen.ListViewAlertTeamsRow
+	for _, id := range arg.AlertIds {
+		if id%3 == 0 {
+			out = append(out, dbgen.ListViewAlertTeamsRow{AlertID: id, PublicID: "TM0000000000CH", Name: "Checkout",
+				Slug: "checkout", Deleted: true, Rule: "matcher",
+				Matcher: pgtype.Text{String: `pod=~"api-.*"`, Valid: true}},
+				dbgen.ListViewAlertTeamsRow{AlertID: id, PublicID: "TM0000000000PA", Name: "Payments",
+					Slug: "payments", Rule: "label"})
+		}
+	}
+	return out, f.teamsFail
 }
 
 func (f *fakeView) FindViewIntegration(_ context.Context, arg dbgen.FindViewIntegrationParams) (
@@ -210,9 +228,18 @@ func TestAlertsView(t *testing.T) {
 	if a3.AlertGroup != nil {
 		t.Errorf("alert 3 in alert group %+v", a3.AlertGroup)
 	}
+	// C-25.FR-5, C-06.FR-19 revised: the Teams of each Alert with the rule, the matcher and a deleted Team by its name.
+	if len(a3.Teams) != 2 || a3.Teams[0] != (AlertTeam{PublicID: "TM0000000000CH", Name: "Checkout", Slug: "checkout",
+		Deleted: true, Rule: "matcher", Matcher: a3.Teams[0].Matcher}) || *a3.Teams[0].Matcher != `pod=~"api-.*"` ||
+		a3.Teams[1].Rule != "label" || a3.Teams[1].Matcher != nil {
+		t.Errorf("teams of alert 3 = %+v", a3.Teams)
+	}
 	a2 := all[slices.IndexFunc(all, func(a ViewAlert) bool { return a.ID == 2 })]
 	if a2.AlertGroup == nil || *a2.AlertGroup != (AlertGroupRef{PublicID: "AGAAAAAAAAAAAA", Number: 2}) {
 		t.Errorf("alert 2 in alert group %+v", a2.AlertGroup)
+	}
+	if a2.Teams == nil || len(a2.Teams) != 0 {
+		t.Errorf("teams of alert 2 = %+v", a2.Teams)
 	}
 	if a2.State != StatusResolved || *a2.Reason != ResolveGone || *a2.ReasonText != GoneReasonText ||
 		a2.ResolvedAt == nil || a2.Warnings == nil || a2.Route != nil || a2.SeverityLevel != nil || a2.SeverityRaw != nil {
@@ -294,6 +321,11 @@ func TestAlertsViewErrors(t *testing.T) {
 		t.Error("no error")
 	}
 	store.fail = nil
+	store.teamsFail = errors.New("down")
+	if _, err := v.List(t.Context(), AlertFilter{Integration: "NTAAAAAAAAAAAA"}); err == nil {
+		t.Error("teams: no error")
+	}
+	store.teamsFail = nil
 	store.rows[0].Labels = []byte(`[]`)
 	if _, err := v.List(t.Context(), AlertFilter{Integration: "NTAAAAAAAAAAAA", Sort: SortStartsDesc}); err == nil {
 		t.Error("bad labels: no error")

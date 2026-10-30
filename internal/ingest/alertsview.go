@@ -47,6 +47,7 @@ type viewQueries interface {
 	ListViewGroupKeys(ctx context.Context, arg dbgen.ListViewGroupKeysParams) ([]dbgen.ListViewGroupKeysRow, error)
 	ListViewAlertGroups(ctx context.Context, arg dbgen.ListViewAlertGroupsParams) ([]dbgen.ListViewAlertGroupsRow,
 		error)
+	ListViewAlertTeams(ctx context.Context, arg dbgen.ListViewAlertTeamsParams) ([]dbgen.ListViewAlertTeamsRow, error)
 }
 
 // AlertPosition is the sort key of an Alert in the view: the sorted time and the id.
@@ -91,6 +92,19 @@ type ViewAlert struct {
 	SeverityRaw   *string
 	// AlertGroup is the Alert Group it fires in, or last fired in; nil before grouping (C-06.FR-19).
 	AlertGroup *AlertGroupRef
+	// Teams are the Teams it belongs to, decided when it last started firing (C-25.FR-5, revised C-06.FR-19).
+	Teams []AlertTeam
+}
+
+// AlertTeam is a Team an Alert belongs to: the Team, deleted or not, the rule that decided it — label or matcher — and
+// the Team matcher of the rule matcher.
+type AlertTeam struct {
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+	Rule     string
+	Matcher  *string
 }
 
 // AlertGroupRef names an Alert Group by its public_id and #N.
@@ -298,6 +312,7 @@ func viewAlertOf(r viewRow) (ViewAlert, error) {
 	a := ViewAlert{ID: r.ID, Fingerprint: r.Fingerprint, State: r.Status, StartsAt: r.StartsAt.UTC(),
 		LastSeenAt: r.LastSeenAt.UTC(), ResolvedAt: timeOf(r.ResolvedAt), Reason: textOf(r.ResolveReason),
 		ReasonText: textOf(r.ResolveReasonText), Warnings: r.StaticLabelConflicts, GroupKeys: []string{},
+		Teams:         []AlertTeam{},
 		SeverityLevel: textOf(r.SeverityLevel), SeverityRaw: textOf(r.SeverityRaw)}
 	if r.RoutePublicID.Valid {
 		a.Route = &RouteRef{PublicID: r.RoutePublicID.String, Name: r.RouteName.String}
@@ -314,7 +329,7 @@ func viewAlertOf(r viewRow) (ViewAlert, error) {
 	return a, nil
 }
 
-// withGroupKeys adds the groupKeys and the Alert Group of each Alert of the page.
+// withGroupKeys adds the groupKeys, the Alert Group and the Teams of each Alert of the page.
 func (v *AlertsView) withGroupKeys(ctx context.Context, page AlertPage) (AlertPage, error) {
 	if len(page.Alerts) == 0 {
 		return page, nil
@@ -338,6 +353,15 @@ func (v *AlertsView) withGroupKeys(ctx context.Context, page AlertPage) (AlertPa
 	}
 	for _, r := range groups {
 		page.Alerts[index[r.AlertID]].AlertGroup = &AlertGroupRef{PublicID: r.PublicID, Number: r.Number}
+	}
+	teams, err := v.store.ListViewAlertTeams(ctx, dbgen.ListViewAlertTeamsParams{OrgID: v.orgID, AlertIds: ids})
+	if err != nil {
+		return AlertPage{}, fmt.Errorf("list the teams of the alerts: %w", err)
+	}
+	for _, r := range teams {
+		a := &page.Alerts[index[r.AlertID]]
+		a.Teams = append(a.Teams, AlertTeam{PublicID: r.PublicID, Name: r.Name, Slug: r.Slug, Deleted: r.Deleted,
+			Rule: r.Rule, Matcher: textOf(r.Matcher)})
 	}
 	return page, nil
 }

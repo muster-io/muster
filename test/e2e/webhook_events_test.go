@@ -108,6 +108,7 @@ func TestWebhookEvents(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
 	e := newMM(t, h, r)
+	withoutTeamLabel(e.api)
 
 	t.Run("storm", func(t *testing.T) {
 		e := e.on(t)

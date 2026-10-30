@@ -153,6 +153,23 @@ func Lookup(name string) *Definition {
 	return nil
 }
 
+// laterLabels are the entity and name labels of the Internal alerts of L2 that later capabilities register — about a
+// Schedule (C-27.FR-7), a Team and a Connection — which the Team label may not take before they exist (C-25.FR-5).
+var laterLabels = []string{"schedule", "schedule_name", "team_id", "team_name", "connection", "connection_name"}
+
+// ReservedLabels are the labels that an Internal alert sets itself, sorted: alertname, severity, every label of the
+// registry and those of the later Internal alerts. The Team label may not be one of them (C-25.FR-5, C-20.FR-1), so a
+// new Internal alert extends the list by registering.
+func ReservedLabels() []string {
+	out := []string{"alertname", "severity"}
+	for _, d := range registry {
+		out = append(out, d.Labels()...)
+	}
+	out = append(out, laterLabels...)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // Definitions returns the registry sorted by name, after checking it: names are unique and start with Muster, the
 // severity is known, an entity label has a name label, label names are valid and unique, and the texts are set.
 func Definitions() ([]*Definition, error) {

@@ -3,6 +3,8 @@
  * Do not edit manually.
  */
 import type { NullableStatusChangeReason } from './nullableStatusChangeReason';
+import type { TeamRef } from './teamRef';
+import type { TeamRule } from './teamRule';
 import type { TimelineAlertsEntryKind } from './timelineAlertsEntryKind';
 import type { TimelineEntryBase } from './timelineEntryBase';
 import type { TimelineLifecycleFields } from './timelineLifecycleFields';
@@ -23,4 +25,13 @@ export type TimelineAlertsEntry = TimelineEntryBase & TimelineLifecycleFields & 
   reason_code?: NullableStatusChangeReason | null;
   /** Static labels the added Alerts already carried. */
   label_conflicts?: string[];
+  /** The Team that joined, for `team_joined`; a Team deleted since keeps its name. */
+  team?: TeamRef;
+  /** The rule that brought the Team, for `team_joined`. */
+  team_rule?: TeamRule;
+  /**
+     * The Team matcher that brought the Team, for `team_joined` by the rule `matcher`.
+     * @nullable
+     */
+  team_matcher?: string | null;
 });

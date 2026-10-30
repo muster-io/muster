@@ -47,6 +47,13 @@ const (
 	EventNoticesMissed      Event = "notices_missed"
 )
 
+// The lifecycle events of the Teams of an Alert Group (C-25.FR-6, FR-7, revised C-09.FR-22): a Team that joins its
+// Teams, and a value of the Team label that names no Team, once per value.
+const (
+	EventTeamJoined       Event = "team_joined"
+	EventUnknownTeamValue Event = "unknown_team_value"
+)
+
 // Kind is the Timeline kind of an entry.
 type Kind string
 
@@ -111,7 +118,7 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15 and C-17.FR-11, a closed list: every
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11 and C-25, a closed list: every
 // transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of timeline_entries
 // back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of the notices it
 // stands for (ack_timeout or owner).
@@ -125,6 +132,7 @@ var Table = []Row{
 	{EventAlertContinued, VariantAny, KindAlerts, Quiet, nil},
 	{EventAnnotationsChanged, VariantAny, KindAlerts, Quiet, nil},
 	{EventSeverityRaised, VariantAny, KindAlerts, Quiet, nil},
+	{EventTeamJoined, VariantAny, KindAlerts, Quiet, nil},
 	{EventUrgencyRaised, VariantRemoves, KindStatus, Loud, []Mention{MentionOwner, MentionRiseToUrgent}},
 	{EventUrgencyRaised, VariantRemovesNone, KindStatus, Quiet, nil},
 	{EventReopened, VariantFiring, KindStatus, Loud, []Mention{MentionReopen}},
@@ -133,6 +141,7 @@ var Table = []Row{
 	{EventSnoozeEnded, VariantAny, KindStatus, Loud, []Mention{MentionSnoozeEnded}},
 	{EventResolved, VariantAny, KindStatus, Quiet, nil},
 	{EventMovedToDefaultRoute, VariantAny, KindSystem, Quiet, nil},
+	{EventUnknownTeamValue, VariantAny, KindSystem, Quiet, nil},
 	{EventUnacknowledged, VariantOwnerReleased, KindStatus, Loud, nil},
 	{EventAcknowledged, VariantAny, KindStatus, Quiet, nil},
 	{EventTakeover, VariantAny, KindStatus, Loud, []Mention{MentionPreviousOwner}},
@@ -174,12 +183,14 @@ func statusVariant(s Status) Variant {
 // SystemEvent is the system_event of a system entry.
 type SystemEvent string
 
-// The system entries this capability writes, and fallback_template_used, which the dispatcher records when the
-// re-render step reports a Route template that failed (C-12.FR-6).
+// The system entries this capability writes, fallback_template_used, which the dispatcher records when the
+// re-render step reports a Route template that failed (C-12.FR-6), and unknown_team_value, the system entry of the
+// lifecycle event of the same name (C-25.FR-7).
 const (
 	SystemMovedToDefaultRoute  SystemEvent = "moved_to_default_route"
 	SystemMusterUnavailable    SystemEvent = "muster_unavailable"
 	SystemFallbackTemplateUsed SystemEvent = "fallback_template_used"
+	SystemUnknownTeamValue     SystemEvent = "unknown_team_value"
 )
 
 // ReasonMinimumSeverity is the reason of a severity_raised, or of the Quiet urgency_raised that removes nothing, that

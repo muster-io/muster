@@ -378,7 +378,7 @@ SELECT o.route_order_version,
        (SELECT coalesce(sum(r.version), 0)
         FROM routes r
         WHERE r.org_id = $1 AND r.deleted_at IS NULL)::bigint AS route_versions,
-       o.severity_label, o.severity_mapping
+       o.severity_label, o.severity_mapping, o.team_label, o.teams_version
 FROM organizations o
 WHERE o.id = $1
 `
@@ -388,6 +388,8 @@ type GetRoutingStampRow struct {
 	RouteVersions     int64
 	SeverityLabel     string
 	SeverityMapping   []byte
+	TeamLabel         string
+	TeamsVersion      int64
 }
 
 // GetRoutingStamp reads what decides whether the cached evaluation order is current — the version of the Route list,
@@ -401,6 +403,8 @@ func (q *Queries) GetRoutingStamp(ctx context.Context, orgID int64) (GetRoutingS
 		&i.RouteVersions,
 		&i.SeverityLabel,
 		&i.SeverityMapping,
+		&i.TeamLabel,
+		&i.TeamsVersion,
 	)
 	return i, err
 }
@@ -425,6 +429,34 @@ func (q *Queries) HasOpenAlertGroups(ctx context.Context, arg HasOpenAlertGroups
 	var open bool
 	err := row.Scan(&open)
 	return open, err
+}
+
+const insertAlertTeams = `-- name: InsertAlertTeams :exec
+INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
+SELECT $1, t.alert_id, t.team_id, t.rule, nullif(t.matcher, '')
+FROM (SELECT unnest($2::bigint[]) AS alert_id, unnest($3::bigint[]) AS team_id,
+             unnest($4::text[]) AS rule, unnest($5::text[]) AS matcher) AS t
+`
+
+type InsertAlertTeamsParams struct {
+	OrgID    int64
+	AlertIds []int64
+	TeamIds  []int64
+	Rules    []string
+	Matchers []string
+}
+
+// InsertAlertTeams records the Teams of Alerts that start firing with the rule that decided each, and the Team matcher
+// of the rule matcher; an empty matcher is null.
+func (q *Queries) InsertAlertTeams(ctx context.Context, arg InsertAlertTeamsParams) error {
+	_, err := q.db.Exec(ctx, insertAlertTeams,
+		arg.OrgID,
+		arg.AlertIds,
+		arg.TeamIds,
+		arg.Rules,
+		arg.Matchers,
+	)
+	return err
 }
 
 const insertOpenGroupUpdate = `-- name: InsertOpenGroupUpdate :exec
@@ -1142,6 +1174,30 @@ SELECT pg_notify($1::text, '')
 // NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
 	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
+}
+
+const resetAlertTeams = `-- name: ResetAlertTeams :exec
+WITH gone AS (
+    DELETE FROM alert_teams
+    WHERE org_id = $1 AND alert_id = ANY($2::bigint[])
+)
+UPDATE alerts a
+SET unknown_team_value = nullif(v.value, '')
+FROM (SELECT unnest($2::bigint[]) AS id, unnest($3::text[]) AS value) AS v
+WHERE a.org_id = $1 AND a.id = v.id
+`
+
+type ResetAlertTeamsParams struct {
+	OrgID         int64
+	Ids           []int64
+	UnknownValues []string
+}
+
+// ResetAlertTeams forgets the Teams of Alerts that start firing, which InsertAlertTeams then records anew, and records
+// the value of the Team label that names no Team, empty for none.
+func (q *Queries) ResetAlertTeams(ctx context.Context, arg ResetAlertTeamsParams) error {
+	_, err := q.db.Exec(ctx, resetAlertTeams, arg.OrgID, arg.Ids, arg.UnknownValues)
 	return err
 }
 

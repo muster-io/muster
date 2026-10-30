@@ -27,7 +27,7 @@ type creation struct {
 
 func (*creation) precondition(*Group) error { return nil }
 
-func (t *creation) apply(ctx context.Context, _ Queries, g *Group, c *change) error {
+func (t *creation) apply(ctx context.Context, q Queries, g *Group, c *change) error {
 	if err := t.e.join(ctx, g, t.slot.joins); err != nil {
 		return err
 	}
@@ -35,7 +35,7 @@ func (t *creation) apply(ctx context.Context, _ Queries, g *Group, c *change) er
 	c.reason = string(EventCreated)
 	c.add(entry{Event: EventCreated, To: StatusFiring, Fingerprints: fingerprints(t.slot.joins),
 		Conflicts: conflicts(t.slot.joins)})
-	return nil
+	return t.e.teams(ctx, q, g, t.slot.joins, c)
 }
 
 // snapshotChange is what one transaction of processing, or the end of a Grace period, does to an existing Alert
@@ -118,7 +118,7 @@ func levelOf(alerts []*alertRow) organization.SeverityLevel {
 }
 
 // joins adds the newly firing Alerts of a slot: a Reopen (C-09.FR-4), or Alerts joining an open Alert Group as
-// Replacements (C-09.FR-7) and additions (C-09.FR-6).
+// Replacements (C-09.FR-7) and additions (C-09.FR-6); the Teams they bring join the Alert Group's after them.
 func (t *snapshotChange) joins(ctx context.Context, q Queries, g *Group, s *slot, c *change) error {
 	if err := t.e.join(ctx, g, s.joins); err != nil {
 		return err
@@ -127,7 +127,10 @@ func (t *snapshotChange) joins(ctx context.Context, q Queries, g *Group, s *slot
 		g.joined(a)
 	}
 	if s.reopen {
-		return t.reopen(ctx, q, g, s, c)
+		if err := t.reopen(ctx, q, g, s, c); err != nil {
+			return err
+		}
+		return t.e.teams(ctx, q, g, s.joins, c)
 	}
 	instance, err := t.e.instanceLabels(ctx)
 	if err != nil {
@@ -152,7 +155,7 @@ func (t *snapshotChange) joins(ctx context.Context, q Queries, g *Group, s *slot
 		c.add(entry{Event: EventAlertsAdded, Variant: statusVariant(g.Status), Fingerprints: fingerprints(added),
 			Conflicts: conflicts(added)})
 	}
-	return nil
+	return t.e.teams(ctx, q, g, s.joins, c)
 }
 
 // replacedLabelOf compares a new Alert with an Alert firing in the Alert Group.

@@ -68,8 +68,9 @@ func DefaultConfig() Config {
 		MigrationsDir: "internal/db/migrations",
 		QueryGlob:     "internal/**/query.sql",
 		GroupsDir:     "internal/groups",
-		GroupTables:   []string{"alert_groups", "alert_group_alerts", "timeline_entries", "notes", "alert_group_counters"},
-		GroupQueries:  "internal/groups/dbgen",
+		GroupTables: []string{"alert_groups", "alert_group_alerts", "alert_group_teams", "timeline_entries", "notes",
+			"alert_group_counters"},
+		GroupQueries: "internal/groups/dbgen",
 		Messenger: MessengerConfig{
 			Package:   "internal/delivery",
 			Interface: "Adapter",

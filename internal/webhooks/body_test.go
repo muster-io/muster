@@ -4,6 +4,7 @@
 package webhooks
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -167,6 +168,7 @@ func TestBodyFields(t *testing.T) {
 	for name, set := range map[string]func(){
 		"owner":           func() { in.Group.OwnerUserID = new(int64(99)) },
 		"alerts":          func() { f.fail["ListBodyAlerts"] = errBoom },
+		"teams":           func() { f.fail["ListBodyTeams"] = errBoom },
 		"user":            func() { in.Actor = groups.Actor{Kind: audit.ActorUser, Person: audit.User(99, "x")} },
 		"service account": func() { in.Actor = groups.Actor{Kind: audit.ActorServiceAccount, Person: audit.User(99, "x")} },
 	} {
@@ -179,5 +181,61 @@ func TestBodyFields(t *testing.T) {
 	}
 	if got := MentionTargets(nil); got == nil || len(got) != 0 {
 		t.Errorf("no mentions %v", got)
+	}
+}
+
+// bodyTeams are the Teams of the Alert Groups of the tests by id: payments and the deleted search for #412.
+var bodyTeams = map[int64][]dbgen.ListBodyTeamsRow{21: {
+	{PublicID: "TM0000000000PA", Name: "Payments", Slug: "payments"},
+	{PublicID: "TM0000000000SE", Name: "Search", Slug: "search"},
+}}
+
+func (f *fakeDB) ListBodyTeams(_ context.Context, arg dbgen.ListBodyTeamsParams) ([]dbgen.ListBodyTeamsRow, error) {
+	return bodyTeams[arg.AlertGroupID], f.fail["ListBodyTeams"]
+}
+
+// TestBodyTeams is C-15.FR-2 revised for L2 and C-09.FR-22: team_joined and unknown_team_value reach events mode one to
+// one, Quiet, and the alert_group of every event carries teams — the id, name and slug of each Team in the order they
+// joined, a deleted one by its name — and an empty list for an Alert Group without Teams.
+func TestBodyTeams(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	in := bodyFixture(f)
+	for _, c := range []struct {
+		group int64
+		want  string
+	}{
+		{21, `[{"id":"TM0000000000PA","name":"Payments","slug":"payments"},` +
+			`{"id":"TM0000000000SE","name":"Search","slug":"search"}]`},
+		{22, `[]`},
+	} {
+		in.Group.ID = c.group
+		render, err := s.eventBodies(t.Context(), f, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, e := range []groups.Event{groups.EventTeamJoined, groups.EventUnknownTeamValue} {
+			raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: int64(i + 1), Event: e},
+				OccurredAt: t0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var v any
+			_ = json.Unmarshal(raw, &v)
+			if err := schema.VisitJSON(v); err != nil {
+				t.Fatalf("%s: %v\n%s", e, err, raw)
+			}
+			var b struct {
+				Event      string `json:"event"`
+				Notify     bool   `json:"notify"`
+				AlertGroup struct {
+					Teams json.RawMessage `json:"teams"`
+				} `json:"alert_group"`
+			}
+			_ = json.Unmarshal(raw, &b)
+			if b.Event != string(e) || b.Notify || string(b.AlertGroup.Teams) != c.want {
+				t.Errorf("#%d %s: %s", c.group, e, raw)
+			}
+		}
 	}
 }

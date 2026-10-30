@@ -75,6 +75,9 @@ type Filter struct {
 	DeliveryProblem *bool
 	// Unclaimed selects the Unclaimed Alert Groups when true, and the others when false (C-17.FR-3).
 	Unclaimed *bool
+	// Team is a Team's public_id, or TeamMine for the Teams of the User Me: the Alert Groups that have it among their
+	// Teams (C-09.FR-13, C-25.FR-2); empty does not filter.
+	Team string
 }
 
 // The values of Filter.Owner that name no User.
@@ -102,6 +105,8 @@ type query struct {
 	snoozedNoEnd pgtype.Bool
 	problem      pgtype.Bool
 	unclaimed    pgtype.Bool
+	teamSet      bool
+	teamIDs      []int64
 	// rowwise are the Matchers the database does not apply.
 	rowwise []matchers.Matcher
 }
@@ -156,6 +161,9 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 		q.reopened = pgtype.Bool{Bool: *f.Reopened, Valid: true}
 	}
 	if q.ownerSet, q.owner, err = s.owner(ctx, f.Owner, f.Me); err != nil {
+		return q, err
+	}
+	if q.teamSet, q.teamIDs, err = s.byTeam(ctx, f.Team, f.Me); err != nil {
 		return q, err
 	}
 	if f.SnoozedNoEnd != nil {

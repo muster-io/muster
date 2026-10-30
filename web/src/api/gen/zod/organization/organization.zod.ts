@@ -13,6 +13,7 @@ import * as zod from 'zod';
 export const getOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 export const getOrganizationResponseOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getOrganizationResponseOneTeamLabelRegExp = new RegExp('^[a-zA-Z_][a-zA-Z0-9_]*$');
 export const getOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const getOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -44,6 +45,7 @@ export const GetOrganizationResponse = zod.object({
   "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
 }).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required when `all` is false, ignored otherwise.')
 }).describe('The Organization\'s button set (C-28.FR-8, FR-10); omit it on an update to keep it.'),
+  "team_label": zod.string().regex(getOrganizationResponseOneTeamLabelRegExp).describe('The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -103,6 +105,7 @@ export const UpdateOrganizationHeader = zod.object({
 export const updateOrganizationBodyOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 export const updateOrganizationBodyOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateOrganizationBodyOneTeamLabelRegExp = new RegExp('^[a-zA-Z_][a-zA-Z0-9_]*$');
 export const updateOrganizationBodyOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationBodyOneRetentionAlertDetailsDaysMax = 36500;
@@ -130,6 +133,7 @@ export const UpdateOrganizationBody = zod.object({
   "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
 }).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required when `all` is false, ignored otherwise.')
 }).optional().describe('The Organization\'s button set (C-28.FR-8, FR-10); omit it on an update to keep it.'),
+  "team_label": zod.string().regex(updateOrganizationBodyOneTeamLabelRegExp).optional().describe('The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),
@@ -167,6 +171,7 @@ export const UpdateOrganizationBody = zod.object({
 export const updateOrganizationResponseOneWorkdayStartRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 export const updateOrganizationResponseOneWorkdayEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateOrganizationResponseOneTeamLabelRegExp = new RegExp('^[a-zA-Z_][a-zA-Z0-9_]*$');
 export const updateOrganizationResponseOneRetentionStoredSnapshotsDaysMax = 36500;
 
 export const updateOrganizationResponseOneRetentionAlertDetailsDaysMax = 36500;
@@ -198,6 +203,7 @@ export const UpdateOrganizationResponse = zod.object({
   "preset": zod.enum(['tomorrow', 'week_start']).optional().describe('A Snooze preset. `tomorrow` ends at the first start of the working day (`organization.workday_start`) after now, `week_start` at the first start of the working day on the first day of the week (`organization.week_start`) after now. After now is strict, so at the start itself the next one counts, and before the start of the working day `tomorrow` ends the same morning.')
 }).describe('One entry of a button set (C-28.FR-8): `acknowledge` (Acknowledge, with Unacknowledge on an acknowledged Root message), `resolve`, `snooze` — one Snooze duration by its value, `snooze_seconds`, at least 1 and required with `snooze` — or `snooze_preset` — one Snooze preset, `preset`, required with `snooze_preset`. Fields the button does not take are ignored. A duration that no Route has is accepted and simply never shown. Refused with `422` `validation-failed` at the item\'s pointer: `required` for a missing `snooze_seconds` or `preset`, `out_of_range` for a `snooze_seconds` below 1, `duplicate` for the same button, duration or preset a second time.')).optional().describe('Required when `all` is false, ignored otherwise.')
 }).describe('The Organization\'s button set (C-28.FR-8, FR-10); omit it on an update to keep it.'),
+  "team_label": zod.string().regex(updateOrganizationResponseOneTeamLabelRegExp).describe('The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.'),
   "severity_label": zod.string().describe('Label that carries severity.'),
   "severity_mapping": zod.array(zod.object({
   "value": zod.string(),

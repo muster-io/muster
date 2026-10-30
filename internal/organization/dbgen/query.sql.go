@@ -65,13 +65,13 @@ INSERT INTO organizations (
     public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
     critical_is_urgent, instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
     retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
-    working_days, workday_end, created_at, updated_at
+    working_days, workday_end, team_label, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, $11, $12,
     $13, $14, $15, $16,
-    $17::text[], $18, $19, $19
+    $17::text[], $18, $19, $20, $20
 )
 RETURNING id
 `
@@ -95,6 +95,7 @@ type CreateOrganizationParams struct {
 	OidcTokenGraceSeconds            int64
 	WorkingDays                      []string
 	WorkdayEnd                       string
+	TeamLabel                        string
 	CreatedAt                        time.Time
 }
 
@@ -118,6 +119,7 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 		arg.OidcTokenGraceSeconds,
 		arg.WorkingDays,
 		arg.WorkdayEnd,
+		arg.TeamLabel,
 		arg.CreatedAt,
 	)
 	var id int64
@@ -159,7 +161,7 @@ const getOrganization = `-- name: GetOrganization :one
 SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label, severity_mapping, severity_styles,
        instance_labels, retention_stored_snapshots_days, retention_alert_details_days,
        retention_alert_group_summaries_days, retention_audit_log_days, totp_required, oidc_token_grace_seconds,
-       working_days, workday_end
+       working_days, workday_end, team_label
 FROM organizations
 ORDER BY id
 LIMIT 1
@@ -184,6 +186,7 @@ type GetOrganizationRow struct {
 	OidcTokenGraceSeconds            int64
 	WorkingDays                      []string
 	WorkdayEnd                       string
+	TeamLabel                        string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -210,6 +213,7 @@ func (q *Queries) GetOrganization(ctx context.Context) (GetOrganizationRow, erro
 		&i.OidcTokenGraceSeconds,
 		&i.WorkingDays,
 		&i.WorkdayEnd,
+		&i.TeamLabel,
 	)
 	return i, err
 }
@@ -298,7 +302,7 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label
 FROM organizations
 WHERE id = $1
 `
@@ -329,6 +333,7 @@ type GetSettingsRow struct {
 	WorkingDays                             []string
 	WorkdayEnd                              string
 	Buttons                                 []byte
+	TeamLabel                               string
 }
 
 // GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
@@ -362,6 +367,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.WorkingDays,
 		&i.WorkdayEnd,
 		&i.Buttons,
+		&i.TeamLabel,
 	)
 	return i, err
 }
@@ -562,14 +568,17 @@ SET name                                         = $1,
     outgoing_heartbeat_proxy_password_key_id     = $22,
     outgoing_heartbeat_proxy_password_updated_at = $23,
     buttons                                      = coalesce($24::jsonb, buttons),
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $25::boolean THEN NULL
+    team_label                                   = coalesce($25::text, team_label),
+    teams_version = teams_version + CASE WHEN team_label <> coalesce($25::text, team_label)
+                                         THEN 1 ELSE 0 END,
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $26::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $25::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $25::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $26::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $26::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $26,
+    updated_at = $27,
     version = version + 1
-WHERE id = $27
+WHERE id = $28
 `
 
 type UpdateSettingsParams struct {
@@ -597,6 +606,7 @@ type UpdateSettingsParams struct {
 	ProxyPasswordKeyID               pgtype.Text
 	ProxyPasswordUpdatedAt           pgtype.Timestamptz
 	Buttons                          []byte
+	TeamLabel                        pgtype.Text
 	UrlChanged                       bool
 	Now                              time.Time
 	OrgID                            int64
@@ -604,7 +614,8 @@ type UpdateSettingsParams struct {
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 // URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
-// null button set keeps the stored one.
+// null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the stamp of the classification that
+// every replica caches (C-25.FR-5).
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,
 		arg.Name,
@@ -631,6 +642,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.ProxyPasswordKeyID,
 		arg.ProxyPasswordUpdatedAt,
 		arg.Buttons,
+		arg.TeamLabel,
 		arg.UrlChanged,
 		arg.Now,
 		arg.OrgID,

@@ -4,7 +4,7 @@
 // Package groups is the Alert Group lifecycle (C-09, ADR-0003, ADR-0004, ADR-0016): grouping of newly firing Alerts,
 // the state machine with its system transitions, the Timeline with the lifecycle events, and the reads of one Alert
 // Group. Every change of an Alert Group passes through the dispatcher; only this package writes alert_groups,
-// alert_group_alerts, timeline_entries, notes and alert_group_counters (lint 2).
+// alert_group_alerts, alert_group_teams, timeline_entries, notes and alert_group_counters (lint 2).
 package groups
 
 import (
@@ -113,6 +113,9 @@ type Queries interface {
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) ([]int64, error)
 	GetGroupRef(ctx context.Context, arg dbgen.GetGroupRefParams) (dbgen.GetGroupRefRow, error)
 	GetSnapshotReceivedAt(ctx context.Context, arg dbgen.GetSnapshotReceivedAtParams) (time.Time, error)
+	ListAlertTeams(ctx context.Context, arg dbgen.ListAlertTeamsParams) ([]dbgen.ListAlertTeamsRow, error)
+	AddGroupTeams(ctx context.Context, arg dbgen.AddGroupTeamsParams) ([]int64, error)
+	AddUnknownTeamValues(ctx context.Context, arg dbgen.AddUnknownTeamValuesParams) ([]string, error)
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the connection or transaction the queries run on, which the re-render step writes through.
@@ -366,6 +369,12 @@ type entry struct {
 	Mentions []Mention
 	// Note is the Note of a note_added, written to notes instead of the Timeline entries.
 	Note *noteEntry
+	// TeamID, TeamRule and TeamMatcher are the Team of a team_joined, the rule that brought it and its Team matcher;
+	// TeamValue is the value of the Team label of an unknown_team_value (C-25.FR-6, FR-7).
+	TeamID      *int64
+	TeamRule    string
+	TeamMatcher string
+	TeamValue   string
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -624,7 +633,8 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			SnoozeUntil: timestamptz(e.SnoozeUntil), Fingerprints: e.Fingerprints,
 			ReplacedLabel: nonEmpty(e.ReplacedLabel), LabelConflicts: e.Conflicts,
 			PeriodFrom: timestamptz(e.PeriodFrom), PeriodTo: timestamptz(e.PeriodTo), Detail: nonEmpty(e.Detail),
-			NoticeNumber: nullInt(e.NoticeNumber), MissedCount: nullInt(e.MissedCount),
+			NoticeNumber: nullInt(e.NoticeNumber), MissedCount: nullInt(e.MissedCount), TeamID: nullInt(e.TeamID),
+			TeamRule: nonEmpty(e.TeamRule), TeamMatcher: nonEmpty(e.TeamMatcher), TeamValue: nonEmpty(e.TeamValue),
 		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:

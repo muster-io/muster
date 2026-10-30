@@ -1314,6 +1314,59 @@ func (q *Queries) ListViewAlertGroups(ctx context.Context, arg ListViewAlertGrou
 	return items, nil
 }
 
+const listViewAlertTeams = `-- name: ListViewAlertTeams :many
+SELECT x.alert_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, x.rule, x.matcher
+FROM alert_teams x
+JOIN teams t ON t.org_id = x.org_id AND t.id = x.team_id
+WHERE x.org_id = $1 AND x.alert_id = ANY($2::bigint[])
+ORDER BY x.alert_id, t.name, t.id
+`
+
+type ListViewAlertTeamsParams struct {
+	OrgID    int64
+	AlertIds []int64
+}
+
+type ListViewAlertTeamsRow struct {
+	AlertID  int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+	Rule     string
+	Matcher  pgtype.Text
+}
+
+// ListViewAlertTeams lists the Teams of each Alert as routing decided them when it last started firing, deleted ones
+// included with their name (C-25.FR-5).
+func (q *Queries) ListViewAlertTeams(ctx context.Context, arg ListViewAlertTeamsParams) ([]ListViewAlertTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listViewAlertTeams, arg.OrgID, arg.AlertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListViewAlertTeamsRow{}
+	for rows.Next() {
+		var i ListViewAlertTeamsRow
+		if err := rows.Scan(
+			&i.AlertID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+			&i.Rule,
+			&i.Matcher,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listViewAlertsByLastSeen = `-- name: ListViewAlertsByLastSeen :many
 SELECT a.id, a.fingerprint, a.labels, a.annotations, a.static_label_conflicts, a.status, a.starts_at, a.last_seen_at,
        a.fired_at, a.resolved_at, a.resolve_reason, a.resolve_reason_text, r.public_id AS route_public_id,

@@ -81,8 +81,10 @@ type Settings struct {
 	WeekStart string
 	// WorkingDays and WorkdayEnd are the days and the end of organization.working_hours, which start at
 	// WorkdayStart in TimeZone.
-	WorkingDays     []string
-	WorkdayEnd      string
+	WorkingDays []string
+	WorkdayEnd  string
+	// TeamLabel is organization.team_label, whose value names a Team by its slug (C-25.FR-5).
+	TeamLabel       string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -129,6 +131,7 @@ func Current(ctx context.Context, s Store) (Settings, error) {
 		WeekStart:        org.WeekStart,
 		WorkingDays:      org.WorkingDays,
 		WorkdayEnd:       org.WorkdayEnd,
+		TeamLabel:        org.TeamLabel,
 		SeverityLabel:    org.SeverityLabel,
 		CriticalIsUrgent: true,
 		InstanceLabels:   org.InstanceLabels,

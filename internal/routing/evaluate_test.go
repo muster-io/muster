@@ -6,12 +6,15 @@ package routing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 func (s *fakeStore) GetRoutingStamp(_ context.Context, org int64) (dbgen.GetRoutingStampRow, error) {
@@ -23,7 +26,45 @@ func (s *fakeStore) GetRoutingStamp(_ context.Context, org int64) (dbgen.GetRout
 		versions += r.Version
 	}
 	return dbgen.GetRoutingStampRow{RouteOrderVersion: s.order, RouteVersions: versions,
-		SeverityLabel: s.severityLabel, SeverityMapping: s.mapping}, nil
+		SeverityLabel: s.severityLabel, SeverityMapping: s.mapping, TeamLabel: s.teamLabel,
+		TeamsVersion: s.teamsVersion}, nil
+}
+
+func (s *fakeStore) ResetAlertTeams(_ context.Context, arg dbgen.ResetAlertTeamsParams) error {
+	if err := s.call("ResetAlertTeams"); err != nil {
+		return err
+	}
+	for i, id := range arg.Ids {
+		delete(s.alertTeams, id)
+		s.unknown[id] = arg.UnknownValues[i]
+	}
+	return nil
+}
+
+func (s *fakeStore) InsertAlertTeams(_ context.Context, arg dbgen.InsertAlertTeamsParams) error {
+	if err := s.call("InsertAlertTeams"); err != nil {
+		return err
+	}
+	for i, id := range arg.AlertIds {
+		s.alertTeams[id] = append(s.alertTeams[id], fmt.Sprintf("%d/%s/%s", arg.TeamIds[i], arg.Rules[i],
+			arg.Matchers[i]))
+	}
+	return nil
+}
+
+func (s *fakeStore) ListClassifiedTeams(_ context.Context, org int64) ([]teamsdb.ListClassifiedTeamsRow, error) {
+	if err := s.call("ListClassifiedTeams"); err != nil || org != orgID {
+		return nil, err
+	}
+	return s.classTeams, nil
+}
+
+func (s *fakeStore) ListClassifiedMatchers(_ context.Context, org int64) ([]teamsdb.ListClassifiedMatchersRow,
+	error) {
+	if err := s.call("ListClassifiedMatchers"); err != nil || org != orgID {
+		return nil, err
+	}
+	return s.classMatchers, nil
 }
 
 func (s *fakeStore) ListAlertLabels(_ context.Context, arg dbgen.ListAlertLabelsParams) ([]dbgen.ListAlertLabelsRow,
@@ -60,6 +101,7 @@ func (s *fakeStore) SetAlertRoutes(_ context.Context, arg dbgen.SetAlertRoutesPa
 func newRouter(store *fakeStore) *Router {
 	r := NewRouter(orgID)
 	r.queries = func(dbgen.DBTX) evalQueries { return store }
+	r.classify = func(dbgen.DBTX) teams.ClassifyQueries { return store }
 	return r
 }
 
@@ -300,7 +342,7 @@ func TestRouterCache(t *testing.T) {
 	if store.calls["ListRoutes"] != 3 {
 		t.Errorf("reads after a change and a hint: %v", store.calls)
 	}
-	if NewRouter(orgID).queries(nil) == nil {
+	if NewRouter(orgID).queries(nil) == nil || NewRouter(orgID).classify(nil) == nil {
 		t.Error("no queries over the transaction")
 	}
 }
@@ -308,12 +350,13 @@ func TestRouterCache(t *testing.T) {
 // TestRouterFailures: a query or data that fails stops routing with an error, which rolls the Snapshot back.
 func TestRouterFailures(t *testing.T) {
 	for _, query := range []string{"GetRoutingStamp", "ListRoutes", "ListRouteMatchers", "ListAlertLabels",
-		"SetAlertRoutes"} {
+		"SetAlertRoutes", "ListClassifiedTeams", "ResetAlertTeams", "InsertAlertTeams"} {
 		svc, store, _ := newService(t)
 		if _, err := svc.Create(t.Context(), by, input("A", Matcher{"a", "=", "b"})); err != nil {
 			t.Fatal(err)
 		}
-		store.alerts[1] = []byte(`{}`)
+		store.alerts[1] = []byte(`{"team":"payments"}`)
+		store.classTeams = []teamsdb.ListClassifiedTeamsRow{{ID: 1, Slug: "payments"}}
 		store.fail[query] = errBoom
 		if _, err := newRouter(store).AlertChanges(t.Context(), nil, fired(1)); !errors.Is(err, errBoom) {
 			t.Errorf("%s failing = %v", query, err)
@@ -349,4 +392,99 @@ type strayMatchers struct{ *fakeStore }
 func (s strayMatchers) ListRouteMatchers(_ context.Context, _ dbgen.ListRouteMatchersParams) (
 	[]dbgen.ListRouteMatchersRow, error) {
 	return s.matchers[99], nil
+}
+
+// classTeams gives the store the Teams payments, checkout-team with the Team matchers of C-25.AC-2, and search.
+func classTeams(store *fakeStore) {
+	store.classTeams = []teamsdb.ListClassifiedTeamsRow{{ID: 1, Slug: "payments"}, {ID: 2, Slug: "checkout-team"},
+		{ID: 3, Slug: "search"}}
+	store.classMatchers = []teamsdb.ListClassifiedMatchersRow{
+		{TeamID: 2, Label: "namespace", Op: "=~", Value: "checkout|billing"},
+		{TeamID: 2, Label: "pod", Op: "=~", Value: "checkout-.*"}}
+}
+
+// TestRouterTeams is C-25.FR-5, C-25.AC-1 and C-25.AC-2: an Alert that starts firing — a fired change — is classified
+// by its Teams in the Snapshot's transaction, its Teams recorded with their rules and the value of the Team label that
+// names no Team; a firing after a resolve replaces what the previous firing recorded; a listed Alert that routing takes
+// late, a Continuation and a resolution decide no Teams; the Teams are read once per stamp of the Teams, again after
+// teams_version changes, and not at all for a Snapshot without a fired change.
+func TestRouterTeams(t *testing.T) {
+	svc, store, _ := newService(t)
+	router := newRouter(store)
+	classTeams(store)
+	store.alerts[1] = []byte(`{"team":"payments","namespace":"billing","severity":"warning"}`)
+	store.alerts[2] = []byte(`{"team":"Payments","pod":"x-1","severity":"warning"}`)
+	store.alerts[3] = []byte(`{"namespace":"search","severity":"warning"}`)
+	store.alerts[4] = []byte(`{"pod":"checkout-api-1"}`)
+	store.alerts[5] = []byte(`{"team":"search"}`)
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1, 2, 3, 4)); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64][]string{1: {"1/label/", `2/matcher/namespace=~"checkout|billing"`},
+		4: {`2/matcher/pod=~"checkout-.*"`}}
+	if !reflectEqual(store.alertTeams, want) || store.unknown[2] != "Payments" || store.unknown[1] != "" ||
+		len(store.unknown) != 4 {
+		t.Errorf("teams %v, unknown %v", store.alertTeams, store.unknown)
+	}
+	if routeOfAlert(t, svc, store, 2) != "Default" {
+		t.Error("an alert without a team was not routed")
+	}
+
+	// A listed Alert routed late, a Continuation and a resolution decide no Teams.
+	if _, err := router.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeListed, AlertID: 5},
+		{Kind: ingest.ChangeContinued, AlertID: 1}, {Kind: ingest.ChangeResolved, AlertID: 4}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.unknown[5]; ok || store.alertTeams[5] != nil || len(store.alertTeams[4]) != 1 ||
+		routeOfAlert(t, svc, store, 5) != "Default" {
+		t.Errorf("after changes that start no firing: teams %v, unknown %v", store.alertTeams, store.unknown)
+	}
+
+	// A firing after a resolve decides the Teams again, with the Teams as they are now.
+	store.alerts[1] = []byte(`{"team":"search"}`)
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1)); err != nil {
+		t.Fatal(err)
+	}
+	if store.calls["ListClassifiedTeams"] != 1 || !slices.Equal(store.alertTeams[1], []string{"3/label/"}) {
+		t.Errorf("refired: %v, reads %v", store.alertTeams[1], store.calls)
+	}
+	store.classTeams = store.classTeams[:2]
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1)); err != nil || store.alertTeams[1] == nil {
+		t.Errorf("the cached teams: %v %v", store.alertTeams[1], err)
+	}
+	store.teamsVersion++
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1)); err != nil {
+		t.Fatal(err)
+	}
+	if store.calls["ListClassifiedTeams"] != 2 || store.alertTeams[1] != nil || store.unknown[1] != "search" {
+		t.Errorf("after a change of the teams: %v %q, reads %v", store.alertTeams[1], store.unknown[1], store.calls)
+	}
+	store.teamLabel = "owner"
+	store.alerts[1] = []byte(`{"team":"search","owner":"payments"}`)
+	if _, err := router.AlertChanges(t.Context(), nil, fired(1)); err != nil {
+		t.Fatal(err)
+	}
+	if store.calls["ListClassifiedTeams"] != 3 || !slices.Equal(store.alertTeams[1], []string{"1/label/"}) {
+		t.Errorf("after a new team label: %v, reads %v", store.alertTeams[1], store.calls)
+	}
+	store.calls = map[string]int{}
+	if _, err := router.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeListed,
+		AlertID: 2}}); err != nil || store.calls["ResetAlertTeams"] != 0 {
+		t.Errorf("a listed alert with its route: %v, queries %v", err, store.calls)
+	}
+}
+
+// reflectEqual compares the recorded Teams, ignoring Alerts without any.
+func reflectEqual(got, want map[int64][]string) bool {
+	for id, ts := range got {
+		if len(ts) > 0 && !slices.Equal(ts, want[id]) {
+			return false
+		}
+	}
+	for id, ts := range want {
+		if !slices.Equal(got[id], ts) {
+			return false
+		}
+	}
+	return true
 }

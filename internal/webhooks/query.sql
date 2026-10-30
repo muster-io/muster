@@ -115,3 +115,12 @@ FROM alert_group_alerts m
 JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
 WHERE m.org_id = @org_id AND m.alert_group_id = @alert_group_id AND m.state IN ('firing', 'resolved')
 ORDER BY a.fingerprint, m.id DESC;
+
+-- ListBodyTeams lists the Teams of an Alert Group for the body of an event, in the order they joined, deleted ones
+-- included with their name (C-15.FR-2).
+-- name: ListBodyTeams :many
+SELECT t.public_id, t.name, t.slug
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = @org_id AND gt.alert_group_id = @alert_group_id
+ORDER BY gt.joined_at, gt.team_id;

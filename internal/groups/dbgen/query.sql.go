@@ -12,6 +12,85 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addGroupTeams = `-- name: AddGroupTeams :many
+INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, matcher, joined_at)
+SELECT $1, $2, t.team_id, t.rule, nullif(t.matcher, ''), $3
+FROM (SELECT unnest($4::bigint[]) AS team_id, unnest($5::text[]) AS rule,
+             unnest($6::text[]) AS matcher) AS t
+ON CONFLICT (alert_group_id, team_id) DO NOTHING
+RETURNING team_id
+`
+
+type AddGroupTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	JoinedAt     time.Time
+	TeamIds      []int64
+	Rules        []string
+	Matchers     []string
+}
+
+// AddGroupTeams adds Teams to the Teams of an Alert Group, which only grow, and returns those it added: a Team the
+// Alert Group already has keeps its rule and when it joined.
+func (q *Queries) AddGroupTeams(ctx context.Context, arg AddGroupTeamsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, addGroupTeams,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.JoinedAt,
+		arg.TeamIds,
+		arg.Rules,
+		arg.Matchers,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const addUnknownTeamValues = `-- name: AddUnknownTeamValues :one
+WITH cur AS (
+    SELECT g.unknown_team_values
+    FROM alert_groups g
+    WHERE g.org_id = $1 AND g.id = $2
+), added AS (
+    SELECT coalesce(array_agg(DISTINCT v.value ORDER BY v.value), '{}')::text[] AS vals
+    FROM unnest($3::text[]) AS v (value), cur c
+    WHERE v.value <> ALL(c.unknown_team_values)
+)
+UPDATE alert_groups g
+SET unknown_team_values = g.unknown_team_values || added.vals
+FROM added
+WHERE g.org_id = $1 AND g.id = $2
+RETURNING added.vals::text[] AS added
+`
+
+type AddUnknownTeamValuesParams struct {
+	OrgID      int64
+	ID         int64
+	TeamValues []string
+}
+
+// AddUnknownTeamValues adds values of the Team label that name no Team to those an Alert Group recorded, and returns
+// the values it added, sorted: each is recorded once per Alert Group.
+func (q *Queries) AddUnknownTeamValues(ctx context.Context, arg AddUnknownTeamValuesParams) ([]string, error) {
+	row := q.db.QueryRow(ctx, addUnknownTeamValues, arg.OrgID, arg.ID, arg.TeamValues)
+	var added []string
+	err := row.Scan(&added)
+	return added, err
+}
+
 const advanceOpenGroupUpdate = `-- name: AdvanceOpenGroupUpdate :exec
 UPDATE open_group_updates
 SET after_alert_group_id = $1, lease_until = $2::timestamptz
@@ -147,14 +226,18 @@ WHERE g.org_id = $2
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND ($15::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::boolean IS NULL
-       OR dp.delivery_problem = $16::boolean)
-  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
-  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
-  AND ($19::text IS NULL OR g.title ILIKE $19::text
-       OR g.summary ILIKE $19::text)
+  AND (NOT $15::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
+  AND ($17::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+  AND ($18::boolean IS NULL
+       OR dp.delivery_problem = $18::boolean)
+  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
+  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
+  AND ($21::text IS NULL OR g.title ILIKE $21::text
+       OR g.summary ILIKE $21::text)
 GROUP BY g.status, (CASE WHEN $1::boolean THEN g.common_labels END)
 `
 
@@ -173,6 +256,8 @@ type CountGroupsParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	TeamSet         bool
+	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
 	Unclaimed       pgtype.Bool
@@ -204,6 +289,8 @@ func (q *Queries) CountGroups(ctx context.Context, arg CountGroupsParams) ([]Cou
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.TeamSet,
+		arg.TeamIds,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
 		arg.Unclaimed,
@@ -725,7 +812,8 @@ WHERE id = $1
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // The queries of the Alert Group lifecycle. Only this package writes alert_groups, alert_group_alerts,
-// timeline_entries, notes and alert_group_counters (lint 2). Times are business times passed in from Go.
+// alert_group_teams, timeline_entries, notes and alert_group_counters (lint 2). Times are business times passed in from
+// Go.
 // GetGroupingSettings reads the Organization settings grouping needs: the Instance labels.
 func (q *Queries) GetGroupingSettings(ctx context.Context, orgID int64) ([]string, error) {
 	row := q.db.QueryRow(ctx, getGroupingSettings, orgID)
@@ -1094,7 +1182,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1103,7 +1191,8 @@ VALUES (
     $17, $18, $19, $20,
     $21, $22, $23::text[],
     $24, $25::text[], $26,
-    $27, $28, $29, $30
+    $27, $28, $29, $30,
+    $31, $32, $33, $34
 )
 `
 
@@ -1138,6 +1227,10 @@ type InsertTimelineEntryParams struct {
 	Detail                pgtype.Text
 	NoticeNumber          pgtype.Int8
 	MissedCount           pgtype.Int8
+	TeamID                pgtype.Int8
+	TeamRule              pgtype.Text
+	TeamMatcher           pgtype.Text
+	TeamValue             pgtype.Text
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1173,6 +1266,10 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.Detail,
 		arg.NoticeNumber,
 		arg.MissedCount,
+		arg.TeamID,
+		arg.TeamRule,
+		arg.TeamMatcher,
+		arg.TeamValue,
 	)
 	return err
 }
@@ -1308,6 +1405,61 @@ func (q *Queries) ListAlertGroupKeys(ctx context.Context, arg ListAlertGroupKeys
 	for rows.Next() {
 		var i ListAlertGroupKeysRow
 		if err := rows.Scan(&i.AlertID, &i.GroupKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAlertTeams = `-- name: ListAlertTeams :many
+SELECT a.id AS alert_id, coalesce(a.unknown_team_value, '')::text AS unknown_team_value,
+       coalesce(t.team_id, 0)::bigint AS team_id, coalesce(t.rule, '')::text AS rule,
+       coalesce(t.matcher, '')::text AS matcher
+FROM alerts a
+LEFT JOIN alert_teams t ON t.org_id = a.org_id AND t.alert_id = a.id
+    AND EXISTS (SELECT 1
+                FROM teams tm
+                WHERE tm.org_id = t.org_id AND tm.id = t.team_id AND tm.deleted_at IS NULL)
+WHERE a.org_id = $1 AND a.id = ANY($2::bigint[])
+ORDER BY a.id, t.team_id
+`
+
+type ListAlertTeamsParams struct {
+	OrgID    int64
+	AlertIds []int64
+}
+
+type ListAlertTeamsRow struct {
+	AlertID          int64
+	UnknownTeamValue string
+	TeamID           int64
+	Rule             string
+	Matcher          string
+}
+
+// ListAlertTeams reads, for Alerts that join an Alert Group, the Teams routing gave each when it started firing — those
+// that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, with
+// a row of team_id 0 for an Alert without a Team.
+func (q *Queries) ListAlertTeams(ctx context.Context, arg ListAlertTeamsParams) ([]ListAlertTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listAlertTeams, arg.OrgID, arg.AlertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertTeamsRow{}
+	for rows.Next() {
+		var i ListAlertTeamsRow
+		if err := rows.Scan(
+			&i.AlertID,
+			&i.UnknownTeamValue,
+			&i.TeamID,
+			&i.Rule,
+			&i.Matcher,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1456,6 +1608,58 @@ func (q *Queries) ListFiringMemberships(ctx context.Context, arg ListFiringMembe
 			&i.Episode,
 			&i.StartsAt,
 			&i.Annotations,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupAlertTeams = `-- name: ListGroupAlertTeams :many
+SELECT x.alert_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, x.rule, x.matcher
+FROM alert_teams x
+JOIN teams t ON t.org_id = x.org_id AND t.id = x.team_id
+WHERE x.org_id = $1 AND x.alert_id = ANY($2::bigint[])
+ORDER BY x.alert_id, t.name, t.id
+`
+
+type ListGroupAlertTeamsParams struct {
+	OrgID    int64
+	AlertIds []int64
+}
+
+type ListGroupAlertTeamsRow struct {
+	AlertID  int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+	Rule     string
+	Matcher  pgtype.Text
+}
+
+// ListGroupAlertTeams lists the Teams of Alerts as routing decided them, deleted ones included with their name.
+func (q *Queries) ListGroupAlertTeams(ctx context.Context, arg ListGroupAlertTeamsParams) ([]ListGroupAlertTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupAlertTeams, arg.OrgID, arg.AlertIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupAlertTeamsRow{}
+	for rows.Next() {
+		var i ListGroupAlertTeamsRow
+		if err := rows.Scan(
+			&i.AlertID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+			&i.Rule,
+			&i.Matcher,
 		); err != nil {
 			return nil, err
 		}
@@ -1619,6 +1823,62 @@ func (q *Queries) ListGroupFiringAlerts(ctx context.Context, arg ListGroupFiring
 	return items, nil
 }
 
+const listGroupTeams = `-- name: ListGroupTeams :many
+SELECT gt.alert_group_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, gt.rule,
+       gt.matcher, gt.joined_at
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = $1 AND gt.alert_group_id = ANY($2::bigint[])
+ORDER BY gt.alert_group_id, gt.joined_at, gt.team_id
+`
+
+type ListGroupTeamsParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListGroupTeamsRow struct {
+	AlertGroupID int64
+	PublicID     string
+	Name         string
+	Slug         string
+	Deleted      bool
+	Rule         string
+	Matcher      pgtype.Text
+	JoinedAt     time.Time
+}
+
+// ListGroupTeams lists the Teams of Alert Groups, deleted ones included with their name, each Alert Group's in the
+// order they joined.
+func (q *Queries) ListGroupTeams(ctx context.Context, arg ListGroupTeamsParams) ([]ListGroupTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupTeams, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupTeamsRow{}
+	for rows.Next() {
+		var i ListGroupTeamsRow
+		if err := rows.Scan(
+			&i.AlertGroupID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+			&i.Rule,
+			&i.Matcher,
+			&i.JoinedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGroupsChangedAsc = `-- name: ListGroupsChangedAsc :many
 SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level,
        (g.severity_level = 'critical')::boolean AS urgent, g.common_labels,
@@ -1666,18 +1926,22 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND ($15::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::boolean IS NULL
-       OR dp.delivery_problem = $16::boolean)
-  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
-  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
-  AND ($19::text IS NULL OR g.title ILIKE $19::text
-       OR g.summary ILIKE $19::text)
-  AND ($20::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) > ($20::timestamptz, $21::bigint))
+  AND (NOT $15::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
+  AND ($17::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+  AND ($18::boolean IS NULL
+       OR dp.delivery_problem = $18::boolean)
+  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
+  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
+  AND ($21::text IS NULL OR g.title ILIKE $21::text
+       OR g.summary ILIKE $21::text)
+  AND ($22::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) > ($22::timestamptz, $23::bigint))
 ORDER BY g.last_changed_at, g.id
-LIMIT $22
+LIMIT $24
 `
 
 type ListGroupsChangedAscParams struct {
@@ -1695,6 +1959,8 @@ type ListGroupsChangedAscParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	TeamSet         bool
+	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
 	Unclaimed       pgtype.Bool
@@ -1760,6 +2026,8 @@ func (q *Queries) ListGroupsChangedAsc(ctx context.Context, arg ListGroupsChange
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.TeamSet,
+		arg.TeamIds,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
 		arg.Unclaimed,
@@ -1870,18 +2138,22 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND ($15::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::boolean IS NULL
-       OR dp.delivery_problem = $16::boolean)
-  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
-  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
-  AND ($19::text IS NULL OR g.title ILIKE $19::text
-       OR g.summary ILIKE $19::text)
-  AND ($20::timestamptz IS NULL
-       OR (g.last_changed_at, g.id) < ($20::timestamptz, $21::bigint))
+  AND (NOT $15::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
+  AND ($17::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+  AND ($18::boolean IS NULL
+       OR dp.delivery_problem = $18::boolean)
+  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
+  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
+  AND ($21::text IS NULL OR g.title ILIKE $21::text
+       OR g.summary ILIKE $21::text)
+  AND ($22::timestamptz IS NULL
+       OR (g.last_changed_at, g.id) < ($22::timestamptz, $23::bigint))
 ORDER BY g.last_changed_at DESC, g.id DESC
-LIMIT $22
+LIMIT $24
 `
 
 type ListGroupsChangedDescParams struct {
@@ -1899,6 +2171,8 @@ type ListGroupsChangedDescParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	TeamSet         bool
+	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
 	Unclaimed       pgtype.Bool
@@ -1964,6 +2238,8 @@ func (q *Queries) ListGroupsChangedDesc(ctx context.Context, arg ListGroupsChang
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.TeamSet,
+		arg.TeamIds,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
 		arg.Unclaimed,
@@ -2074,18 +2350,22 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND ($15::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::boolean IS NULL
-       OR dp.delivery_problem = $16::boolean)
-  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
-  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
-  AND ($19::text IS NULL OR g.title ILIKE $19::text
-       OR g.summary ILIKE $19::text)
-  AND ($20::timestamptz IS NULL
-       OR (g.created_at, g.id) > ($20::timestamptz, $21::bigint))
+  AND (NOT $15::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
+  AND ($17::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+  AND ($18::boolean IS NULL
+       OR dp.delivery_problem = $18::boolean)
+  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
+  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
+  AND ($21::text IS NULL OR g.title ILIKE $21::text
+       OR g.summary ILIKE $21::text)
+  AND ($22::timestamptz IS NULL
+       OR (g.created_at, g.id) > ($22::timestamptz, $23::bigint))
 ORDER BY g.created_at, g.id
-LIMIT $22
+LIMIT $24
 `
 
 type ListGroupsStartedAscParams struct {
@@ -2103,6 +2383,8 @@ type ListGroupsStartedAscParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	TeamSet         bool
+	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
 	Unclaimed       pgtype.Bool
@@ -2168,6 +2450,8 @@ func (q *Queries) ListGroupsStartedAsc(ctx context.Context, arg ListGroupsStarte
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.TeamSet,
+		arg.TeamIds,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
 		arg.Unclaimed,
@@ -2279,18 +2563,22 @@ WHERE g.org_id = $1 AND g.status = ANY($2::text[])
   AND ($11::text IS NULL OR g.resolve_reason = $11::text)
   AND ($12::boolean IS NULL OR (g.reopen_count > 0) = $12::boolean)
   AND (NOT $13::boolean OR g.owner_user_id IS NOT DISTINCT FROM $14::bigint)
-  AND ($15::boolean IS NULL
-       OR (g.status = 'snoozed' AND g.snooze_no_end) = $15::boolean)
-  AND ($16::boolean IS NULL
-       OR dp.delivery_problem = $16::boolean)
-  AND ($17::boolean IS NULL OR g.unclaimed = $17::boolean)
-  AND ($18::jsonb IS NULL OR g.common_labels @> $18::jsonb)
-  AND ($19::text IS NULL OR g.title ILIKE $19::text
-       OR g.summary ILIKE $19::text)
-  AND ($20::timestamptz IS NULL
-       OR (g.created_at, g.id) < ($20::timestamptz, $21::bigint))
+  AND (NOT $15::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY($16::bigint[])))
+  AND ($17::boolean IS NULL
+       OR (g.status = 'snoozed' AND g.snooze_no_end) = $17::boolean)
+  AND ($18::boolean IS NULL
+       OR dp.delivery_problem = $18::boolean)
+  AND ($19::boolean IS NULL OR g.unclaimed = $19::boolean)
+  AND ($20::jsonb IS NULL OR g.common_labels @> $20::jsonb)
+  AND ($21::text IS NULL OR g.title ILIKE $21::text
+       OR g.summary ILIKE $21::text)
+  AND ($22::timestamptz IS NULL
+       OR (g.created_at, g.id) < ($22::timestamptz, $23::bigint))
 ORDER BY g.created_at DESC, g.id DESC
-LIMIT $22
+LIMIT $24
 `
 
 type ListGroupsStartedDescParams struct {
@@ -2308,6 +2596,8 @@ type ListGroupsStartedDescParams struct {
 	Reopened        pgtype.Bool
 	OwnerSet        bool
 	OwnerID         pgtype.Int8
+	TeamSet         bool
+	TeamIds         []int64
 	SnoozedNoEnd    pgtype.Bool
 	DeliveryProblem pgtype.Bool
 	Unclaimed       pgtype.Bool
@@ -2384,6 +2674,8 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 		arg.Reopened,
 		arg.OwnerSet,
 		arg.OwnerID,
+		arg.TeamSet,
+		arg.TeamIds,
 		arg.SnoozedNoEnd,
 		arg.DeliveryProblem,
 		arg.Unclaimed,
@@ -3069,11 +3361,95 @@ func (q *Queries) ListStatisticsRoutes(ctx context.Context, arg ListStatisticsRo
 	return items, nil
 }
 
+const listTeamRefs = `-- name: ListTeamRefs :many
+SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM teams
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListTeamRefsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListTeamRefsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+}
+
+// ListTeamRefs names Teams, deleted ones included: the Teams of the Timeline entries.
+func (q *Queries) ListTeamRefs(ctx context.Context, arg ListTeamRefsParams) ([]ListTeamRefsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamRefs, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamRefsRow{}
+	for rows.Next() {
+		var i ListTeamRefsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamsByPublicID = `-- name: ListTeamsByPublicID :many
+SELECT id, public_id, name
+FROM teams
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+`
+
+type ListTeamsByPublicIDParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ListTeamsByPublicIDRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListTeamsByPublicID names Teams, deleted ones included, by public_id: the filter by Team of the list.
+func (q *Queries) ListTeamsByPublicID(ctx context.Context, arg ListTeamsByPublicIDParams) ([]ListTeamsByPublicIDRow, error) {
+	rows, err := q.db.Query(ctx, listTeamsByPublicID, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamsByPublicIDRow{}
+	for rows.Next() {
+		var i ListTeamsByPublicIDRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTimelineAsc = `-- name: ListTimelineAsc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -3122,6 +3498,10 @@ type ListTimelineAscRow struct {
 	PeriodFrom            pgtype.Timestamptz
 	PeriodTo              pgtype.Timestamptz
 	Detail                pgtype.Text
+	TeamID                pgtype.Int8
+	TeamRule              pgtype.Text
+	TeamMatcher           pgtype.Text
+	TeamValue             pgtype.Text
 }
 
 // ListTimelineAsc reads the Timeline entries of an Alert Group, oldest first, after a position.
@@ -3171,6 +3551,10 @@ func (q *Queries) ListTimelineAsc(ctx context.Context, arg ListTimelineAscParams
 			&i.PeriodFrom,
 			&i.PeriodTo,
 			&i.Detail,
+			&i.TeamID,
+			&i.TeamRule,
+			&i.TeamMatcher,
+			&i.TeamValue,
 		); err != nil {
 			return nil, err
 		}
@@ -3265,7 +3649,7 @@ const listTimelineDesc = `-- name: ListTimelineDesc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -3314,6 +3698,10 @@ type ListTimelineDescRow struct {
 	PeriodFrom            pgtype.Timestamptz
 	PeriodTo              pgtype.Timestamptz
 	Detail                pgtype.Text
+	TeamID                pgtype.Int8
+	TeamRule              pgtype.Text
+	TeamMatcher           pgtype.Text
+	TeamValue             pgtype.Text
 }
 
 // The Timeline merges three sources by (at, source, id): its entries (source 0), Notes (1) and delivery events (2).
@@ -3365,6 +3753,10 @@ func (q *Queries) ListTimelineDesc(ctx context.Context, arg ListTimelineDescPara
 			&i.PeriodFrom,
 			&i.PeriodTo,
 			&i.Detail,
+			&i.TeamID,
+			&i.TeamRule,
+			&i.TeamMatcher,
+			&i.TeamValue,
 		); err != nil {
 			return nil, err
 		}
@@ -3490,6 +3882,39 @@ func (q *Queries) ListUserRefs(ctx context.Context, arg ListUserRefsParams) ([]L
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserTeamIDs = `-- name: ListUserTeamIDs :many
+SELECT team_id
+FROM team_users
+WHERE org_id = $1 AND user_id = $2
+ORDER BY team_id
+`
+
+type ListUserTeamIDsParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// ListUserTeamIDs lists the Teams of a User, "My Teams" of the list.
+func (q *Queries) ListUserTeamIDs(ctx context.Context, arg ListUserTeamIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listUserTeamIDs, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

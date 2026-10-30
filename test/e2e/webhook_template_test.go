@@ -115,6 +115,7 @@ func TestWebhookTemplate(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
 	e := newMM(t, h, r)
+	withoutTeamLabel(e.api)
 
 	t.Run("two-step threads", func(t *testing.T) {
 		// C-15.AC-3: create, extract, update with the id; FR-3: open thread once, then replies; FR-11: Mentions.

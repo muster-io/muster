@@ -19,4 +19,4 @@ export type Team = TeamInput & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}, 'description' | 'working_hours'>>;
+}, 'description' | 'working_hours' | 'matchers'>>;

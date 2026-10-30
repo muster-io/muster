@@ -195,6 +195,13 @@ func teamInputOf(b gen.TeamInput) teams.Input {
 		hours := workingHoursIn(*w)
 		in.WorkingHours = &hours
 	}
+	if b.Matchers != nil {
+		ms := make([]teams.Matcher, len(*b.Matchers))
+		for i, m := range *b.Matchers {
+			ms[i] = teams.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value}
+		}
+		in.Matchers = &ms
+	}
 	return in
 }
 
@@ -219,9 +226,13 @@ func workingHoursOf(w teams.WorkingHours) gen.WorkingHours {
 // teamOf is the API form of a Team, with its effective Working hours.
 func teamOf(t teams.Team) gen.Team {
 	tag := etag(t.Version)
+	ms := make([]gen.Matcher, len(t.Matchers))
+	for i, m := range t.Matchers {
+		ms[i] = gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value}
+	}
 	return gen.Team{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Description: t.Description,
 		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours), UserCount: int(t.UserCount),
-		CreatedAt: t.CreatedAt.UTC(), Etag: &tag}
+		CreatedAt: t.CreatedAt.UTC(), Etag: &tag, Matchers: ms}
 }
 
 // teamUserOf is the API form of a person in a Team.

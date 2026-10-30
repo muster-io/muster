@@ -22,11 +22,13 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/destinations"
+	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 func TestMain(m *testing.M) {
@@ -273,6 +275,100 @@ func TestIntegrationTeams(t *testing.T) {
 			if _, err := e.d.Pool.Exec(ctx, sql); err == nil {
 				t.Errorf("%s was stored", sql)
 			}
+		}
+	})
+}
+
+// TestIntegrationTeamsOfAlertGroups is C-25.FR-1, FR-5, FR-10, FR-11 and C-25.AC-9 against PostgreSQL: Team matchers
+// are written and read back in their order and replaced as a whole; every change of a Team raises teams_version; the
+// classification reads the Teams that are not deleted with their compiled matchers; after a Team is deleted, its
+// matchers go, an Alert Group that had it among its Teams still lists it by name with deleted true, and its slug no
+// longer gives Alerts that Team.
+func TestIntegrationTeamsOfAlertGroups(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		version := func(t *testing.T) int64 {
+			t.Helper()
+			return int64(e.count(t, `SELECT teams_version FROM organizations WHERE id = $1`, e.orgID))
+		}
+		payments, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ms := []teams.Matcher{{Label: "namespace", Op: "=~", Value: "checkout|billing"},
+			{Label: "pod", Op: "=~", Value: "checkout-.*"}}
+		checkout, err := e.svc.Create(ctx, by, teams.Input{Name: "Checkout", Slug: "checkout-team", Matchers: &ms})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.svc.Get(ctx, checkout.PublicID); err != nil || len(got.Matchers) != 2 ||
+			got.Matchers[0] != ms[0] || got.Matchers[1] != ms[1] || version(t) != 2 {
+			t.Fatalf("matchers %+v, %v, teams_version %d", got.Matchers, err, version(t))
+		}
+		one := ms[1:]
+		if _, err := e.svc.Update(ctx, by, checkout.PublicID, nil, teams.Input{Name: "Checkout",
+			Slug: "checkout-team", Matchers: &one}); err != nil || version(t) != 3 ||
+			e.count(t, `SELECT count(*) FROM team_matchers WHERE org_id = $1 AND position = 0 AND label = 'pod'`,
+				e.orgID) != 1 {
+			t.Errorf("replaced: %v, teams_version %d", err, version(t))
+		}
+		classes, err := teams.NewClassifier(e.orgID).At(ctx, teamsdb.New(e.d.Pool),
+			teams.Stamp{Label: "team", Version: version(t)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := classes.Classify(map[string]string{"team": "payments", "pod": "checkout-api-1"})
+		if len(got.Teams) != 2 || got.Teams[0] != (teams.Membership{TeamID: payments.ID, Rule: teams.RuleLabel}) ||
+			got.Teams[1] != (teams.Membership{TeamID: checkout.ID, Rule: teams.RuleMatcher,
+				Matcher: `pod=~"checkout-.*"`}) || got.UnknownValue != "" {
+			t.Errorf("classified %+v", got)
+		}
+
+		var route int64
+		if err := e.d.Pool.QueryRow(ctx, `SELECT id FROM routes WHERE org_id = $1 AND is_default`,
+			e.orgID).Scan(&route); err != nil {
+			t.Fatal(err)
+		}
+		var group int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+			group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+			integration_ids, status, severity_level, urgent, created_at, last_changed_at)
+			VALUES ($1, 'AG0000000000T1', 1, $2, '{alertname}', '{}', sha256('t1'), 't', '{}', '{}', '{}', 'firing',
+				'warning', false, $3, $3) RETURNING id`, e.orgID, route, t0).Scan(&group); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule,
+			matcher, joined_at) VALUES ($1, $2, $3, 'label', NULL, $5), ($1, $2, $4, 'matcher', 'pod=~"x"', $5)`,
+			e.orgID, group, payments.ID, checkout.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.svc.Delete(ctx, by, payments.PublicID, nil); err != nil || version(t) != 4 {
+			t.Fatalf("delete: %v, teams_version %d", err, version(t))
+		}
+		if err := e.svc.Delete(ctx, by, checkout.PublicID, nil); err != nil ||
+			e.count(t, `SELECT count(*) FROM team_matchers WHERE org_id = $1`, e.orgID) != 0 {
+			t.Fatalf("delete of checkout: %v", err)
+		}
+		gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+			Business: clock.NewManual(t0)})
+		v, err := gs.Get(ctx, "AG0000000000T1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(v.Teams) != 2 || v.Teams[0].Team.Name != "Payments" || !v.Teams[0].Team.Deleted ||
+			v.Teams[0].Team.Slug != "payments" || v.Teams[0].Team.PublicID != payments.PublicID ||
+			v.Teams[1].Team.Name != "Checkout" || *v.Teams[1].Matcher != `pod=~"x"` {
+			t.Errorf("teams of the alert group %+v", v.Teams)
+		}
+		classes, err = teams.NewClassifier(e.orgID).At(ctx, teamsdb.New(e.d.Pool),
+			teams.Stamp{Label: "team", Version: version(t)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classes.Classify(map[string]string{"team": "payments", "pod": "checkout-api-1"}); len(got.Teams) != 0 ||
+			got.UnknownValue != "payments" {
+			t.Errorf("after the deletion %+v", got)
 		}
 	})
 }

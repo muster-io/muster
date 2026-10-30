@@ -114,7 +114,9 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 	if err := organization.Ensure(ctx, organization.NewStore(d.Pool), logger, t0); err != nil {
 		t.Fatal(err)
 	}
-	var stmts []string
+	// The Alerts of these tests carry the label team, by which their Routes take them; the Team label (C-25.FR-5)
+	// moves off it, so that no unknown_team_value joins their Timelines and outgoing webhook events.
+	stmts := []string{`UPDATE organizations SET team_label = 'muster_team'`}
 	for _, m := range []string{"2026-10", "2026-11"} {
 		from, _ := time.Parse("2006-01", m)
 		to := from.AddDate(0, 1, 0)

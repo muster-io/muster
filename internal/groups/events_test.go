@@ -164,6 +164,19 @@ func TestLifecycleEventTable(t *testing.T) {
 				}
 				return h.groupOf(t, a)
 			}},
+		{"team joined", want{EventTeamJoined, KindAlerts, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.withTeams()
+				a := h.teamAlert("x", "", byLabel(payments))
+				h.changes(t, ingest.ChangeFired, a)
+				return h.groupOf(t, a)
+			}},
+		{"unknown team value", want{EventUnknownTeamValue, KindSystem, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				a := h.teamAlert("x", "Payments")
+				h.changes(t, ingest.ChangeFired, a)
+				return h.groupOf(t, a)
+			}},
 	}
 	produced := map[Event]bool{}
 	for _, c := range cases {

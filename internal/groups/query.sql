@@ -2,7 +2,8 @@
 -- Copyright The Muster Authors
 
 -- The queries of the Alert Group lifecycle. Only this package writes alert_groups, alert_group_alerts,
--- timeline_entries, notes and alert_group_counters (lint 2). Times are business times passed in from Go.
+-- alert_group_teams, timeline_entries, notes and alert_group_counters (lint 2). Times are business times passed in from
+-- Go.
 
 -- GetGroupingSettings reads the Organization settings grouping needs: the Instance labels.
 -- name: GetGroupingSettings :one
@@ -239,7 +240,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -248,7 +249,8 @@ VALUES (
     sqlc.narg('reason'), sqlc.narg('from_status'), sqlc.narg('to_status'), sqlc.narg('owner_user_id'),
     sqlc.narg('previous_owner_user_id'), sqlc.narg('snooze_until'), sqlc.narg('fingerprints')::text[],
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
-    sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count')
+    sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count'),
+    sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -480,7 +482,7 @@ ORDER BY p.alert_id, g.group_key;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -494,7 +496,7 @@ LIMIT @lim;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -609,6 +611,10 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (NOT @team_set::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY(@team_ids::bigint[])))
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
@@ -670,6 +676,10 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (NOT @team_set::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY(@team_ids::bigint[])))
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
@@ -731,6 +741,10 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (NOT @team_set::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY(@team_ids::bigint[])))
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
@@ -792,6 +806,10 @@ WHERE g.org_id = @org_id AND g.status = ANY(@statuses::text[])
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (NOT @team_set::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY(@team_ids::bigint[])))
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
@@ -833,6 +851,10 @@ WHERE g.org_id = @org_id
   AND (sqlc.narg('resolve_reason')::text IS NULL OR g.resolve_reason = sqlc.narg('resolve_reason')::text)
   AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
   AND (NOT @owner_set::boolean OR g.owner_user_id IS NOT DISTINCT FROM sqlc.narg('owner_id')::bigint)
+  AND (NOT @team_set::boolean
+       OR EXISTS (SELECT 1
+                  FROM alert_group_teams gt
+                  WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id AND gt.team_id = ANY(@team_ids::bigint[])))
   AND (sqlc.narg('snoozed_no_end')::boolean IS NULL
        OR (g.status = 'snoozed' AND g.snooze_no_end) = sqlc.narg('snoozed_no_end')::boolean)
   AND (sqlc.narg('delivery_problem')::boolean IS NULL
@@ -1116,3 +1138,83 @@ FROM alert_groups
 WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved' AND id > @after_id
 ORDER BY id
 LIMIT @lim;
+
+-- ListAlertTeams reads, for Alerts that join an Alert Group, the Teams routing gave each when it started firing — those
+-- that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, with
+-- a row of team_id 0 for an Alert without a Team.
+-- name: ListAlertTeams :many
+SELECT a.id AS alert_id, coalesce(a.unknown_team_value, '')::text AS unknown_team_value,
+       coalesce(t.team_id, 0)::bigint AS team_id, coalesce(t.rule, '')::text AS rule,
+       coalesce(t.matcher, '')::text AS matcher
+FROM alerts a
+LEFT JOIN alert_teams t ON t.org_id = a.org_id AND t.alert_id = a.id
+    AND EXISTS (SELECT 1
+                FROM teams tm
+                WHERE tm.org_id = t.org_id AND tm.id = t.team_id AND tm.deleted_at IS NULL)
+WHERE a.org_id = @org_id AND a.id = ANY(@alert_ids::bigint[])
+ORDER BY a.id, t.team_id;
+
+-- AddGroupTeams adds Teams to the Teams of an Alert Group, which only grow, and returns those it added: a Team the
+-- Alert Group already has keeps its rule and when it joined.
+-- name: AddGroupTeams :many
+INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, matcher, joined_at)
+SELECT @org_id, @alert_group_id, t.team_id, t.rule, nullif(t.matcher, ''), @joined_at
+FROM (SELECT unnest(@team_ids::bigint[]) AS team_id, unnest(@rules::text[]) AS rule,
+             unnest(@matchers::text[]) AS matcher) AS t
+ON CONFLICT (alert_group_id, team_id) DO NOTHING
+RETURNING team_id;
+
+-- AddUnknownTeamValues adds values of the Team label that name no Team to those an Alert Group recorded, and returns
+-- the values it added, sorted: each is recorded once per Alert Group.
+-- name: AddUnknownTeamValues :one
+WITH cur AS (
+    SELECT g.unknown_team_values
+    FROM alert_groups g
+    WHERE g.org_id = @org_id AND g.id = @id
+), added AS (
+    SELECT coalesce(array_agg(DISTINCT v.value ORDER BY v.value), '{}')::text[] AS vals
+    FROM unnest(@team_values::text[]) AS v (value), cur c
+    WHERE v.value <> ALL(c.unknown_team_values)
+)
+UPDATE alert_groups g
+SET unknown_team_values = g.unknown_team_values || added.vals
+FROM added
+WHERE g.org_id = @org_id AND g.id = @id
+RETURNING added.vals::text[] AS added;
+
+-- ListGroupTeams lists the Teams of Alert Groups, deleted ones included with their name, each Alert Group's in the
+-- order they joined.
+-- name: ListGroupTeams :many
+SELECT gt.alert_group_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, gt.rule,
+       gt.matcher, gt.joined_at
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = @org_id AND gt.alert_group_id = ANY(@alert_group_ids::bigint[])
+ORDER BY gt.alert_group_id, gt.joined_at, gt.team_id;
+
+-- ListGroupAlertTeams lists the Teams of Alerts as routing decided them, deleted ones included with their name.
+-- name: ListGroupAlertTeams :many
+SELECT x.alert_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, x.rule, x.matcher
+FROM alert_teams x
+JOIN teams t ON t.org_id = x.org_id AND t.id = x.team_id
+WHERE x.org_id = @org_id AND x.alert_id = ANY(@alert_ids::bigint[])
+ORDER BY x.alert_id, t.name, t.id;
+
+-- ListTeamRefs names Teams, deleted ones included: the Teams of the Timeline entries.
+-- name: ListTeamRefs :many
+SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM teams
+WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- ListTeamsByPublicID names Teams, deleted ones included, by public_id: the filter by Team of the list.
+-- name: ListTeamsByPublicID :many
+SELECT id, public_id, name
+FROM teams
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]);
+
+-- ListUserTeamIDs lists the Teams of a User, "My Teams" of the list.
+-- name: ListUserTeamIDs :many
+SELECT team_id
+FROM team_users
+WHERE org_id = @org_id AND user_id = @user_id
+ORDER BY team_id;

@@ -90,7 +90,7 @@ func organizationOf(o organization.Organization) gen.Organization {
 		},
 		TotpRequired: gen.TotpPolicy(o.TOTPRequired), OidcTokenGraceSeconds: int(o.OIDCTokenGrace / time.Second),
 		Etag: &tag, WorkdayEnd: o.WorkdayEnd, WorkingDays: make([]gen.Weekday, 0, len(o.WorkingDays)),
-		Buttons: gen.OrganizationButtonSet{All: o.Buttons.All},
+		Buttons: gen.OrganizationButtonSet{All: o.Buttons.All}, TeamLabel: o.TeamLabel,
 	}
 	if !o.Buttons.All {
 		items := buttonItemsOf(o.Buttons.Items)
@@ -161,7 +161,7 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 		}
 		in.WorkingDays = &days
 	}
-	in.WorkdayEnd = b.WorkdayEnd
+	in.WorkdayEnd, in.TeamLabel = b.WorkdayEnd, b.TeamLabel
 	if b.WeekStart != nil {
 		w := string(*b.WeekStart)
 		in.WeekStart = &w
