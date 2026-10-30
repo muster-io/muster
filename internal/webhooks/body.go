@@ -112,8 +112,8 @@ type bodyQueries interface {
 var _ delivery.EventBodies = (*Service)(nil)
 
 // EventBodies reads, through the transaction tx of a change, the Alert Group of in as its events carry it — its state
-// after the change, its Owner, its Route, its Teams and its Alerts — and the actor of the change, and returns the function that
-// renders the body of each of its events (C-15.FR-2).
+// after the change, its Owner, its Route, its Teams and its Alerts — and the actor of the change, and returns the
+// function that renders the body of each of its events (C-15.FR-2).
 func (s *Service) EventBodies(ctx context.Context, tx groups.DBTX, in delivery.EventSource) (delivery.BodyFunc,
 	error) {
 	return s.eventBodies(ctx, dbgen.New(tx), in)

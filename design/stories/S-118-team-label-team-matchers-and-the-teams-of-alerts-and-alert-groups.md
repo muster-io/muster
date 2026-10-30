@@ -68,6 +68,10 @@ files_touched:
   - test/e2e/lifecycle_test.go
   - test/e2e/webhook_events_test.go
   - test/e2e/webhook_template_test.go
+  - test/e2e/request_log_test.go
+  - docs/install/versions.md
+  - api/README.md
+  - design/stories/S-163-team-label-values-and-the-evaluation-of-open-alert-groups-on-save.md
   - docs/concepts/teams.md
   - docs/outgoing-webhooks/events.md
 acceptance:

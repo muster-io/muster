@@ -163,7 +163,7 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 	if q.ownerSet, q.owner, err = s.owner(ctx, f.Owner, f.Me); err != nil {
 		return q, err
 	}
-	if q.teamSet, q.teamIDs, err = s.teamFilter(ctx, f.Team, f.Me); err != nil {
+	if q.teamSet, q.teamIDs, err = s.byTeam(ctx, f.Team, f.Me); err != nil {
 		return q, err
 	}
 	if f.SnoozedNoEnd != nil {

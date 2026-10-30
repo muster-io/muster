@@ -445,10 +445,10 @@ func TestTeamsOnEveryJoin(t *testing.T) {
 	})
 }
 
-// TestTeamFilter is C-09.FR-13, C-25.FR-2 and C-25.AC-11 on the parameters of the list: no Team does not filter, a
+// TestFilterByTeam is C-09.FR-13, C-25.FR-2 and C-25.AC-11 on the parameters of the list: no Team does not filter, a
 // Team's public_id selects it, deleted or not, mine the Teams of the calling User, none when they are in none; mine
 // for a Service account and an unknown Team are refused at /query/team.
-func TestTeamFilter(t *testing.T) {
+func TestFilterByTeam(t *testing.T) {
 	h := newHarness(t)
 	h.withTeams()
 	h.db.teamsOf().users[bobID] = []int64{payments, checkout}

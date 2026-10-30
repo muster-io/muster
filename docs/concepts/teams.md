@@ -57,16 +57,21 @@ By Team matchers
     `pod=~"checkout-.*"` gets an Alert with `namespace="billing"` and one with `pod="checkout-api-1"`, and not one
     with `namespace="search"`. Matchers are saved with the Team, with `If-Match`, and replaced as a whole; an update
     that omits them keeps them. An expression that is not RE2 is refused with `422` `invalid_regex` at its pointer.
+    A matcher with only a negative operator, such as `env!="prod"`, picks every Alert that lacks the label, Internal
+    alerts included, because a missing label counts as empty.
 
 Muster decides the Teams of an Alert when it starts firing — its first firing, and each firing after it resolved —
 and records them on the Alert with the rule that matched: `label`, or `matcher` with the matcher's text. The Alerts
-view of an Integration shows them as `teams`. A Continuation is not a new firing and decides nothing; a Team created or
+view of an Integration shows them as `teams`: the Teams of the Alert's latest firing, which replace those of an earlier
+one. A Continuation is not a new firing and decides nothing; a Team created or
 changed later reaches the Alerts that fire from then on.
 
 The Teams of an Alert Group are those of every Alert that ever joined it. They only grow: a Team stays among them
 after its Alerts resolve. Each Team that joins records the Quiet lifecycle event `team_joined` in the Timeline, naming
 the Team and the rule that brought it; `getAlertGroup` and `listAlertGroups` carry the Teams as `teams`, and outgoing
-webhooks in events mode carry them in `alert_group.teams` ([Events mode](../outgoing-webhooks/events.md)). The
+webhooks in events mode carry them in `alert_group.teams` ([Events mode](../outgoing-webhooks/events.md)). An event
+carries the state of the Alert Group, not a change: each `team_joined` lists every Team the Alert Group has at that
+moment, the new one included. The
 parameter `team` of `listAlertGroups` and `getAlertGroupCounts` takes a Team's id, or `mine` for the Alert Groups of
 the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever its Route says: they do not change where
 it is delivered.

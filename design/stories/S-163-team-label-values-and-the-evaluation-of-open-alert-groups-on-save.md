@@ -145,6 +145,8 @@ None.
 - The evaluation only adds (C-25.FR-13): a Team stays in an Alert Group, and on its Alerts, after a change that would no
   longer bring it, as the Teams of an Alert Group only grow (C-25.FR-6).
 - Depends on S-111 for `open_group_updates`.
+- The evaluation must also cover Alerts that S-118's Router gave no Teams: an Alert that routing took up late (a listed
+  Alert without a Route), and one that first fired on a 0.1 replica during a rolling update.
 - Migration `0026` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present
   when it merges (S-131's Notes).
