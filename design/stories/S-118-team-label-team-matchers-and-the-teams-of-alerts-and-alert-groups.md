@@ -49,6 +49,8 @@ files_touched:
   - internal/delivery/live_test.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
+  - internal/webhooks/testevent.go
+  - internal/webhooks/testevent_test.go
   - internal/webhooks/query.sql
   - internal/organization/organization.go
   - internal/organization/settings.go
@@ -249,7 +251,9 @@ None.
 
 - Suggested commit: `feat(teams): assign alerts and alert groups to teams by label and matchers`.
 - The Teams of an Alert are decided once, when it starts firing (C-25.FR-5), by the Router that already routes it;
-  later changes of Teams reach open Alert Groups only through the evaluation on save of S-163.
+  later changes of Teams reach open Alert Groups only through the evaluation on save of S-163. An Alert that routing
+  takes up late (a listed Alert without a Route), or one that first fired on a 0.1 replica during a rolling upgrade,
+  gets no Teams until that evaluation, so S-163 must cover such Alerts.
 - `alert_group_teams` is written only by `groups`, like the Alert Group's other tables, so it joins lint 2.
 - `team_joined` and `unknown_team_value` are Quiet and never ring anyone; `team_joined` re-renders the Root message,
   which shows Teams from S-125 on.

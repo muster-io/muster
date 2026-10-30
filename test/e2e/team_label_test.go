@@ -269,6 +269,30 @@ func TestTeamLabel(t *testing.T) {
 		}
 	}
 
+	// C-25.FR-5: the Team label counts with the Static labels of the Integration: an Alert without the label of an
+	// Integration whose Static labels set team=payments belongs to payments by the label.
+	static := api.json(http.MethodPost, "/api/v1/integrations", `{"name":"static","connection_mode":"webhook_only",
+		"static_labels":{"team":"payments"},"duplicate_window_seconds":45,"heartbeat":{"enabled":false}}`,
+		http.StatusCreated)["id"].(string)
+	staticToken := api.json(http.MethodPost, "/api/v1/integrations/"+static+"/tokens", `{"name":"static"}`,
+		http.StatusCreated)["value"].(string)
+	e.fake(http.MethodPost, e.fam+"/receivers", `{"name":"static","url":"`+r.Ingest+`/api/v1/ingest","token":"`+
+		staticToken+`"}`)
+	e.fake(http.MethodPut, e.fam+"/groups/st", `{"receiver":"static","route":"{}","labels":{"alertname":"Static"}}`)
+	e.alert("st", "s", `{"severity":"warning","cluster":"ts"}`, "")
+	e.notify("st", "first notification")
+	var staticAlerts struct {
+		Items []struct {
+			Labels map[string]string `json:"labels"`
+			Teams  []teamOf          `json:"teams"`
+		} `json:"items"`
+	}
+	decode(t, api.do(http.MethodGet, "/api/v1/integrations/"+static+"/alerts", ""), &staticAlerts)
+	if len(staticAlerts.Items) != 1 || staticAlerts.Items[0].Labels["team"] != "payments" ||
+		!slices.Equal(slugs(staticAlerts.Items[0].Teams), []string{"payments/label"}) {
+		t.Errorf("an alert of the integration with the static label team=payments: %+v", staticAlerts.Items)
+	}
+
 	// C-15.FR-2: the outgoing webhook receives team_joined and unknown_team_value with alert_group.teams.
 	type record struct {
 		Body struct {

@@ -1206,7 +1206,7 @@ SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM teams
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
 
--- ListTeamsByPublicID names Teams, deleted ones included, by public_id: the Team filter of the list.
+-- ListTeamsByPublicID names Teams, deleted ones included, by public_id: the filter by Team of the list.
 -- name: ListTeamsByPublicID :many
 SELECT id, public_id, name
 FROM teams

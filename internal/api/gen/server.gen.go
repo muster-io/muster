@@ -8528,7 +8528,7 @@ type GetAlertGroupCountsParams struct {
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
-	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
 	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
 
 	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.
@@ -8612,7 +8612,7 @@ type ListAlertGroupsParams struct {
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
-	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
 	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
 
 	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.

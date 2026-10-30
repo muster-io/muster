@@ -177,7 +177,7 @@ func (s *Service) entryTeams(ctx context.Context, entries []TimelineEntry) error
 	return nil
 }
 
-// teamFilter resolves the Team filter of the list and the counts (C-09.FR-13, C-25.FR-2): whether it is set and the
+// teamFilter resolves the filter by Team of the list and the counts (C-09.FR-13, C-25.FR-2): whether it is set and the
 // Teams it selects. TeamMine is the Teams of the calling User, none when they are in none; a Service account, which is
 // in no Team, is a FieldError, as is an unknown Team. A deleted Team may be named: Alert Groups keep it.
 func (s *Service) teamFilter(ctx context.Context, team string, me audit.Actor) (bool, []int64, error) {

@@ -3424,7 +3424,7 @@ type ListTeamsByPublicIDRow struct {
 	Name     string
 }
 
-// ListTeamsByPublicID names Teams, deleted ones included, by public_id: the Team filter of the list.
+// ListTeamsByPublicID names Teams, deleted ones included, by public_id: the filter by Team of the list.
 func (q *Queries) ListTeamsByPublicID(ctx context.Context, arg ListTeamsByPublicIDParams) ([]ListTeamsByPublicIDRow, error) {
 	rows, err := q.db.Query(ctx, listTeamsByPublicID, arg.OrgID, arg.PublicIds)
 	if err != nil {

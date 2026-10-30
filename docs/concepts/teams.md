@@ -91,6 +91,10 @@ webhooks in events mode receive it. Create a Team with that value as its slug, o
 Alerts, and the Alerts that start firing from then on belong to it. A value that is not a valid slug, such as
 `Payments`, reaches a Team only through a Team matcher.
 
+With the default Team label `team` and no Teams defined yet, every Alert that carries a `team` label records
+`unknown_team_value` in its Alert Group's Timeline and sends it to outgoing webhooks in events mode. Create the Teams,
+or change the Team label to a label your Alerts do not use for something else, to avoid it.
+
 ## People
 
 An Admin adds Users to a Team by hand and removes them, through the API (`addTeamUser`, `removeTeamUser`). A User may be
