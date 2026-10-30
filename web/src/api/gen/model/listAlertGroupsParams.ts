@@ -77,7 +77,7 @@ label?: LabelMatchersParameter;
  */
 owner?: AgOwnerParameter;
 /**
- * Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+ * Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
  */
 team?: AgTeamParameter;
 /**
