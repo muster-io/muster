@@ -284,7 +284,6 @@ test("names the Transport Slack, and Check ends a Broken Slack Destination at on
       await admin.call<{ id: string }>("POST", "/api/v1/routes", {
         name: ROUTE,
         matchers: [{ label: "team", op: "=", value: TEAM }],
-        urgent: false,
         group_key: ["alertname", "cluster"],
         destination_ids: [destinationId],
         policy: profiles.items.find((p) => p.id === "paging")?.policy,

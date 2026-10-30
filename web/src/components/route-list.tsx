@@ -112,6 +112,8 @@ function RouteRow({
 }) {
   const { t } = useTranslation();
   const row = useRef<HTMLLIElement>(null);
+  // A 0.1 replica answers a Route without the field during a rollout.
+  const minimumSeverity = route.minimum_severity ?? "none";
   const indicator =
     dropTarget?.id === route.id
       ? dropTarget.before
@@ -156,13 +158,13 @@ function RouteRow({
           >
             {route.name}
           </Link>
-          {route.minimum_severity !== "none" && (
+          {minimumSeverity !== "none" && (
             <span
               className="inline-flex items-center rounded-md border border-destructive/40 px-1.5 py-0.5 text-xs font-medium text-destructive"
               data-testid="route-minimum-severity"
             >
               {t("routes.list.minimumSeverity", {
-                level: minimumSeverityName(t, route.minimum_severity),
+                level: minimumSeverityName(t, minimumSeverity),
               })}
             </span>
           )}

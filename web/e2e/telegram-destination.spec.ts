@@ -271,7 +271,6 @@ test("a Thread that lost the copy of its post shows as not attached in the Deliv
     await api.call("POST", "/api/v1/routes", {
       name: "tgd",
       matchers: [{ label: "team", op: "=", value: TEAM }],
-      urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [destinationId],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,

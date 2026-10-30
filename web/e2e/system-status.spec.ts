@@ -189,7 +189,6 @@ test.beforeAll(async () => {
     await admin.call("POST", "/api/v1/routes", {
       name: ROUTE,
       matchers: [{ label: "team", op: "=", value: ROUTE }],
-      urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [ids.alerts],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,
