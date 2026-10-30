@@ -217,7 +217,6 @@ test.beforeAll(async () => {
       await admin.call<{ id: string }>("POST", "/api/v1/routes", {
         name: ROUTE,
         matchers: [{ label: "team", op: "=", value: TEAM }],
-        urgent: false,
         group_key: ["alertname", "cluster"],
         destination_ids: [ids.alerts],
         policy: profiles.items.find((p) => p.id === "paging")?.policy,
@@ -582,7 +581,6 @@ test("a Destination whose template keeps failing links its banner to the runbook
     await admin.call("POST", "/api/v1/routes", {
       name: "dlf-template",
       matchers: [{ label: "team", op: "=", value: "dlf-template" }],
-      urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [destination],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,

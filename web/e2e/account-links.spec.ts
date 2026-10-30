@@ -531,7 +531,6 @@ test("links accounts through Bridges by token and by code, and acknowledges thro
     await api.call("POST", "/api/v1/routes", {
       name: BRIDGE_TEAM,
       matchers: [{ label: "team", op: "=", value: BRIDGE_TEAM }],
-      urgent: false,
       group_key: ["alertname"],
       destination_ids: [created.destination.id],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,

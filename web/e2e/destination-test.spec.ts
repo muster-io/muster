@@ -118,7 +118,6 @@ async function route(admin: Api, name: string, destinationId: string): Promise<v
   await admin.call("POST", "/api/v1/routes", {
     name,
     matchers: [{ label: "team", op: "=", value: name }],
-    urgent: false,
     group_key: ["alertname", "cluster"],
     destination_ids: [destinationId],
     policy: profiles.items.find((p) => p.id === "paging")?.policy,

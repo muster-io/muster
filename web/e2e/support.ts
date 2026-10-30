@@ -148,7 +148,6 @@ export async function createRoute(name: string, team: string, groupKey: string[]
     const route = await admin.call<{ id: string }>("POST", "/api/v1/routes", {
       name,
       matchers: [{ label: "team", op: "=", value: team }],
-      urgent: false,
       group_key: groupKey,
       destination_ids: [],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,

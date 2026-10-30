@@ -485,7 +485,7 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
   expect((await readHb())?.minimum_severity).toBe("critical");
 
   await ensureRussianAdmin();
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
   const ru = await context.newPage();
   const ruCsp = watchCsp(ru);
   await signIn(ru, RU_ADMIN, RU_PASSWORD);

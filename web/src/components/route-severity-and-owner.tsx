@@ -18,7 +18,7 @@ import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 
 /** The field of the section in the form of the Route editor. */
 export const severityAndOwnerSchema = {
-  minimum_severity: z.enum(["none", "warning", "critical"]),
+  minimum_severity: z.enum(MinimumSeverity),
 };
 
 export interface SeverityAndOwnerValues {
