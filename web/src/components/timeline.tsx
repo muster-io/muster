@@ -130,7 +130,7 @@ function changeReason(
     case "integration_deleted":
       return reasonLabel(t, code);
     case "minimum_severity":
-      return reason ? reason : null;
+      return t("timeline.reasons.minimumSeverity");
     case null:
     case undefined:
       return reason ? reason : null;
@@ -171,7 +171,9 @@ export function entryText(
         case "created":
           return t("timeline.events.created");
         case "urgency_raised":
-          return t("timeline.events.urgencyRaised");
+          return reason === null
+            ? t("timeline.events.urgencyRaised")
+            : t("timeline.events.urgencyRaisedWith", { reason });
         case "reopened":
           return t("timeline.events.reopened");
         case "snooze_ended":
@@ -217,8 +219,12 @@ export function entryText(
           return t("timeline.events.alertContinued", { count });
         case "annotations_changed":
           return t("timeline.events.annotationsChanged");
-        case "severity_raised":
-          return t("timeline.events.severityRaised");
+        case "severity_raised": {
+          const reason = changeReason(t, entry.reason_code, entry.reason);
+          return reason === null
+            ? t("timeline.events.severityRaised")
+            : t("timeline.events.severityRaisedWith", { reason });
+        }
         default:
           return t("timeline.events.other");
       }

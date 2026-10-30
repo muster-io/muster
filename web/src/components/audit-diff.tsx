@@ -85,6 +85,8 @@ function routeField(t: TFunction, pointer: string): string | undefined {
       return t("routes.fields.description");
     case "/matchers":
       return t("routes.fields.matchers");
+    case "/minimum_severity":
+      return t("routes.fields.minimumSeverity");
     case "/urgent":
       return t("routes.fields.urgent");
     case "/group_key":

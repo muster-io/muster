@@ -342,6 +342,32 @@ test("Retention shows the order refusal at the summaries field, then saves", asy
   expect(csp).toEqual([]);
 });
 
+test("Alert handling has no Critical is Urgent, and saves the Instance labels without it", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await page.goto("/admin/organization/alert-handling");
+  await expect(page.getByRole("heading", { name: "Alert handling", level: 1 })).toBeVisible();
+  await expect(page.getByText("Critical is Urgent")).toHaveCount(0);
+  await expect(page.getByRole("switch")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Add label" }).click();
+  await page
+    .getByRole("textbox", { name: /^Instance labels, entry \d+$/ })
+    .last()
+    .fill("zone");
+  const request = page.waitForRequest(
+    (r) => r.url().endsWith("/api/v1/organization") && r.method() === "PUT",
+  );
+  await save(page);
+  const body: unknown = (await request).postDataJSON();
+  expect(body).not.toHaveProperty("critical_is_urgent");
+  expect(body).toMatchObject({ instance_labels: expect.arrayContaining(["zone"]) });
+  await expect(page.getByTestId("alert-handling-status")).toHaveText("Saved.");
+  expect(csp).toEqual([]);
+});
+
 test("Severity levels lists the unmapped value P5 and maps it", async ({ page }) => {
   test.setTimeout(120_000);
   const csp = watchCsp(page);

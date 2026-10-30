@@ -11,6 +11,9 @@ files_touched:
   - web/src/components/route-severity-and-owner.tsx
   - web/src/components/route-severity-and-owner.test.tsx
   - web/src/components/route-list.tsx
+  - web/src/components/profile-picker.tsx
+  - web/src/components/profile-picker.test.tsx
+  - web/src/components/organization-form.tsx
   - web/src/routes/routes.new.tsx
   - web/src/routes/admin.organization.alert-handling.tsx
   - web/src/components/audit-diff.tsx
@@ -21,6 +24,7 @@ files_touched:
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - web/e2e/routes.spec.ts
+  - web/e2e/route-preview.spec.ts
   - web/e2e/organization-settings.spec.ts
   - web/e2e/alert-group-page.spec.ts
   - web/e2e/docs-links-forms.spec.ts
@@ -28,6 +32,7 @@ files_touched:
   - web/e2e/screenshots/organization.spec.ts
   - docs/concepts/routes-and-group-keys.md
   - docs/configure/organization.md
+  - docs/install/versions.md
 acceptance:
   - "[C-26.FR-8, C-26.FR-9] The Route form has the section \"Severity, Escalation chains and owner\" with \"Minimum severity\" — None, warning, critical — and the hint \"Only raises the Severity level of the Route's Alert Groups. Replaces the former 'Urgent': an Urgent Alert Group is a critical one.\" with \"Learn more\" to the section Minimum severity of Routes and Group keys; saving critical sends `minimum_severity` `critical` and no `urgent`, and the form no longer offers the urgent switch (`route-severity-and-owner.test.tsx`, `routes.spec.ts`)."
   - "[C-26.FR-8] The Routes list marks a Route whose Minimum severity is warning or critical with \"Minimum severity: critical\" (or warning) where it showed \"Urgent\" (`routes.spec.ts`)."
@@ -125,6 +130,15 @@ None.
 - Suggested commit: `feat(web): set the minimum severity on the route form`.
 - The section's name already names the Escalation chains and the owner, which S-158 and S-119 add, so that the form
   does not change its structure twice; until then it holds only "Minimum severity".
+- Review leftovers of S-162 are fixed here: `profile-picker.tsx` maps the profile id with an exhaustive `switch` over
+  `informational` and `paging`, whose `default` branch (`satisfies never`) is the 0.1 replica's `on_call`, read as
+  Paging, with a component test (`profile-picker.test.tsx`); the upgrade note of 0.2.0 in `docs/install/versions.md`
+  says that the break hits clients that type the enum **or look up `on_call`**, and that a page of the 0.1 web UI
+  names both profiles Informational and fills in the Paging values with its first card.
+- `organization-form.tsx` leaves `critical_is_urgent` out of every Organization update, so that "saves without the
+  field" holds for all pages of Organization, not only Alert handling; `route-preview.spec.ts` used the urgent switch.
+  Both were missing from `files_touched`. The Route form's section sits after the Destinations, so the screenshots of
+  the guide get one more image, `07-minimum-severity`; the later ones move to `08-policy` and `09-saved-route`.
 
 ## Coverage
 

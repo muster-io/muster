@@ -1177,6 +1177,7 @@
       "matchers": "Matchers",
       "mattermostCallback": "Button presses in Mattermost",
       "mentions": "Mentions",
+      "minimumSeverity": "Minimum severity",
       "oidcGroups": "Group mapping",
       "outboundPolicy": "Allowed networks",
       "permissions": "Service account Permissions",
@@ -1193,7 +1194,6 @@
       "template": "Message templates",
       "timers": "Ack timeout and Reminders",
       "totpPolicy": "TOTP policy",
-      "urgent": "Urgent",
       "webhookExtraction": "Extraction rules",
       "webhookSecrets": "Secrets",
       "webhookSigningSecret": "Signing secret",
@@ -1757,8 +1757,6 @@
   "organization": {
     "alertHandling": {
       "addInstanceLabel": "Add label",
-      "criticalIsUrgent": "Critical is Urgent",
-      "criticalIsUrgentHint": "An Alert Group whose Severity level is critical is Urgent.",
       "instanceLabels": "Instance labels",
       "instanceLabelsHint": "A new Alert that differs from a firing one only in these labels is a Replacement: it stays in the same Alert Group and the Timeline names the label that changed."
     },
@@ -2122,16 +2120,14 @@
       "description": "Description",
       "groupKey": "Group key",
       "matchers": "Matchers",
+      "minimumSeverity": "Minimum severity",
       "name": "Name",
       "urgent": "Urgent"
     },
     "form": {
       "back": "Back to the routes",
       "defaultMatchers": "The Default route has no Matchers: it takes every alert no other route took.",
-      "readOnly": "You can view this route but not change it.",
-      "urgent": "Urgent: every Alert Group of this Route is urgent",
-      "urgentOff": "No",
-      "urgentOn": "Yes: every Alert Group of this Route is urgent"
+      "readOnly": "You can view this route but not change it."
     },
     "groupKey": {
       "add": "Add label",
@@ -2159,6 +2155,7 @@
       "defaultHint": "Takes every alert no other route took. Always last.",
       "dragHint": "Drag to change the order",
       "label": "Routes in evaluation order",
+      "minimumSeverity": "Minimum severity: {{level}}",
       "moved": "{{name}} moved to position {{position}} of {{total}}.",
       "moveDown": "Move {{name}} down",
       "moveUp": "Move {{name}} up",
@@ -2167,8 +2164,7 @@
       "openAlertGroups_one": "{{count}} open Alert Group",
       "openAlertGroups_other": "{{count}} open Alert Groups",
       "stale": "Someone else changed the order. Reload to see it.",
-      "templateError": "Template error",
-      "urgent": "Urgent"
+      "templateError": "Template error"
     },
     "matchers": {
       "hint": "An alert must match every Matcher. =~ and !~ take an RE2 regular expression that must match the whole value.",
@@ -2227,6 +2223,14 @@
       "paging": "Paging",
       "pagingLine": "For alerts someone must act on: ack timeout and Reminders on.",
       "title": "Choose a profile"
+    },
+    "severity": {
+      "critical": "critical",
+      "hint": "Only raises the Severity level of the Route's Alert Groups. Replaces the former 'Urgent': an Urgent Alert Group is a critical one.",
+      "minimum": "Minimum severity",
+      "none": "None",
+      "title": "Severity, Escalation chains and owner",
+      "warning": "warning"
     },
     "snooze": {
       "add": "Add",
@@ -2650,6 +2654,7 @@
       "resolved": "Resolved",
       "resolvedWith": "Resolved: {{reason}}",
       "severityRaised": "Severity raised",
+      "severityRaisedWith": "Severity raised: {{reason}}",
       "snoozedNoEnd": "Snoozed with no end",
       "snoozedUntil": "Snoozed until {{until}}",
       "snoozeEnded": "Snooze ended while alerts still fire",
@@ -2659,7 +2664,8 @@
       "unclaimed": "Unclaimed",
       "unresolved": "Unresolved",
       "unsnoozed": "Unsnoozed",
-      "urgencyRaised": "Became Urgent"
+      "urgencyRaised": "Became Urgent",
+      "urgencyRaisedWith": "Became Urgent: {{reason}}"
     },
     "kinds": {
       "alerts": "Alerts",
@@ -2681,6 +2687,7 @@
     },
     "quiet": "Quiet",
     "reasons": {
+      "minimumSeverity": "Minimum severity of the Route",
       "noAnswer": "No answer to the last two Reminders",
       "ownerDeleted": "the owner was deleted",
       "ownerDisabled": "the owner was disabled"

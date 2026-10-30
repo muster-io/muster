@@ -11,7 +11,7 @@ metadata:
   labels:
     {{- include "muster.labels" . | nindent 4 }}
     app.kubernetes.io/component: app
-  {{- with .Values.ingress.annotations }}
+  {{- with mustMergeOverwrite (deepCopy (.Values.ingress.annotations | default dict)) (.Values.ingress.app.annotations | default dict) }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -44,7 +44,7 @@ metadata:
   labels:
     {{- include "muster.labels" . | nindent 4 }}
     app.kubernetes.io/component: ingest
-  {{- with .Values.ingress.annotations }}
+  {{- with mustMergeOverwrite (deepCopy (.Values.ingress.annotations | default dict)) (.Values.ingress.ingest.annotations | default dict) }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

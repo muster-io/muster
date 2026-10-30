@@ -60,6 +60,7 @@ const AUDITED: Record<string, readonly string[]> = {
     "/description",
     "/matchers",
     "/urgent",
+    "/minimum_severity",
     "/group_key",
     "/destination_ids",
     "/policy/reopen_window_seconds",
@@ -178,6 +179,13 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "connection", "/event_mode")).toBe("Режим событий");
     expect(fieldLabel(i18n.t, "connection", "/app_token")).toBe("Токен уровня приложения");
     expect(fieldLabel(i18n.t, "connection", "/slack_signing_secret")).toBe("Секрет подписи Slack");
+  });
+
+  test("names the Minimum severity of a Route, and keeps the label of the former urgent mark", async () => {
+    expect(fieldLabel(i18n.t, "route", "/minimum_severity")).toBe("Minimum severity");
+    expect(fieldLabel(i18n.t, "route", "/urgent")).toBe("Urgent");
+    await i18n.changeLanguage("ru");
+    expect(fieldLabel(i18n.t, "route", "/minimum_severity")).toBe("Минимальная важность маршрута");
   });
 
   test("names the Destinations and the delivery fields of a Route", async () => {

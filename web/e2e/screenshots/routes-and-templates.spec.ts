@@ -157,8 +157,14 @@ test("creates a Route, edits its message, and adds a Lookup table and a Link rul
     padding: 16,
     waitFor: page.getByTestId("route-destination").getByText("Healthy"),
   });
+  const severity = page.getByTestId("route-severity-section");
+  await capture(page, ROUTES, "07-minimum-severity", {
+    locator: severity,
+    padding: 16,
+    waitFor: severity.getByLabel("Minimum severity", { exact: true }),
+  });
   await scrollToTop(page.getByTestId("route-lifecycle"));
-  await capture(page, ROUTES, "07-policy", { waitFor: page.getByTestId("route-timers") });
+  await capture(page, ROUTES, "08-policy", { waitFor: page.getByTestId("route-timers") });
 
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page).toHaveURL(/\/routes$/);
@@ -166,7 +172,7 @@ test("creates a Route, edits its message, and adds a Lookup table and a Link rul
     .getByTestId("route-row")
     .filter({ has: page.getByRole("link", { name: ROUTE, exact: true }) });
   await expect(row.getByTestId("route-matchers")).toHaveText('team="payments"');
-  await capture(page, ROUTES, "08-saved-route", { waitFor: row });
+  await capture(page, ROUTES, "09-saved-route", { waitFor: row });
 
   // Preview before you save: the saved Route with a proposed Group key beside its current one.
   await row.getByRole("link", { name: ROUTE, exact: true }).click();

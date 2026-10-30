@@ -57,7 +57,13 @@ export function organizationInput(
   org: Organization,
   patch: OrganizationPatch = {},
 ): OrganizationInput {
-  const { id: _id, etag: _etag, outgoing_heartbeat: heartbeat, ...rest } = org;
+  const {
+    id: _id,
+    etag: _etag,
+    critical_is_urgent: _criticalIsUrgent,
+    outgoing_heartbeat: heartbeat,
+    ...rest
+  } = org;
   const { password_status: _password, ...proxy } = heartbeat.proxy;
   return { ...rest, outgoing_heartbeat: { proxy }, ...patch };
 }

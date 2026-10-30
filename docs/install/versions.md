@@ -101,10 +101,18 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0023 adds the [button sets](../concepts/statuses-and-commands.md#button-sets): the Organization's
       shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
 
+    **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
+    the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
+    can turn it on again. The image is now `image.registry` and `image.repository`, with `global.imageRegistry` over
+    the registry. An `image.repository` with the full path keeps working, but it ignores both registry values; move its
+    host to `image.registry` to use `global.imageRegistry`. A host without a dot or a colon, such as `registry/muster`,
+    now counts as a path under `image.registry`.
+
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
-    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
-    0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles Informational, so reload the
-    web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.
+    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
+    during a rolling update a 0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles
+    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored
+    changes.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity

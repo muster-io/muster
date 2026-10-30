@@ -5,7 +5,7 @@ apiVersion: v2
 name: muster
 description: Self-hosted alert grouping and on-call service
 type: application
-version: 0.0.0
+version: 0.0.1
 appVersion: "0.0.0-dev"
 home: https://github.com/muster-io/muster
 icon: https://raw.githubusercontent.com/muster-io/muster/master/docs/brand/muster-mark-tile.svg

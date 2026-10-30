@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The Routes in evaluation order (C-08.FR-3): each with its name, its Matchers in Alertmanager syntax, the urgent mark,
-// the mark of a template that keeps failing (C-12.FR-6), the Group key and the count of open Alert Groups; the Default
-// route pinned last. With routes:write a Route moves by dragging its handle (the browser's own drag and drop, which
-// adds nothing to the page that the Content Security Policy would refuse) or with "Move up" and "Move down", which also
-// serve the keyboard and touch screens. Every move saves the whole order with If-Match from the list ETag; a save over
+// The Routes in evaluation order (C-08.FR-3): each with its name, its Matchers in Alertmanager syntax, the Minimum
+// severity when it is set, the mark of a template that keeps failing (C-12.FR-6), the Group key and the count of open
+// Alert Groups; the Default route pinned last. With routes:write a Route moves by dragging its handle (the browser's
+// own drag and drop, which adds nothing to the page that the Content Security Policy would refuse) or with "Move up"
+// and "Move down", which also serve the keyboard and touch screens. Every move saves the whole order with If-Match from the list ETag; a save over
 // a newer order (412) shows "Someone else changed the order. Reload to see it." and puts the order back as it was read.
 
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,7 @@ import {
 import type { Route, RouteList as RouteListModel, RouteOrder } from "../api/gen/model";
 import { type Tagged, apiFetchTagged, isApiError, isStale, problemText } from "../lib/api";
 import { matcherText } from "./matcher-builder";
+import { minimumSeverityName } from "./route-severity-and-owner";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { cn } from "./ui/utils";
@@ -155,12 +156,14 @@ function RouteRow({
           >
             {route.name}
           </Link>
-          {route.urgent && (
+          {route.minimum_severity !== "none" && (
             <span
               className="inline-flex items-center rounded-md border border-destructive/40 px-1.5 py-0.5 text-xs font-medium text-destructive"
-              data-testid="route-urgent"
+              data-testid="route-minimum-severity"
             >
-              {t("routes.list.urgent")}
+              {t("routes.list.minimumSeverity", {
+                level: minimumSeverityName(t, route.minimum_severity),
+              })}
             </span>
           )}
           {route.template_error && (
