@@ -52,6 +52,16 @@ helm install muster oci://ghcr.io/muster-io/charts/muster --version <version> \
 
 Each release signs the chart with cosign, keyless, with the identity of its release workflow, as it signs the image.
 
+## Image registry and Ingress annotations
+
+The image is `<registry>/<repository>:<tag>`: `image.registry` (`ghcr.io`) and `image.repository` (`muster-io/muster`).
+`global.imageRegistry` replaces `image.registry` when set, for every image the chart renders. An `image.repository`
+that starts with a registry host, such as `nexus.example.org/muster-io/muster`, is used as it is.
+
+`ingress.annotations` applies to both Ingress objects, `muster-app` and `muster-ingest`. `ingress.app.annotations` and
+`ingress.ingest.annotations` are merged over a copy of it for their own Ingress, and their keys win. The
+`httpRoute.annotations`, `httpRoute.app.annotations` and `httpRoute.ingest.annotations` work the same way.
+
 ## Documentation
 
 - [Install with Helm](https://muster-io.github.io/muster/latest/install/helm/): the Secret, the values, the two public

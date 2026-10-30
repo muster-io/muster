@@ -79,10 +79,18 @@ else existingSecret.
 {{- end }}
 
 {{/*
-Return the appropriate image repository and tag
+Return the image: <registry>/<repository>:<tag, or the appVersion>. global.imageRegistry wins over image.registry. An
+image.repository whose first path segment is a registry host (it holds a "." or ":", or is localhost) is used as it is.
 */}}
 {{- define "muster.image" -}}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- $repository := .Values.image.repository -}}
+{{- $first := first (splitList "/" $repository) -}}
+{{- $registry := (.Values.global | default dict).imageRegistry | default .Values.image.registry -}}
+{{- if or (contains "." $first) (contains ":" $first) (eq $first "localhost") (not $registry) -}}
+{{- printf "%s:%s" $repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- else -}}
+{{- printf "%s/%s:%s" (trimSuffix "/" $registry) $repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- end }}
 {{- end }}
 
 {{/*
