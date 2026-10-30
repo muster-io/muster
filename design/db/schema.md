@@ -1434,7 +1434,7 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
 - **`rotation_layers`** — the Rotation layers of a Schedule, `position` 1 for the lowest, unique per Schedule through
   `rotation_layers_position_key`, deferred to the commit so that a save renumbers the layers it keeps. `shift_length`
   is `day`, `week` or `hours`; `shift_seconds` is set exactly with `hours`, a multiple of 3600 from 3600
-  (`rotation_layers_shift_seconds_check`), and `handover_day` exactly with `week`. `handover_time` and the limits'
+  (`rotation_layers_shift_seconds_check`), and `handover_day` exactly with `week` (`rotation_layers_handover_day_set_check`). `handover_time` and the limits'
   `limit_start` and `limit_end` are `HH:MM`; `limit_days` are days of the week, and a time of day needs days and both
   its ends (`rotation_layers_limit_times_check`). `limit_end <> limit_start`: an end earlier than the start crosses
   midnight, and the window belongs to the day it starts on (C-27.FR-2).

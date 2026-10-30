@@ -54,7 +54,7 @@ CREATE TABLE rotation_layers (
     CONSTRAINT rotation_layers_shift_seconds_check CHECK ((shift_length = 'hours') = (shift_seconds IS NOT NULL)
         AND shift_seconds >= 3600 AND shift_seconds % 3600 = 0),
     -- handover_day is set exactly with week.
-    CONSTRAINT rotation_layers_handover_day_check CHECK ((shift_length = 'week') = (handover_day IS NOT NULL)),
+    CONSTRAINT rotation_layers_handover_day_set_check CHECK ((shift_length = 'week') = (handover_day IS NOT NULL)),
     CONSTRAINT rotation_layers_limit_days_check CHECK (cardinality(limit_days) > 0
         AND limit_days <@ ARRAY['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']),
     -- The time of day of the limits is set with both its ends, and only with days.
