@@ -489,8 +489,9 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
   const ru = await context.newPage();
   const ruCsp = watchCsp(ru);
   await signIn(ru, RU_ADMIN, RU_PASSWORD);
+  // The language is already Russian when the test above ran first.
   await ru.goto("/profile");
-  await ru.getByLabel("Language").selectOption("ru");
+  await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
   await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
   await ru.goto("/routes");
   await expect(routeRow(ru, "hb").getByTestId("route-minimum-severity")).toHaveText(
