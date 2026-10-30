@@ -79,6 +79,7 @@ const WRITE: Permission[] = [
   "destinations:write",
   "destinations:test",
   "connections:read",
+  "routes:read",
 ];
 
 function json(status: number, body: unknown): Response {
@@ -113,6 +114,19 @@ function mockReads(check?: Omit<DestinationCheckResult, "request_log_run">) {
     }
     if (url.startsWith("/api/v1/user-directory")) {
       return Promise.resolve(json(200, { items: [], next_cursor: null }));
+    }
+    if (url.startsWith("/api/v1/route-profiles")) {
+      return Promise.resolve(
+        json(200, {
+          items: [{ id: "paging", policy: { snooze_durations_seconds: [3600, 14400, 86400] } }],
+        }),
+      );
+    }
+    if (url.startsWith("/api/v1/routes")) {
+      return Promise.resolve(json(200, { items: [] }));
+    }
+    if (url.startsWith("/api/v1/organization")) {
+      return Promise.resolve(json(200, { workday_start: "09:00", week_start: "monday" }));
     }
     if (check !== undefined && url.endsWith("/checks")) {
       return Promise.resolve(json(200, { ...check, request_log_run: "CR0000000000R1" }));
@@ -231,8 +245,40 @@ describe("DestinationForm with the Telegram fields", () => {
       connection_id: TG.id,
       channel_id: "@muster_alerts",
       mentions: defaultMentions(),
+      buttons: { source: "organization" },
       limiter: { limit: 10, per_seconds: 60 },
     });
+  });
+
+  test("has the Buttons section with its preview and tick boxes, in English and in Russian", async () => {
+    mockReads();
+    const save = vi.fn((_input: DestinationInput) => Promise.resolve(undefined));
+    await render(
+      providers(<DestinationForm kind={TELEGRAM_KIND} submitLabel="Save" save={save} />),
+    );
+    const firing = page.getByTestId("button-set-preview-firing");
+    await expect.element(page.getByLabelText("As in the Organization")).toBeChecked();
+    await expect
+      .element(firing)
+      .toHaveTextContent(
+        "AckResolveSnooze 1 hSnooze 4 hSnooze 24 hUntil tomorrow 09:00Until Monday 09:00",
+      );
+    await userEvent.click(page.getByLabelText("Own for this Destination"));
+    for (const key of ["resolve", "snooze:3600", "snooze:14400", "preset:week_start"]) {
+      await userEvent.click(page.getByTestId(`button-set-item-${key}`));
+    }
+    await expect.element(firing).toHaveTextContent("AckSnooze 24 hUntil tomorrow 09:00");
+    await expect
+      .element(page.getByTestId("button-set-preview-acknowledged"))
+      .toHaveTextContent("UnackSnooze 24 hUntil tomorrow 09:00");
+
+    await i18n.changeLanguage("ru");
+    await expect.element(page.getByLabelText("Свои для этого места доставки")).toBeChecked();
+    await expect
+      .element(page.getByTestId("button-set-preview-firing"))
+      .toHaveTextContent("ПодтвердитьОтложить на 24 чДо завтра 09:00");
+    await expect.element(page.getByTestId("button-set-item-snooze:86400")).toBeChecked();
+    await expect.element(page.getByText("Отложить на 4 ч", { exact: true })).toBeVisible();
   });
 
   test("shows each failing check next to the channel, and nothing is saved", async () => {

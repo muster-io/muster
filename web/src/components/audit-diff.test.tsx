@@ -54,7 +54,7 @@ const AUDITED: Record<string, readonly string[]> = {
     "/proxy/username",
     "/proxy/password",
   ],
-  organization: ["/totp_required"],
+  organization: ["/totp_required", "/buttons"],
   route: [
     "/name",
     "/description",
@@ -111,6 +111,7 @@ const AUDITED: Record<string, readonly string[]> = {
     "/team_id",
     "/channel_id",
     "/mentions",
+    "/buttons",
     "/limiter/limit",
     "/limiter/per_seconds",
     "/deleted_at",
@@ -205,12 +206,16 @@ describe("fieldLabel", () => {
     expect(fieldLabel(i18n.t, "destination", "/team_id")).toBe("Team");
     expect(fieldLabel(i18n.t, "destination", "/channel_id")).toBe("Channel");
     expect(fieldLabel(i18n.t, "destination", "/mentions")).toBe("Mentions");
+    expect(fieldLabel(i18n.t, "destination", "/buttons")).toBe("Buttons");
+    expect(fieldLabel(i18n.t, "organization", "/buttons")).toBe("Buttons");
     expect(fieldLabel(i18n.t, "destination", "/limiter/per_seconds")).toBe(
       "Rate limit: period (seconds)",
     );
     await i18n.changeLanguage("ru");
     expect(fieldLabel(i18n.t, "destination", "/channel_id")).toBe("Канал");
     expect(fieldLabel(i18n.t, "destination", "/mentions")).toBe("Упоминания");
+    expect(fieldLabel(i18n.t, "destination", "/buttons")).toBe("Кнопки");
+    expect(fieldLabel(i18n.t, "organization", "/buttons")).toBe("Кнопки");
   });
 
   test("shows the pointer of a field without a name", () => {

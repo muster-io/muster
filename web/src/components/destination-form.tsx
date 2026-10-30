@@ -15,6 +15,7 @@ import { useTranslation } from "react-i18next";
 
 import type {
   Destination,
+  DestinationButtonSet,
   DestinationInput,
   DestinationType,
   Limiter,
@@ -22,6 +23,13 @@ import type {
   MentionSettings,
 } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
+import {
+  type ButtonSetValue,
+  destinationButtons,
+  destinationButtonsInput,
+  itemErrors,
+} from "../lib/button-sets";
+import { ButtonSetEditor } from "./button-set-editor";
 import { type CheckCode, checkCodeText, checkDetail, checkErrorText } from "./connection-check";
 import {
   LimiterField,
@@ -101,7 +109,13 @@ export interface DestinationKind<V> {
   check: (v: V) => Record<string, string>;
   /** The request of a save. */
   input: (
-    common: { name: string; mentions: MentionSettings; limiter: Limiter },
+    common: {
+      name: string;
+      mentions: MentionSettings;
+      limiter: Limiter;
+      /** The button set, for the types that have one: not an outgoing webhook. */
+      buttons?: DestinationButtonSet;
+    },
     v: V,
   ) => DestinationInput;
   /**
@@ -120,6 +134,7 @@ export interface DestinationKind<V> {
 interface Values<V> {
   name: string;
   mentions: MentionSettings;
+  buttons: ButtonSetValue;
   limiter: LimiterValues;
   fields: V;
 }
@@ -133,6 +148,7 @@ function valuesOf<V>(kind: DestinationKind<V>, d: Destination | undefined): Valu
   return {
     name: d?.name ?? "",
     mentions: d?.mentions ?? defaultMentions(),
+    buttons: destinationButtons(d && d.type !== "webhook" ? d.buttons : undefined),
     limiter: limiterValues(d?.limiter ?? kind.defaultLimiter),
     fields: kind.values(d),
   };
@@ -188,6 +204,11 @@ export function destinationErrors<V>(kind: DestinationKind<V>, v: Values<V>): De
   }
   for (const [field, code] of Object.entries(limiterErrors(v.limiter))) {
     errors[`/limiter/${field}`] = { code };
+  }
+  if (kind.type !== "webhook" && !v.buttons.follows) {
+    for (const [index, code] of Object.entries(itemErrors(v.buttons.items))) {
+      errors[`/buttons/items/${index}`] = { code };
+    }
   }
   return errors;
 }
@@ -251,6 +272,11 @@ export function destinationErrorText(t: TFunction, pointer: string, problem: Fie
     return t("destinations.errors.unknownConnection");
   }
   return fieldErrorText(t, problem.code);
+}
+
+/** Whether a pointer is the button set or below it, such as /buttons/items/2. */
+function isButtonsPointer(pointer: string): boolean {
+  return pointer === "/buttons" || pointer.startsWith("/buttons/");
 }
 
 /** The kind of Loud event a Mention pointer names, such as /mentions/new_alerts/user_ids/0. */
@@ -376,6 +402,7 @@ export function DestinationForm<V>({
       mentionErrors[mentionKind] = destinationErrorText(t, pointer, problem);
     }
   }
+  const buttonsError = Object.entries(errors).find(([pointer]) => isButtonsPointer(pointer))?.[1];
   const limiterFieldErrors: Partial<Record<keyof LimiterValues, string>> = {};
   for (const field of ["limit", "per_seconds"] as const) {
     const message = text(`/limiter/${field}`);
@@ -387,6 +414,7 @@ export function DestinationForm<V>({
     pointer === "/name" ||
     isTypePointer(kind.pointers, pointer) ||
     mentionKindOf(pointer) !== undefined ||
+    isButtonsPointer(pointer) ||
     pointer === "/limiter/limit" ||
     pointer === "/limiter/per_seconds";
   const unshown = Object.entries(errors).filter(([pointer]) => !shown(pointer));
@@ -410,6 +438,9 @@ export function DestinationForm<V>({
                 name: values.name.trim(),
                 mentions: values.mentions,
                 limiter: limiterInput(values.limiter),
+                ...(kind.type === "webhook"
+                  ? {}
+                  : { buttons: destinationButtonsInput(values.buttons) }),
               },
               values.fields,
             ),
@@ -507,6 +538,22 @@ export function DestinationForm<V>({
             />
           </CardContent>
         </Card>
+        {kind.type !== "webhook" && (
+          <Card>
+            <CardContent>
+              <ButtonSetEditor
+                id={`${ID}-buttons`}
+                kind="destination"
+                value={values.buttons}
+                destinationName={values.name.trim()}
+                destinationId={destination?.id}
+                error={buttonsError?.code}
+                disabled={readOnly}
+                onChange={(next) => change("buttons", next, ["/buttons"])}
+              />
+            </CardContent>
+          </Card>
+        )}
       </fieldset>
       {!readOnly && (
         <div className="flex flex-col gap-3">

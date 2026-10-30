@@ -1,5 +1,6 @@
 {
   "field.bridge_events": "messengers/bridge.md#create-the-connection",
+  "field.buttons": "concepts/statuses-and-commands.md#button-sets",
   "field.group_key": "concepts/routes-and-group-keys.md#group-keys",
   "field.heartbeat": "integrations/heartbeat.md#turn-it-on",
   "field.integration_snippet": "integrations/alertmanager.md#create-a-token-and-paste-the-snippet",

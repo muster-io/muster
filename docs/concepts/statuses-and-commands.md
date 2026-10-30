@@ -345,6 +345,27 @@ shows, on a Route with the durations 1 h, 4 h and 24 h:
 | Acknowledged | **Unack**, **Snooze 24 h**, **Until tomorrow 09:00** |
 | Snoozed | **Ack**, **Unsnooze** |
 
+To choose the buttons of a Destination:
+
+1. Open **Destinations** and select the Destination, or create one. The form of a Mattermost, Telegram, Slack or Bridge
+   Destination has the section **Buttons**. An outgoing webhook sends no buttons and has no section.
+2. Under **Buttons**, choose **Own for this Destination**. The tick boxes are **Acknowledge** (which brings **Unack**
+   with it), **Resolve**, each Snooze duration of your Routes and both Snooze presets; they start as what the
+   Destination shows now. Untick what the Root message should not show. **What {Destination} shows** lists the buttons
+   of a firing and of an acknowledged Root message, in the order of the table above, and follows each tick box at once.
+3. Select **Save**. Choose **As in the Organization** and save to follow the Organization's set again.
+
+    ![The section Buttons of a Destination with Own for this Destination chosen: Acknowledge, Snooze 24 h and Until tomorrow ticked, and the buttons a firing and an acknowledged Root message show](../assets/screenshots/concepts/statuses-and-commands/07-destination-buttons.png){ .screenshot }
+
+To change the set of every Destination that follows the Organization, open **Organization → Alert handling** and use
+**Buttons of Root messages**: **All buttons**, the default, or **Only the buttons I tick**, with the same preview. See
+[Organization settings](../configure/organization.md#alert-handling). A Destination of its own set keeps it when the
+Organization's set changes. A ticked Organization list names the Snooze durations it lists: a duration that a Route
+gains later is not shown until you tick it, unlike with **All buttons**. The form offers the Snooze durations of your
+Routes, or those of the Paging profile while no Route has any; a duration that the stored set names and no Route has
+stays ticked, so saving never drops it. The preview of a Destination shows the durations of the first Route that sends
+to it, as its Root message does.
+
 The set changes only the buttons of Root messages. Reminders keep **Still on it** and **Unack**; the
 [Text commands](#text-commands) of Bridges, the web UI and the API keep every action; and a press on a button that a
 message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:

@@ -95,4 +95,21 @@ test("creates a Mattermost Connection and a Destination", async ({ page }) => {
     "Button press: Button presses reach Muster.",
   );
   await capture(page, DOCS, "07-button-press", { locator: press });
+
+  // The Buttons section of the Destination, for "Button sets" of Statuses and commands: its own set of Acknowledge,
+  // "24 h" and "Until tomorrow", with the buttons a firing and an acknowledged Root message then show. Not saved.
+  const buttons = page.getByTestId("button-set");
+  await buttons.scrollIntoViewIfNeeded();
+  await page.getByLabel("Own for this Destination").check();
+  for (const key of ["resolve", "snooze:3600", "snooze:14400", "preset:week_start"]) {
+    await page.getByTestId(`button-set-item-${key}`).uncheck();
+  }
+  await expect(page.getByTestId("button-set-preview-firing").getByRole("listitem")).toHaveText([
+    "Ack",
+    "Snooze 24 h",
+    "Until tomorrow 09:00",
+  ]);
+  await capture(page, "concepts/statuses-and-commands", "07-destination-buttons", {
+    locator: cardOf(buttons),
+  });
 });

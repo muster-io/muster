@@ -293,6 +293,7 @@ describe("DestinationForm with the Bridge fields", () => {
       connection_id: BR.id,
       channel_id: "ch-alerts",
       mentions: defaultMentions(),
+      buttons: { source: "organization" },
       limiter: { limit: 60, per_seconds: 60 },
     });
   });

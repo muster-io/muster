@@ -167,6 +167,17 @@ test("saves each page of the Organization, reads the Audit log, the System statu
   await signInAdmin(page);
   await nav(page, "Organization").click();
 
+  // Alert handling first: the button set without Resolve. Its Audit log row is the oldest of the spec, so that the
+  // rows of the Audit log images stay as short as before; the start of the working day is still 09:00 here.
+  await organizationNav(page, "Alert handling").click();
+  await page.getByLabel("Only the buttons I tick").check();
+  await page.getByTestId("button-set-item-resolve").uncheck();
+  await save(page, "alert-handling-status");
+  await capture(page, ORGANIZATION, "03-alert-handling", {
+    waitFor: page.getByTestId("alert-handling-status"),
+    locator: cardOf(page.getByTestId("button-set")),
+  });
+
   // General: the time zone of messages and the start of the working day.
   await organizationNav(page, "General").click();
   await page.getByLabel("Search time zones").fill("tokyo");
@@ -193,9 +204,6 @@ test("saves each page of the Organization, reads the Audit log, the System statu
     .last()
     .fill("node");
   await save(page, "alert-handling-status");
-  await capture(page, ORGANIZATION, "03-alert-handling", {
-    waitFor: page.getByTestId("alert-handling-status"),
-  });
 
   // Security: the token grace of 14 days.
   await organizationNav(page, "Security").click();

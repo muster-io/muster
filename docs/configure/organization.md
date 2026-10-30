@@ -67,16 +67,26 @@ info.
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
     Group, and the Timeline names the label that changed.
 
+**Buttons of Root messages** (`organization.buttons`, all)
+:   Which buttons the Root messages of every Destination show, unless a Destination has a set of its own: **All buttons**,
+    the default, or **Only the buttons I tick**, with a tick box for **Acknowledge** (which brings **Unack** with it),
+    **Resolve**, each Snooze duration of your Routes and both Snooze presets. **What a Root message shows** lists the
+    buttons of a firing and of an acknowledged Root message and follows each tick box. Hidden actions stay in Muster
+    and in the Text commands of Bridges. See [Button sets](../concepts/statuses-and-commands.md#button-sets).
+
 From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
 [Urgent](../concepts/routes-and-group-keys.md#urgent) exactly when its Severity level is critical.
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
-status.
+status. A change of **Buttons of Root messages** updates the open Root messages of the Destinations that follow the
+Organization within seconds, as edits that notify nobody.
 
 1. Open **Organization → Alert handling**.
-2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it. Select **Save**.
+2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
+3. Under **Buttons of Root messages**, choose **Only the buttons I tick** and untick what the Root messages should not
+   show, such as **Resolve**. Select **Save**.
 
-    ![Organization → Alert handling: the Instance labels with node added, saved](../assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+    ![Organization → Alert handling: Buttons of Root messages with Only the buttons I tick chosen and Resolve unticked](../assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
 
 ## Security
 

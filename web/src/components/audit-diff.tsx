@@ -218,7 +218,19 @@ function connectionField(t: TFunction, pointer: string): string | undefined {
   }
 }
 
-/** The names of the changed fields of a Destination; the Mentions are one field. */
+/** The names of the changed fields of the Organization; the button set is one field. */
+function organizationField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/totp_required":
+      return t("audit.fields.totpRequired");
+    case "/buttons":
+      return t("audit.fields.buttons");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of a Destination; the Mentions and the button set are one field each. */
 function destinationField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
     case "/name":
@@ -231,6 +243,8 @@ function destinationField(t: TFunction, pointer: string): string | undefined {
       return t("destinations.mattermost.channel");
     case "/mentions":
       return t("mentions.title");
+    case "/buttons":
+      return t("audit.fields.buttons");
     case "/limiter/limit":
       return t("audit.fields.limiterLimit");
     case "/limiter/per_seconds":
@@ -311,7 +325,7 @@ export function fieldLabel(
       label = routeField(t, pointer);
       break;
     case "organization":
-      label = pointer === "/totp_required" ? t("audit.fields.totpRequired") : undefined;
+      label = organizationField(t, pointer);
       break;
     case "lookup_table":
       label = lookupTableField(t, pointer);

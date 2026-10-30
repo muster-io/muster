@@ -15,7 +15,7 @@ import { problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
 
 /** Which of its two texts a profile id reads as. */
-function profileKind(id: RouteProfileId): "informational" | "paging" {
+export function profileKind(id: RouteProfileId): "informational" | "paging" {
   switch (id) {
     case "informational":
       return "informational";
