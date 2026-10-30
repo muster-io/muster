@@ -28,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/routing/dbgen"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -88,6 +89,15 @@ type fakeStore struct {
 	// teams are the Teams that are not deleted by public_id, and userTeams the public_ids of the Teams of each User.
 	teams     map[string]dbgen.LockOwningTeamRow
 	userTeams map[int64][]string
+
+	// The classification by Teams (evaluate_test.go): the Team label and teams_version, the Teams and Team matchers it
+	// reads, and the Teams and the unknown value that routing recorded on each Alert.
+	teamLabel     string
+	teamsVersion  int64
+	classTeams    []teamsdb.ListClassifiedTeamsRow
+	classMatchers []teamsdb.ListClassifiedMatchersRow
+	alertTeams    map[int64][]string
+	unknown       map[int64]string
 }
 
 // link is a row of route_destinations.
@@ -103,7 +113,8 @@ func newStore() *fakeStore {
 			`{"value":"info","level":"info"},{"value":"none","level":"info"}]`),
 		alerts: map[int64][]byte{}, routed: map[int64]dbgen.SetAlertRoutesParams{}, dismissals: map[int64][]string{},
 		open: map[int64]int64{}, dests: map[string]int64{}, deleted: map[string]bool{}, links: map[int64][]link{},
-		teams: map[string]dbgen.LockOwningTeamRow{}, userTeams: map[int64][]string{}}
+		teams: map[string]dbgen.LockOwningTeamRow{}, userTeams: map[int64][]string{}, teamLabel: "team",
+		alertTeams: map[int64][]string{}, unknown: map[int64]string{}}
 }
 
 func (s *fakeStore) call(name string) error {

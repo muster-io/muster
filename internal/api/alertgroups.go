@@ -64,6 +64,7 @@ type filterParams struct {
 	resolveReason         *gen.ResolveReason
 	label                 *[]string
 	owner                 *string
+	team                  *string
 	snoozedNoEnd, problem *bool
 	unclaimed             *bool
 	from, to              *time.Time
@@ -78,6 +79,9 @@ func filterOf(p filterParams) (groups.Filter, error) {
 		DeliveryProblem: p.problem, Unclaimed: p.unclaimed, Me: p.me}
 	if p.owner != nil {
 		f.Owner = *p.owner
+	}
+	if p.team != nil {
+		f.Team = *p.team
 	}
 	if p.route != nil {
 		f.Routes = *p.route
@@ -123,7 +127,7 @@ func (s *Server) ListAlertGroups(ctx context.Context, req gen.ListAlertGroupsReq
 	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
-		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		label: p.Label, owner: p.Owner, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
 		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: c.Actor})
 	if err != nil {
 		return nil, err
@@ -177,7 +181,7 @@ func (s *Server) GetAlertGroupCounts(ctx context.Context, req gen.GetAlertGroupC
 	}
 	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
 		urgent: p.Urgent, reopened: p.Reopened, resolvedBy: p.ResolvedBy, resolveReason: p.ResolveReason,
-		label: p.Label, owner: p.Owner, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
+		label: p.Label, owner: p.Owner, team: p.Team, snoozedNoEnd: p.SnoozedNoEnd, problem: p.DeliveryProblem,
 		unclaimed: p.Unclaimed, from: p.From, to: p.To, q: p.Q, me: me.Actor})
 	if err != nil {
 		return nil, err
@@ -326,6 +330,7 @@ func alertGroupOf(v groups.View, c groups.Caller) gen.AlertGroup {
 		ResolvedAlertCount: int(v.ResolvedCount), AllowedCommands: []gen.CommandName{},
 		Links: linksOf(v.Links), DetailsRemoved: &v.DetailsRemoved, Resolution: resolvedByOf(v.Resolution),
 		Owner: userRefOf(v.Owner), DeliveryProblem: v.DeliveryProblem, Unclaimed: v.Unclaimed,
+		Teams: alertGroupTeamsOf(v.Teams),
 	}
 	if v.NextNotice != nil {
 		out.NextNotice = &gen.NextNotice{Kind: gen.NextNoticeKind(v.NextNotice.Kind), At: v.NextNotice.At}
@@ -509,7 +514,7 @@ func (s *Server) ListAlertGroupAlerts(ctx context.Context, req gen.ListAlertGrou
 			Integration: &gen.EntityRef{Id: a.Integration.PublicID, Name: a.Integration.Name},
 			State:       gen.AlertStateResolved, StartsAt: a.StartsAt, ResolvedAt: nullableTime(a.ResolvedAt),
 			LastSeenAt: a.LastSeenAt, AlertmanagerGroups: a.GroupKeys, SourceUrl: nullableString(a.SourceURL),
-			ResolveReasonText: nullableString(a.ReasonText)}
+			ResolveReasonText: nullableString(a.ReasonText), Teams: teamMembershipsOf(a.Teams)}
 		if a.Firing {
 			item.State = gen.AlertStateFiring
 		}
@@ -628,6 +633,14 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		if e.LabelConflicts != nil {
 			v.LabelConflicts = &e.LabelConflicts
 		}
+		if e.Team != nil {
+			v.Team = &gen.TeamRef{Id: e.Team.PublicID, Name: e.Team.Name, Slug: e.Team.Slug, Deleted: e.Team.Deleted}
+		}
+		if e.TeamRule != nil {
+			rule := gen.TeamRule(*e.TeamRule)
+			v.TeamRule = &rule
+			v.TeamMatcher = nullableString(e.TeamMatcher)
+		}
 		err = out.FromTimelineAlertsEntry(v)
 	case groups.KindTimers:
 		v := gen.TimelineTimersEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineTimersEntryKindTimers,
@@ -655,6 +668,9 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 			PeriodTo: nullableTime(e.PeriodTo), Detail: nullableString(e.Detail)}
 		if e.Event != "" {
 			v.Event, v.Loudness, v.Mentions = &event, &loudness, &mentions
+		}
+		if e.TeamValue != nil {
+			v.TeamValue.Set(*e.TeamValue)
 		}
 		err = out.FromTimelineSystemEntry(v)
 	}
@@ -731,4 +747,35 @@ func linksOf(ls []groups.Link) *[]gen.AlertGroupLink {
 		}
 	}
 	return &out
+}
+
+// teamMembershipOf is the API form of a Team an Alert belongs to.
+func teamMembershipOf(t groups.TeamMembership) gen.TeamMembership {
+	out := gen.TeamMembership{Team: gen.TeamRef{Id: t.Team.PublicID, Name: t.Team.Name, Slug: t.Team.Slug,
+		Deleted: t.Team.Deleted}, Rule: gen.TeamRule(t.Rule)}
+	if t.Matcher != nil {
+		out.Matcher.Set(*t.Matcher)
+	} else {
+		out.Matcher.SetNull()
+	}
+	return out
+}
+
+// teamMembershipsOf is the API form of the Teams of an Alert.
+func teamMembershipsOf(ts []groups.TeamMembership) []gen.TeamMembership {
+	out := make([]gen.TeamMembership, len(ts))
+	for i, t := range ts {
+		out[i] = teamMembershipOf(t)
+	}
+	return out
+}
+
+// alertGroupTeamsOf is the API form of the Teams of an Alert Group.
+func alertGroupTeamsOf(ts []groups.GroupTeam) []gen.AlertGroupTeam {
+	out := make([]gen.AlertGroupTeam, len(ts))
+	for i, t := range ts {
+		m := teamMembershipOf(t.TeamMembership)
+		out[i] = gen.AlertGroupTeam{Team: m.Team, Rule: m.Rule, Matcher: m.Matcher, JoinedAt: t.JoinedAt}
+	}
+	return out
 }

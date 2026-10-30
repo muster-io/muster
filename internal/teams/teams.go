@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams/dbgen"
@@ -73,6 +76,7 @@ const (
 	CodeOutOfRange    = "out_of_range"
 	CodeDuplicate     = "duplicate"
 	CodeUnknownID     = "unknown_id"
+	CodeInvalidRegex  = "invalid_regex"
 )
 
 const (
@@ -114,7 +118,7 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
 // Team is a Team as the API reads it. Own are its own Working hours, nil when it follows the Organization's;
-// WorkingHours are the effective ones.
+// WorkingHours are the effective ones. Matchers are its Team matchers in their order (C-25.FR-5).
 type Team struct {
 	ID           int64
 	PublicID     string
@@ -123,19 +127,29 @@ type Team struct {
 	Description  string
 	Own          *WorkingHours
 	WorkingHours WorkingHours
+	Matchers     []Matcher
 	UserCount    int64
 	CreatedAt    time.Time
 	Version      int64
 }
 
+// Matcher is a Team matcher (C-25.FR-5): a condition on one label in the syntax of Route Matchers.
+type Matcher struct {
+	Label string `json:"label"`
+	Op    string `json:"op"`
+	Value string `json:"value"`
+}
+
 // Input is what createTeam and updateTeam write. A nil Description keeps the stored one on an update and is empty on a
-// creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the Team's own on an update.
+// creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the Team's own on an update; nil Matchers
+// keep the stored ones on an update and are none on a creation, and others replace them as a whole.
 type Input struct {
 	Name            string
 	Slug            string
 	Description     *string
 	OwnWorkingHours bool
 	WorkingHours    *WorkingHours
+	Matchers        *[]Matcher
 }
 
 // Person is someone in a Team with their Role, how they are in it and the messengers they linked.
@@ -205,6 +219,11 @@ type Queries interface {
 	DeleteTeamUser(ctx context.Context, arg dbgen.DeleteTeamUserParams) (int64, error)
 	DeleteUserTeams(ctx context.Context, arg dbgen.DeleteUserTeamsParams) ([]dbgen.DeleteUserTeamsRow, error)
 	ListTeamInfo(ctx context.Context, orgID int64) ([]dbgen.ListTeamInfoRow, error)
+	ListTeamMatchers(ctx context.Context, arg dbgen.ListTeamMatchersParams) ([]dbgen.ListTeamMatchersRow, error)
+	DeleteTeamMatchers(ctx context.Context, arg dbgen.DeleteTeamMatchersParams) error
+	InsertTeamMatchers(ctx context.Context, arg dbgen.InsertTeamMatchersParams) error
+	LockTeamsVersion(ctx context.Context, orgID int64) (int64, error)
+	BumpTeamsVersion(ctx context.Context, orgID int64) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -352,7 +371,33 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
 			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount}, org))
 	}
+	if err := s.withMatchers(ctx, s.store, page.Teams); err != nil {
+		return Page{}, err
+	}
 	return page, nil
+}
+
+// withMatchers sets the Team matchers of each Team, none for a Team without them.
+func (s *Service) withMatchers(ctx context.Context, q Queries, list []Team) error {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(list))
+	index := make(map[int64]int, len(list))
+	for i, t := range list {
+		ids[i], index[t.ID] = t.ID, i
+		list[i].Matchers = []Matcher{}
+	}
+	rows, err := q.ListTeamMatchers(ctx, dbgen.ListTeamMatchersParams{OrgID: s.orgID, TeamIds: ids})
+	if err != nil {
+		return fmt.Errorf("list the team matchers: %w", err)
+	}
+	for _, r := range rows {
+		if i, ok := index[r.TeamID]; ok {
+			list[i].Matchers = append(list[i].Matchers, Matcher{Label: r.Label, Op: r.Op, Value: r.Value})
+		}
+	}
+	return nil
 }
 
 // Get reads the Team publicID; a deleted or unknown one is ErrNotFound.
@@ -376,7 +421,11 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Team, er
 	if err != nil {
 		return Team{}, err
 	}
-	return teamOf(teamRow(r), org), nil
+	out := []Team{teamOf(teamRow(r), org)}
+	if err := s.withMatchers(ctx, q, out); err != nil {
+		return Team{}, err
+	}
+	return out[0], nil
 }
 
 // lock locks the Team publicID for a change and reads it.
@@ -412,6 +461,13 @@ func check(in Input) (Input, error) {
 		return in, &FieldError{Pointer: "/description", Code: CodeTooLong,
 			Detail: fmt.Sprintf("The description is longer than %d characters.", MaxDescriptionLength)}
 	}
+	if in.Matchers != nil {
+		for i, m := range *in.Matchers {
+			if err := checkMatcher(i, m); err != nil {
+				return in, err
+			}
+		}
+	}
 	if !in.OwnWorkingHours {
 		in.WorkingHours = nil
 		return in, nil
@@ -424,6 +480,61 @@ func check(in Input) (Input, error) {
 		in.WorkingHours = &w
 	}
 	return in, nil
+}
+
+// checkMatcher refuses the Team matcher at index i whose label is empty, whose operator is not one of Alertmanager's,
+// or whose regular expression does not compile, compiled as the classification compiles it.
+func checkMatcher(i int, m Matcher) error {
+	pointer := "/matchers/" + strconv.Itoa(i)
+	if m.Label == "" {
+		return &FieldError{Pointer: pointer + "/label", Code: CodeInvalidFormat, Detail: "The label name is empty."}
+	}
+	if _, err := matchers.New(m.Label, matchers.Op(m.Op), m.Value); err != nil {
+		if re, ok := errors.AsType[*matchers.RegexpError](err); ok {
+			return &FieldError{Pointer: pointer + "/value", Code: CodeInvalidRegex, Detail: re.Error()}
+		}
+		return &FieldError{Pointer: pointer + "/op", Code: CodeInvalidFormat,
+			Detail: "The operator is one of =, !=, =~ and !~."}
+	}
+	return nil
+}
+
+// writeMatchers replaces the Team matchers of the Team id with ms.
+func (s *Service) writeMatchers(ctx context.Context, q Queries, id int64, ms []Matcher) error {
+	if err := q.DeleteTeamMatchers(ctx, dbgen.DeleteTeamMatchersParams{OrgID: s.orgID, TeamID: id}); err != nil {
+		return fmt.Errorf("remove the team matchers: %w", err)
+	}
+	if len(ms) == 0 {
+		return nil
+	}
+	p := dbgen.InsertTeamMatchersParams{OrgID: s.orgID, TeamID: id}
+	for _, m := range ms {
+		p.Labels = append(p.Labels, m.Label)
+		p.Ops = append(p.Ops, m.Op)
+		p.MatcherValues = append(p.MatcherValues, m.Value)
+	}
+	if err := q.InsertTeamMatchers(ctx, p); err != nil {
+		return fmt.Errorf("write the team matchers: %w", err)
+	}
+	return nil
+}
+
+// lockVersion locks the Organization's row before a change of a Team, ahead of the Team's own row (LockTeamsVersion),
+// so that the change can raise organizations.teams_version, the stamp of the classification (C-25.FR-5).
+func (s *Service) lockVersion(ctx context.Context, q Queries) error {
+	if _, err := q.LockTeamsVersion(ctx, s.orgID); err != nil {
+		return fmt.Errorf("lock the teams of the organization: %w", err)
+	}
+	return nil
+}
+
+// bumpVersion raises organizations.teams_version after a change of a Team, so that every replica classifies the next
+// Alerts with it (C-25.FR-5).
+func (s *Service) bumpVersion(ctx context.Context, q Queries) error {
+	if err := q.BumpTeamsVersion(ctx, s.orgID); err != nil {
+		return fmt.Errorf("raise the version of the teams: %w", err)
+	}
+	return nil
 }
 
 // missingHours is the refusal of own Working hours that are not given and not stored.
@@ -443,6 +554,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 	}
 	var created Team
 	err = s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockVersion(ctx, q); err != nil {
+			return err
+		}
 		description := ""
 		if in.Description != nil {
 			description = *in.Description
@@ -450,10 +564,18 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
 			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: s.clock.Now().UTC()}
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, in.WorkingHours)
-		if _, err := q.InsertTeam(ctx, p); err != nil {
+		id, err := q.InsertTeam(ctx, p)
+		if err != nil {
 			return fmt.Errorf("create the team: %w", taken(err))
 		}
-		var err error
+		if in.Matchers != nil {
+			if err := s.writeMatchers(ctx, q, id, *in.Matchers); err != nil {
+				return err
+			}
+		}
+		if err := s.bumpVersion(ctx, q); err != nil {
+			return err
+		}
 		if created, err = s.get(ctx, q, p.PublicID); err != nil {
 			return err
 		}
@@ -491,6 +613,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	}
 	var before, updated Team
 	err = s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockVersion(ctx, q); err != nil {
+			return err
+		}
 		var err error
 		if before, err = s.lock(ctx, q, publicID); err != nil {
 			return err
@@ -502,6 +627,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		next.Name, next.Slug, next.Own = in.Name, in.Slug, in.WorkingHours
 		if in.Description != nil {
 			next.Description = *in.Description
+		}
+		if in.Matchers != nil {
+			next.Matchers = *in.Matchers
 		}
 		if in.OwnWorkingHours && next.Own == nil {
 			if before.Own == nil {
@@ -519,6 +647,14 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, next.Own)
 		if err := q.UpdateTeam(ctx, p); err != nil {
 			return fmt.Errorf("update the team %s: %w", before.PublicID, taken(err))
+		}
+		if !slices.Equal(before.Matchers, next.Matchers) {
+			if err := s.writeMatchers(ctx, q, before.ID, next.Matchers); err != nil {
+				return err
+			}
+		}
+		if err := s.bumpVersion(ctx, q); err != nil {
+			return err
 		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
 			return err
@@ -545,6 +681,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	var before Team
 	err := s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockVersion(ctx, q); err != nil {
+			return err
+		}
 		var err error
 		if before, err = s.lock(ctx, q, publicID); err != nil {
 			return err
@@ -578,6 +717,12 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}
 		if err := q.DeleteTeamUsers(ctx, dbgen.DeleteTeamUsersParams{OrgID: s.orgID, TeamID: before.ID}); err != nil {
 			return fmt.Errorf("remove the people of the team %s: %w", before.PublicID, err)
+		}
+		if err := s.writeMatchers(ctx, q, before.ID, nil); err != nil {
+			return err
+		}
+		if err := s.bumpVersion(ctx, q); err != nil {
+			return err
 		}
 		if err := q.DeleteTeam(ctx, dbgen.DeleteTeamParams{OrgID: s.orgID, ID: before.ID,
 			Now: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
@@ -816,11 +961,16 @@ type view struct {
 	Description     string        `json:"description"`
 	OwnWorkingHours bool          `json:"own_working_hours"`
 	WorkingHours    *WorkingHours `json:"working_hours"`
+	Matchers        []Matcher     `json:"matchers"`
 }
 
 func viewOf(t Team) view {
+	ms := t.Matchers
+	if ms == nil {
+		ms = []Matcher{}
+	}
 	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
-		WorkingHours: t.Own}
+		WorkingHours: t.Own, Matchers: ms}
 }
 
 // exportInfo sets the muster_team_info series of a Team.

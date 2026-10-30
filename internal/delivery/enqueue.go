@@ -47,8 +47,8 @@ type Row struct {
 	EventMentions bool
 }
 
-// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15 and C-17.FR-11 that delivery turns into
-// messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
+// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11 and C-25 that delivery turns
+// into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
 // variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those it
 // leaves, a Quiet Publication in those it joins, an update in those of both.
 var Table = []Row{
@@ -92,6 +92,8 @@ var Table = []Row{
 	{groups.EventAutoUnacknowledged, groups.VariantAny, FormReply, groups.Loud,
 		[]groups.Mention{groups.MentionOwner}, false},
 	{groups.EventNoticesMissed, groups.VariantAny, FormReply, groups.Loud, nil, true},
+	{groups.EventTeamJoined, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 }
 
 // EventRow is a row of the Loud/Quiet table of delivery events (reference.md, Loud and Quiet): what delivery

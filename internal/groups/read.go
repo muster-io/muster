@@ -41,6 +41,10 @@ type readQueries interface {
 		[]dbgen.ListTimelineDeliveryEventsRow, error)
 	CountOpenGroupsByRoute(ctx context.Context, orgID int64) ([]dbgen.CountOpenGroupsByRouteRow, error)
 	ListRoutePublicIDs(ctx context.Context, orgID int64) ([]string, error)
+	ListGroupTeams(ctx context.Context, arg dbgen.ListGroupTeamsParams) ([]dbgen.ListGroupTeamsRow, error)
+	ListGroupAlertTeams(ctx context.Context, arg dbgen.ListGroupAlertTeamsParams) ([]dbgen.ListGroupAlertTeamsRow,
+		error)
+	ListTeamRefs(ctx context.Context, arg dbgen.ListTeamRefsParams) ([]dbgen.ListTeamRefsRow, error)
 }
 
 // The notices of the Alert Group page (AlertGroupNotice).
@@ -90,15 +94,17 @@ type Notice struct {
 
 // View is an Alert Group as getAlertGroup reads it.
 type View struct {
-	PublicID          string
-	Number            int64
-	Title             string
-	Summary           *string
-	Status            Status
-	Severity          organization.SeverityLevel
-	Urgent            bool
-	Route             Ref
-	Integrations      []Ref
+	PublicID     string
+	Number       int64
+	Title        string
+	Summary      *string
+	Status       Status
+	Severity     organization.SeverityLevel
+	Urgent       bool
+	Route        Ref
+	Integrations []Ref
+	// Teams are its Teams in the order they joined (C-25.FR-6).
+	Teams             []GroupTeam
 	StartedAt         time.Time
 	LastChangedAt     time.Time
 	ResolvedAt        *time.Time
@@ -283,7 +289,20 @@ func (s *Service) Get(ctx context.Context, publicID string) (View, error) {
 		}
 		v.Links = append(v.Links, links...)
 	}
+	teams, err := s.groupTeams(ctx, []int64{r.ID})
+	if err != nil {
+		return View{}, err
+	}
+	v.Teams = orNoTeams(teams[r.ID])
 	return v, nil
+}
+
+// orNoTeams is ts, or an empty list for nil.
+func orNoTeams[T any](ts []T) []T {
+	if ts == nil {
+		return []T{}
+	}
+	return ts
 }
 
 // refs are Users and Service accounts by id.
@@ -361,6 +380,8 @@ type GroupAlert struct {
 	LastSeenAt  time.Time
 	GroupKeys   []string
 	SourceURL   *string
+	// Teams are the Teams it belongs to, decided when it last started firing (C-25.FR-5).
+	Teams []TeamMembership
 }
 
 // AlertPage is a page of the Alerts of an Alert Group; Next is nil on the last page.
@@ -409,12 +430,16 @@ func (s *Service) Alerts(ctx context.Context, publicID string, f AlertFilter) (A
 			keys[k.AlertID] = append(keys[k.AlertID], k.GroupKey)
 		}
 	}
+	teams, err := s.alertTeams(ctx, ids)
+	if err != nil {
+		return AlertPage{}, err
+	}
 	for _, r := range rows {
 		a := GroupAlert{Fingerprint: r.Fingerprint, Integration: Ref{PublicID: r.IntegrationPublicID,
 			Name: r.IntegrationName}, Firing: !r.Ended, Reason: textOf(r.ResolveReason),
 			ReasonText: textOf(r.ResolveReasonText), StartsAt: r.StartsAt.UTC(), ResolvedAt: timeOf(r.EndedAt),
 			LastSeenAt: r.LastSeenAt.UTC(), GroupKeys: orEmpty(keys[r.AlertID]),
-			SourceURL: textOf(r.GeneratorUrl)}
+			SourceURL: textOf(r.GeneratorUrl), Teams: orNoTeams(teams[r.AlertID])}
 		if err := json.Unmarshal(r.Labels, &a.Labels); err != nil {
 			return AlertPage{}, fmt.Errorf("read the labels of alert %s: %w", r.Fingerprint, err)
 		}
@@ -513,7 +538,15 @@ type TimelineEntry struct {
 	Detail         *string
 	Note           *NoteView
 	Delivery       *DeliveryView
-	position       TimelinePosition
+	// Team, TeamRule and TeamMatcher are the Team of a team_joined, the rule that brought it and its Team matcher;
+	// TeamValue is the value of an unknown_team_value (C-25.FR-6, FR-7).
+	Team        *TeamRef
+	TeamRule    *string
+	TeamMatcher *string
+	TeamValue   *string
+	position    TimelinePosition
+	// teamID is the id of Team, which entryTeams names.
+	teamID int64
 }
 
 // TimelinePage is a page of a Timeline; Next is nil on the last page.
@@ -587,6 +620,9 @@ func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilte
 	if err := s.actors(ctx, out.Entries); err != nil {
 		return TimelinePage{}, err
 	}
+	if err := s.entryTeams(ctx, out.Entries); err != nil {
+		return TimelinePage{}, err
+	}
 	return out, nil
 }
 
@@ -627,7 +663,9 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			SnoozeUntil: timeOf(r.SnoozeUntil), Fingerprints: r.Fingerprints, ReplacedLabel: textOf(r.ReplacedLabel),
 			LabelConflicts: r.LabelConflicts, NoticeNumber: int8Of(r.NoticeNumber),
 			MissedCount: int8Of(r.MissedCount), PeriodFrom: timeOf(r.PeriodFrom), PeriodTo: timeOf(r.PeriodTo),
-			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID}}
+			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID},
+			TeamRule: textOf(r.TeamRule), TeamMatcher: textOf(r.TeamMatcher), TeamValue: textOf(r.TeamValue),
+			teamID: r.TeamID.Int64}
 		if r.Event.Valid {
 			e.Mentions = orEmpty(r.Mentions)
 		}

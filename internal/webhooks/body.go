@@ -77,6 +77,15 @@ type AlertGroup struct {
 	SnoozeUntil   *time.Time `json:"snooze_until"`
 	ReopenCount   int64      `json:"reopen_count"`
 	URL           string     `json:"url"`
+	// Teams are the Teams of the Alert Group in the order they joined (C-25.FR-6), a deleted one by its name.
+	Teams []Team `json:"teams"`
+}
+
+// Team is a Team of the Alert Group (WebhookTeam).
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
 }
 
 // Alert is one Alert of the Alert Group, by fingerprint (WebhookAlert).
@@ -97,12 +106,13 @@ type bodyQueries interface {
 	GetBodyServiceAccount(ctx context.Context, arg dbgen.GetBodyServiceAccountParams) (
 		dbgen.GetBodyServiceAccountRow, error)
 	ListBodyAlerts(ctx context.Context, arg dbgen.ListBodyAlertsParams) ([]dbgen.ListBodyAlertsRow, error)
+	ListBodyTeams(ctx context.Context, arg dbgen.ListBodyTeamsParams) ([]dbgen.ListBodyTeamsRow, error)
 }
 
 var _ delivery.EventBodies = (*Service)(nil)
 
 // EventBodies reads, through the transaction tx of a change, the Alert Group of in as its events carry it — its state
-// after the change, its Owner, its Route and its Alerts — and the actor of the change, and returns the function that
+// after the change, its Owner, its Route, its Teams and its Alerts — and the actor of the change, and returns the function that
 // renders the body of each of its events (C-15.FR-2).
 func (s *Service) EventBodies(ctx context.Context, tx groups.DBTX, in delivery.EventSource) (delivery.BodyFunc,
 	error) {
@@ -123,6 +133,14 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 			return nil, fmt.Errorf("read the owner of alert group #%d: %w", g.Number, err)
 		}
 		ag.Owner = &User{ID: u.PublicID, Name: u.Name, Login: u.Login}
+	}
+	teams, err := q.ListBodyTeams(ctx, dbgen.ListBodyTeamsParams{OrgID: s.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return nil, fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+	}
+	ag.Teams = make([]Team, len(teams))
+	for i, t := range teams {
+		ag.Teams[i] = Team{ID: t.PublicID, Name: t.Name, Slug: t.Slug}
 	}
 	rows, err := q.ListBodyAlerts(ctx, dbgen.ListBodyAlertsParams{OrgID: s.orgID, AlertGroupID: g.ID})
 	if err != nil {

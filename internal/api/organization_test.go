@@ -41,8 +41,9 @@ func newFakeOrganization() *fakeOrganization {
 	return &fakeOrganization{org: organization.Organization{
 		PublicID: "RGAAAAAAAAAAAA", Name: d.Name, TimeZone: d.TimeZone, WorkdayStart: d.WorkdayStart,
 		WeekStart: d.WeekStart, WorkingDays: d.WorkingDays, WorkdayEnd: d.WorkdayEnd, SeverityLabel: d.SeverityLabel,
-		SeverityMapping: d.SeverityMapping, SeverityStyles: d.SeverityStyles, CriticalIsUrgent: d.CriticalIsUrgent,
-		InstanceLabels: d.InstanceLabels, Retention: d.Retention, TOTPRequired: d.TOTPRequired,
+		TeamLabel: d.TeamLabel, SeverityMapping: d.SeverityMapping, SeverityStyles: d.SeverityStyles,
+		CriticalIsUrgent: d.CriticalIsUrgent,
+		InstanceLabels:   d.InstanceLabels, Retention: d.Retention, TOTPRequired: d.TOTPRequired,
 		OIDCTokenGrace: d.OIDCTokenGrace, Version: 3, Buttons: buttons.All(),
 		OutgoingHeartbeat: organization.OutgoingHeartbeat{
 			URL:   organization.SecretState{Set: true, UpdatedAt: &at},
@@ -76,6 +77,9 @@ func (f *fakeOrganization) Update(_ context.Context, actor audit.Actor, _ audit.
 			Code: fieldInvalidFormat, Detail: "The URL is not an absolute http or https URL."}
 	}
 	f.org.TOTPRequired, f.org.Name = in.TOTPRequired, in.Name
+	if in.TeamLabel != nil {
+		f.org.TeamLabel = *in.TeamLabel
+	}
 	if in.WorkdayStart != nil {
 		f.org.WorkdayStart = *in.WorkdayStart
 	}

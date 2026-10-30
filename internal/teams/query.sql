@@ -176,3 +176,54 @@ ORDER BY t.id;
 SELECT public_id, name
 FROM teams
 WHERE org_id = @org_id AND deleted_at IS NULL;
+
+-- ListTeamMatchers lists the Team matchers of Teams, each Team's in their order.
+-- name: ListTeamMatchers :many
+SELECT team_id, label, op, value
+FROM team_matchers
+WHERE org_id = @org_id AND team_id = ANY(@team_ids::bigint[])
+ORDER BY team_id, position;
+
+-- DeleteTeamMatchers removes the Team matchers of a Team, which a save replaces as a whole.
+-- name: DeleteTeamMatchers :exec
+DELETE FROM team_matchers
+WHERE org_id = @org_id AND team_id = @team_id;
+
+-- InsertTeamMatchers writes the Team matchers of a Team in their order.
+-- name: InsertTeamMatchers :exec
+INSERT INTO team_matchers (org_id, team_id, label, op, value, position)
+SELECT @org_id, @team_id, m.label, m.op, m.value, m.position
+FROM (SELECT unnest(@labels::text[]) AS label, unnest(@ops::text[]) AS op, unnest(@matcher_values::text[]) AS value,
+             generate_subscripts(@labels::text[], 1) - 1 AS position) AS m;
+
+-- LockTeamsVersion locks the Organization's row FOR NO KEY UPDATE before a change of a Team, ahead of the Team's own
+-- row: the lock order of a Route or a Destination saved with an owning Team, which takes the row of the Organization to
+-- bump the order of its list first. The foreign-key checks of rows that name the Organization take a key share lock,
+-- which this one lets through.
+-- name: LockTeamsVersion :one
+SELECT teams_version
+FROM organizations
+WHERE id = @org_id
+FOR NO KEY UPDATE;
+
+-- BumpTeamsVersion raises organizations.teams_version, the stamp of the cached classification of every replica, after
+-- a change of a Team or of the Team label.
+-- name: BumpTeamsVersion :exec
+UPDATE organizations
+SET teams_version = teams_version + 1
+WHERE id = @org_id;
+
+-- ListClassifiedTeams lists the Teams that are not deleted, which the Team label and the Team matchers name.
+-- name: ListClassifiedTeams :many
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = @org_id AND deleted_at IS NULL
+ORDER BY id;
+
+-- ListClassifiedMatchers lists the Team matchers of the Teams that are not deleted, each Team's in their order.
+-- name: ListClassifiedMatchers :many
+SELECT m.team_id, m.label, m.op, m.value
+FROM team_matchers m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = @org_id AND t.deleted_at IS NULL
+ORDER BY m.team_id, m.position;

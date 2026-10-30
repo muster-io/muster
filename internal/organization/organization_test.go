@@ -23,6 +23,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
@@ -55,7 +56,7 @@ func (s *fakeStore) GetOrganization(context.Context) (dbgen.GetOrganizationRow, 
 		InstanceLabels: o.InstanceLabels, RetentionStoredSnapshotsDays: o.RetentionStoredSnapshotsDays,
 		RetentionAlertDetailsDays: o.RetentionAlertDetailsDays, RetentionAuditLogDays: o.RetentionAuditLogDays,
 		RetentionAlertGroupSummariesDays: o.RetentionAlertGroupSummariesDays, TotpRequired: o.TotpRequired,
-		OidcTokenGraceSeconds: o.OidcTokenGraceSeconds,
+		OidcTokenGraceSeconds: o.OidcTokenGraceSeconds, TeamLabel: o.TeamLabel,
 	}
 	if s.mappingJSON != nil {
 		row.SeverityMapping = s.mappingJSON
@@ -243,7 +244,7 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 		SeverityMapping: mapping, SeverityStyles: styles, InstanceLabels: d.InstanceLabels,
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
-		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1,
+		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1, TeamLabel: "team",
 	}, policy: dbgen.GetOutboundPolicySettingsRow{Policy: "standard", Allowed: []string{"127.0.0.0/8"},
 		Denied: []string{}, Version: 1}, fail: map[string]error{}}
 }
@@ -292,7 +293,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.RetentionAuditLogDays = arg.RetentionAuditLogDays
 	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
-	s.row.OutgoingHeartbeatProxy, s.row.Buttons = arg.Proxy, arg.Buttons
+	s.row.OutgoingHeartbeatProxy, s.row.Buttons, s.row.TeamLabel = arg.Proxy, arg.Buttons, arg.TeamLabel
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
 	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
 	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
@@ -1139,5 +1140,61 @@ func TestUpdateWithoutKeyring(t *testing.T) {
 	in.HeartbeatURL = keyring.Clear
 	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
 		t.Errorf("clearing: %v", err)
+	}
+}
+
+// TestTeamLabel is C-25.FR-5 and C-20.FR-1 revised for L2: the Organization reads the Team label team; an update
+// changes it, writes it and records it in the diff of organization.updated; an update that omits it keeps it; a label
+// that an Internal alert sets itself — alertname, severity, the entity and name labels of the registry and those of
+// the Internal alerts of L2, schedule and team_id among them — is refused with reserved_label at /team_label, and one
+// that is not a label name with invalid_format, changing nothing.
+func TestTeamLabel(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, err := svc.Get(t.Context())
+	if err != nil || o.TeamLabel != "team" {
+		t.Fatalf("Get = %q, %v", o.TeamLabel, err)
+	}
+	for _, label := range []string{"alertname", "severity", "integration", "integration_name", "route_name",
+		"destination", "destination_name", "template", "schedule", "schedule_name", "team_id", "team_name",
+		"connection", "connection_name"} {
+		in := inputOf(o)
+		in.TeamLabel = new(label)
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/team_label" || f.Code != CodeReservedLabel {
+			t.Errorf("%s: %v", label, err)
+		}
+	}
+	for _, label := range []string{"", "team-name", "1team"} {
+		in := inputOf(o)
+		in.TeamLabel = new(label)
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		if f, ok := errors.AsType[*FieldError](err); !ok || f.Pointer != "/team_label" || f.Code != CodeInvalidFormat {
+			t.Errorf("%q: %v", label, err)
+		}
+	}
+	if len(s.updates) != 0 || len(s.audit) != 0 || s.row.TeamLabel != "team" {
+		t.Fatal("a refused update changed the organization")
+	}
+	in := inputOf(o)
+	in.TeamLabel = new("owner_team")
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil || got.TeamLabel != "owner_team" || len(s.updates) != 1 || s.updates[0].TeamLabel != "owner_team" {
+		t.Fatalf("owner_team = %q, %v", got.TeamLabel, err)
+	}
+	if len(s.audit) != 1 || s.audit[0].Action != ActionUpdated || string(s.audit[0].Diff) !=
+		`[{"pointer":"/team_label","before":"team","after":"owner_team"}]` {
+		t.Errorf("audit = %+v", s.audit)
+	}
+	in = inputOf(got)
+	in.Name = "Ops"
+	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel != "owner_team" {
+		t.Errorf("an update that omits it = %q, %v", kept.TeamLabel, err)
+	}
+	reserved := internalalerts.ReservedLabels()
+	if !slices.IsSorted(reserved) || !slices.Contains(reserved, "team_id") || slices.Contains(reserved, "team") {
+		t.Errorf("reserved labels %v", reserved)
 	}
 }

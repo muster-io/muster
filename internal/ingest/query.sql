@@ -449,6 +449,15 @@ JOIN alert_groups g ON g.org_id = m.org_id AND g.id = m.alert_group_id
 WHERE m.org_id = @org_id AND m.alert_id = ANY(@alert_ids::bigint[])
 ORDER BY m.alert_id, m.id DESC;
 
+-- ListViewAlertTeams lists the Teams of each Alert as routing decided them when it last started firing, deleted ones
+-- included with their name (C-25.FR-5).
+-- name: ListViewAlertTeams :many
+SELECT x.alert_id, t.public_id, t.name, t.slug, (t.deleted_at IS NOT NULL)::boolean AS deleted, x.rule, x.matcher
+FROM alert_teams x
+JOIN teams t ON t.org_id = x.org_id AND t.id = x.team_id
+WHERE x.org_id = @org_id AND x.alert_id = ANY(@alert_ids::bigint[])
+ORDER BY x.alert_id, t.name, t.id;
+
 -- CountTruncatedGroups counts the truncated groupKeys of an Integration (MusterSnapshotTruncated).
 -- name: CountTruncatedGroups :one
 SELECT count(*)

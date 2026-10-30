@@ -12,6 +12,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpTeamsVersion = `-- name: BumpTeamsVersion :exec
+UPDATE organizations
+SET teams_version = teams_version + 1
+WHERE id = $1
+`
+
+// BumpTeamsVersion raises organizations.teams_version, the stamp of the cached classification of every replica, after
+// a change of a Team or of the Team label.
+func (q *Queries) BumpTeamsVersion(ctx context.Context, orgID int64) error {
+	_, err := q.db.Exec(ctx, bumpTeamsVersion, orgID)
+	return err
+}
+
 const deleteTeam = `-- name: DeleteTeam :exec
 UPDATE teams
 SET deleted_at = $1, updated_at = $1, own_working_hours = false, working_days = NULL, working_start = NULL,
@@ -29,6 +42,22 @@ type DeleteTeamParams struct {
 // name and slug are free at once.
 func (q *Queries) DeleteTeam(ctx context.Context, arg DeleteTeamParams) error {
 	_, err := q.db.Exec(ctx, deleteTeam, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteTeamMatchers = `-- name: DeleteTeamMatchers :exec
+DELETE FROM team_matchers
+WHERE org_id = $1 AND team_id = $2
+`
+
+type DeleteTeamMatchersParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DeleteTeamMatchers removes the Team matchers of a Team, which a save replaces as a whole.
+func (q *Queries) DeleteTeamMatchers(ctx context.Context, arg DeleteTeamMatchersParams) error {
+	_, err := q.db.Exec(ctx, deleteTeamMatchers, arg.OrgID, arg.TeamID)
 	return err
 }
 
@@ -294,6 +323,33 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	return id, err
 }
 
+const insertTeamMatchers = `-- name: InsertTeamMatchers :exec
+INSERT INTO team_matchers (org_id, team_id, label, op, value, position)
+SELECT $1, $2, m.label, m.op, m.value, m.position
+FROM (SELECT unnest($3::text[]) AS label, unnest($4::text[]) AS op, unnest($5::text[]) AS value,
+             generate_subscripts($3::text[], 1) - 1 AS position) AS m
+`
+
+type InsertTeamMatchersParams struct {
+	OrgID         int64
+	TeamID        int64
+	Labels        []string
+	Ops           []string
+	MatcherValues []string
+}
+
+// InsertTeamMatchers writes the Team matchers of a Team in their order.
+func (q *Queries) InsertTeamMatchers(ctx context.Context, arg InsertTeamMatchersParams) error {
+	_, err := q.db.Exec(ctx, insertTeamMatchers,
+		arg.OrgID,
+		arg.TeamID,
+		arg.Labels,
+		arg.Ops,
+		arg.MatcherValues,
+	)
+	return err
+}
+
 const insertTeamUser = `-- name: InsertTeamUser :execrows
 INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
 VALUES ($1, $2, $3, true, $4)
@@ -321,6 +377,87 @@ func (q *Queries) InsertTeamUser(ctx context.Context, arg InsertTeamUserParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listClassifiedMatchers = `-- name: ListClassifiedMatchers :many
+SELECT m.team_id, m.label, m.op, m.value
+FROM team_matchers m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = $1 AND t.deleted_at IS NULL
+ORDER BY m.team_id, m.position
+`
+
+type ListClassifiedMatchersRow struct {
+	TeamID int64
+	Label  string
+	Op     string
+	Value  string
+}
+
+// ListClassifiedMatchers lists the Team matchers of the Teams that are not deleted, each Team's in their order.
+func (q *Queries) ListClassifiedMatchers(ctx context.Context, orgID int64) ([]ListClassifiedMatchersRow, error) {
+	rows, err := q.db.Query(ctx, listClassifiedMatchers, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClassifiedMatchersRow{}
+	for rows.Next() {
+		var i ListClassifiedMatchersRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.Label,
+			&i.Op,
+			&i.Value,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listClassifiedTeams = `-- name: ListClassifiedTeams :many
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = $1 AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListClassifiedTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// ListClassifiedTeams lists the Teams that are not deleted, which the Team label and the Team matchers name.
+func (q *Queries) ListClassifiedTeams(ctx context.Context, orgID int64) ([]ListClassifiedTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listClassifiedTeams, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClassifiedTeamsRow{}
+	for rows.Next() {
+		var i ListClassifiedTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLinkedMessengers = `-- name: ListLinkedMessengers :many
@@ -392,6 +529,51 @@ func (q *Queries) ListTeamInfo(ctx context.Context, orgID int64) ([]ListTeamInfo
 	for rows.Next() {
 		var i ListTeamInfoRow
 		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamMatchers = `-- name: ListTeamMatchers :many
+SELECT team_id, label, op, value
+FROM team_matchers
+WHERE org_id = $1 AND team_id = ANY($2::bigint[])
+ORDER BY team_id, position
+`
+
+type ListTeamMatchersParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamMatchersRow struct {
+	TeamID int64
+	Label  string
+	Op     string
+	Value  string
+}
+
+// ListTeamMatchers lists the Team matchers of Teams, each Team's in their order.
+func (q *Queries) ListTeamMatchers(ctx context.Context, arg ListTeamMatchersParams) ([]ListTeamMatchersRow, error) {
+	rows, err := q.db.Query(ctx, listTeamMatchers, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamMatchersRow{}
+	for rows.Next() {
+		var i ListTeamMatchersRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.Label,
+			&i.Op,
+			&i.Value,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -599,6 +781,24 @@ func (q *Queries) LockTeamUser(ctx context.Context, arg LockTeamUserParams) (Loc
 		&i.Status,
 	)
 	return i, err
+}
+
+const lockTeamsVersion = `-- name: LockTeamsVersion :one
+SELECT teams_version
+FROM organizations
+WHERE id = $1
+FOR NO KEY UPDATE
+`
+
+// LockTeamsVersion locks the Organization's row FOR NO KEY UPDATE before a change of a Team, ahead of the Team's own
+// row: the lock order of a Route or a Destination saved with an owning Team, which takes the row of the Organization to
+// bump the order of its list first. The foreign-key checks of rows that name the Organization take a key share lock,
+// which this one lets through.
+func (q *Queries) LockTeamsVersion(ctx context.Context, orgID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockTeamsVersion, orgID)
+	var teams_version int64
+	err := row.Scan(&teams_version)
+	return teams_version, err
 }
 
 const releaseOwnedDestinations = `-- name: ReleaseOwnedDestinations :many

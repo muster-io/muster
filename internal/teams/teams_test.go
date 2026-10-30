@@ -63,6 +63,11 @@ type fakeStore struct {
 	fail   map[string]error
 	nextID int64
 	listed []dbgen.ListTeamsParams
+	// matchers are the Team matchers of each Team, version organizations.teams_version, and locked how often the
+	// Organization's row was locked for a change of a Team.
+	matchers map[int64][]dbgen.ListTeamMatchersRow
+	version  int64
+	locked   int
 }
 
 func newStore() *fakeStore {
@@ -543,7 +548,7 @@ func TestCreate(t *testing.T) {
 	var diff []audit.Change
 	_ = json.Unmarshal(e.Diff, &diff)
 	if e.Action != ActionCreated || e.ResourceType.String != ResourceTeam || e.ResourcePublicID.String !=
-		team.PublicID || len(diff) != 8 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
+		team.PublicID || len(diff) != 9 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
 		t.Errorf("audit %+v %s", e, e.Diff)
 	}
 	if len(store.hints) != 1 || store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {
@@ -957,5 +962,155 @@ func TestInfo(t *testing.T) {
 	<-done
 	if got := infoSeries(t, "TM0000000000R1"); got != "" {
 		t.Errorf("a deleted team still has %q", got)
+	}
+}
+
+func (s *fakeStore) ListTeamMatchers(_ context.Context, arg dbgen.ListTeamMatchersParams) (
+	[]dbgen.ListTeamMatchersRow, error) {
+	if err := s.fail["ListTeamMatchers"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListTeamMatchersRow
+	for _, id := range slices.Sorted(slices.Values(arg.TeamIds)) {
+		out = append(out, s.matchers[id]...)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteTeamMatchers(_ context.Context, arg dbgen.DeleteTeamMatchersParams) error {
+	if err := s.fail["DeleteTeamMatchers"]; err != nil {
+		return err
+	}
+	delete(s.matchers, arg.TeamID)
+	return nil
+}
+
+func (s *fakeStore) InsertTeamMatchers(_ context.Context, arg dbgen.InsertTeamMatchersParams) error {
+	if err := s.fail["InsertTeamMatchers"]; err != nil {
+		return err
+	}
+	if s.matchers == nil {
+		s.matchers = map[int64][]dbgen.ListTeamMatchersRow{}
+	}
+	for i := range arg.Labels {
+		s.matchers[arg.TeamID] = append(s.matchers[arg.TeamID], dbgen.ListTeamMatchersRow{TeamID: arg.TeamID,
+			Label: arg.Labels[i], Op: arg.Ops[i], Value: arg.MatcherValues[i]})
+	}
+	return nil
+}
+
+func (s *fakeStore) LockTeamsVersion(context.Context, int64) (int64, error) {
+	s.locked++
+	return s.version, s.fail["LockTeamsVersion"]
+}
+
+func (s *fakeStore) BumpTeamsVersion(context.Context, int64) error {
+	if err := s.fail["BumpTeamsVersion"]; err != nil {
+		return err
+	}
+	s.version++
+	return nil
+}
+
+// TestMatchers is C-25.FR-1, FR-5 and FR-11: a Team takes Team matchers in the syntax of Route Matchers, read back in
+// their order, replaced as a whole and kept when an update omits them, each change recorded in the diff of
+// team.updated; an invalid regular expression is refused with invalid_regex at its pointer, an empty label or an
+// unknown operator with invalid_format; every change of a Team — a creation, an update, a deletion — raises
+// organizations.teams_version after locking the Organization's row, and an update that changes nothing raises nothing.
+func TestMatchers(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	ms := []Matcher{{Label: "namespace", Op: "=~", Value: "checkout|billing"}, {Label: "pod", Op: "=~",
+		Value: "checkout-.*"}}
+	team, err := svc.Create(ctx, by, Input{Name: "Checkout", Slug: "checkout-team", Matchers: &ms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(team.Matchers, ms) || store.version != 1 || store.locked != 1 {
+		t.Fatalf("created %+v, version %d, locked %d", team.Matchers, store.version, store.locked)
+	}
+	if !strings.Contains(string(store.audit[0].Diff), `"pointer":"/matchers","after":[{"label":"namespace","op":"=~",`+
+		`"value":"checkout|billing"},{"label":"pod","op":"=~","value":"checkout-.*"}]`) {
+		t.Errorf("created diff %s", store.audit[0].Diff)
+	}
+	kept, err := svc.Update(ctx, by, team.PublicID, ptr(int64(1)), Input{Name: "Checkout", Slug: "checkout-team"})
+	if err != nil || !slices.Equal(kept.Matchers, ms) || kept.Version != 1 || store.version != 1 ||
+		len(store.audit) != 1 {
+		t.Errorf("kept = %+v, %v, version %d", kept, err, store.version)
+	}
+	one := ms[:1]
+	changed, err := svc.Update(ctx, by, team.PublicID, ptr(int64(1)), Input{Name: "Checkout", Slug: "checkout-team",
+		Matchers: &one})
+	if err != nil || !slices.Equal(changed.Matchers, one) || changed.Version != 2 || store.version != 2 {
+		t.Fatalf("changed = %+v, %v, version %d", changed, err, store.version)
+	}
+	if d := string(store.audit[1].Diff); store.audit[1].Action != ActionUpdated || d !=
+		`[{"pointer":"/matchers","before":[{"label":"namespace","op":"=~","value":"checkout|billing"},`+
+			`{"label":"pod","op":"=~","value":"checkout-.*"}],"after":[{"label":"namespace","op":"=~",`+
+			`"value":"checkout|billing"}]}]` {
+		t.Errorf("updated diff %s", d)
+	}
+	if got, err := svc.Get(ctx, team.PublicID); err != nil || !slices.Equal(got.Matchers, one) {
+		t.Errorf("get = %+v, %v", got.Matchers, err)
+	}
+	page, err := svc.List(ctx, ListFilter{Limit: 10})
+	if err != nil || len(page.Teams) != 1 || !slices.Equal(page.Teams[0].Matchers, one) {
+		t.Errorf("list = %+v, %v", page.Teams, err)
+	}
+	plain, err := svc.Create(ctx, by, Input{Name: "Search", Slug: "search"})
+	if err != nil || plain.Matchers == nil || len(plain.Matchers) != 0 || store.version != 3 {
+		t.Errorf("without matchers = %+v, %v", plain.Matchers, err)
+	}
+	for i, c := range []struct {
+		m             Matcher
+		pointer, code string
+	}{
+		{Matcher{Label: "pod", Op: "=~", Value: "checkout-("}, "/matchers/1/value", CodeInvalidRegex},
+		{Matcher{Label: "", Op: "=", Value: "x"}, "/matchers/1/label", CodeInvalidFormat},
+		{Matcher{Label: "pod", Op: "~", Value: "x"}, "/matchers/1/op", CodeInvalidFormat},
+	} {
+		bad := []Matcher{ms[0], c.m}
+		f := fieldError(t, func() error {
+			_, err := svc.Update(ctx, by, team.PublicID, nil, Input{Name: "Checkout", Slug: "checkout-team",
+				Matchers: &bad})
+			return err
+		}())
+		if f.Pointer != c.pointer || f.Code != c.code {
+			t.Errorf("%d: %+v", i, f)
+		}
+	}
+	if err := svc.Delete(ctx, by, plain.PublicID, nil); err != nil || store.version != 4 {
+		t.Errorf("delete = %v, version %d", err, store.version)
+	}
+	if err := svc.Delete(ctx, by, team.PublicID, nil); err != nil || store.matchers[team.ID] != nil {
+		t.Errorf("delete = %v, matchers %v", err, store.matchers[team.ID])
+	}
+	for _, name := range []string{"LockTeamsVersion", "BumpTeamsVersion", "InsertTeamMatchers", "DeleteTeamMatchers",
+		"ListTeamMatchers"} {
+		store.fail[name] = errBoom
+		if _, err := svc.Create(ctx, by, Input{Name: "z" + name, Slug: strings.ToLower(name),
+			Matchers: &ms}); !errors.Is(err, errBoom) {
+			t.Errorf("create, %s fails = %v", name, err)
+		}
+		delete(store.fail, name)
+	}
+	other, err := svc.Create(ctx, by, Input{Name: "Other", Slug: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"LockTeamsVersion", "BumpTeamsVersion", "DeleteTeamMatchers"} {
+		store.fail[name] = errBoom
+		if _, err := svc.Update(ctx, by, other.PublicID, nil, Input{Name: "Other", Slug: "other",
+			Matchers: &ms}); !errors.Is(err, errBoom) {
+			t.Errorf("update, %s fails = %v", name, err)
+		}
+		if err := svc.Delete(ctx, by, other.PublicID, nil); !errors.Is(err, errBoom) {
+			t.Errorf("delete, %s fails = %v", name, err)
+		}
+		delete(store.fail, name)
+	}
+	store.fail["ListTeamMatchers"] = errBoom
+	if _, err := svc.List(ctx, ListFilter{Limit: 10}); !errors.Is(err, errBoom) {
+		t.Errorf("list, ListTeamMatchers fails = %v", err)
 	}
 }

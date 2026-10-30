@@ -8,8 +8,8 @@ depends_on: [S-115]
 covers: [C-25.FR-1, C-25.FR-2, C-25.FR-5, C-25.FR-6, C-25.FR-7, C-25.FR-10, C-25.FR-11, C-25.FR-12, C-25.AC-1, C-25.AC-2, C-25.AC-5, C-25.AC-9, C-25.AC-11, C-06.FR-19, C-09.FR-1, C-09.FR-11, C-09.FR-13, C-09.FR-22, C-11.FR-20, C-15.FR-2, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0025_team_label_and_matchers.up.sql
-  - internal/db/migrations/0025_team_label_and_matchers.down.sql
+  - internal/db/migrations/0024_team_label_and_matchers.up.sql
+  - internal/db/migrations/0024_team_label_and_matchers.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -18,6 +18,7 @@ files_touched:
   - internal/teams/classify_test.go
   - internal/teams/query.sql
   - internal/teams/teams_integration_test.go
+  - internal/teams/teams_test.go
   - internal/api/teams.go
   - internal/api/teams_test.go
   - internal/routing/evaluate.go
@@ -25,6 +26,11 @@ files_touched:
   - internal/routing/query.sql
   - internal/groups/grouping.go
   - internal/groups/grouping_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/transitions.go
+  - internal/groups/list.go
+  - internal/groups/counts.go
   - internal/groups/teams.go
   - internal/groups/teams_test.go
   - internal/groups/events.go
@@ -34,12 +40,15 @@ files_touched:
   - internal/groups/query.sql
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
+  - internal/api/integrations.go
   - internal/ingest/alertsview.go
+  - internal/ingest/alertsview_test.go
   - internal/ingest/query.sql
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
+  - internal/webhooks/query.sql
   - internal/organization/organization.go
   - internal/organization/settings.go
   - internal/organization/query.sql
@@ -107,7 +116,7 @@ issue: 407
   - `LifecycleEvent` gains `team_joined` (`x-event-kinds` `alerts`) and `unknown_team_value` (`system`);
     `WebhookEventName` gains both; `TimelineAlertsEntry` gains `team` (`TeamRef`), `team_rule` and `team_matcher`;
     `TimelineSystemEntry` gains `team_value`; `WebhookAlertGroup` gains `teams` ({`id`, `name`, `slug`}[]).
-- **Schema** (migration `0025_team_label_and_matchers`, expand only; `schema.md` §4.2, §4.7, §4.9, §4.15):
+- **Schema** (migration `0024_team_label_and_matchers`, expand only; `schema.md` §4.2, §4.7, §4.9, §4.15):
   - `organizations.team_label text NOT NULL DEFAULT 'team'` and `organizations.teams_version bigint NOT NULL DEFAULT
     0`, which every change of a Team or of the Team label increments, so that each replica's cached classification
     (below) sees the change in the Snapshot's own transaction, as the Routes' stamp does.
@@ -163,7 +172,7 @@ issue: 407
 ## Steps
 
 1. Write the migration and `schema.md`. Check: `make test-integration` runs up, down and up; the `_v2` CHECKs accept
-   every event of 0024 and the two new ones.
+   every event of 0023 and the two new ones.
 2. Write the Team label, the matchers and the classification. Check: `organization_test.go`; `classify_test.go` covers
    the exact slug, Static labels, each operator, several Teams, a deleted Team and the cache across `teams_version`.
 3. Record the Teams of Alerts in routing and of Alert Groups in the dispatcher. Check: `evaluate_test.go`,
@@ -240,9 +249,10 @@ None.
   which shows Teams from S-125 on.
 - With 45 files the story is at the edge of the size signal; the list of Team label values and the evaluation on save
   were split into S-163 when the contract was written.
-- Migration `0025` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
-  when it merges (S-131's Notes).
+- Migration `0025` followed the story map; it was renumbered to the next free number, `0024`, when the story was worked,
+  since `0023_button_sets` is the latest on `master` (S-131's Notes). The CHECKs it replaces were still the first
+  versions from `0001` (only the transport CHECKs of `timeline_entries` were re-versioned, by `0011` and `0018`), so the
+  new ones are `_v2` and list every value present on `master`.
 
 ## Coverage
 

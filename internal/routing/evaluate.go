@@ -13,6 +13,8 @@ import (
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 // evalQueries are the queries of routing, run in the transaction of the Snapshot.
@@ -22,6 +24,8 @@ type evalQueries interface {
 	ListRouteMatchers(ctx context.Context, arg dbgen.ListRouteMatchersParams) ([]dbgen.ListRouteMatchersRow, error)
 	ListAlertLabels(ctx context.Context, arg dbgen.ListAlertLabelsParams) ([]dbgen.ListAlertLabelsRow, error)
 	SetAlertRoutes(ctx context.Context, arg dbgen.SetAlertRoutesParams) error
+	ResetAlertTeams(ctx context.Context, arg dbgen.ResetAlertTeamsParams) error
+	InsertAlertTeams(ctx context.Context, arg dbgen.InsertAlertTeamsParams) error
 }
 
 // stamp identifies a state of the Routes: the version of the list, which creation, deletion and reordering bump,
@@ -59,10 +63,16 @@ func (o *order) first(labels map[string]string) int {
 // applied, and gets its Severity level; both are recorded on the Alert, which keeps them until it fires again, so an
 // edit or a reorder applies to the next Alerts only. The order with its compiled Matchers is cached per replica: a
 // route hint drops it, and every Snapshot compares the stamp of the Routes in its own transaction, so that a change
-// made on any replica applies at once.
+// made on any replica applies at once. A fired change — the first firing of an Alert, or a firing after a resolve —
+// also starts firing in the sense of C-25.FR-5: the Router classifies it by its Teams and records them on the Alert
+// with their rules, and the value of the Team label that names no Team, replacing what its previous firing recorded;
+// the Teams are cached per replica as the order is, under the stamp of the Teams read with the Routes' stamp.
 type Router struct {
 	orgID   int64
 	queries func(dbgen.DBTX) evalQueries
+	// classify are the queries of the classification by Teams in the Snapshot's transaction.
+	classify func(dbgen.DBTX) teams.ClassifyQueries
+	teams    *teams.Classifier
 
 	mu     sync.Mutex
 	cached *order
@@ -70,7 +80,9 @@ type Router struct {
 
 // NewRouter returns the Router of the Organization orgID.
 func NewRouter(orgID int64) *Router {
-	return &Router{orgID: orgID, queries: func(d dbgen.DBTX) evalQueries { return dbgen.New(d) }}
+	return &Router{orgID: orgID, teams: teams.NewClassifier(orgID),
+		queries:  func(d dbgen.DBTX) evalQueries { return dbgen.New(d) },
+		classify: func(d dbgen.DBTX) teams.ClassifyQueries { return teamsdb.New(d) }}
 }
 
 // Invalidate drops the cached evaluation order: a hint said that a Route changed.
@@ -87,9 +99,10 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 	error) {
 	var ids, listed []int64
 	seen := make(map[int64]bool, len(changes))
+	fired := map[int64]bool{}
 	for _, c := range changes {
 		if c.Kind == ingest.ChangeFired && !seen[c.AlertID] {
-			seen[c.AlertID] = true
+			seen[c.AlertID], fired[c.AlertID] = true, true
 			ids = append(ids, c.AlertID)
 		}
 	}
@@ -126,6 +139,9 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 		RouteIds: make([]int64, 0, len(rows)), SeverityLevels: make([]string, 0, len(rows)),
 		SeverityRaws: make([]string, 0, len(rows))}
 	took := make([]bool, len(o.routes))
+	var classes *teams.Classes
+	var reset dbgen.ResetAlertTeamsParams
+	var members dbgen.InsertAlertTeamsParams
 	for _, row := range rows {
 		var labels map[string]string
 		if err := json.Unmarshal(row.Labels, &labels); err != nil {
@@ -140,9 +156,30 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 		set.RouteIds = append(set.RouteIds, routeID)
 		set.SeverityLevels = append(set.SeverityLevels, string(sev.Level))
 		set.SeverityRaws = append(set.SeverityRaws, sev.Raw)
+		if !fired[row.ID] {
+			continue
+		}
+		if classes == nil {
+			classes, err = r.teams.At(ctx, r.classify(tx), teams.Stamp{Label: st.TeamLabel, Version: st.TeamsVersion})
+			if err != nil {
+				return ingest.Routed{}, err
+			}
+		}
+		c := classes.Classify(labels)
+		reset.Ids = append(reset.Ids, row.ID)
+		reset.UnknownValues = append(reset.UnknownValues, c.UnknownValue)
+		for _, m := range c.Teams {
+			members.AlertIds = append(members.AlertIds, row.ID)
+			members.TeamIds = append(members.TeamIds, m.TeamID)
+			members.Rules = append(members.Rules, m.Rule)
+			members.Matchers = append(members.Matchers, m.Matcher)
+		}
 	}
 	if err := q.SetAlertRoutes(ctx, set); err != nil {
 		return ingest.Routed{}, fmt.Errorf("record the routes of the alerts: %w", err)
+	}
+	if err := r.recordTeams(ctx, q, reset, members); err != nil {
+		return ingest.Routed{}, err
 	}
 	var out ingest.Routed
 	for i, t := range took {
@@ -152,6 +189,26 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 		}
 	}
 	return out, nil
+}
+
+// recordTeams records the Teams of the Alerts that start firing, replacing those of their previous firing, and the
+// values of the Team label that name no Team (C-25.FR-5).
+func (r *Router) recordTeams(ctx context.Context, q evalQueries, reset dbgen.ResetAlertTeamsParams,
+	members dbgen.InsertAlertTeamsParams) error {
+	if len(reset.Ids) == 0 {
+		return nil
+	}
+	reset.OrgID, members.OrgID = r.orgID, r.orgID
+	if err := q.ResetAlertTeams(ctx, reset); err != nil {
+		return fmt.Errorf("forget the teams of the alerts that start firing: %w", err)
+	}
+	if len(members.AlertIds) == 0 {
+		return nil
+	}
+	if err := q.InsertAlertTeams(ctx, members); err != nil {
+		return fmt.Errorf("record the teams of the alerts: %w", err)
+	}
+	return nil
 }
 
 // order is the evaluation order as of the stamp: the cached one when its stamp is the same, otherwise the one read in

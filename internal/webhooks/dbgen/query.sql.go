@@ -276,6 +276,47 @@ func (q *Queries) ListBodyAlerts(ctx context.Context, arg ListBodyAlertsParams) 
 	return items, nil
 }
 
+const listBodyTeams = `-- name: ListBodyTeams :many
+SELECT t.public_id, t.name, t.slug
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = $1 AND gt.alert_group_id = $2
+ORDER BY gt.joined_at, gt.team_id
+`
+
+type ListBodyTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListBodyTeamsRow struct {
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// ListBodyTeams lists the Teams of an Alert Group for the body of an event, in the order they joined, deleted ones
+// included with their name (C-15.FR-2).
+func (q *Queries) ListBodyTeams(ctx context.Context, arg ListBodyTeamsParams) ([]ListBodyTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listBodyTeams, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBodyTeamsRow{}
+	for rows.Next() {
+		var i ListBodyTeamsRow
+		if err := rows.Scan(&i.PublicID, &i.Name, &i.Slug); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSecretValues = `-- name: ListSecretValues :many
 SELECT name, value_ciphertext, value_key_id
 FROM destination_secrets

@@ -26,6 +26,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization/dbgen"
@@ -100,7 +101,9 @@ type Organization struct {
 	WorkingDays []string
 	WorkdayEnd  string
 	// Buttons is organization.buttons, the button set of the Destinations that follow the Organization (C-28.FR-8).
-	Buttons         buttons.Set
+	Buttons buttons.Set
+	// TeamLabel is organization.team_label, whose value names a Team by its slug (C-25.FR-5).
+	TeamLabel       string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -132,7 +135,9 @@ type Input struct {
 	WorkingDays *[]string
 	WorkdayEnd  *string
 	// Buttons is organization.buttons; nil keeps the stored one.
-	Buttons         *ButtonSetInput
+	Buttons *ButtonSetInput
+	// TeamLabel is organization.team_label; nil keeps the stored one.
+	TeamLabel       *string
 	SeverityLabel   string
 	SeverityMapping []SeverityMapping
 	SeverityStyles  []SeverityStyle
@@ -274,7 +279,7 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 	o := Organization{
 		PublicID: row.PublicID, Name: row.Name, TimeZone: row.TimeZone, WorkdayStart: row.WorkdayStart,
 		WeekStart: row.WeekStart, WorkingDays: row.WorkingDays, WorkdayEnd: row.WorkdayEnd,
-		SeverityLabel: row.SeverityLabel, CriticalIsUrgent: true,
+		TeamLabel: row.TeamLabel, SeverityLabel: row.SeverityLabel, CriticalIsUrgent: true,
 		InstanceLabels: row.InstanceLabels,
 		Retention: Retention{
 			StoredSnapshotsDays: row.RetentionStoredSnapshotsDays, AlertDetailsDays: row.RetentionAlertDetailsDays,
@@ -410,6 +415,7 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			ProxyPasswordKeyID:               optText(password.KeyID),
 			ProxyPasswordUpdatedAt:           optTime(password.UpdatedAt),
 			Buttons:                          set,
+			TeamLabel:                        after.TeamLabel,
 			UrlChanged:                       urlChanged,
 			Now:                              now,
 		}); err != nil {
@@ -496,6 +502,9 @@ func applyInput(before Organization, in Input) (Organization, error) {
 	}
 	if in.WorkdayEnd != nil {
 		after.WorkdayEnd = *in.WorkdayEnd
+	}
+	if in.TeamLabel != nil {
+		after.TeamLabel = *in.TeamLabel
 	}
 	// The working day ends later than it starts (P-63): the field the update changes is refused, the end when both
 	// change.
@@ -604,6 +613,7 @@ type view struct {
 	WorkingDays           []string          `json:"working_days"`
 	WorkdayEnd            string            `json:"workday_end"`
 	Buttons               json.RawMessage   `json:"buttons"`
+	TeamLabel             string            `json:"team_label"`
 	SeverityLabel         string            `json:"severity_label"`
 	SeverityMapping       []SeverityMapping `json:"severity_mapping"`
 	SeverityStyles        []SeverityStyle   `json:"severity_styles"`
@@ -633,6 +643,7 @@ func viewOf(o Organization) view {
 		Name: o.Name, TimeZone: o.TimeZone, WorkdayStart: o.WorkdayStart, WeekStart: o.WeekStart,
 		WorkingDays: o.WorkingDays, WorkdayEnd: o.WorkdayEnd, SeverityLabel: o.SeverityLabel,
 		SeverityMapping: o.SeverityMapping, SeverityStyles: o.SeverityStyles, InstanceLabels: o.InstanceLabels, Buttons: set,
+		TeamLabel: o.TeamLabel,
 		Retention: retentionView{
 			StoredSnapshotsDays: o.Retention.StoredSnapshotsDays, AlertDetailsDays: o.Retention.AlertDetailsDays,
 			AlertGroupSummariesDays: o.Retention.AlertGroupSummariesDays, AuditLogDays: o.Retention.AuditLogDays,
@@ -659,6 +670,7 @@ const (
 	CodeOutOfRange     = "out_of_range"
 	CodeDuplicate      = "duplicate"
 	CodeRetentionOrder = "retention_order"
+	CodeReservedLabel  = "reserved_label"
 )
 
 const (
@@ -723,7 +735,11 @@ func validate(in Input) *FieldError {
 	case in.WorkdayEnd != nil && !timeOfDay.MatchString(*in.WorkdayEnd):
 		return &FieldError{Pointer: "/workday_end", Code: CodeInvalidFormat,
 			Detail: "The end of the working day is not a time HH:MM on the 24-hour clock, such as 18:00."}
-	case !labelName.MatchString(in.SeverityLabel):
+	}
+	if fe := validateTeamLabel(in.TeamLabel); fe != nil {
+		return fe
+	}
+	if !labelName.MatchString(in.SeverityLabel) {
 		return &FieldError{Pointer: "/severity_label", Code: CodeInvalidFormat,
 			Detail: "The severity label is not a label name."}
 	}
@@ -876,6 +892,22 @@ func validateRetention(r Retention) *FieldError {
 		return &FieldError{Pointer: "/retention/alert_group_summaries_days", Code: CodeRetentionOrder,
 			Detail: fmt.Sprintf("Keep Alert Group summaries at least as long as alert details (%d days).",
 				r.AlertDetailsDays)}
+	}
+	return nil
+}
+
+// validateTeamLabel refuses a Team label that is not a label name, or that an Internal alert sets itself
+// (internalalerts.ReservedLabels): the Team label of an Internal alert would name a Team the alert is not about
+// (C-25.FR-5, C-20.FR-1). Nil keeps the stored one.
+func validateTeamLabel(label *string) *FieldError {
+	switch {
+	case label == nil:
+		return nil
+	case !labelName.MatchString(*label):
+		return &FieldError{Pointer: "/team_label", Code: CodeInvalidFormat, Detail: "The Team label is not a label name."}
+	case slices.Contains(internalalerts.ReservedLabels(), *label):
+		return &FieldError{Pointer: "/team_label", Code: CodeReservedLabel,
+			Detail: "An Internal alert sets the label " + *label + " itself; choose another Team label."}
 	}
 	return nil
 }

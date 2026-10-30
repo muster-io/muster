@@ -168,7 +168,7 @@ SELECT o.route_order_version,
        (SELECT coalesce(sum(r.version), 0)
         FROM routes r
         WHERE r.org_id = @org_id AND r.deleted_at IS NULL)::bigint AS route_versions,
-       o.severity_label, o.severity_mapping
+       o.severity_label, o.severity_mapping, o.team_label, o.teams_version
 FROM organizations o
 WHERE o.id = @org_id;
 
@@ -189,6 +189,26 @@ SET route_id = nullif(r.route_id, 0), severity_level = r.severity_level, severit
 FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@route_ids::bigint[]) AS route_id,
              unnest(@severity_levels::text[]) AS severity_level, unnest(@severity_raws::text[]) AS severity_raw) AS r
 WHERE a.org_id = @org_id AND a.id = r.id;
+
+-- ResetAlertTeams forgets the Teams of Alerts that start firing, which InsertAlertTeams then records anew, and records
+-- the value of the Team label that names no Team, empty for none.
+-- name: ResetAlertTeams :exec
+WITH gone AS (
+    DELETE FROM alert_teams
+    WHERE org_id = @org_id AND alert_id = ANY(@ids::bigint[])
+)
+UPDATE alerts a
+SET unknown_team_value = nullif(v.value, '')
+FROM (SELECT unnest(@ids::bigint[]) AS id, unnest(@unknown_values::text[]) AS value) AS v
+WHERE a.org_id = @org_id AND a.id = v.id;
+
+-- InsertAlertTeams records the Teams of Alerts that start firing with the rule that decided each, and the Team matcher
+-- of the rule matcher; an empty matcher is null.
+-- name: InsertAlertTeams :exec
+INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
+SELECT @org_id, t.alert_id, t.team_id, t.rule, nullif(t.matcher, '')
+FROM (SELECT unnest(@alert_ids::bigint[]) AS alert_id, unnest(@team_ids::bigint[]) AS team_id,
+             unnest(@rules::text[]) AS rule, unnest(@matchers::text[]) AS matcher) AS t;
 
 -- ListHeartbeatIntegrations lists the Integrations that are not deleted and have their Heartbeat on, with what
 -- MusterHeartbeatLost carries of them: the public_id, the name and the Static labels.

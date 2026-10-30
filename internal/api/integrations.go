@@ -336,6 +336,16 @@ func integrationAlertOf(a ingest.ViewAlert) gen.IntegrationAlert {
 	if a.AlertGroup != nil {
 		out.AlertGroup = &gen.AlertGroupRef{Id: a.AlertGroup.PublicID, Number: int(a.AlertGroup.Number)}
 	}
+	out.Teams = make([]gen.TeamMembership, len(a.Teams))
+	for i, t := range a.Teams {
+		out.Teams[i] = gen.TeamMembership{Team: gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug,
+			Deleted: t.Deleted}, Rule: gen.TeamRule(t.Rule)}
+		if t.Matcher != nil {
+			out.Teams[i].Matcher.Set(*t.Matcher)
+		} else {
+			out.Teams[i].Matcher.SetNull()
+		}
+	}
 	return out
 }
 

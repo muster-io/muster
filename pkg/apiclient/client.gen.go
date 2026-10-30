@@ -1166,8 +1166,10 @@ const (
 	LifecycleEventSnoozeEnded         LifecycleEvent = "snooze_ended"
 	LifecycleEventSnoozed             LifecycleEvent = "snoozed"
 	LifecycleEventTakeover            LifecycleEvent = "takeover"
+	LifecycleEventTeamJoined          LifecycleEvent = "team_joined"
 	LifecycleEventUnacknowledged      LifecycleEvent = "unacknowledged"
 	LifecycleEventUnclaimed           LifecycleEvent = "unclaimed"
+	LifecycleEventUnknownTeamValue    LifecycleEvent = "unknown_team_value"
 	LifecycleEventUnresolved          LifecycleEvent = "unresolved"
 	LifecycleEventUnsnoozed           LifecycleEvent = "unsnoozed"
 	LifecycleEventUrgencyRaised       LifecycleEvent = "urgency_raised"
@@ -1216,9 +1218,13 @@ func (e LifecycleEvent) Valid() bool {
 		return true
 	case LifecycleEventTakeover:
 		return true
+	case LifecycleEventTeamJoined:
+		return true
 	case LifecycleEventUnacknowledged:
 		return true
 	case LifecycleEventUnclaimed:
+		return true
+	case LifecycleEventUnknownTeamValue:
 		return true
 	case LifecycleEventUnresolved:
 		return true
@@ -2662,6 +2668,24 @@ func (e SystemNoticeKind) Valid() bool {
 	}
 }
 
+// Defines values for TeamRule.
+const (
+	TeamRuleLabel   TeamRule = "label"
+	TeamRuleMatcher TeamRule = "matcher"
+)
+
+// Valid indicates whether the value is a known member of the TeamRule enum.
+func (e TeamRule) Valid() bool {
+	switch e {
+	case TeamRuleLabel:
+		return true
+	case TeamRuleMatcher:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TeamUserSource.
 const (
 	ByHand TeamUserSource = "by_hand"
@@ -3094,6 +3118,7 @@ const (
 	TimelineSystemEntrySystemEventMovedToDefaultRoute  TimelineSystemEntrySystemEvent = "moved_to_default_route"
 	TimelineSystemEntrySystemEventMusterUnavailable    TimelineSystemEntrySystemEvent = "muster_unavailable"
 	TimelineSystemEntrySystemEventTemplateValueMissing TimelineSystemEntrySystemEvent = "template_value_missing"
+	TimelineSystemEntrySystemEventUnknownTeamValue     TimelineSystemEntrySystemEvent = "unknown_team_value"
 )
 
 // Valid indicates whether the value is a known member of the TimelineSystemEntrySystemEvent enum.
@@ -3106,6 +3131,8 @@ func (e TimelineSystemEntrySystemEvent) Valid() bool {
 	case TimelineSystemEntrySystemEventMusterUnavailable:
 		return true
 	case TimelineSystemEntrySystemEventTemplateValueMissing:
+		return true
+	case TimelineSystemEntrySystemEventUnknownTeamValue:
 		return true
 	default:
 		return false
@@ -3374,9 +3401,11 @@ const (
 	WebhookEventNameSnoozeEnded         WebhookEventName = "snooze_ended"
 	WebhookEventNameSnoozed             WebhookEventName = "snoozed"
 	WebhookEventNameTakeover            WebhookEventName = "takeover"
+	WebhookEventNameTeamJoined          WebhookEventName = "team_joined"
 	WebhookEventNameTest                WebhookEventName = "test"
 	WebhookEventNameUnacknowledged      WebhookEventName = "unacknowledged"
 	WebhookEventNameUnclaimed           WebhookEventName = "unclaimed"
+	WebhookEventNameUnknownTeamValue    WebhookEventName = "unknown_team_value"
 	WebhookEventNameUnresolved          WebhookEventName = "unresolved"
 	WebhookEventNameUnsnoozed           WebhookEventName = "unsnoozed"
 	WebhookEventNameUrgencyRaised       WebhookEventName = "urgency_raised"
@@ -3425,11 +3454,15 @@ func (e WebhookEventName) Valid() bool {
 		return true
 	case WebhookEventNameTakeover:
 		return true
+	case WebhookEventNameTeamJoined:
+		return true
 	case WebhookEventNameTest:
 		return true
 	case WebhookEventNameUnacknowledged:
 		return true
 	case WebhookEventNameUnclaimed:
+		return true
+	case WebhookEventNameUnknownTeamValue:
 		return true
 	case WebhookEventNameUnresolved:
 		return true
@@ -3748,8 +3781,11 @@ type AlertGroup struct {
 	StartedAt time.Time                 `json:"started_at"`
 	Status    AlertGroupStatus          `json:"status"`
 	Summary   nullable.Nullable[string] `json:"summary,omitempty"`
-	Title     string                    `json:"title"`
-	Unclaimed bool                      `json:"unclaimed"`
+
+	// Teams The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.
+	Teams     []AlertGroupTeam `json:"teams"`
+	Title     string           `json:"title"`
+	Unclaimed bool             `json:"unclaimed"`
 
 	// Urgent True exactly when `severity_level` is `critical`.
 	Urgent bool `json:"urgent"`
@@ -3777,6 +3813,9 @@ type AlertGroupAlert struct {
 	SourceUrl nullable.Nullable[string] `json:"source_url,omitempty"`
 	StartsAt  time.Time                 `json:"starts_at"`
 	State     AlertState                `json:"state"`
+
+	// Teams The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5).
+	Teams []TeamMembership `json:"teams"`
 }
 
 // AlertGroupAlertList defines model for AlertGroupAlertList.
@@ -3893,6 +3932,20 @@ type AlertGroupStatisticsItem struct {
 
 // AlertGroupStatus defines model for AlertGroupStatus.
 type AlertGroupStatus string
+
+// AlertGroupTeam A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.
+type AlertGroupTeam struct {
+	JoinedAt time.Time `json:"joined_at"`
+
+	// Matcher The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.
+	Matcher nullable.Nullable[string] `json:"matcher"`
+
+	// Rule How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team's slug, or by one of its Team matchers.
+	Rule TeamRule `json:"rule"`
+
+	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
+	Team TeamRef `json:"team"`
+}
 
 // AlertState defines model for AlertState.
 type AlertState string
@@ -4981,6 +5034,9 @@ type IntegrationAlert struct {
 
 	// StaticLabelWarnings Static labels the Alert already carried; its own value won.
 	StaticLabelWarnings *[]string `json:"static_label_warnings,omitempty"`
+
+	// Teams The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5).
+	Teams []TeamMembership `json:"teams"`
 }
 
 // IntegrationAlertList defines model for IntegrationAlertList.
@@ -5832,6 +5888,9 @@ type Organization struct {
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
 
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	TeamLabel string `json:"team_label"`
+
 	// TimeZone IANA time zone used for times in messages.
 	TimeZone string `json:"time_zone"`
 
@@ -5877,6 +5936,9 @@ type OrganizationBase struct {
 	// SeverityMapping Values of the severity label mapped to Severity levels. Unmapped values count as warning.
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
+
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	TeamLabel *string `json:"team_label,omitempty"`
 
 	// TimeZone IANA time zone used for times in messages.
 	TimeZone string `json:"time_zone"`
@@ -5935,6 +5997,9 @@ type OrganizationInput struct {
 	// SeverityMapping Values of the severity label mapped to Severity levels. Unmapped values count as warning.
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
+
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	TeamLabel *string `json:"team_label,omitempty"`
 
 	// TimeZone IANA time zone used for times in messages.
 	TimeZone string `json:"time_zone"`
@@ -7263,6 +7328,9 @@ type Team struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
+	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
+	Matchers []Matcher `json:"matchers"`
+
 	// Name Unique, ignoring case, among the Teams that are not deleted.
 	Name string `json:"name"`
 
@@ -7284,6 +7352,9 @@ type TeamInput struct {
 	// Description Omit it on an update to keep it.
 	Description *string `json:"description,omitempty"`
 
+	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
+	Matchers *[]Matcher `json:"matchers,omitempty"`
+
 	// Name Unique, ignoring case, among the Teams that are not deleted.
 	Name string `json:"name"`
 
@@ -7303,6 +7374,18 @@ type TeamList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// TeamMembership A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.
+type TeamMembership struct {
+	// Matcher The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.
+	Matcher nullable.Nullable[string] `json:"matcher"`
+
+	// Rule How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team's slug, or by one of its Team matchers.
+	Rule TeamRule `json:"rule"`
+
+	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
+	Team TeamRef `json:"team"`
+}
+
 // TeamRef The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 type TeamRef struct {
 	Deleted bool `json:"deleted"`
@@ -7312,6 +7395,9 @@ type TeamRef struct {
 	Name string   `json:"name"`
 	Slug string   `json:"slug"`
 }
+
+// TeamRule How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team's slug, or by one of its Team matchers.
+type TeamRule string
 
 // TeamUser defines model for TeamUser.
 type TeamUser struct {
@@ -7683,6 +7769,15 @@ type TimelineAlertsEntry struct {
 
 	// ReplacedLabel The Instance label that differs, for `alert_replaced`.
 	ReplacedLabel nullable.Nullable[string] `json:"replaced_label,omitempty"`
+
+	// Team The Team that joined, for `team_joined`; a Team deleted since keeps its name.
+	Team *TeamRef `json:"team,omitempty"`
+
+	// TeamMatcher The Team matcher that brought the Team, for `team_joined` by the rule `matcher`.
+	TeamMatcher nullable.Nullable[string] `json:"team_matcher,omitempty"`
+
+	// TeamRule The rule that brought the Team, for `team_joined`.
+	TeamRule *TeamRule `json:"team_rule,omitempty"`
 }
 
 // TimelineAlertsEntryKind defines model for TimelineAlertsEntry.Kind.
@@ -7827,6 +7922,9 @@ type TimelineSystemEntry struct {
 	PeriodFrom  nullable.Nullable[time.Time]   `json:"period_from,omitempty"`
 	PeriodTo    nullable.Nullable[time.Time]   `json:"period_to,omitempty"`
 	SystemEvent TimelineSystemEntrySystemEvent `json:"system_event"`
+
+	// TeamValue The value of the Team label that names no Team, for `unknown_team_value`.
+	TeamValue nullable.Nullable[string] `json:"team_value,omitempty"`
 }
 
 // TimelineSystemEntryKind defines model for TimelineSystemEntry.Kind.
@@ -8051,7 +8149,10 @@ type WebhookAlertGroup struct {
 	StartedAt     time.Time                    `json:"started_at"`
 	Status        AlertGroupStatus             `json:"status"`
 	Summary       nullable.Nullable[string]    `json:"summary,omitempty"`
-	Title         string                       `json:"title"`
+
+	// Teams The Teams of the Alert Group (C-25.FR-6), in the order they joined; a Team deleted since keeps its name.
+	Teams []WebhookTeam `json:"teams"`
+	Title string        `json:"title"`
 
 	// Urgent True exactly when `severity_level` is `critical`.
 	Urgent bool `json:"urgent"`
@@ -8186,6 +8287,14 @@ type WebhookMentionTarget struct {
 // WebhookMentionTargetType defines model for WebhookMentionTarget.Type.
 type WebhookMentionTargetType string
 
+// WebhookTeam A Team as an outgoing webhook event names it.
+type WebhookTeam struct {
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id   PublicId `json:"id"`
+	Name string   `json:"name"`
+	Slug string   `json:"slug"`
+}
+
 // WebhookTemplateConfig defines model for WebhookTemplateConfig.
 type WebhookTemplateConfig struct {
 	Create RequestTemplate `json:"create"`
@@ -8265,6 +8374,9 @@ type AgSort string
 
 // AgStatus defines model for AgStatus.
 type AgStatus = []AlertGroupStatus
+
+// AgTeam defines model for AgTeam.
+type AgTeam = string
 
 // AgUnclaimed defines model for AgUnclaimed.
 type AgUnclaimed = bool
@@ -8418,6 +8530,9 @@ type GetAlertGroupCountsParams struct {
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
 
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
+
 	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.
 	SnoozedNoEnd *AgSnoozedNoEnd `form:"snoozed_no_end,omitempty" json:"snoozed_no_end,omitempty"`
 
@@ -8498,6 +8613,9 @@ type ListAlertGroupsParams struct {
 
 	// Owner A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
 	Owner *AgOwner `form:"owner,omitempty" json:"owner,omitempty"`
+
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
 
 	// SnoozedNoEnd True: only Alert Groups snoozed with no end. False: every Alert Group but those.
 	SnoozedNoEnd *AgSnoozedNoEnd `form:"snoozed_no_end,omitempty" json:"snoozed_no_end,omitempty"`
@@ -17237,6 +17355,18 @@ func NewGetAlertGroupCountsRequest(server string, params *GetAlertGroupCountsPar
 
 		}
 
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "team", *params.Team, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if params.SnoozedNoEnd != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "snoozed_no_end", *params.SnoozedNoEnd, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
@@ -17596,6 +17726,18 @@ func NewListAlertGroupsRequest(server string, params *ListAlertGroupsParams) (*h
 		if params.Owner != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "owner", *params.Owner, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "team", *params.Team, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {

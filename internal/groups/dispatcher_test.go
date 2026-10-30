@@ -112,6 +112,8 @@ type fakeDB struct {
 	following []int64
 	// retired are the deliveries being retired, by Alert Group and Destination.
 	retired map[[2]int64]bool
+	// teams are the Teams of the Alerts and of the Alert Groups (teams_test.go).
+	teams fakeTeams
 }
 
 func newDB() *fakeDB {
@@ -847,7 +849,8 @@ func (f *fakeDB) timeline(group int64, kinds []string, at pgtype.Timestamptz, so
 			Reason: e.Reason, FromStatus: e.FromStatus, ToStatus: e.ToStatus, OwnerUserID: e.OwnerUserID,
 			PreviousOwnerUserID: e.PreviousOwnerUserID, SnoozeUntil: e.SnoozeUntil, Fingerprints: e.Fingerprints,
 			ReplacedLabel: e.ReplacedLabel, LabelConflicts: e.LabelConflicts, PeriodFrom: e.PeriodFrom,
-			PeriodTo: e.PeriodTo, Detail: e.Detail})
+			PeriodTo: e.PeriodTo, Detail: e.Detail, TeamID: e.TeamID, TeamRule: e.TeamRule,
+			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListTimelineDescRow) int {
 		c := cmp.Or(a.At.Compare(b.At), cmp.Compare(a.ID, b.ID))
