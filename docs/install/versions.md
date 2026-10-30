@@ -102,9 +102,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
-    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
-    0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles Informational, so reload the
-    web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.
+    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
+    during a rolling update a 0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles
+    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity

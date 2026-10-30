@@ -106,7 +106,7 @@ test("creates a Route from a profile and previews its Group key", async ({ page 
     "severity",
     "cluster",
   ]);
-  await expect(page.getByRole("switch", { name: /^Urgent:/ })).not.toBeChecked();
+  await expect(page.getByTestId("route-minimum-severity")).toHaveValue("none");
   await page.getByRole("textbox", { name: "Name" }).fill("disk");
   await page.getByRole("button", { name: "Add matcher" }).click();
   await expect(page.getByRole("textbox", { name: "Label of matcher 1" })).toBeFocused();
@@ -217,7 +217,7 @@ test("an open editor says when its Route changed elsewhere, and a save over it i
         name: route.name,
         description,
         matchers: route.matchers,
-        urgent: route.urgent,
+        minimum_severity: route.minimum_severity,
         group_key: route.group_key,
         destination_ids: route.destination_ids,
         policy: route.policy,
@@ -235,7 +235,7 @@ test("an open editor says when its Route changed elsewhere, and a save over it i
     "changed by the API",
   );
   // With changes: the editor keeps them, says so, and the save is refused.
-  await page.getByRole("switch", { name: /^Urgent:/ }).check();
+  await page.getByTestId("route-minimum-severity").selectOption("critical");
   await update("changed again");
   await expect(
     page
@@ -250,7 +250,7 @@ test("an open editor says when its Route changed elsewhere, and a save over it i
   await shot(page, "routes-editor-conflict");
   await page.getByRole("button", { name: "Reload" }).click();
   await expect(page.getByRole("textbox", { name: "Description" })).toHaveValue("changed again");
-  await expect(page.getByRole("switch", { name: /^Urgent:/ })).not.toBeChecked();
+  await expect(page.getByTestId("route-minimum-severity")).toHaveValue("none");
   await admin.dispose();
   expect(csp).toEqual([]);
 });

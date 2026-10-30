@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Organization → Alert handling (C-20.FR-1): whether a critical Severity level makes an Alert Group Urgent, and the
-// Instance labels, whose change alone makes a new Alert a Replacement (C-09.FR-7).
+// Organization → Alert handling (C-20.FR-1): the Instance labels, whose change alone makes a new Alert a Replacement
+// (C-09.FR-7).
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { createFileRoute } from "@tanstack/react-router";
@@ -20,7 +20,6 @@ import {
   useOrganizationForm,
 } from "../components/organization-form";
 import { Card, CardContent } from "../components/ui/card";
-import { Label } from "../components/ui/label";
 
 export const Route = createFileRoute("/admin/organization/alert-handling")({
   staticData: { shell: true },
@@ -28,7 +27,7 @@ export const Route = createFileRoute("/admin/organization/alert-handling")({
 });
 
 const schema = z
-  .object({ critical_is_urgent: z.boolean(), instance_labels: z.array(z.string()) })
+  .object({ instance_labels: z.array(z.string()) })
   .superRefine((v, ctx) => {
     const seen = new Set<string>();
     v.instance_labels.forEach((raw, index) => {
@@ -51,15 +50,12 @@ function AlertHandlingForm({ organization }: { organization: Organization }) {
   const { form, formRef, onSubmit, state } = useOrganizationForm<AlertHandlingValues>({
     organization,
     values: (org) => ({
-      critical_is_urgent: org.critical_is_urgent,
       instance_labels: org.instance_labels,
     }),
     patch: (v) => ({
-      critical_is_urgent: v.critical_is_urgent,
       instance_labels: v.instance_labels.map((l) => l.trim()),
     }),
     fields: (v) => [
-      "critical_is_urgent",
       "instance_labels",
       ...v.instance_labels.map((_, i) => `instance_labels.${i}` as const),
     ],
@@ -71,26 +67,6 @@ function AlertHandlingForm({ organization }: { organization: Organization }) {
   );
   return (
     <form ref={formRef} noValidate className="flex flex-col gap-6" onSubmit={onSubmit}>
-      <Card>
-        <CardContent className="flex items-start gap-2">
-          <input
-            id="critical-is-urgent"
-            type="checkbox"
-            role="switch"
-            className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            aria-describedby="critical-is-urgent-hint"
-            {...form.register("critical_is_urgent")}
-          />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <Label htmlFor="critical-is-urgent" className="leading-snug">
-              {t("organization.alertHandling.criticalIsUrgent")}
-            </Label>
-            <p id="critical-is-urgent-hint" className="text-sm text-muted-foreground">
-              {t("organization.alertHandling.criticalIsUrgentHint")}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
       <Card>
         <CardContent>
           <Controller

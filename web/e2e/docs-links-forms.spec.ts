@@ -265,7 +265,7 @@ test("the Route editor has Learn more beside its complex fields", async ({ page,
   for (const [about, path, hash] of [
     ["Matchers", "concepts/routes-and-group-keys/", "#matchers"],
     ["Group key", "concepts/routes-and-group-keys/", "#group-keys"],
-    ["Urgent", "concepts/routes-and-group-keys/", "#urgent"],
+    ["Minimum severity", "concepts/routes-and-group-keys/", "#minimum-severity"],
     ["Message templates", "configure/messages-and-templates/", "#the-template-language"],
     ["Loud and Quiet delivery", "concepts/loud-and-quiet/", ""],
     [

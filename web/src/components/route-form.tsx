@@ -2,12 +2,12 @@
 // Copyright The Muster Authors
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
-// the urgent mark, the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11,
-// C-11.FR-9), the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the
+// the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11, C-11.FR-9), the
+// section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the
 // Storm threshold of C-11), the Snooze durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
 // the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
 // policy field is shown; a new Route starts with the values of its profile. Without routes:write the editor only shows
-// the Route. The Matchers, the urgent mark and the Group key have "Learn more" beside their labels.
+// the Route. The Matchers, the Minimum severity and the Group key have "Learn more" beside their labels.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
@@ -73,6 +73,11 @@ import {
   timersValues,
   withTimers,
 } from "./route-policy-timers";
+import {
+  RouteSeverityAndOwner,
+  minimumSeverityName,
+  severityAndOwnerSchema,
+} from "./route-severity-and-owner";
 import { TemplateErrorBanner } from "./template-error-banner";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -88,7 +93,7 @@ const formSchema = z
   .object({
     name: z.string().trim().min(1, "required").max(NAME_MAX, "too_long"),
     description: z.string(),
-    urgent: z.boolean(),
+    ...severityAndOwnerSchema,
     matchers: z.array(
       z.object({
         key: z.number(),
@@ -121,13 +126,13 @@ const formSchema = z
     });
   });
 
-type FormValues = z.infer<typeof formSchema>;
+export type FormValues = z.infer<typeof formSchema>;
 
-function formValues(base: RouteInput): FormValues {
+export function formValues(base: RouteInput): FormValues {
   return {
     name: base.name,
     description: base.description ?? "",
-    urgent: base.urgent ?? false,
+    minimum_severity: base.minimum_severity ?? "none",
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
     destination_ids: [...base.destination_ids],
@@ -146,11 +151,16 @@ function withDraft(key: readonly string[], draft: string): string[] {
 }
 
 /** The input of a save: the fields of the form, and the policy fields it does not show unchanged from base. */
-function inputOf(base: RouteInput, v: FormValues, draft: string, isDefault: boolean): RouteInput {
+export function inputOf(
+  base: RouteInput,
+  v: FormValues,
+  draft: string,
+  isDefault: boolean,
+): RouteInput {
   return {
     name: v.name.trim(),
     description: v.description.trim(),
-    urgent: v.urgent,
+    minimum_severity: v.minimum_severity,
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...v.destination_ids],
@@ -358,6 +368,12 @@ export function RouteForm({
           setLanguageError(item.code);
         } else if (item.pointer === "/name") {
           form.setError("name", { type: item.code, message: item.code }, { shouldFocus: true });
+        } else if (item.pointer === "/minimum_severity") {
+          form.setError(
+            "minimum_severity",
+            { type: item.code, message: item.code },
+            { shouldFocus: true },
+          );
         } else if (lifecycleField !== undefined) {
           form.setError(
             lifecycleField,
@@ -457,9 +473,9 @@ export function RouteForm({
             />
           )}
         </ReadOnlyField>
-        <ReadOnlyField label={t("routes.fields.urgent")}>
-          <span className="text-sm">
-            {base.urgent ? t("routes.form.urgentOn") : t("routes.form.urgentOff")}
+        <ReadOnlyField label={t("routes.severity.minimum")}>
+          <span className="text-sm" data-testid="route-minimum-severity">
+            {minimumSeverityName(t, base.minimum_severity ?? "none")}
           </span>
         </ReadOnlyField>
         <div className="flex flex-col gap-1">
@@ -586,21 +602,6 @@ export function RouteForm({
           />
         )}
       </fieldset>
-      <div className="flex items-start gap-2">
-        <input
-          id={`${ID}-urgent`}
-          type="checkbox"
-          role="switch"
-          className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          {...form.register("urgent")}
-        />
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <Label htmlFor={`${ID}-urgent`} className="leading-snug">
-            {t("routes.form.urgent")}
-          </Label>
-          <DocsLink to="field.urgent" kind="learn_more" about={t("docs.fields.urgent")} />
-        </div>
-      </div>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap items-baseline gap-x-2">
@@ -659,6 +660,11 @@ export function RouteForm({
             }}
           />
         )}
+      />
+      <RouteSeverityAndOwner
+        id={`${ID}-severity`}
+        minimumSeverity={form.register("minimum_severity")}
+        error={errors.minimum_severity?.message}
       />
       <RoutePolicyLifecycle
         id={`${ID}-lifecycle`}

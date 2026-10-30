@@ -230,6 +230,14 @@ describe("entryText", () => {
       ],
       [alerts("annotations_changed"), "Annotations changed"],
       [alerts("severity_raised"), "Severity raised"],
+      [
+        alerts("severity_raised", { reason: "x", reason_code: "minimum_severity" }),
+        "Severity raised: Minimum severity of the Route",
+      ],
+      [
+        status("urgency_raised", { reason: "x", reason_code: "minimum_severity" }),
+        "Became Urgent: Minimum severity of the Route",
+      ],
       [timers("ack_timeout", { notice_number: 2 }), "Ack timeout notice 2 of 3"],
       [timers("unclaimed"), "Unclaimed"],
       [timers("reminder", { notice_number: 1 }), "Reminder 1"],
@@ -295,6 +303,16 @@ describe("entryText", () => {
     expect(actorText(i18n.t, { ...ALICE, transport: "bridge" })).toBe("Alice Smith через Мост");
     expect(text(delivery("republished_past_edit_window"))).toBe(
       "Опубликована заново в ops: окно правки истекло",
+    );
+  });
+
+  test("names the reason minimum_severity in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    expect(text(status("urgency_raised", { reason: "x", reason_code: "minimum_severity" }))).toBe(
+      "Стала срочной: Минимальная важность маршрута",
+    );
+    expect(text(alerts("severity_raised", { reason: "x", reason_code: "minimum_severity" }))).toBe(
+      "Важность повысилась: Минимальная важность маршрута",
     );
   });
 

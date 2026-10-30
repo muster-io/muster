@@ -235,6 +235,43 @@ test("shows the header, notices, Alerts, labels, Timeline and previous Alert Gro
   expect(csp).toEqual([]);
 });
 
+test("a raised Minimum severity of the Route makes an acknowledged warning Alert Group critical", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  await fam("PUT", "/groups/agm", {
+    receiver: "ag-page",
+    route: "{}",
+    labels: { alertname: "DiskSlow" },
+  });
+  await fam("PUT", "/groups/agm/alerts/m1", db("m", "m1"));
+  await notify(integrationId, "agm", { reason: "first notification" });
+  const group = await groupOf("m1");
+  const admin = await adminApi();
+  try {
+    await admin.call("POST", `/api/v1/alert-groups/${group.id}/acknowledge`);
+  } finally {
+    await admin.dispose();
+  }
+  await signInAdmin(page);
+  await page.goto(`/alert-groups/${group.id}`);
+  await expect(page.getByTestId("fact-severity")).toContainText("warning");
+  await expect(page.getByTestId("alert-group-status")).toHaveText("Acknowledged");
+
+  // The Minimum severity critical on the Route's page, then Save.
+  await page.goto(`/routes/${routeId}`);
+  await page.getByTestId("route-minimum-severity").selectOption("critical");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByTestId("route-minimum-severity")).toHaveValue("critical");
+
+  await page.goto(`/alert-groups/${group.id}`);
+  await expect(page.getByTestId("fact-severity")).toContainText("critical");
+  await expect(page.getByTestId("alert-group-status")).toHaveText("Acknowledged");
+  await expect(entry(page, "Became Urgent: Minimum severity of the Route")).toHaveCount(1);
+  await shot(page, "alert-group-page-minimum-severity");
+  expect(csp).toEqual([]);
+});
+
 test("shows the page in Russian", async ({ page }) => {
   const csp = watchCsp(page);
   const admin = await adminApi();
