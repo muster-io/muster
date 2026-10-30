@@ -100,6 +100,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       yours did.
     - Migration 0023 adds the [button sets](../concepts/statuses-and-commands.md#button-sets): the Organization's
       shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
+    - Migration 0024 adds the [Team label and Team matchers](../concepts/teams.md#which-alerts-belong-to-a-team). The
+      Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
+      label `team` records one Quiet `unknown_team_value` per value in its Timeline, and outgoing webhooks in events
+      mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -132,7 +136,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     differently. A 0.1 replica also does not know the end of the working day: its `updateOrganization` that sets the
     start of the working day at or after the end fails the CHECK of migration 0022 with `500` until the rollout ends;
     save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
-    does not know them and renders every button on the messages it touches.
+    does not know them and renders every button on the messages it touches. A 0.1 replica gives the Alerts it
+    processes no Teams, and the events-mode webhook bodies it sends lack `alert_group.teams`: create Teams only after
+    every replica runs 0.2.0.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -189,6 +195,39 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v2_check;
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_scope_check;
         ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0024 adds the Team label, Team matchers and the Teams of Alerts and Alert Groups, in three transactions:
+    the first adds the columns and tables and the new CHECKs of the Timeline and of `webhook_events`, the second
+    validates them, the third drops the old CHECKs. A failure leaves the schema recorded as dirty at version 24. To
+    recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'organizations' AND column_name = 'team_label';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 23, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE organizations VALIDATE CONSTRAINT organizations_team_label_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_team_rule_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_event_v2_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_v2_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v2_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_event_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_system_event_check;
+        ALTER TABLE timeline_entries DROP CONSTRAINT IF EXISTS timeline_entries_system_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 

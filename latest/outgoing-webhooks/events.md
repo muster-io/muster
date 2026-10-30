@@ -121,7 +121,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
     "resolved_at": null,
     "snooze_until": null,
     "reopen_count": 0,
-    "url": "https://muster.example.org/alert-groups/AGK7M3QX9P2RTA"
+    "url": "https://muster.example.org/alert-groups/AGK7M3QX9P2RTA",
+    "teams": [{ "id": "TM4D7K2Q9X1VBN", "name": "Payments", "slug": "payments" }]
   },
   "alerts": [
     {
@@ -166,7 +167,9 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 
 `alert_group`
 :   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
-    `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.
+    `name`, `login`) while acknowledged, Route, Urgent, Severity level, times, Reopen count, its page in Muster and its
+    `teams`: the `id`, `name` and `slug` of each Team of the Alert Group, in the order they joined, a deleted Team by
+    its name, `[]` for none ([Teams](../concepts/teams.md#which-alerts-belong-to-a-team)).
 
 `alerts`
 :   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
@@ -232,6 +235,13 @@ never sent.
 
 `notices_missed`
 :   `notify`: true
+
+`team_joined`
+:   `notify`: false. A Team joined the Teams of the Alert Group; `alert_group.teams` lists it.
+
+`unknown_team_value`
+:   `notify`: false. An Alert of the Alert Group carries a value of the Team label that names no Team; sent once per
+    value and Alert Group.
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.

@@ -3545,6 +3545,7 @@ paths:
       - $ref: '#/components/parameters/AgReopened'
       - $ref: '#/components/parameters/LabelMatchers'
       - $ref: '#/components/parameters/AgOwner'
+      - $ref: '#/components/parameters/AgTeam'
       - $ref: '#/components/parameters/AgSnoozedNoEnd'
       - $ref: '#/components/parameters/AgDeliveryProblem'
       - $ref: '#/components/parameters/AgUnclaimed'
@@ -3593,6 +3594,7 @@ paths:
       - $ref: '#/components/parameters/AgReopened'
       - $ref: '#/components/parameters/LabelMatchers'
       - $ref: '#/components/parameters/AgOwner'
+      - $ref: '#/components/parameters/AgTeam'
       - $ref: '#/components/parameters/AgSnoozedNoEnd'
       - $ref: '#/components/parameters/AgDeliveryProblem'
       - $ref: '#/components/parameters/AgUnclaimed'
@@ -7821,6 +7823,14 @@ components:
         nobody owns, resolved ones included.
       schema:
         type: string
+    AgTeam:
+      name: team
+      in: query
+      description: Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`;
+        or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account
+        token). An unknown Team is `422` `unknown_id`.
+      schema:
+        type: string
     AgSnoozedNoEnd:
       name: snoozed_no_end
       in: query
@@ -8463,6 +8473,9 @@ components:
           description: The number or time is outside the allowed range, such as a Snooze `until` in the past.
         - code: invalid_regex
           description: A Matcher expression is not valid RE2.
+        - code: reserved_label
+          description: The label is one that an Internal alert sets itself, such as `team_id`, and cannot be the Team
+            label (`/team_label`).
         - code: template_syntax
           description: A template does not parse or fails its dry run; `line` and `column` say where.
         - code: unknown_function
@@ -10059,6 +10072,16 @@ components:
         buttons:
           description: The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it.
           $ref: '#/components/schemas/OrganizationButtonSet'
+        team_label:
+          type: string
+          pattern: '^[a-zA-Z_][a-zA-Z0-9_]*$'
+          x-unprocessable: true
+          description: The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug
+            (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`,
+            `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is
+            refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing
+            afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+          example: team
         severity_label:
           type: string
           description: Label that carries severity.
@@ -10101,6 +10124,7 @@ components:
         - workday_start
         - week_start
         - buttons
+        - team_label
         - critical_is_urgent
         - working_days
         - workday_end
@@ -10549,6 +10573,7 @@ components:
       - starts_at
       - last_seen_at
       - alertmanager_groups
+      - teams
       properties:
         fingerprint:
           type: string
@@ -10598,6 +10623,11 @@ components:
         alert_group:
           description: The Alert Group the Alert lives in.
           $ref: '#/components/schemas/AlertGroupRef'
+        teams:
+          type: array
+          description: The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5).
+          items:
+            $ref: '#/components/schemas/TeamMembership'
     IntegrationAlertList:
       type: object
       required:
@@ -10934,6 +10964,14 @@ components:
           description: The Team's own Working hours, required with `own_working_hours` on a creation and read only with
             it. A read always carries the effective ones, the Organization's when the Team has none of its own.
           $ref: '#/components/schemas/WorkingHours'
+        matchers:
+          type: array
+          maxItems: 50
+          description: The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its
+            own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to
+            keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
+          items:
+            $ref: '#/components/schemas/Matcher'
     Team:
       allOf:
       - $ref: '#/components/schemas/TeamInput'
@@ -10942,6 +10980,7 @@ components:
         - id
         - description
         - working_hours
+        - matchers
         - user_count
         - created_at
         - etag
@@ -10990,6 +11029,43 @@ components:
           type: string
         deleted:
           type: boolean
+    TeamRule:
+      type: string
+      description: How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team's slug, or
+        by one of its Team matchers.
+      enum:
+      - label
+      - matcher
+    TeamMembership:
+      type: object
+      description: A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.
+      required:
+      - team
+      - rule
+      - matcher
+      properties:
+        team:
+          $ref: '#/components/schemas/TeamRef'
+        rule:
+          $ref: '#/components/schemas/TeamRule'
+        matcher:
+          type:
+          - string
+          - 'null'
+          description: The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.
+          example: namespace=~"checkout|billing"
+    AlertGroupTeam:
+      description: A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it
+        joined; a Team deleted since keeps its name, with `deleted` true.
+      allOf:
+      - $ref: '#/components/schemas/TeamMembership'
+      - type: object
+        required:
+        - joined_at
+        properties:
+          joined_at:
+            type: string
+            format: date-time
     TeamUserSource:
       type: string
       description: How a person is in a Team. `by_hand` is an Admin's addition; membership through the groups of the
@@ -11537,6 +11613,7 @@ components:
       - unclaimed
       - delivery_problem
       - allowed_commands
+      - teams
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
@@ -11580,6 +11657,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EntityRef'
+        teams:
+          type: array
+          description: The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order
+            they joined; they only grow.
+          items:
+            $ref: '#/components/schemas/AlertGroupTeam'
         started_at:
           type: string
           format: date-time
@@ -11679,6 +11762,7 @@ components:
       - starts_at
       - last_seen_at
       - alertmanager_groups
+      - teams
       properties:
         fingerprint:
           type: string
@@ -11716,6 +11800,11 @@ components:
           - string
           - 'null'
           description: The Alert's `generatorURL`.
+        teams:
+          type: array
+          description: The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5).
+          items:
+            $ref: '#/components/schemas/TeamMembership'
     AlertGroupAlertList:
       type: object
       required:
@@ -11878,6 +11967,8 @@ components:
       - reminder_answered
       - auto_unacknowledged
       - notices_missed
+      - team_joined
+      - unknown_team_value
       x-event-kinds:
         status:
         - created
@@ -11899,6 +11990,7 @@ components:
         - alert_continued
         - annotations_changed
         - severity_raised
+        - team_joined
         notes:
         - note_added
         timers:
@@ -11909,6 +12001,7 @@ components:
         - notices_missed
         system:
         - moved_to_default_route
+        - unknown_team_value
     Loudness:
       type: string
       enum:
@@ -12082,6 +12175,17 @@ components:
             description: Static labels the added Alerts already carried.
             items:
               type: string
+          team:
+            description: The Team that joined, for `team_joined`; a Team deleted since keeps its name.
+            $ref: '#/components/schemas/TeamRef'
+          team_rule:
+            description: The rule that brought the Team, for `team_joined`.
+            $ref: '#/components/schemas/TeamRule'
+          team_matcher:
+            type:
+            - string
+            - 'null'
+            description: The Team matcher that brought the Team, for `team_joined` by the rule `matcher`.
     TimelineNoteEntry:
       allOf:
       - $ref: '#/components/schemas/TimelineEntryBase'
@@ -12186,6 +12290,7 @@ components:
             - muster_unavailable
             - fallback_template_used
             - template_value_missing
+            - unknown_team_value
           event:
             description: Set for lifecycle events of kind `system`.
             $ref: '#/components/schemas/LifecycleEvent'
@@ -12209,6 +12314,11 @@ components:
             type:
             - string
             - 'null'
+          team_value:
+            type:
+            - string
+            - 'null'
+            description: The value of the Team label that names no Team, for `unknown_team_value`.
     TimelineEntry:
       description: One Timeline entry; `kind` selects the variant.
       oneOf:
@@ -15881,6 +15991,8 @@ components:
       - reminder_answered
       - auto_unacknowledged
       - notices_missed
+      - team_joined
+      - unknown_team_value
       - test
     WebhookMentionTarget:
       type: object
@@ -15960,6 +16072,7 @@ components:
       - severity_level
       - started_at
       - url
+      - teams
       properties:
         number:
           type: integer
@@ -16004,6 +16117,26 @@ components:
           type: string
           format: uri
           description: Link to the Alert Group page at `MUSTER_PUBLIC_URL`.
+        teams:
+          type: array
+          description: The Teams of the Alert Group (C-25.FR-6), in the order they joined; a Team deleted since keeps its
+            name.
+          items:
+            $ref: '#/components/schemas/WebhookTeam'
+    WebhookTeam:
+      type: object
+      description: A Team as an outgoing webhook event names it.
+      required:
+      - id
+      - name
+      - slug
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        slug:
+          type: string
     WebhookAlert:
       type: object
       required:

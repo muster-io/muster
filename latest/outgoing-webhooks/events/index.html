@@ -3121,7 +3121,8 @@ field, for example <code>/events/headers/0/value</code>: the value is shown to e
 <span class="w">    </span><span class="nt">"resolved_at"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"snooze_until"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">"reopen_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://muster.example.org/alert-groups/AGK7M3QX9P2RTA"</span>
+<span class="w">    </span><span class="nt">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://muster.example.org/alert-groups/AGK7M3QX9P2RTA"</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">"teams"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"TM4D7K2Q9X1VBN"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Payments"</span><span class="p">,</span><span class="w"> </span><span class="nt">"slug"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments"</span><span class="w"> </span><span class="p">}]</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">"alerts"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
@@ -3159,7 +3160,9 @@ used) and the <code>transport</code> (<code>ui</code>, <code>api</code>, <code>m
 <code>reason</code>, for example <code>timer</code>.</dd>
 <dt><code>alert_group</code></dt>
 <dd>The Alert Group as it was when the event was recorded: number, <code>id</code>, title, <code>summary</code>, status, the <code>owner</code> (<code>id</code>,
-<code>name</code>, <code>login</code>) while acknowledged, Route, Urgent, Severity level, times, Reopen count and its page in Muster.</dd>
+<code>name</code>, <code>login</code>) while acknowledged, Route, Urgent, Severity level, times, Reopen count, its page in Muster and its
+<code>teams</code>: the <code>id</code>, <code>name</code> and <code>slug</code> of each Team of the Alert Group, in the order they joined, a deleted Team by
+its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-belong-to-a-team">Teams</a>).</dd>
 <dt><code>alerts</code></dt>
 <dd>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</dd>
 </dl>
@@ -3205,6 +3208,11 @@ never sent.</p>
 <dd><code>notify</code>: true</dd>
 <dt><code>notices_missed</code></dt>
 <dd><code>notify</code>: true</dd>
+<dt><code>team_joined</code></dt>
+<dd><code>notify</code>: false. A Team joined the Teams of the Alert Group; <code>alert_group.teams</code> lists it.</dd>
+<dt><code>unknown_team_value</code></dt>
+<dd><code>notify</code>: false. An Alert of the Alert Group carries a value of the Team label that names no Team; sent once per
+value and Alert Group.</dd>
 </dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>

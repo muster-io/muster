@@ -1663,6 +1663,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-alerts-belong-to-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Which Alerts belong to a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#values-without-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Values without a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#people" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2803,6 +2825,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#which-alerts-belong-to-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Which Alerts belong to a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#values-without-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Values without a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#people" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2846,7 +2890,8 @@
 
 <h1 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h1>
 <p>A <strong>Team</strong> says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
-own configuration with a filter. Teams are managed through the API under <code>/api/v1/teams</code>.</p>
+own configuration with a filter. Alerts and Alert Groups belong to Teams by their labels, so that each team finds its
+Alert Groups. Teams are managed through the API under <code>/api/v1/teams</code>.</p>
 <h2 id="what-a-team-is">What a Team is<a class="headerlink" href="#what-a-team-is" title="Permanent link">&para;</a></h2>
 <p>A Team has:</p>
 <ul>
@@ -2855,6 +2900,7 @@ own configuration with a filter. Teams are managed through the API under <code>/
   starts with a letter or a digit (<code>team.slug_format</code>), so <code>Payments</code> and <code>-x</code> are refused. It is unique in the
   Organization and compared exactly;</li>
 <li>a <strong>description</strong>;</li>
+<li>its <strong>Team matchers</strong>, which pick the Alerts that belong to it beside its slug;</li>
 <li>the <strong>people</strong> in it, which may be nobody;</li>
 <li>its <strong>Working hours</strong>: its own, else the Organization's.</li>
 </ul>
@@ -2869,13 +2915,69 @@ deliver to the Team, and a Route's owning Team adds no delivery.</dd>
 cannot change the Team, and a Viewer in a Team is refused Acknowledge as any Viewer is. Only an Admin creates,
 edits and deletes Teams and adds people to them; every Role reads them.</dd>
 <dt>Deleting a Team</dt>
-<dd>The people leave it, its Working hours are removed, and the Routes and Destinations it owned have no owner from
-then on, each with a new version. Its slug and name are free at once for a new Team. The Team itself is kept,
-marked deleted, for what still names it.</dd>
+<dd>The people leave it, its Working hours and Team matchers are removed, and the Routes and Destinations it owned
+have no owner from then on, each with a new version. Its slug and name are free at once for a new Team, and its
+slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still names it: the Alert
+Groups that had it among their Teams list it by its name, with <code>deleted</code> true.</dd>
 </dl>
 <p>Every change of a Team and of the people in it is recorded in the Audit log, and the metric <code>muster_team_info</code> has
 one series per Team that is not deleted, with its name (<a href="../../reference/metrics/">Metrics</a>). The operations are listed
 in the <a href="../../reference/api/">API reference</a>.</p>
+<h2 id="which-alerts-belong-to-a-team">Which Alerts belong to a Team<a class="headerlink" href="#which-alerts-belong-to-a-team" title="Permanent link">&para;</a></h2>
+<p>An Alert belongs to a Team in two ways, and may belong to several Teams.</p>
+<dl>
+<dt>By the Team label</dt>
+<dd>The Team label is an Organization setting, <code>team</code> by default (<code>organization.team_label</code>, <code>team_label</code> of the
+Organization's settings). An Alert whose value of the Team label, with the Static labels of its Integration,
+equals a Team's slug exactly belongs to that Team: with the Team "payments", <code>team="payments"</code> belongs to it and
+<code>team="Payments"</code> does not. The Team label cannot be a label that an Internal alert sets itself, such as
+<code>alertname</code>, <code>severity</code>, <code>integration</code>, <code>schedule</code> or <code>team_id</code>: such a label is refused with <code>422</code>
+<code>reserved_label</code>.</dd>
+<dt>By Team matchers</dt>
+<dd>A Team's <code>matchers</code> use the syntax of Route Matchers on any label — <code>=</code>, <code>!=</code>, <code>=~</code> and <code>!~</code>, regular expressions
+anchored at both ends, a missing label counting as empty — and each is enough on its own: an Alert that any one of
+them picks belongs to the Team. The Team with the matchers <code>namespace=~"checkout|billing"</code> and
+<code>pod=~"checkout-.*"</code> gets an Alert with <code>namespace="billing"</code> and one with <code>pod="checkout-api-1"</code>, and not one
+with <code>namespace="search"</code>. Matchers are saved with the Team, with <code>If-Match</code>, and replaced as a whole; an update
+that omits them keeps them. An expression that is not RE2 is refused with <code>422</code> <code>invalid_regex</code> at its pointer.
+A matcher with only a negative operator, such as <code>env!="prod"</code>, picks every Alert that lacks the label, Internal
+alerts included, because a missing label counts as empty.</dd>
+</dl>
+<p>Muster decides the Teams of an Alert when it starts firing — its first firing, and each firing after it resolved —
+and records them on the Alert with the rule that matched: <code>label</code>, or <code>matcher</code> with the matcher's text. The Alerts
+view of an Integration shows them as <code>teams</code>: the Teams of the Alert's latest firing, which replace those of an earlier
+one. A Continuation is not a new firing and decides nothing; a Team created or
+changed later reaches the Alerts that fire from then on.</p>
+<p>The Teams of an Alert Group are those of every Alert that ever joined it. They only grow: a Team stays among them
+after its Alerts resolve. Each Team that joins records the Quiet lifecycle event <code>team_joined</code> in the Timeline, naming
+the Team and the rule that brought it; <code>getAlertGroup</code> and <code>listAlertGroups</code> carry the Teams as <code>teams</code>, and outgoing
+webhooks in events mode carry them in <code>alert_group.teams</code> (<a href="../../outgoing-webhooks/events/">Events mode</a>). An event
+carries the state of the Alert Group, not a change: each <code>team_joined</code> lists every Team the Alert Group has at that
+moment, the new one included. The
+parameter <code>team</code> of <code>listAlertGroups</code> and <code>getAlertGroupCounts</code> takes a Team's id, or <code>mine</code> for the Alert Groups of
+the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever its Route says: they do not change where
+it is delivered.</p>
+<dl>
+<dt>A worked example</dt>
+<dd>A rule generator sets <code>category</code>, <code>team</code> and <code>system</code> on every alert rule. With the Team label <code>team</code>, each Team's
+slug is the value its rules carry — <code>payments</code>, <code>checkout</code> — and the Alerts reach their Teams without any matcher.
+A Team without people that only names Alerts is fine: it groups and filters them.</dd>
+<dt>Test clusters with one shared namespace</dt>
+<dd>When every team deploys into the same namespace of a test cluster, <code>namespace</code> does not tell them apart. Match
+another label instead: the Pod name (<code>pod=~"checkout-.*"</code>), an app label the workloads carry
+(<code>app_kubernetes_io_part_of="checkout"</code>), or put the Team label itself on the workloads, so that their Alerts carry
+<code>team="checkout"</code>.</dd>
+</dl>
+<h2 id="values-without-a-team">Values without a Team<a class="headerlink" href="#values-without-a-team" title="Permanent link">&para;</a></h2>
+<p>A value of the Team label that names no Team — a typo, a team without a Team yet, or a case that differs, such as
+<code>Payments</code> — adds nothing to the Alert Group: it is delivered to its Route's Destinations as before. Its Timeline
+records the Quiet lifecycle event <code>unknown_team_value</code> with the value, once per value and Alert Group, and outgoing
+webhooks in events mode receive it. Create a Team with that value as its slug, or add a Team matcher that picks those
+Alerts, and the Alerts that start firing from then on belong to it. A value that is not a valid slug, such as
+<code>Payments</code>, reaches a Team only through a Team matcher.</p>
+<p>With the default Team label <code>team</code> and no Teams defined yet, every Alert that carries a <code>team</code> label records
+<code>unknown_team_value</code> in its Alert Group's Timeline and sends it to outgoing webhooks in events mode. Create the Teams,
+or change the Team label to a label your Alerts do not use for something else, to avoid it.</p>
 <h2 id="people">People<a class="headerlink" href="#people" title="Permanent link">&para;</a></h2>
 <p>An Admin adds Users to a Team by hand and removes them, through the API (<code>addTeamUser</code>, <code>removeTeamUser</code>). A User may be
 in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — <code>by_hand</code> for a
