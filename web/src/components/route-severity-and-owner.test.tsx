@@ -3,7 +3,7 @@
 
 // The section "Severity, Escalation chains and owner" of the Route editor in a real browser: the Minimum severity with
 // its three values, "None" selected by default, the hint and "Learn more", the value a save sends (and no `urgent`),
-// a server error at the field, the Route profiles' value and the Russian texts.
+// a server error at the field and the Russian texts.
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

@@ -3,8 +3,9 @@
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
 // the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11, C-11.FR-9), the
-// section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the
-// Storm threshold of C-11), the Snooze durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
+// section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section
+// (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the Storm threshold of C-11), the Snooze
+// durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
 // the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
 // policy field is shown; a new Route starts with the values of its profile. Without routes:write the editor only shows
 // the Route. The Matchers, the Minimum severity and the Group key have "Learn more" beside their labels.
