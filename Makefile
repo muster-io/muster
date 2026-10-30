@@ -425,6 +425,52 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 	else \
 		echo "$$out"; echo "the error does not say: $(HELM_CHECK_DASHBOARD_ERROR)"; failed=1; \
 	fi; \
+	echo "the annotations of each Ingress and HTTPRoute, over the shared ones"; \
+	if $(HELM) template muster $(CHART) --set existingSecret=muster --set ingress.enabled=true \
+		--set ingress.annotations.shared=yes --set ingress.annotations.both=shared \
+		--set ingress.app.annotations.foo=bar --set ingress.ingest.annotations.both=own >"$$tmp/ing.yaml" && \
+		$(HELM) template muster $(CHART) --set existingSecret=muster --set httpRoute.enabled=true \
+		--set httpRoute.annotations.shared=yes --set httpRoute.annotations.both=shared \
+		--set httpRoute.app.annotations.foo=bar --set httpRoute.ingest.annotations.both=own >"$$tmp/route.yaml" && \
+		mkdir "$$tmp/ing" "$$tmp/route" && \
+		awk -v d="$$tmp/ing/" '/^---$$/ {n++} {print > (d n)}' "$$tmp/ing.yaml" && \
+		awk -v d="$$tmp/route/" '/^---$$/ {n++} {print > (d n)}' "$$tmp/route.yaml"; then \
+		ok=1; \
+		for kind in ing route; do \
+			objs=$$(grep -lE '^kind: (Ingress|HTTPRoute)$$' "$$tmp/$$kind"/*); \
+			app=$$(grep -lx '  name: muster-app' $$objs); ingest=$$(grep -lx '  name: muster-ingest' $$objs); \
+			test -n "$$app" -a -n "$$ingest" || { ok=0; continue; }; \
+			grep -qx '    shared: "yes"' "$$app" && grep -qx '    shared: "yes"' "$$ingest" && \
+			grep -qx '    foo: bar' "$$app" && ! grep -q 'foo:' "$$ingest" || ok=0; \
+		done; \
+		grep -qx '    both: own' $$(grep -lx '  name: muster-ingest' $$(grep -l '^kind: HTTPRoute$$' "$$tmp/route"/*)) && \
+		grep -qx '    both: shared' $$(grep -lx '  name: muster-app' $$(grep -l '^kind: HTTPRoute$$' "$$tmp/route"/*)) && \
+		grep -qx '    both: own' "$$tmp/ing"/* && grep -qx '    both: shared' $$(grep -lx '  name: muster-app' $$(grep -l '^kind: Ingress$$' "$$tmp/ing"/*)) || ok=0; \
+		test "$$ok" -eq 1 || { echo "the annotations are not merged per Ingress and HTTPRoute with the own keys winning"; failed=1; }; \
+	else \
+		echo "helm template failed with the annotations of the Ingresses"; failed=1; \
+	fi; \
+	echo "the image from its registry, from global.imageRegistry and from a full repository"; \
+	app=$$(sed -n 's/^appVersion: "\(.*\)"$$/\1/p' $(CHART)/Chart.yaml); \
+	check_image() { \
+		$(HELM) template muster $(CHART) --set existingSecret=muster "$$@" >"$$tmp/image.yaml" || return 1; \
+		test "$$(grep -cE '^ +image: ' "$$tmp/image.yaml")" -eq 2 && \
+		test "$$(grep -cxF "          image: $$expected" "$$tmp/image.yaml")" -eq 2; \
+	}; \
+	expected="ghcr.io/muster-io/muster:$$app"; check_image || { echo "the default image is not $$expected"; failed=1; }; \
+	expected="cr.example.org/muster-io/muster:$$app"; \
+	check_image --set image.registry=cr.example.org || { echo "image.registry does not give $$expected"; failed=1; }; \
+	check_image --set image.registry=other.example.org --set global.imageRegistry=cr.example.org || \
+		{ echo "global.imageRegistry does not win over image.registry"; failed=1; }; \
+	expected="nexus.example/muster-io/muster:$$app"; \
+	check_image --set image.repository=nexus.example/muster-io/muster --set global.imageRegistry=cr.example.org || \
+		{ echo "a full image.repository is not used as it is"; failed=1; }; \
+	expected="cr.example.org/muster-io/muster:$$app"; check_image --set global.imageRegistry=cr.example.org/ || \
+		{ echo "global.imageRegistry alone does not give $$expected"; failed=1; }; \
+	expected="localhost/muster:$$app"; check_image --set image.repository=localhost/muster || \
+		{ echo "a localhost image.repository is not used as it is"; failed=1; }; \
+	expected="localhost:5000/muster:$$app"; check_image --set image.repository=localhost:5000/muster || \
+		{ echo "an image.repository with a port is not used as it is"; failed=1; }; \
 	exit $$failed
 
 # Renders the chart with the PrometheusRule, extracts its rule group into a plain rule file with chartcheck, which also

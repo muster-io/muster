@@ -14,7 +14,7 @@ metadata:
     {{- with .Values.httpRoute.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-  {{- with .Values.httpRoute.annotations }}
+  {{- with mustMergeOverwrite (deepCopy (.Values.httpRoute.annotations | default dict)) (.Values.httpRoute.app.annotations | default dict) }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -40,7 +40,7 @@ metadata:
     {{- with .Values.httpRoute.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-  {{- with .Values.httpRoute.annotations }}
+  {{- with mustMergeOverwrite (deepCopy (.Values.httpRoute.annotations | default dict)) (.Values.httpRoute.ingest.annotations | default dict) }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
