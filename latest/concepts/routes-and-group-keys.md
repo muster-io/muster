@@ -216,19 +216,26 @@ labels](../integrations/alertmanager.md#static-labels).
 
     ![The Destinations of the Route: the outgoing webhook payments, Healthy](../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
 
-4. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
+4. Under **Severity, Escalation chains and owner**, choose the [Minimum severity](#minimum-severity): **None**, which is
+   the default, **warning** or **critical**. It only raises the Severity level of the Route's Alert Groups; with
+   **critical** they are [Urgent](#urgent).
+
+    ![The Minimum severity of the Route: None, with its hint](../assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png){ .screenshot }
+
+5. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
    **Delivery** (the Thread batching window and the Storm threshold), **Snooze durations**, **Ack timeout and
    Reminders** — see [Statuses and commands](statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) —
    and **Message**, which [Messages and templates](../configure/messages-and-templates.md#edit-a-routes-message)
    explains.
 
-    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](../assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](../assets/screenshots/concepts/routes-and-group-keys/08-policy.png){ .screenshot }
 
-5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
-   Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](#order-and-the-default-route).
-   Above the list, Muster may suggest Routes for its own alerts.
+6. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Minimum severity where it is warning or critical, its Group key and its open Alert Groups; drag it, or use its
+   arrows, to [change the order](#order-and-the-default-route). Above the list, Muster may suggest Routes for its own
+   alerts.
 
-    ![The Routes list: the Route payments first, then the Default route, under two suggestions](../assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png){ .screenshot }
+    ![The Routes list: the Route payments first, then the Default route, under two suggestions](../assets/screenshots/concepts/routes-and-group-keys/09-saved-route.png){ .screenshot }
 
 ## Examples
 
@@ -240,6 +247,10 @@ plus a messenger.
 `severity="critical"`, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.
+
+**A service whose every alert matters.** Create the Route `hb` with the Matcher `svc="hb"` and the Minimum severity
+**critical**. Even its warning Alerts start critical, and so Urgent, Alert Groups, and the Routes list marks the Route
+"Minimum severity: critical".
 
 **Certificates.** Create the Route `certificates` with the Matcher `alertname=~"Cert.*"`, the Informational profile and a
 Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer

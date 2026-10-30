@@ -1066,9 +1066,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     now counts as a path under `image.registry`.
 
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
-    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids; during a rolling update a
-    0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles Informational, so reload the
-    web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored changes.
+    Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
+    during a rolling update a 0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles
+    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored
+    changes.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
@@ -1497,23 +1498,20 @@ info.
 
 **Organization → Alert handling**
 
-**Critical is Urgent** (`organization.critical_is_urgent`, on)
-:   An Alert Group whose Severity level is critical is **Urgent**. See [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md).
-    From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
-    [upgrade notes of 0.2.0](https://muster-io.github.io/muster/latest/install/versions.md#upgrade-notes).
-
 **Instance labels** (`organization.instance_labels`, `pod`, `instance`, `container`, `endpoint`)
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
     Group, and the Timeline names the label that changed.
+
+From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
+[Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent) exactly when its Severity level is critical.
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.
 
 1. Open **Organization → Alert handling**.
-2. Turn **Critical is Urgent** on or off, and change the **Instance labels**: **Add label** adds one, the × next to a
-   label removes it. Select **Save**.
+2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it. Select **Save**.
 
-    ![Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+    ![Organization → Alert handling: the Instance labels with node added, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
 
 ## Security
 
@@ -8010,19 +8008,26 @@ labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#s
 
     ![The Destinations of the Route: the outgoing webhook payments, Healthy](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
 
-4. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
+4. Under **Severity, Escalation chains and owner**, choose the [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity): **None**, which is
+   the default, **warning** or **critical**. It only raises the Severity level of the Route's Alert Groups; with
+   **critical** they are [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent).
+
+    ![The Minimum severity of the Route: None, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png){ .screenshot }
+
+5. Check the policy below, filled in by the profile: **Lifecycle** (the Reopen window and the Grace period),
    **Delivery** (the Thread batching window and the Storm threshold), **Snooze durations**, **Ack timeout and
    Reminders** — see [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#ack-timeouts-reminders-and-auto-unacknowledge) —
    and **Message**, which [Messages and templates](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#edit-a-routes-message)
    explains.
 
-    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-policy.png){ .screenshot }
+    ![The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/08-policy.png){ .screenshot }
 
-5. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
-   Group key and its open Alert Groups; drag it, or use its arrows, to [change the order](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#order-and-the-default-route).
-   Above the list, Muster may suggest Routes for its own alerts.
+6. Select **Create**. The Routes list opens with the new Route just above the Default route, with its Matchers, its
+   Minimum severity where it is warning or critical, its Group key and its open Alert Groups; drag it, or use its
+   arrows, to [change the order](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#order-and-the-default-route). Above the list, Muster may suggest Routes for its own
+   alerts.
 
-    ![The Routes list: the Route payments first, then the Default route, under two suggestions](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png){ .screenshot }
+    ![The Routes list: the Route payments first, then the Default route, under two suggestions](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/09-saved-route.png){ .screenshot }
 
 ## Examples
 
@@ -8034,6 +8039,10 @@ plus a messenger.
 `severity="critical"`, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.
+
+**A service whose every alert matters.** Create the Route `hb` with the Matcher `svc="hb"` and the Minimum severity
+**critical**. Even its warning Alerts start critical, and so Urgent, Alert Groups, and the Routes list marks the Route
+"Minimum severity: critical".
 
 **Certificates.** Create the Route `certificates` with the Matcher `alertname=~"Cert.*"`, the Informational profile and a
 Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer

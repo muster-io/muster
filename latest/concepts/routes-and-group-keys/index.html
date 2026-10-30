@@ -3352,18 +3352,25 @@ labels</a>.</p>
 <p><img alt="The Destinations of the Route: the outgoing webhook payments, Healthy" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png" /></p>
 </li>
 <li>
+<p>Under <strong>Severity, Escalation chains and owner</strong>, choose the <a href="#minimum-severity">Minimum severity</a>: <strong>None</strong>, which is
+   the default, <strong>warning</strong> or <strong>critical</strong>. It only raises the Severity level of the Route's Alert Groups; with
+   <strong>critical</strong> they are <a href="#urgent">Urgent</a>.</p>
+<p><img alt="The Minimum severity of the Route: None, with its hint" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png" /></p>
+</li>
+<li>
 <p>Check the policy below, filled in by the profile: <strong>Lifecycle</strong> (the Reopen window and the Grace period),
    <strong>Delivery</strong> (the Thread batching window and the Storm threshold), <strong>Snooze durations</strong>, <strong>Ack timeout and
    Reminders</strong> — see <a href="../statuses-and-commands/#ack-timeouts-reminders-and-auto-unacknowledge">Statuses and commands</a> —
    and <strong>Message</strong>, which <a href="../../configure/messages-and-templates/#edit-a-routes-message">Messages and templates</a>
    explains.</p>
-<p><img alt="The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-policy.png" /></p>
+<p><img alt="The policy of the Route with the values of Paging: Lifecycle, Delivery, Snooze durations, Ack timeout and Reminders" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/08-policy.png" /></p>
 </li>
 <li>
 <p>Select <strong>Create</strong>. The Routes list opens with the new Route just above the Default route, with its Matchers, its
-   Group key and its open Alert Groups; drag it, or use its arrows, to <a href="#order-and-the-default-route">change the order</a>.
-   Above the list, Muster may suggest Routes for its own alerts.</p>
-<p><img alt="The Routes list: the Route payments first, then the Default route, under two suggestions" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/08-saved-route.png" /></p>
+   Minimum severity where it is warning or critical, its Group key and its open Alert Groups; drag it, or use its
+   arrows, to <a href="#order-and-the-default-route">change the order</a>. Above the list, Muster may suggest Routes for its own
+   alerts.</p>
+<p><img alt="The Routes list: the Route payments first, then the Default route, under two suggestions" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/09-saved-route.png" /></p>
 </li>
 </ol>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
@@ -3374,6 +3381,9 @@ plus a messenger.</p>
 <code>severity="critical"</code>, the Paging profile and a Destination that is the payments team's channel. Put it above the
 Default route. Critical alerts of the payments team reach their channel and are Urgent. Their other alerts fall through
 to the Default route.</p>
+<p><strong>A service whose every alert matters.</strong> Create the Route <code>hb</code> with the Matcher <code>svc="hb"</code> and the Minimum severity
+<strong>critical</strong>. Even its warning Alerts start critical, and so Urgent, Alert Groups, and the Routes list marks the Route
+"Minimum severity: critical".</p>
 <p><strong>Certificates.</strong> Create the Route <code>certificates</code> with the Matcher <code>alertname=~"Cert.*"</code>, the Informational profile and a
 Destination for the platform channel. These Alert Groups send no ack timeout notices and no Reminders, and they offer
 Snooze for a day, three days or a week.</p>

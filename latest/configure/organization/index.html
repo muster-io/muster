@@ -3033,22 +3033,19 @@ counts as warning" and has a <strong>Map</strong> action. If your alerts use <co
 <h2 id="alert-handling">Alert handling<a class="headerlink" href="#alert-handling" title="Permanent link">&para;</a></h2>
 <p><strong>Organization → Alert handling</strong></p>
 <dl>
-<dt><strong>Critical is Urgent</strong> (<code>organization.critical_is_urgent</code>, on)</dt>
-<dd>An Alert Group whose Severity level is critical is <strong>Urgent</strong>. See <a href="../../concepts/loud-and-quiet/">Loud and Quiet</a>.
-From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
-<a href="../../install/versions/#upgrade-notes">upgrade notes of 0.2.0</a>.</dd>
 <dt><strong>Instance labels</strong> (<code>organization.instance_labels</code>, <code>pod</code>, <code>instance</code>, <code>container</code>, <code>endpoint</code>)</dt>
 <dd>A new Alert that differs from a firing one only in these labels is a <strong>Replacement</strong>: it stays in the same Alert
 Group, and the Timeline names the label that changed.</dd>
 </dl>
+<p>From 0.2.0 the page has no <strong>Critical is Urgent</strong> switch: an Alert Group is
+<a href="../../concepts/routes-and-group-keys/#urgent">Urgent</a> exactly when its Severity level is critical.</p>
 <p>Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.</p>
 <ol>
 <li>Open <strong>Organization → Alert handling</strong>.</li>
 <li>
-<p>Turn <strong>Critical is Urgent</strong> on or off, and change the <strong>Instance labels</strong>: <strong>Add label</strong> adds one, the × next to a
-   label removes it. Select <strong>Save</strong>.</p>
-<p><img alt="Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved" class="screenshot" src="../../assets/screenshots/configure/organization/03-alert-handling.png" /></p>
+<p>Change the <strong>Instance labels</strong>: <strong>Add label</strong> adds one, the × next to a label removes it. Select <strong>Save</strong>.</p>
+<p><img alt="Organization → Alert handling: the Instance labels with node added, saved" class="screenshot" src="../../assets/screenshots/configure/organization/03-alert-handling.png" /></p>
 </li>
 </ol>
 <h2 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h2>
