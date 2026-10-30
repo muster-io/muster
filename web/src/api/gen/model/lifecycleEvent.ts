@@ -36,4 +36,6 @@ export const LifecycleEvent = {
   reminder_answered: 'reminder_answered',
   auto_unacknowledged: 'auto_unacknowledged',
   notices_missed: 'notices_missed',
+  team_joined: 'team_joined',
+  unknown_team_value: 'unknown_team_value',
 } as const;

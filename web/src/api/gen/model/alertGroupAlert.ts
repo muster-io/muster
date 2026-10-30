@@ -6,6 +6,7 @@ import type { AlertState } from './alertState';
 import type { EntityRef } from './entityRef';
 import type { Labels } from './labels';
 import type { NullableResolveReason } from './nullableResolveReason';
+import type { TeamMembership } from './teamMembership';
 
 export interface AlertGroupAlert {
   fingerprint: string;
@@ -26,4 +27,6 @@ export interface AlertGroupAlert {
      * @nullable
      */
   source_url?: string | null;
+  /** The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5). */
+  teams: TeamMembership[];
 }

@@ -11,4 +11,5 @@ export const TimelineSystemEntrySystemEvent = {
   muster_unavailable: 'muster_unavailable',
   fallback_template_used: 'fallback_template_used',
   template_value_missing: 'template_value_missing',
+  unknown_team_value: 'unknown_team_value',
 } as const;

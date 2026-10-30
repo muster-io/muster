@@ -6,6 +6,7 @@ import type { AlertGroupStatus } from './alertGroupStatus';
 import type { EntityRef } from './entityRef';
 import type { PublicId } from './publicId';
 import type { SeverityLevel } from './severityLevel';
+import type { WebhookTeam } from './webhookTeam';
 import type { WebhookUser } from './webhookUser';
 
 /**
@@ -33,4 +34,6 @@ export interface WebhookAlertGroup {
   reopen_count?: number;
   /** Link to the Alert Group page at `MUSTER_PUBLIC_URL`. */
   url: string;
+  /** The Teams of the Alert Group (C-25.FR-6), in the order they joined; a Team deleted since keeps its name. */
+  teams: WebhookTeam[];
 }

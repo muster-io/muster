@@ -12,6 +12,7 @@ import type { AgResolveReasonParameter } from './agResolveReasonParameter';
 import type { AgRouteParameter } from './agRouteParameter';
 import type { AgSeverityParameter } from './agSeverityParameter';
 import type { AgSnoozedNoEndParameter } from './agSnoozedNoEndParameter';
+import type { AgTeamParameter } from './agTeamParameter';
 import type { AgUnclaimedParameter } from './agUnclaimedParameter';
 import type { AgUrgentParameter } from './agUrgentParameter';
 import type { FromParameter } from './fromParameter';
@@ -55,6 +56,10 @@ label?: LabelMatchersParameter;
  * A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.
  */
 owner?: AgOwnerParameter;
+/**
+ * Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.
+ */
+team?: AgTeamParameter;
 /**
  * True: only Alert Groups snoozed with no end. False: every Alert Group but those.
  */

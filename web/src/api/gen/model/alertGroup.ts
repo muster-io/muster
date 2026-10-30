@@ -6,6 +6,7 @@ import type { ActorRef } from './actorRef';
 import type { AlertGroupLink } from './alertGroupLink';
 import type { AlertGroupNotice } from './alertGroupNotice';
 import type { AlertGroupStatus } from './alertGroupStatus';
+import type { AlertGroupTeam } from './alertGroupTeam';
 import type { CommandName } from './commandName';
 import type { EntityRef } from './entityRef';
 import type { Labels } from './labels';
@@ -38,6 +39,8 @@ export interface AlertGroup {
   urgent: boolean;
   route: EntityRef;
   integrations: EntityRef[];
+  /** The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow. */
+  teams: AlertGroupTeam[];
   started_at: string;
   /** @nullable */
   resolved_at?: string | null;

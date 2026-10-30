@@ -28,6 +28,7 @@ export const ListAlertGroupsQueryParams = zod.object({
   "reopened": zod.boolean().optional().describe('True: Reopen count above zero.'),
   "label": zod.array(zod.string()).optional().describe('Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert\'s labels.'),
   "owner": zod.string().optional().describe('A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.'),
+  "team": zod.string().optional().describe('Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.'),
   "snoozed_no_end": zod.boolean().optional().describe('True: only Alert Groups snoozed with no end. False: every Alert Group but those.'),
   "delivery_problem": zod.boolean().optional().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
   "unclaimed": zod.boolean().optional().describe('Only Unclaimed Alert Groups.'),
@@ -44,6 +45,7 @@ export const listAlertGroupsResponseItemsItemOwnerIdRegExp = new RegExp('^[A-HJK
 export const listAlertGroupsResponseItemsItemSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listAlertGroupsResponseItemsItemTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listAlertGroupsResponseItemsItemLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -80,6 +82,18 @@ export const ListAlertGroupsResponse = zod.object({
   "id": zod.string().regex(listAlertGroupsResponseItemsItemIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(listAlertGroupsResponseItemsItemTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -145,6 +159,7 @@ export const GetAlertGroupCountsQueryParams = zod.object({
   "reopened": zod.boolean().optional().describe('True: Reopen count above zero.'),
   "label": zod.array(zod.string()).optional().describe('Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert\'s labels.'),
   "owner": zod.string().optional().describe('A user `public_id`, `me` (the calling User; `422` for a Service account token), or `none` for Alert Groups nobody owns, resolved ones included.'),
+  "team": zod.string().optional().describe('Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` for a Service account token). An unknown Team is `422` `unknown_id`.'),
   "snoozed_no_end": zod.boolean().optional().describe('True: only Alert Groups snoozed with no end. False: every Alert Group but those.'),
   "delivery_problem": zod.boolean().optional().describe('Any Destination is Not delivered, waiting for a Broken Destination, deleted in the messenger or has a Thread not attached.'),
   "unclaimed": zod.boolean().optional().describe('Only Unclaimed Alert Groups.'),
@@ -234,6 +249,7 @@ export const getAlertGroupResponseOwnerIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-h
 export const getAlertGroupResponseSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getAlertGroupResponseTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupResponseLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -269,6 +285,18 @@ export const GetAlertGroupResponse = zod.object({
   "id": zod.string().regex(getAlertGroupResponseIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(getAlertGroupResponseTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -340,6 +368,7 @@ export const ListAlertGroupAlertsQueryParams = zod.object({
 })
 
 export const listAlertGroupAlertsResponseItemsItemIntegrationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listAlertGroupAlertsResponseItemsItemTeamsItemTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ListAlertGroupAlertsResponse = zod.object({
@@ -358,7 +387,17 @@ export const ListAlertGroupAlertsResponse = zod.object({
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_seen_at": zod.iso.datetime({"offset":true}),
   "alertmanager_groups": zod.array(zod.string()),
-  "source_url": zod.string().nullish().describe('The Alert\'s `generatorURL`.')
+  "source_url": zod.string().nullish().describe('The Alert\'s `generatorURL`.'),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(listAlertGroupAlertsResponseItemsItemTeamsItemTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.')).describe('The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5).')
 })),
   "next_cursor": zod.string().nullable()
 })
@@ -392,6 +431,7 @@ export const getAlertGroupTimelineResponseItemsItemOneThreeOwnerIdRegExp = new R
 export const getAlertGroupTimelineResponseItemsItemOneThreePreviousOwnerIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemTwoOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemTwoOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getAlertGroupTimelineResponseItemsItemTwoThreeTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemThreeOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemThreeOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemThreeThreeNoteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -419,7 +459,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -458,7 +498,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -467,7 +507,15 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "replaced_label": zod.string().nullish().describe('The Instance label that differs, for `alert_replaced`.'),
   "reason": zod.string().nullish().describe('Why the Severity level rose, as text, for a `severity_raised` that no Alert caused; clients translate `reason_code` and show this text only when there is no code.'),
   "reason_code": zod.union([zod.literal('resolved'),zod.literal('gone'),zod.literal('stale'),zod.literal('integration_deleted'),zod.literal('owner_disabled'),zod.literal('owner_deleted'),zod.literal('reminders_unanswered'),zod.literal('minimum_severity'),zod.literal(null)]).nullish().describe('The stable code of the reason of an automatic status change: why the Alert that resolved the Alert Group resolved (`resolved`, `gone`, `stale`, `integration_deleted`), why the Owner was released (`owner_disabled`, `owner_deleted`), `reminders_unanswered` when nobody answered the last two Reminders and the Alert Group was unacknowledged automatically, or `minimum_severity` when the Severity level was raised by the Minimum severity of the Route. Null when the entry has no reason or its reason has no code.'),
-  "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the added Alerts already carried.')
+  "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the added Alerts already carried.'),
+  "team": zod.object({
+  "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemTwoThreeTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).optional().describe('The Team that joined, for `team_joined`; a Team deleted since keeps its name.'),
+  "team_rule": zod.enum(['label', 'matcher']).optional().describe('The rule that brought the Team, for `team_joined`.'),
+  "team_matcher": zod.string().nullish().describe('The Team matcher that brought the Team, for `team_joined` by the rule `matcher`.')
 })).and(zod.object({
   "kind": zod.enum(['alerts'])
 })),zod.object({
@@ -483,7 +531,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -516,7 +564,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -563,13 +611,14 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
   "kind": zod.enum(['system']),
-  "system_event": zod.enum(['moved_to_default_route', 'muster_unavailable', 'fallback_template_used', 'template_value_missing']),
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed']).optional().describe('Set for lifecycle events of kind `system`.'),
+  "system_event": zod.enum(['moved_to_default_route', 'muster_unavailable', 'fallback_template_used', 'template_value_missing', 'unknown_team_value']),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).optional().describe('Set for lifecycle events of kind `system`.'),
   "loudness": zod.enum(['loud', 'quiet']).optional(),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.')).optional(),
   "period_from": zod.iso.datetime({"offset":true}).nullish(),
   "period_to": zod.iso.datetime({"offset":true}).nullish(),
-  "detail": zod.string().nullish()
+  "detail": zod.string().nullish(),
+  "team_value": zod.string().nullish().describe('The value of the Team label that names no Team, for `unknown_team_value`.')
 })).and(zod.object({
   "kind": zod.enum(['system'])
 }))]).describe('One Timeline entry; `kind` selects the variant.')),
@@ -675,6 +724,7 @@ export const acknowledgeAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('
 export const acknowledgeAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const acknowledgeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -712,6 +762,18 @@ export const AcknowledgeAlertGroupResponse = zod.object({
   "id": zod.string().regex(acknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(acknowledgeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -778,6 +840,7 @@ export const unacknowledgeAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp
 export const unacknowledgeAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unacknowledgeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unacknowledgeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -815,6 +878,18 @@ export const UnacknowledgeAlertGroupResponse = zod.object({
   "id": zod.string().regex(unacknowledgeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(unacknowledgeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -889,6 +964,7 @@ export const resolveAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('^[A-
 export const resolveAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const resolveAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const resolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -926,6 +1002,18 @@ export const ResolveAlertGroupResponse = zod.object({
   "id": zod.string().regex(resolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(resolveAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -992,6 +1080,7 @@ export const unresolveAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('^[
 export const unresolveAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unresolveAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unresolveAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1029,6 +1118,18 @@ export const UnresolveAlertGroupResponse = zod.object({
   "id": zod.string().regex(unresolveAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(unresolveAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -1102,6 +1203,7 @@ export const snoozeAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('^[A-H
 export const snoozeAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const snoozeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const snoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1139,6 +1241,18 @@ export const SnoozeAlertGroupResponse = zod.object({
   "id": zod.string().regex(snoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(snoozeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -1205,6 +1319,7 @@ export const unsnoozeAlertGroupResponseAlertGroupOwnerIdRegExp = new RegExp('^[A
 export const unsnoozeAlertGroupResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const unsnoozeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const unsnoozeAlertGroupResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1242,6 +1357,18 @@ export const UnsnoozeAlertGroupResponse = zod.object({
   "id": zod.string().regex(unsnoozeAlertGroupResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(unsnoozeAlertGroupResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),
@@ -1387,6 +1514,7 @@ export const answerReminderResponseAlertGroupOwnerIdRegExp = new RegExp('^[A-HJK
 export const answerReminderResponseAlertGroupSnoozedByIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupIntegrationsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const answerReminderResponseAlertGroupTeamsItemOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupResolutionActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupNoticesItemRelatedAlertGroupIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const answerReminderResponseAlertGroupLinksItemLinkRuleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1424,6 +1552,18 @@ export const AnswerReminderResponse = zod.object({
   "id": zod.string().regex(answerReminderResponseAlertGroupIntegrationsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 })),
+  "teams": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(answerReminderResponseAlertGroupTeamsItemOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "rule": zod.enum(['label', 'matcher']).describe('How an Alert belongs to a Team (C-25.FR-5) — by the value of the Team label, equal to the Team\'s slug, or by one of its Team matchers.'),
+  "matcher": zod.string().nullable().describe('The Team matcher that picked the Alert, in the Alertmanager syntax, for the rule `matcher`.')
+}).describe('A Team that an Alert belongs to, with the rule that decided it when the Alert started firing.').and(zod.object({
+  "joined_at": zod.iso.datetime({"offset":true})
+})).describe('A Team of an Alert Group (C-25.FR-6), with the rule of the first Alert that brought it and when it joined; a Team deleted since keeps its name, with `deleted` true.')).describe('The Teams of the Alert Group (C-25.FR-6), those of every Alert that ever joined it, in the order they joined; they only grow.'),
   "started_at": zod.iso.datetime({"offset":true}),
   "resolved_at": zod.iso.datetime({"offset":true}).nullish(),
   "last_changed_at": zod.iso.datetime({"offset":true}),

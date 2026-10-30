@@ -22,4 +22,9 @@ export type TimelineSystemEntry = TimelineEntryBase & ({
   period_to?: string | null;
   /** @nullable */
   detail?: string | null;
+  /**
+     * The value of the Team label that names no Team, for `unknown_team_value`.
+     * @nullable
+     */
+  team_value?: string | null;
 });

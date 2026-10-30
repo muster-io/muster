@@ -32,6 +32,11 @@ export interface OrganizationBase {
   workday_end?: string;
   /** The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it. */
   buttons?: OrganizationButtonSet;
+  /**
+     * The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+     * @pattern ^[a-zA-Z_][a-zA-Z0-9_]*$
+     */
+  team_label?: string;
   /** Label that carries severity. */
   severity_label: string;
   /** Values of the severity label mapped to Severity levels. Unmapped values count as warning. */

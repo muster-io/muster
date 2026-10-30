@@ -8,6 +8,7 @@ import type { EntityRef } from './entityRef';
 import type { Labels } from './labels';
 import type { NullableResolveReason } from './nullableResolveReason';
 import type { SeverityLevel } from './severityLevel';
+import type { TeamMembership } from './teamMembership';
 
 /**
  * An Alert as Muster tracks it for one Integration.
@@ -40,4 +41,6 @@ export interface IntegrationAlert {
   severity_raw?: string | null;
   /** The Alert Group the Alert lives in. */
   alert_group?: AlertGroupRef;
+  /** The Teams the Alert belongs to, decided when it last started firing (C-25.FR-5). */
+  teams: TeamMembership[];
 }
