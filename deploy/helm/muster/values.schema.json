@@ -285,11 +285,29 @@
         },
         "app": {
           "description": "The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "description": "Annotations of this one Ingress, merged over ingress.annotations; their keys win.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
         },
         "ingest": {
           "description": "The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "description": "Annotations of this one Ingress, merged over ingress.annotations; their keys win.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
@@ -316,11 +334,29 @@
         },
         "app": {
           "description": "The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "description": "Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
         },
         "ingest": {
           "description": "The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.",
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "description": "Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

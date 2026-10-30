@@ -445,7 +445,7 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 		done; \
 		grep -qx '    both: own' $$(grep -lx '  name: muster-ingest' $$(grep -l '^kind: HTTPRoute$$' "$$tmp/route"/*)) && \
 		grep -qx '    both: shared' $$(grep -lx '  name: muster-app' $$(grep -l '^kind: HTTPRoute$$' "$$tmp/route"/*)) && \
-		grep -qx '    both: own' "$$tmp/ing"/* && grep -qx '    both: shared' $$(grep -lx '  name: muster-app' $$(grep -l '^kind: Ingress$$' "$$tmp/ing"/*)) || ok=0; \
+		grep -qx '    both: own' $$(grep -lx '  name: muster-ingest' $$(grep -l '^kind: Ingress$$' "$$tmp/ing"/*)) && grep -qx '    both: shared' $$(grep -lx '  name: muster-app' $$(grep -l '^kind: Ingress$$' "$$tmp/ing"/*)) || ok=0; \
 		test "$$ok" -eq 1 || { echo "the annotations are not merged per Ingress and HTTPRoute with the own keys winning"; failed=1; }; \
 	else \
 		echo "helm template failed with the annotations of the Ingresses"; failed=1; \
@@ -471,6 +471,10 @@ helm-check: $(HELM) $(KUBECONFORM) ## Lint, render and validate the chart; check
 		{ echo "a localhost image.repository is not used as it is"; failed=1; }; \
 	expected="localhost:5000/muster:$$app"; check_image --set image.repository=localhost:5000/muster || \
 		{ echo "an image.repository with a port is not used as it is"; failed=1; }; \
+	expected="ghcr.io/muster:$$app"; check_image --set image.repository=muster || \
+		{ echo "a bare image.repository is not a path under image.registry"; failed=1; }; \
+	expected="docker.io/muster:$$app"; check_image --set image.repository=muster --set image.registry=docker.io || \
+		{ echo "a bare image.repository does not follow image.registry"; failed=1; }; \
 	exit $$failed
 
 # Renders the chart with the PrometheusRule, extracts its rule group into a plain rule file with chartcheck, which also

@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Copyright The Muster Authors
 
+global:
+  imageRegistry: registry.example.org
+
+image:
+  registry: ghcr.io
+
 existingSecret: muster
 replicas: 2
 
@@ -75,6 +81,8 @@ ingress:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
   app:
+    annotations:
+      example.com/app-ingress: value
     hosts:
       - host: muster.example.org
         path: /
@@ -84,6 +92,8 @@ ingress:
         hosts:
           - muster.example.org
   ingest:
+    annotations:
+      example.com/ingest-ingress: value
     hosts:
       - host: ingest.muster.example.org
         path: /
@@ -103,9 +113,13 @@ httpRoute:
   annotations:
     example.com/route-annotation: value
   app:
+    annotations:
+      example.com/app-route: value
     hostnames:
       - muster.example.org
   ingest:
+    annotations:
+      example.com/ingest-route: value
     hostnames:
       - ingest.muster.example.org
 

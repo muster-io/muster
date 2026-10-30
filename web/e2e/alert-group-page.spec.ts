@@ -258,22 +258,25 @@ test("a raised Minimum severity of the Route makes an acknowledged warning Alert
   await expect(page.getByTestId("fact-severity")).toContainText("warning");
   await expect(page.getByTestId("alert-group-status")).toHaveText("Acknowledged");
 
-  // The Minimum severity critical on the Route's page, then Save.
-  await page.goto(`/routes/${routeId}`);
-  await page.getByTestId("route-minimum-severity").selectOption("critical");
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByTestId("route-minimum-severity")).toHaveValue("critical");
+  try {
+    // The Minimum severity critical on the Route's page, then Save.
+    await page.goto(`/routes/${routeId}`);
+    await page.getByTestId("route-minimum-severity").selectOption("critical");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByTestId("route-minimum-severity")).toHaveValue("critical");
 
-  await page.goto(`/alert-groups/${group.id}`);
-  await expect(page.getByTestId("fact-severity")).toContainText("critical");
-  await expect(page.getByTestId("alert-group-status")).toHaveText("Acknowledged");
-  await expect(entry(page, "Became Urgent: Minimum severity of the Route")).toHaveCount(1);
-  await shot(page, "alert-group-page-minimum-severity");
-  // The Route is shared with the next test: back to no Minimum severity.
-  await page.goto(`/routes/${routeId}`);
-  await page.getByTestId("route-minimum-severity").selectOption("none");
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByTestId("route-minimum-severity")).toHaveValue("none");
+    await page.goto(`/alert-groups/${group.id}`);
+    await expect(page.getByTestId("fact-severity")).toContainText("critical");
+    await expect(page.getByTestId("alert-group-status")).toHaveText("Acknowledged");
+    await expect(entry(page, "Became Urgent: Minimum severity of the Route")).toHaveCount(1);
+    await shot(page, "alert-group-page-minimum-severity");
+  } finally {
+    // The Route is shared with the next test: back to no Minimum severity.
+    await page.goto(`/routes/${routeId}`);
+    await page.getByTestId("route-minimum-severity").selectOption("none");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByTestId("route-minimum-severity")).toHaveValue("none");
+  }
   expect(csp).toEqual([]);
 });
 

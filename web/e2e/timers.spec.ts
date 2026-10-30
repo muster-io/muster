@@ -604,7 +604,6 @@ test("two unanswered Reminders unacknowledge automatically", async ({ page, brow
   await pat(tokenA, "POST", "/api/v1/routes", {
     name: "tm-au",
     matchers: [{ label: "team", op: "=", value: "tm-au" }],
-    urgent: false,
     group_key: ["alertname", "cluster"],
     destination_ids: [destinationId],
     policy: { ...policy, auto_unacknowledge: true },
