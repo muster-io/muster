@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-26
+- Date: 2026-10-31
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
@@ -882,6 +882,45 @@ URL. — _2026-10-19 · the documentation's example vector in Go; [verifying
 requests](https://docs.slack.dev/authentication/verifying-requests-from-slack), [Events
 API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
 
+## GitLab
+
+Unless an entry says otherwise, the facts were checked on 2026-10-31 against a self-managed GitLab 18.8.2-ee (revision
+75b6aa72896, the Enterprise Edition binary) with the groups `muster-spike/platform` and `muster-spike/platform/infra` and
+three users: `alice`, a direct Owner of `…/platform` (so an inherited Owner of `…/infra`), `bob`, a direct Maintainer of
+`…/platform/infra`, and `carol`, a direct Developer of `…/platform`. Tokens were obtained through the API with the
+password grant of an instance OAuth application (scopes `openid profile email`, then `read_user` added), the ID token
+decoded and userinfo called with the access token; the records kept hold claim names and values, never a token; signatures were not checked.
+`gitlab.com` and the authorization code flow with PKCE were not tried.
+
+**F-116. Discovery lists all three role claims.** `/.well-known/openid-configuration` has `claims_supported` with
+`https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and also `groups` and `groups_direct`.
+`scopes_supported` includes `openid`, `profile`, `email` and `read_user`. — _2026-10-31 · discovery of the test GitLab ·
+GitLab 18.8.2-ee_ · Used in C-03.FR-5, C-25.FR-4.
+
+**F-117. The role claims and `groups` come only from userinfo; the ID token has only `groups_direct`.** With the scopes
+`openid profile email` the ID token carried `groups_direct` and no `https://gitlab.org/claims/…` key and no `groups`;
+userinfo carried `groups` (the person's groups with the inherited ones, F-118) and the person's role claim and no
+`groups_direct`, which in the ID token held the groups they are a direct member of. A sign-in that reads the ID token alone
+never sees a role claim. — _2026-10-31 · the three users, ID token and userinfo compared · GitLab 18.8.2-ee_ · Used in
+C-03.FR-5, C-25.FR-4.
+
+**F-118. A role claim lists only the groups where the person holds that role directly.** `alice`, an Owner of
+`muster-spike/platform`, had `…/owner` = [`muster-spike/platform`], without the inherited `muster-spike/platform/infra`;
+that group appears for her, and for `carol`, only in `groups` (userinfo), which lists `platform` and `platform/infra`.
+`bob`'s `…/maintainer` and `groups` were both [`muster-spike/platform/infra`]. An entry for a group below a direct
+membership therefore matches a role claim only as a subtree entry (`muster-spike/platform/*`). — _2026-10-31 · the three
+users · GitLab 18.8.2-ee_ · Used in C-03.FR-5, C-25.FR-4.
+
+**F-119. A person has only the claim of the role they hold (users with one role each).** `alice` had `…/owner` and not `…/maintainer` or
+`…/developer`; `bob` only `…/maintainer`; `carol` only `…/developer`. A role claim a person has no group for is absent,
+not an empty list, and an Owner is not repeated under the lower roles; a person with different roles in different
+groups was not tried. — _2026-10-31 · the three users · GitLab
+18.8.2-ee_ · Used in C-03.FR-5, C-25.FR-4.
+
+**F-120. The scope `read_user` changes nothing.** With `read_user` added to `openid profile email` the granted scope was
+echoed, and the claim names and values of the ID token and of userinfo were identical for all three users. — _2026-10-31
+· the three users, with and without the scope · GitLab 18.8.2-ee_ · Used in C-03.FR-5, C-25.FR-4.
+
 ## Pending
 
 Before the stories of L2, these spikes check what the core of L2 relies on:
@@ -899,9 +938,6 @@ Before the stories of L2, these spikes check what the core of L2 relies on:
   whether `<!subteam^ID>` from a bot notifies the people of the user group in a Thread reply and in the blocks of a Root
   message; whether `<!everyone>` from a bot notifies anyone outside the workspace's general channel; and whether an app
   that gained the scope in its manifest lacks it in `x-oauth-scopes` until it is reinstalled.
-- **GitLab role claims** (C-03.FR-5, C-25.FR-4, issue #369). Which token carries
-  `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer` — the ID token, userinfo or both — whether
-  they list direct memberships only or inherited ones too, and whether discovery's `claims_supported` names them.
 - **Telegram** (C-27.FR-8, C-28). Whether a `tg://user?id=` Mention in a comment rings a member of the discussion group
   who muted it, and whether the bot can tell with `getChatMember` that a person is not in the discussion group, which the
   warning about an unreachable On-call uses. Forum topics and plain group chats are checked with the later part of L2.
