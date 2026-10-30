@@ -3593,6 +3593,27 @@ shows, on a Route with the durations 1 h, 4 h and 24 h:</p>
 </tr>
 </tbody>
 </table>
+<p>To choose the buttons of a Destination:</p>
+<ol>
+<li>Open <strong>Destinations</strong> and select the Destination, or create one. The form of a Mattermost, Telegram, Slack or Bridge
+   Destination has the section <strong>Buttons</strong>. An outgoing webhook sends no buttons and has no section.</li>
+<li>Under <strong>Buttons</strong>, choose <strong>Own for this Destination</strong>. The tick boxes are <strong>Acknowledge</strong> (which brings <strong>Unack</strong>
+   with it), <strong>Resolve</strong>, each Snooze duration of your Routes and both Snooze presets; they start as what the
+   Destination shows now. Untick what the Root message should not show. <strong>What {Destination} shows</strong> lists the buttons
+   of a firing and of an acknowledged Root message, in the order of the table above, and follows each tick box at once.</li>
+<li>
+<p>Select <strong>Save</strong>. Choose <strong>As in the Organization</strong> and save to follow the Organization's set again.</p>
+<p><img alt="The section Buttons of a Destination with Own for this Destination chosen: Acknowledge, Snooze 24 h and Until tomorrow ticked, and the buttons a firing and an acknowledged Root message show" class="screenshot" src="../../assets/screenshots/concepts/statuses-and-commands/07-destination-buttons.png" /></p>
+</li>
+</ol>
+<p>To change the set of every Destination that follows the Organization, open <strong>Organization → Alert handling</strong> and use
+<strong>Buttons of Root messages</strong>: <strong>All buttons</strong>, the default, or <strong>Only the buttons I tick</strong>, with the same preview. See
+<a href="../../configure/organization/#alert-handling">Organization settings</a>. A Destination of its own set keeps it when the
+Organization's set changes. A ticked Organization list names the Snooze durations it lists: a duration that a Route
+gains later is not shown until you tick it, unlike with <strong>All buttons</strong>. The form offers the Snooze durations of your
+Routes, or those of the Paging profile while no Route has any; a duration that the stored set names and no Route has
+stays ticked, so saving never drops it. The preview of a Destination shows the durations of the first Route that sends
+to it, as its Root message does.</p>
 <p>The set changes only the buttons of Root messages. Reminders keep <strong>Still on it</strong> and <strong>Unack</strong>; the
 <a href="#text-commands">Text commands</a> of Bridges, the web UI and the API keep every action; and a press on a button that a
 message showed before its set changed still runs its command. Each messenger lays out the buttons it shows as before:

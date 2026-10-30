@@ -1502,16 +1502,26 @@ info.
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
     Group, and the Timeline names the label that changed.
 
+**Buttons of Root messages** (`organization.buttons`, all)
+:   Which buttons the Root messages of every Destination show, unless a Destination has a set of its own: **All buttons**,
+    the default, or **Only the buttons I tick**, with a tick box for **Acknowledge** (which brings **Unack** with it),
+    **Resolve**, each Snooze duration of your Routes and both Snooze presets. **What a Root message shows** lists the
+    buttons of a firing and of an acknowledged Root message and follows each tick box. Hidden actions stay in Muster
+    and in the Text commands of Bridges. See [Button sets](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#button-sets).
+
 From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
 [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent) exactly when its Severity level is critical.
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
-status.
+status. A change of **Buttons of Root messages** updates the open Root messages of the Destinations that follow the
+Organization within seconds, as edits that notify nobody.
 
 1. Open **Organization → Alert handling**.
-2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it. Select **Save**.
+2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
+3. Under **Buttons of Root messages**, choose **Only the buttons I tick** and untick what the Root messages should not
+   show, such as **Resolve**. Select **Save**.
 
-    ![Organization → Alert handling: the Instance labels with node added, saved](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+    ![Organization → Alert handling: Buttons of Root messages with Only the buttons I tick chosen and Resolve unticked](https://muster-io.github.io/muster/latest/assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
 
 ## Security
 
@@ -8813,6 +8823,27 @@ shows, on a Route with the durations 1 h, 4 h and 24 h:
 | Firing | **Ack**, **Snooze 24 h**, **Until tomorrow 09:00** |
 | Acknowledged | **Unack**, **Snooze 24 h**, **Until tomorrow 09:00** |
 | Snoozed | **Ack**, **Unsnooze** |
+
+To choose the buttons of a Destination:
+
+1. Open **Destinations** and select the Destination, or create one. The form of a Mattermost, Telegram, Slack or Bridge
+   Destination has the section **Buttons**. An outgoing webhook sends no buttons and has no section.
+2. Under **Buttons**, choose **Own for this Destination**. The tick boxes are **Acknowledge** (which brings **Unack**
+   with it), **Resolve**, each Snooze duration of your Routes and both Snooze presets; they start as what the
+   Destination shows now. Untick what the Root message should not show. **What {Destination} shows** lists the buttons
+   of a firing and of an acknowledged Root message, in the order of the table above, and follows each tick box at once.
+3. Select **Save**. Choose **As in the Organization** and save to follow the Organization's set again.
+
+    ![The section Buttons of a Destination with Own for this Destination chosen: Acknowledge, Snooze 24 h and Until tomorrow ticked, and the buttons a firing and an acknowledged Root message show](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/statuses-and-commands/07-destination-buttons.png){ .screenshot }
+
+To change the set of every Destination that follows the Organization, open **Organization → Alert handling** and use
+**Buttons of Root messages**: **All buttons**, the default, or **Only the buttons I tick**, with the same preview. See
+[Organization settings](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling). A Destination of its own set keeps it when the
+Organization's set changes. A ticked Organization list names the Snooze durations it lists: a duration that a Route
+gains later is not shown until you tick it, unlike with **All buttons**. The form offers the Snooze durations of your
+Routes, or those of the Paging profile while no Route has any; a duration that the stored set names and no Route has
+stays ticked, so saving never drops it. The preview of a Destination shows the durations of the first Route that sends
+to it, as its Root message does.
 
 The set changes only the buttons of Root messages. Reminders keep **Still on it** and **Unack**; the
 [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands) of Bridges, the web UI and the API keep every action; and a press on a button that a
