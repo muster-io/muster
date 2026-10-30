@@ -302,7 +302,7 @@ func TestCatalogueConstructed(t *testing.T) {
 
 // The label policy of C-19.AC-3 and ADR-0014: the only label names a series may carry.
 var (
-	policyEntity = []string{"integration", "route", "destination", "team"}
+	policyEntity = []string{"integration", "route", "destination", "team", "schedule"}
 	policyClosed = []string{"client", "outcome", "state", "route_pattern", "method", "code", "kind", "reason", "status",
 		"by", "command", "transport", "template", "table", "direction"}
 	policyForbidden = []string{"alertname", "severity", "user", "number", "org_id", "organization"}

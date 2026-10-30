@@ -58,6 +58,7 @@ import (
 	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
@@ -126,6 +127,8 @@ type database interface {
 	RoutingStore() routing.Store
 	// TeamsStore serves the Teams.
 	TeamsStore() teams.Store
+	// SchedulesStore serves the Schedules.
+	SchedulesStore() schedules.Store
 	// HeartbeatStore serves the Heartbeat endpoint and the Heartbeat check.
 	HeartbeatStore() heartbeat.Store
 	IngestStore() ingest.Store
@@ -210,6 +213,8 @@ func (d pgDatabase) IntegrationsStore() integrations.Store { return integrations
 func (d pgDatabase) RoutingStore() routing.Store { return routing.NewStore(d.Pool) }
 
 func (d pgDatabase) TeamsStore() teams.Store { return teams.NewStore(d.Pool) }
+
+func (d pgDatabase) SchedulesStore() schedules.Store { return schedules.NewStore(d.Pool) }
 
 func (d pgDatabase) HeartbeatStore() heartbeat.Store { return heartbeat.NewStore(d.Pool) }
 
@@ -532,7 +537,9 @@ type process struct {
 	routes *routing.Service
 	router *routing.Router
 	// teams holds the Teams, which own Routes and Destinations.
-	teams     *teams.Service
+	teams *teams.Service
+	// schedules holds the Schedules of the Teams.
+	schedules *schedules.Service
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
 	worker    *ingest.Worker
@@ -941,6 +948,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
 		Business: p.clocks.Business, Real: p.clocks.Real, Router: p.router, Snapshots: p.snapshots, Log: p.log})
 	p.teams = teams.New(teams.Config{OrgID: orgID, Store: p.db.TeamsStore(), Audit: w, Business: p.clocks.Business})
+	p.schedules = schedules.New(schedules.Config{OrgID: orgID, Store: p.db.SchedulesStore(), Audit: w,
+		Business: p.clocks.Business})
 	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
 		Business: p.clocks.Business, Log: p.log,
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
@@ -1137,6 +1146,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 			Commit: buildinfo.Commit}),
 		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
 		Teams:          p.teams,
+		Schedules:      p.schedules,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
@@ -1340,6 +1350,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	routeInfoTicks, stopRouteInfoTicks := every(InfoRefreshInterval)
 	destinationInfoTicks, stopDestinationInfoTicks := every(InfoRefreshInterval)
 	teamInfoTicks, stopTeamInfoTicks := every(InfoRefreshInterval)
+	scheduleInfoTicks, stopScheduleInfoTicks := every(InfoRefreshInterval)
 	wg.Go(func() {
 		defer stopLeaderTicks()
 		p.keeper.Run(ctx, leaderTicks)
@@ -1393,6 +1404,8 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.destinations.InfoChanged()
 			case teams.Hint:
 				p.teams.InfoChanged()
+			case schedules.Hint:
+				p.schedules.InfoChanged()
 			case connections.Hint:
 				p.poller.Wake()
 				p.bridgePoller.Wake()
@@ -1407,6 +1420,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 				p.routes.InfoChanged()
 				p.destinations.InfoChanged()
 				p.teams.InfoChanged()
+				p.schedules.InfoChanged()
 				p.poller.Wake()
 				p.bridgePoller.Wake()
 				p.slackSockets.Wake()
@@ -1441,6 +1455,10 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	wg.Go(func() {
 		defer stopTeamInfoTicks()
 		p.teams.RunInfo(ctx, teamInfoTicks)
+	})
+	wg.Go(func() {
+		defer stopScheduleInfoTicks()
+		p.schedules.RunInfo(ctx, scheduleInfoTicks)
 	})
 	return func(wait context.Context) {
 		cancel()

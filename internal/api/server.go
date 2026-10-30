@@ -222,6 +222,7 @@ type Config struct {
 	SystemStatus SystemStatus
 	RequestLog   RequestLog
 	Teams        Teams
+	Schedules    Schedules
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -261,6 +262,7 @@ type Server struct {
 	systemStatus   SystemStatus
 	requestLog     RequestLog
 	teams          Teams
+	schedules      Schedules
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -321,6 +323,9 @@ var implemented = map[string]bool{
 	"ListRequestLog": true, "GetRequestRecord": true,
 	"ListTeams": true, "CreateTeam": true, "GetTeam": true, "UpdateTeam": true, "DeleteTeam": true,
 	"ListTeamUsers": true, "AddTeamUser": true, "RemoveTeamUser": true,
+	"ListSchedules": true, "CreateSchedule": true, "GetSchedule": true, "UpdateSchedule": true, "DeleteSchedule": true,
+	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
+	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -358,6 +363,7 @@ func New(cfg Config) (*Server, error) {
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
 		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
+		schedules:      cfg.Schedules,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

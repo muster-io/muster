@@ -52,7 +52,9 @@
   `open_group_updates`, C-28.FR-8 to FR-10) and
   [`0024_team_label_and_matchers`](../../internal/db/migrations/0024_team_label_and_matchers.up.sql)
   (the Team label, Team matchers, the Teams of Alerts and Alert Groups and the lifecycle events `team_joined` and
-  `unknown_team_value`, C-25.FR-5 to FR-7, S-118), in
+  `unknown_team_value`, C-25.FR-5 to FR-7, S-118) and
+  [`0025_schedules`](../../internal/db/migrations/0025_schedules.up.sql)
+  (Schedules, their Rotation layers with their people, and Overrides, C-27, S-131), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -148,8 +150,9 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
 indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `request_log` (0013), the queue of
 changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), the Teams, `teams` and
-`team_users` (0022), and the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
-`alert_group_teams` (0024), which makes 65 tables.
+`team_users` (0022), the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
+`alert_group_teams` (0024), and the Schedules, `schedules`, `rotation_layers`, `rotation_layer_users` and
+`schedule_overrides` (0025), which makes 69 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -164,6 +167,7 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
+| Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides` | schedules | deleted with their Schedule |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
@@ -1402,7 +1406,9 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   `working_time_zone` are set exactly when `own_working_hours` (`teams_working_hours_check`), and
   `working_end > working_start` (P-63). A Team without them follows the Organization's. Deletion is soft, because the
   Alert Groups that had the Team keep its name (C-25.FR-10): `deleted_at` is set, the Working hours are cleared, the
-  people leave and the name and slug are free at once. The deletion clears `owning_team_id` on the Destinations, then
+  people leave and the name and slug are free at once. A Team that has Schedules is not deleted (`team_in_use`, P-64):
+  the deletion reads them under the lock `FOR NO KEY UPDATE` of the Team that every change of its Schedules takes
+  first. The deletion clears `owning_team_id` on the Destinations, then
   the Routes, that the Team owned, raising their `version` as their own saves do and recording each in the Audit log
   by the system, with the queries of `internal/teams` — the package stays a leaf of the import graph; a save that names
   an owner reads the Team `FOR SHARE` before it locks its own row, the order the deletion takes.
@@ -1412,6 +1418,36 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3). The index `team_users_user_idx` on `(org_id, user_id)` serves "My Teams" and the deletion of a
   user, which removes their rows in its transaction; disabling a user keeps them.
+
+### 4.16 Schedules
+
+Serves C-27 (from 0.2.0, migration 0024); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
+Every change of a Team's Schedules locks the Team `FOR NO KEY UPDATE` first, then the Schedule, so that the first
+Schedule of a Team is its main one and a Team with Schedules is never deleted.
+
+- **`schedules`** — a Schedule of a Team (`team_id`), with a name unique in the Team ignoring case
+  (`schedules_name_key` on `(team_id, lower(name))`), the time zone stored at creation (`schedule.time_zone`, P-77)
+  and `main`; the partial unique index `schedules_main_key` on `(team_id) WHERE main` keeps at most one main Schedule
+  per Team. A Team's first Schedule is created main (P-90); marking another one main clears the previous one in the
+  same transaction, and deleting the main Schedule leaves the Team without one (P-66). Deletion is a `DELETE` that
+  cascades to the Rotation layers, their people and the Overrides; the Audit log keeps the name.
+- **`rotation_layers`** — the Rotation layers of a Schedule, `position` 1 for the lowest, unique per Schedule through
+  `rotation_layers_position_key`, deferred to the commit so that a save renumbers the layers it keeps. `shift_length`
+  is `day`, `week` or `hours`; `shift_seconds` is set exactly with `hours`, a multiple of 3600 from 3600
+  (`rotation_layers_shift_seconds_check`), and `handover_day` exactly with `week`. `handover_time` and the limits'
+  `limit_start` and `limit_end` are `HH:MM`; `limit_days` are days of the week, and a time of day needs days and both
+  its ends (`rotation_layers_limit_times_check`). `limit_end <> limit_start`: an end earlier than the start crosses
+  midnight, and the window belongs to the day it starts on (C-27.FR-2).
+- **`rotation_layer_users`** — the people of a Rotation layer in turn, primary key `(rotation_layer_id, position)`;
+  `rotation_layer_users_user_idx` on `(org_id, user_id)` finds the layers of a user. A save writes them again.
+- **`schedule_overrides`** — an Override of a Schedule: the User who takes the Shift (`user_id`), the one whose Shift
+  it takes (`replaces_user_id`, nullable), `starts_at < ends_at` (`schedule_overrides_span_check`), and its maker,
+  exactly one of `created_by_user_id` and `created_by_service_account_id` (`schedule_overrides_created_by_check`).
+  `created_at` and the id order the Overrides where they overlap, the one created last winning (P-65). The index
+  `schedule_overrides_period_idx` on `(org_id, schedule_id, ends_at)` serves the reads of a period.
+
+The Permissions `schedules:read`, `schedules:write` and `schedule-overrides:write` and their allocation are reference
+data of migration 0024, as in 0001 and 0022.
 
 ## 5. Queues and claims
 

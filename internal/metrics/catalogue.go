@@ -510,3 +510,14 @@ var TeamInfo = newGauge(Definition{
 	},
 	Capability: "C-25",
 })
+
+// ScheduleInfo is 1 for every Schedule; its labels carry the Schedule's name (C-27.FR-13).
+var ScheduleInfo = newGauge(Definition{
+	Name: "muster_schedule_info",
+	Help: "Always 1, one series per Schedule; the labels carry its public_id and name.",
+	Labels: []Label{
+		entity("schedule"),
+		info("name", "the name of the Schedule"),
+	},
+	Capability: "C-27",
+})

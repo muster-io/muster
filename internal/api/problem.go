@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
@@ -92,6 +93,9 @@ const (
 	codeCheckFailed           = "destination_check_failed"
 	codeSlugTaken             = "slug_taken"
 	codeTeamInUse             = "team_in_use"
+	codeNotInTeam             = "not_in_team"
+	codeScheduleInUse         = "schedule_in_use"
+	codeOverrideEnded         = "override_ended"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
@@ -141,6 +145,8 @@ type Problem struct {
 	RelatedAlertGroup *gen.AlertGroupRef
 	// LinkRules is set on the in_use refusal of a Lookup table: the Link rules that read it.
 	LinkRules []gen.EntityRef
+	// InUseBy is set on team_in_use and schedule_in_use: the objects that hold the resource.
+	InUseBy []gen.InUseRef
 	// AttemptsRemaining is set on link_code_invalid: the codes the link request still takes.
 	AttemptsRemaining *int
 }
@@ -174,6 +180,47 @@ func inUseProblem(err error) *Problem {
 	p.Detail = "These Link rules read this Lookup table: " + strings.Join(names, ", ") +
 		"; change them before deleting or renaming the table."
 	return p
+}
+
+// heldProblem is a 409 conflict with code whose detail names the objects that hold the resource, listed in in_use_by;
+// without them it is the detail alone.
+func heldProblem(code, detail, named string, held []gen.InUseRef) *Problem {
+	p := problem(http.StatusConflict, typeConflict, code, detail)
+	if len(held) == 0 {
+		return p
+	}
+	names := make([]string, len(held))
+	for i, h := range held {
+		names[i] = strconv.Quote(h.Name)
+	}
+	p.InUseBy = held
+	p.Detail = named + strings.Join(names, ", ") + "."
+	return p
+}
+
+// teamInUseProblem is the team_in_use refusal of a Team that has Schedules, which in_use_by names.
+func teamInUseProblem(err error) *Problem {
+	var held []gen.InUseRef
+	if e, ok := errors.AsType[*teams.InUseError](err); ok {
+		for _, h := range e.Holders {
+			held = append(held, gen.InUseRef{Type: gen.InUseRefType(h.Type), Id: h.PublicID, Name: h.Name})
+		}
+	}
+	return heldProblem(codeTeamInUse,
+		"The Team has Schedules or owns Escalation chains; delete them or give them another Team first.",
+		"Delete these Schedules of the Team first: ", held)
+}
+
+// scheduleInUseProblem is the schedule_in_use refusal of a Schedule that Escalation steps name.
+func scheduleInUseProblem(err error) *Problem {
+	var held []gen.InUseRef
+	if e, ok := errors.AsType[*schedules.InUseError](err); ok {
+		for _, r := range e.Referrers {
+			held = append(held, gen.InUseRef{Type: gen.InUseRefType(r.Type), Id: r.PublicID, Name: r.Name})
+		}
+	}
+	return heldProblem(codeScheduleInUse, "Escalation steps name this Schedule; change them first.",
+		"Escalation steps of these chains name this Schedule; change them first: ", held)
 }
 
 // checkFailedProblem is the 422 of a save that its Destination check refused: one item per failing check at the field
@@ -273,6 +320,9 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if len(p.LinkRules) > 0 {
 		body.LinkRules = &p.LinkRules
 	}
+	if len(p.InUseBy) > 0 {
+		body.InUseBy = &p.InUseBy
+	}
 	body.AttemptsRemaining = p.AttemptsRemaining
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
@@ -370,6 +420,14 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*teams.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*schedules.FieldError](err); ok {
+		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+		if f.Reason != "" {
+			reason := gen.NotPageableReason(f.Reason)
+			p.Errors[0].Reason = &reason
+		}
+		return p
+	}
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return errInvalidCredentials
@@ -460,8 +518,24 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	case errors.Is(err, teams.ErrVersionMismatch):
 		return errPreconditionFailed
 	case errors.Is(err, teams.ErrInUse):
-		return problem(http.StatusConflict, typeConflict, codeTeamInUse,
-			"The Team has Schedules or owns Escalation chains; delete them or give them another Team first.")
+		return teamInUseProblem(err)
+	case errors.Is(err, schedules.ErrNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Schedule.")
+	case errors.Is(err, schedules.ErrOverrideNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such Override of the Schedule.")
+	case errors.Is(err, schedules.ErrNameTaken):
+		return problem(http.StatusConflict, typeConflict, codeNameTaken,
+			"Another Schedule of the Team has this name; names are compared case-insensitively.")
+	case errors.Is(err, schedules.ErrVersionMismatch):
+		return errPreconditionFailed
+	case errors.Is(err, schedules.ErrNotInTeam):
+		return problem(http.StatusConflict, typeConflict, codeNotInTeam,
+			"Only the people in the Team of the Schedule and Admins make its Overrides.")
+	case errors.Is(err, schedules.ErrOverrideEnded):
+		return problem(http.StatusConflict, typeConflict, codeOverrideEnded,
+			"The Override has ended; it can be neither changed nor deleted.")
+	case errors.Is(err, schedules.ErrInUse):
+		return scheduleInUseProblem(err)
 	case errors.Is(err, groups.ErrNotFound), errors.Is(err, delivery.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Alert Group.")
 	case errors.Is(err, groups.ErrRouteNotFound):

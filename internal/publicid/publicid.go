@@ -33,7 +33,9 @@ const (
 	Organization       Prefix = "RG"
 	RequestRecord      Prefix = "RQ"
 	Route              Prefix = "RT"
+	RotationLayer      Prefix = "RY"
 	ServiceAccount     Prefix = "SA"
+	Schedule           Prefix = "SC"
 	Session            Prefix = "SN"
 	User               Prefix = "SR"
 	StoredSnapshot     Prefix = "SS"
@@ -41,6 +43,7 @@ const (
 	LookupTable        Prefix = "TB"
 	TimelineEntry      Prefix = "TE"
 	Team               Prefix = "TM"
+	ScheduleOverride   Prefix = "VR"
 )
 
 // Alphabet is Crockford base32: the digits and the upper-case letters without I, L, O and U.

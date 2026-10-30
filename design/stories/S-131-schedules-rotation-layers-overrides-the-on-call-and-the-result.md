@@ -9,12 +9,14 @@ covers: [C-27.FR-1, C-27.FR-2, C-27.FR-3, C-27.FR-4, C-27.FR-5, C-27.FR-6, C-27.
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0029_schedules.up.sql
-  - internal/db/migrations/0029_schedules.down.sql
+  - internal/db/migrations/0024_schedules.up.sql
+  - internal/db/migrations/0024_schedules.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/publicid/publicid.go
+  - internal/publicid/publicid_test.go
+  - sqlc.yaml
   - internal/schedules/schedules.go
   - internal/schedules/rotation.go
   - internal/schedules/rotation_test.go
@@ -29,11 +31,16 @@ files_touched:
   - internal/api/schedules_test.go
   - internal/api/problem.go
   - internal/api/server.go
+  - internal/api/server_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/teams/teams.go
   - internal/teams/query.sql
   - internal/teams/teams_test.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
+  - internal/tools/refgen/main.go
   - internal/auth/auth_integration_test.go
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
@@ -131,13 +138,13 @@ issue: 420
     optional property of `Problem`: `{type, id, name}[]`, the kind of each object that holds the resource (`schedule`
     here, `escalation_chain` from S-154), its `public_id` and its name; `team_in_use` (declared
     in S-115) raised for a Team with Schedules, naming them in `in_use_by`; `name_taken`; `out_of_range` at `/end`,
-    `/to`, `/rotation_layers/{i}/shift_seconds` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
+    `/query/to`, `/rotation_layers/{i}/shift_seconds` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
     `conflict`) for a change or a deletion of an Override that has ended.
   - `internal/api/problem.go`: `problemFor` maps the errors of `schedules` — not found, `name_taken`, a stale version,
     `not_in_team`, `override_ended`, `schedule_in_use` and `team_in_use` with `in_use_by` — and `Problem` gains the
     member `InUseBy` that `writeProblem` writes as `in_use_by`; the L1 `inUseProblem` of Lookup tables generalizes to
     it, its `LinkRules` staying as they are; the error item of `not_pageable` gains `reason` through `gen.ProblemError`.
-- **Schema** (migration `0029_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
+- **Schema** (migration `0024_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
   - `schedules`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^SC[0-9A-HJKMNP-TV-Z]{12}$')`), `team_id` (FK
     `teams`), `name`, `time_zone`, `main boolean NOT NULL DEFAULT false`, `version`, `created_at`, `updated_at`;
     unique `(team_id, lower(name))`; unique partial index `(team_id) WHERE main` — one main Schedule per Team.
@@ -312,7 +319,15 @@ None open. Settled:
 - Suggested commit: `feat(schedules): add schedules with rotation layers, overrides and the on-call`.
 - Migration numbers follow the story map: 0029 to 0035 for S-131, S-133, S-164, S-134, S-139, S-140 and S-165. A story
   merged out of that order renumbers its migration to the next free number in its own pull request, with its tests and
-  `schema.md`, as S-092 did.
+  `schema.md`, as S-092 did. S-131 is merged first of them and takes `0024_schedules`, the number after
+  `0023_button_sets` on `master` (journal D585).
+- Corrected with the implementation: `files_touched` names the migration `0024_schedules`, and adds the files that
+  carry what the Contracts ask for — `sqlc.yaml` (the new package's generated queries), `internal/publicid/publicid_test.go`
+  (the new prefixes), `internal/api/server_test.go` (the Permission enum of 36 values), `internal/runtime/runtime_test.go`
+  (the fake database's Schedules store), and `internal/metrics/metrics.go`, `metrics_test.go` and
+  `internal/tools/refgen/main.go` (the entity label `schedule` joins the label policy of ADR-0014 with the first metric
+  that carries it). The refusal of a period of `getScheduleOnCall` is at `/query/to`, the pointer of a query parameter
+  (`api/README.md`), not `/to`.
 - The maintainer confirms provisional values with this story (operator attention): P-64, deleting a Team with Schedules
   is refused (the rest of P-64 was implemented by S-115 and S-118); P-65, the Override created last wins; P-66,
   deleting the main Schedule leaves the Team without one; P-77, a Schedule's time zone defaults to the Organization's,

@@ -79,6 +79,13 @@ SET deleted_at = @now, updated_at = @now, own_working_hours = false, working_day
     working_end = NULL, working_time_zone = NULL, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
+-- ListTeamSchedules lists the Schedules of a Team by name, which refuse its deletion (P-64).
+-- name: ListTeamSchedules :many
+SELECT public_id, name
+FROM schedules
+WHERE org_id = @org_id AND team_id = @team_id
+ORDER BY lower(name), id;
+
 -- DeleteTeamUsers removes every person from a Team.
 -- name: DeleteTeamUsers :exec
 DELETE FROM team_users
