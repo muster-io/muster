@@ -110,7 +110,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     - An `image.repository` without a registry host, such as the Docker Hub path `myorg/muster` or a bare local
       `muster` for kind or minikube, is now prefixed with `ghcr.io`. To keep pulling it from Docker Hub, set
-      `image.registry: docker.io`; or write the full path, such as `docker.io/myorg/muster`.
+      `image.registry: docker.io`; or write the full path, such as `docker.io/myorg/muster`. A local image for kind or
+      minikube needs `image.registry: ""`.
     - A `global.imageRegistry` inherited from an umbrella chart now applies to Muster. To keep pulling Muster from
       GitHub, set `image.repository` to the full `ghcr.io/muster-io/muster`, which ignores both registry values.
     - `httpRoute.app.annotations` and `httpRoute.ingest.annotations` set the annotations of one HTTPRoute, over the
