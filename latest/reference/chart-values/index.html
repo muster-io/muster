@@ -3341,10 +3341,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ingressappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ingressingest" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>ingress.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.ingest.annotations</code>
       </span>
     </span>
   </a>
@@ -3418,10 +3440,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#httprouteappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#httprouteingest" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>httpRoute.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.ingest.annotations</code>
       </span>
     </span>
   </a>
@@ -5124,10 +5168,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ingressappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ingressingest" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>ingress.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ingressingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ingress.ingest.annotations</code>
       </span>
     </span>
   </a>
@@ -5201,10 +5267,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#httprouteappannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.app.annotations</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#httprouteingest" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>httpRoute.ingest</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#httprouteingestannotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>httpRoute.ingest.annotations</code>
       </span>
     </span>
   </a>
@@ -6315,11 +6403,17 @@
 <p>object · default: <code>{}</code></p>
 <p>Extra annotations of both Ingresses; app.annotations and ingest.annotations are merged over a copy of them for their own Ingress, and their keys win.</p>
 <h3 id="ingressapp"><code>ingress.app</code><a class="headerlink" href="#ingressapp" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"annotations":{},"hosts":[],"tls":[]}</code></p>
+<p>object</p>
 <p>The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.</p>
+<h3 id="ingressappannotations"><code>ingress.app.annotations</code><a class="headerlink" href="#ingressappannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Annotations of this one Ingress, merged over ingress.annotations; their keys win.</p>
 <h3 id="ingressingest"><code>ingress.ingest</code><a class="headerlink" href="#ingressingest" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"annotations":{},"hosts":[],"tls":[]}</code></p>
+<p>object</p>
 <p>The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.</p>
+<h3 id="ingressingestannotations"><code>ingress.ingest.annotations</code><a class="headerlink" href="#ingressingestannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Annotations of this one Ingress, merged over ingress.annotations; their keys win.</p>
 <h3 id="httproute"><code>httpRoute</code><a class="headerlink" href="#httproute" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed.</p>
@@ -6336,11 +6430,17 @@
 <p>object · default: <code>{}</code></p>
 <p>Extra labels of the HTTPRoutes.</p>
 <h3 id="httprouteapp"><code>httpRoute.app</code><a class="headerlink" href="#httprouteapp" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"annotations":{},"hostnames":[]}</code></p>
+<p>object</p>
 <p>The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.</p>
+<h3 id="httprouteappannotations"><code>httpRoute.app.annotations</code><a class="headerlink" href="#httprouteappannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.</p>
 <h3 id="httprouteingest"><code>httpRoute.ingest</code><a class="headerlink" href="#httprouteingest" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"annotations":{},"hostnames":[]}</code></p>
+<p>object</p>
 <p>The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.</p>
+<h3 id="httprouteingestannotations"><code>httpRoute.ingest.annotations</code><a class="headerlink" href="#httprouteingestannotations" title="Permanent link">&para;</a></h3>
+<p>object · default: <code>{}</code></p>
+<p>Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.</p>
 <h3 id="servicemonitor"><code>serviceMonitor</code><a class="headerlink" href="#servicemonitor" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener.</p>

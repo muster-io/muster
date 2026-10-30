@@ -3008,11 +3008,21 @@ can turn it on again. The image is now <code>image.registry</code> and <code>ima
 the registry. An <code>image.repository</code> with the full path keeps working, but it ignores both registry values; move its
 host to <code>image.registry</code> to use <code>global.imageRegistry</code>. A host without a dot or a colon, such as <code>registry/muster</code>,
 now counts as a path under <code>image.registry</code>.</p>
+<ul>
+<li>An <code>image.repository</code> without a registry host, such as the Docker Hub path <code>myorg/muster</code> or a bare local
+  <code>muster</code> for kind or minikube, is now prefixed with <code>ghcr.io</code>. To keep pulling it from Docker Hub, set
+  <code>image.registry: docker.io</code>; or write the full path, such as <code>docker.io/myorg/muster</code>. A local image for kind or
+  minikube needs <code>image.registry: ""</code>.</li>
+<li>A <code>global.imageRegistry</code> inherited from an umbrella chart now applies to Muster. To keep pulling Muster from
+  GitHub, set <code>image.repository</code> to the full <code>ghcr.io/muster-io/muster</code>, which ignores both registry values.</li>
+<li><code>httpRoute.app.annotations</code> and <code>httpRoute.ingest.annotations</code> set the annotations of one HTTPRoute, over the
+  shared <code>httpRoute.annotations</code>, as the Ingress ones do.</li>
+</ul>
 <p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
 Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids or look up <code>on_call</code>;
 during a rolling update a 0.1 replica still answers <code>on_call</code>, and a page of the 0.1 web UI names both profiles
-Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored
-changes.</p>
+Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only
+fill in a new Route and are not stored, so nothing stored changes.</p>
 <p><strong>Rolling upgrade from 0.1.</strong> Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
 replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity
 level on the Alert Groups it changes, with <code>urgent</code> true, since 0.2.0 writes <code>routes.urgent</code>. Until a later change

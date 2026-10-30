@@ -108,11 +108,20 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     host to `image.registry` to use `global.imageRegistry`. A host without a dot or a colon, such as `registry/muster`,
     now counts as a path under `image.registry`.
 
+    - An `image.repository` without a registry host, such as the Docker Hub path `myorg/muster` or a bare local
+      `muster` for kind or minikube, is now prefixed with `ghcr.io`. To keep pulling it from Docker Hub, set
+      `image.registry: docker.io`; or write the full path, such as `docker.io/myorg/muster`. A local image for kind or
+      minikube needs `image.registry: ""`.
+    - A `global.imageRegistry` inherited from an umbrella chart now applies to Muster. To keep pulling Muster from
+      GitHub, set `image.repository` to the full `ghcr.io/muster-io/muster`, which ignores both registry values.
+    - `httpRoute.app.annotations` and `httpRoute.ingest.annotations` set the annotations of one HTTPRoute, over the
+      shared `httpRoute.annotations`, as the Ingress ones do.
+
     **The Route profile On-call is now Paging.** `route-profiles` (`listRouteProfiles`) returns the id `paging`, named
     Paging, instead of `on_call`, which breaks clients that type the enum of the profile ids or look up `on_call`;
     during a rolling update a 0.1 replica still answers `on_call`, and a page of the 0.1 web UI names both profiles
-    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only fill in a new Route and are not stored, so nothing stored
-    changes.
+    Informational, and its first card fills in the Paging values, so reload the web UI after the rollout. Profiles only
+    fill in a new Route and are not stored, so nothing stored changes.
 
     **Rolling upgrade from 0.1.** Every migration of 0.2.0 applies when the first 0.2.0 replica starts, while 0.1
     replicas still run until the rollout ends. A 0.1 replica ignores the Minimum severity: it stores a lower Severity

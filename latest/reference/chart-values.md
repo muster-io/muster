@@ -380,15 +380,27 @@ Extra annotations of both Ingresses; app.annotations and ingest.annotations are 
 
 ### `ingress.app`
 
-object · default: `{"annotations":{},"hosts":[],"tls":[]}`
+object
 
 The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.
 
+### `ingress.app.annotations`
+
+object · default: `{}`
+
+Annotations of this one Ingress, merged over ingress.annotations; their keys win.
+
 ### `ingress.ingest`
 
-object · default: `{"annotations":{},"hosts":[],"tls":[]}`
+object
 
 The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.
+
+### `ingress.ingest.annotations`
+
+object · default: `{}`
+
+Annotations of this one Ingress, merged over ingress.annotations; their keys win.
 
 ### `httpRoute`
 
@@ -422,15 +434,27 @@ Extra labels of the HTTPRoutes.
 
 ### `httpRoute.app`
 
-object · default: `{"annotations":{},"hostnames":[]}`
+object
 
 The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.
 
+### `httpRoute.app.annotations`
+
+object · default: `{}`
+
+Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.
+
 ### `httpRoute.ingest`
 
-object · default: `{"annotations":{},"hostnames":[]}`
+object
 
 The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.
+
+### `httpRoute.ingest.annotations`
+
+object · default: `{}`
+
+Annotations of this one HTTPRoute, merged over httpRoute.annotations; their keys win.
 
 ### `serviceMonitor`
 
