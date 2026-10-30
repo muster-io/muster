@@ -34,7 +34,7 @@ function fromProfile(profile: RouteProfile): RouteInput {
     name: "",
     description: "",
     matchers: [],
-    urgent: profile.urgent,
+    minimum_severity: profile.minimum_severity,
     group_key: [...profile.group_key],
     destination_ids: [],
     policy: profile.policy,

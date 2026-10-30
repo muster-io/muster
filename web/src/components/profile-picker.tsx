@@ -14,15 +14,29 @@ import type { RouteProfile, RouteProfileId } from "../api/gen/model";
 import { problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
 
-// Any id but informational reads as Paging: during a rolling update a 0.1 replica still answers with the old id.
+/** Which of its two texts a profile id reads as. */
+function profileKind(id: RouteProfileId): "informational" | "paging" {
+  switch (id) {
+    case "informational":
+      return "informational";
+    case "paging":
+      return "paging";
+    default:
+      // During a rolling update a 0.1 replica still answers with the old id on_call, which reads as Paging.
+      id satisfies never;
+      return "paging";
+  }
+}
 
 /** The name of a Route profile in the language of the page. */
 export function profileName(t: TFunction, id: RouteProfileId): string {
-  return id === "informational" ? t("routes.profiles.informational") : t("routes.profiles.paging");
+  return profileKind(id) === "informational"
+    ? t("routes.profiles.informational")
+    : t("routes.profiles.paging");
 }
 
 function profileLine(t: TFunction, id: RouteProfileId): string {
-  return id === "informational"
+  return profileKind(id) === "informational"
     ? t("routes.profiles.informationalLine")
     : t("routes.profiles.pagingLine");
 }

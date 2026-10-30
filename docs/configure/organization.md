@@ -63,23 +63,20 @@ info.
 
 **Organization → Alert handling**
 
-**Critical is Urgent** (`organization.critical_is_urgent`, on)
-:   An Alert Group whose Severity level is critical is **Urgent**. See [Loud and Quiet](../concepts/loud-and-quiet.md).
-    From 0.2.0 the switch is ignored: a critical Alert Group is always Urgent, see the
-    [upgrade notes of 0.2.0](../install/versions.md#upgrade-notes).
-
 **Instance labels** (`organization.instance_labels`, `pod`, `instance`, `container`, `endpoint`)
 :   A new Alert that differs from a firing one only in these labels is a **Replacement**: it stays in the same Alert
     Group, and the Timeline names the label that changed.
+
+From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
+[Urgent](../concepts/routes-and-group-keys.md#urgent) exactly when its Severity level is critical.
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status.
 
 1. Open **Organization → Alert handling**.
-2. Turn **Critical is Urgent** on or off, and change the **Instance labels**: **Add label** adds one, the × next to a
-   label removes it. Select **Save**.
+2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it. Select **Save**.
 
-    ![Organization → Alert handling: Critical is Urgent on and the Instance labels with node added, saved](../assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
+    ![Organization → Alert handling: the Instance labels with node added, saved](../assets/screenshots/configure/organization/03-alert-handling.png){ .screenshot }
 
 ## Security
 

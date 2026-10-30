@@ -97,7 +97,6 @@ async function prepare(): Promise<void> {
     await admin.call("POST", "/api/v1/routes", {
       name: "disk",
       matchers: [{ label: "alertname", op: "=", value: "Disk" }],
-      urgent: false,
       group_key: ["alertname", "cluster"],
       destination_ids: [],
       policy: profiles.items.find((p) => p.id === "paging")?.policy,
@@ -420,4 +419,107 @@ test("Create route offers Paging and Informational, and Paging reads «С при
   await shot(ru, "routes-profile-choice-ru");
   expect(ruCsp).toEqual([]);
   await context.close();
+});
+
+/** The Route "hb" with the Matcher svc="hb", as the API reads it, or undefined. */
+async function readHb(): Promise<(ApiRoute & { minimum_severity: string }) | undefined> {
+  const admin = await adminApi();
+  try {
+    const list = await admin.call<{ items: (ApiRoute & { minimum_severity: string })[] }>(
+      "GET",
+      "/api/v1/routes",
+    );
+    return list.items.find((r) => r.name === "hb");
+  } finally {
+    await admin.dispose();
+  }
+}
+
+test("the Route form chooses the Minimum severity, saves it and the list marks it", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const stale = await readHb();
+  if (stale !== undefined) {
+    const admin = await adminApi();
+    await admin.call("DELETE", `/api/v1/routes/${stale.id}`);
+    await admin.dispose();
+  }
+  await signInAdmin(page);
+  await page.goto("/routes/new");
+  await page.getByTestId("route-profile-paging").click();
+  const section = page.getByTestId("route-severity-section");
+  await expect(section).toContainText("Severity, Escalation chains and owner");
+  await expect(section.getByLabel("Minimum severity", { exact: true })).toHaveValue("none");
+  await expect(
+    section.getByLabel("Minimum severity", { exact: true }).locator("option"),
+  ).toHaveText(["None", "warning", "critical"]);
+  await expect(section).toContainText(
+    "Only raises the Severity level of the Route's Alert Groups. Replaces the former 'Urgent': an Urgent Alert Group is a critical one.",
+  );
+  await expect(page.getByRole("switch", { name: /^Urgent/ })).toHaveCount(0);
+  await expect(page.getByText("Urgent: every Alert Group of this Route is urgent")).toHaveCount(0);
+  await expect(
+    section.getByRole("link", { name: "Learn more: Minimum severity (opens in a new tab)" }),
+  ).toHaveAttribute("href", /\/concepts\/routes-and-group-keys\/#minimum-severity$/);
+  await shot(page, "routes-minimum-severity");
+
+  await page.getByTestId("route-minimum-severity").selectOption("critical");
+  await page.getByRole("textbox", { name: "Name" }).fill("hb");
+  await page.getByRole("button", { name: "Add matcher" }).click();
+  await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("svc");
+  await page.getByRole("textbox", { name: "Value of matcher 1" }).fill("hb");
+  const request = page.waitForRequest(
+    (r) => r.url().endsWith("/api/v1/routes") && r.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Create" }).click();
+  const body: unknown = (await request).postDataJSON();
+  expect(body).toMatchObject({ minimum_severity: "critical" });
+  expect(body).not.toHaveProperty("urgent");
+
+  await expect(routeRow(page, "hb").getByTestId("route-minimum-severity")).toHaveText(
+    "Minimum severity: critical",
+  );
+  await expect(routeRow(page, "disk").getByTestId("route-minimum-severity")).toHaveCount(0);
+  expect((await readHb())?.minimum_severity).toBe("critical");
+
+  await ensureRussianAdmin();
+  const context = await browser.newContext();
+  const ru = await context.newPage();
+  const ruCsp = watchCsp(ru);
+  await signIn(ru, RU_ADMIN, RU_PASSWORD);
+  // The language is already Russian when the test above ran first.
+  await ru.goto("/profile");
+  await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+  await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+  await ru.goto("/routes");
+  await expect(routeRow(ru, "hb").getByTestId("route-minimum-severity")).toHaveText(
+    "Минимальная важность: critical",
+  );
+  await ru.goto("/routes/new");
+  await ru.getByRole("button", { name: "С призывом" }).click();
+  const ruSection = ru.getByTestId("route-severity-section");
+  await expect(ruSection).toContainText("Важность, эскалация и владелец");
+  await expect(ruSection.getByLabel("Минимальная важность маршрута", { exact: true })).toHaveValue(
+    "none",
+  );
+  await expect(
+    ruSection.getByLabel("Минимальная важность маршрута", { exact: true }).locator("option"),
+  ).toHaveText(["Нет", "warning", "critical"]);
+  await expect(ruSection).toContainText(
+    "Только поднимает важность групп маршрута. Вместо прежнего «Срочный»: срочная группа — это critical.",
+  );
+  await expectNoHorizontalScroll(ru);
+  await shot(ru, "routes-minimum-severity-ru");
+  expect(ruCsp).toEqual([]);
+  await context.close();
+
+  const hb = await readHb();
+  if (hb !== undefined) {
+    const admin = await adminApi();
+    await admin.call("DELETE", `/api/v1/routes/${hb.id}`);
+    await admin.dispose();
+  }
+  expect(csp).toEqual([]);
 });
