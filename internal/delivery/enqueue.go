@@ -63,6 +63,7 @@ var Table = []Row{
 	{groups.EventAlertContinued, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventAnnotationsChanged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventSeverityRaised, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventTeamJoined, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUrgencyRaised, groups.VariantRemoves, FormReply, groups.Loud,
 		[]groups.Mention{groups.MentionOwner, groups.MentionRiseToUrgent}, false},
 	{groups.EventUrgencyRaised, groups.VariantRemovesNone, FormUpdate, groups.Quiet, nil, false},
@@ -74,6 +75,7 @@ var Table = []Row{
 		false},
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
+	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventUnacknowledged, groups.VariantOwnerReleased, FormReplyAndUpdate, groups.Loud, nil, false},
 	{groups.EventAcknowledged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventTakeover, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPreviousOwner},
@@ -92,8 +94,6 @@ var Table = []Row{
 	{groups.EventAutoUnacknowledged, groups.VariantAny, FormReply, groups.Loud,
 		[]groups.Mention{groups.MentionOwner}, false},
 	{groups.EventNoticesMissed, groups.VariantAny, FormReply, groups.Loud, nil, true},
-	{groups.EventTeamJoined, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
-	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 }
 
 // EventRow is a row of the Loud/Quiet table of delivery events (reference.md, Loud and Quiet): what delivery

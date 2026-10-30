@@ -132,6 +132,7 @@ var Table = []Row{
 	{EventAlertContinued, VariantAny, KindAlerts, Quiet, nil},
 	{EventAnnotationsChanged, VariantAny, KindAlerts, Quiet, nil},
 	{EventSeverityRaised, VariantAny, KindAlerts, Quiet, nil},
+	{EventTeamJoined, VariantAny, KindAlerts, Quiet, nil},
 	{EventUrgencyRaised, VariantRemoves, KindStatus, Loud, []Mention{MentionOwner, MentionRiseToUrgent}},
 	{EventUrgencyRaised, VariantRemovesNone, KindStatus, Quiet, nil},
 	{EventReopened, VariantFiring, KindStatus, Loud, []Mention{MentionReopen}},
@@ -140,6 +141,7 @@ var Table = []Row{
 	{EventSnoozeEnded, VariantAny, KindStatus, Loud, []Mention{MentionSnoozeEnded}},
 	{EventResolved, VariantAny, KindStatus, Quiet, nil},
 	{EventMovedToDefaultRoute, VariantAny, KindSystem, Quiet, nil},
+	{EventUnknownTeamValue, VariantAny, KindSystem, Quiet, nil},
 	{EventUnacknowledged, VariantOwnerReleased, KindStatus, Loud, nil},
 	{EventAcknowledged, VariantAny, KindStatus, Quiet, nil},
 	{EventTakeover, VariantAny, KindStatus, Loud, []Mention{MentionPreviousOwner}},
@@ -154,8 +156,6 @@ var Table = []Row{
 	{EventReminderAnswered, VariantAny, KindTimers, Quiet, nil},
 	{EventAutoUnacknowledged, VariantAny, KindStatus, Loud, []Mention{MentionOwner}},
 	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
-	{EventTeamJoined, VariantAny, KindAlerts, Quiet, nil},
-	{EventUnknownTeamValue, VariantAny, KindSystem, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

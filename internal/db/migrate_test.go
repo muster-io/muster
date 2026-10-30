@@ -2269,7 +2269,7 @@ func TestIntegrationMigrate(t *testing.T) {
 			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (24)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":23`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":24`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
