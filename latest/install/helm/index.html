@@ -466,6 +466,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#image-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Image registry
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway-api" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2936,6 +2947,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#image-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Image registry
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway-api" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3215,12 +3237,21 @@ route; do not expose it outside the cluster.</p>
 <p><code>ingress.enabled</code> creates two Ingress objects, one for the app Service and one for the ingest Service. List the hosts of
 each under <code>ingress.app.hosts</code> and <code>ingress.ingest.hosts</code>, with their <code>tls</code> blocks, and set <code>ingress.className</code> and
 <code>ingress.annotations</code> for your controller. A host takes an optional <code>path</code> (<code>/</code> by default) and <code>pathType</code> (<code>Prefix</code>).
-Annotations apply to both Ingress objects. Set the body size limit of your controller to at least 16 MB for the ingest
+<code>ingress.annotations</code> applies to both Ingress objects; <code>ingress.app.annotations</code> and <code>ingress.ingest.annotations</code> are
+merged over a copy of it for their own Ingress, and their keys win. Restrict the web UI to your networks with an
+annotation of <code>ingress.app.annotations</code>, and keep the ingest host public for Alertmanagers and messengers.
+Set the body size limit of your controller to at least 16 MB for the ingest
 host, because Muster accepts Snapshots up to that size.</p>
+<h2 id="image-registry">Image registry<a class="headerlink" href="#image-registry" title="Permanent link">&para;</a></h2>
+<p>The image is <code>&lt;registry&gt;/&lt;repository&gt;:&lt;tag&gt;</code>, with <code>image.registry</code> <code>ghcr.io</code> and <code>image.repository</code> <code>muster-io/muster</code>
+by default. Set <code>image.registry</code> to pull the image through a mirror or a pull-through proxy, or <code>global.imageRegistry</code>,
+which wins over it, for every image the chart renders. An <code>image.repository</code> that starts with a registry host, such as
+<code>nexus.example.org/muster-io/muster</code>, is used as it is, with neither registry applied.</p>
 <h2 id="gateway-api">Gateway API<a class="headerlink" href="#gateway-api" title="Permanent link">&para;</a></h2>
 <p><code>httpRoute.enabled</code> creates two <code>HTTPRoute</code> objects (<code>gateway.networking.k8s.io/v1</code>) instead of Ingress objects, one
 for each Service. Name the Gateway in <code>httpRoute.parentRefs</code> and the host names in <code>httpRoute.app.hostnames</code> and
-<code>httpRoute.ingest.hostnames</code>:</p>
+<code>httpRoute.ingest.hostnames</code>. <code>httpRoute.annotations</code> applies to both routes, and <code>httpRoute.app.annotations</code> and
+<code>httpRoute.ingest.annotations</code> are merged over a copy of it for their own route, as for the Ingress objects:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">httpRoute</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
 <span class="w">  </span><span class="nt">parentRefs</span><span class="p">:</span>

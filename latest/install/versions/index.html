@@ -3002,6 +3002,12 @@ critical, and a Route raises the level of its Alert Groups with its
 <li>Migration 0023 adds the <a href="../../concepts/statuses-and-commands/#button-sets">button sets</a>: the Organization's
   shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.</li>
 </ul>
+<p><strong>Helm chart.</strong> <code>ingress.app.annotations</code> and <code>ingress.ingest.annotations</code> set the annotations of one Ingress, over
+the shared <code>ingress.annotations</code>, so an installation that turned the chart's Ingress off to get different annotations
+can turn it on again. The image is now <code>image.registry</code> and <code>image.repository</code>, with <code>global.imageRegistry</code> over
+the registry. An <code>image.repository</code> with the full path keeps working, but it ignores both registry values; move its
+host to <code>image.registry</code> to use <code>global.imageRegistry</code>. A host without a dot or a colon, such as <code>registry/muster</code>,
+now counts as a path under <code>image.registry</code>.</p>
 <p><strong>The Route profile On-call is now Paging.</strong> <code>route-profiles</code> (<code>listRouteProfiles</code>) returns the id <code>paging</code>, named
 Paging, instead of <code>on_call</code>, which breaks clients that type the enum of the profile ids; during a rolling update a
 0.1 replica still answers <code>on_call</code>, and a page of the 0.1 web UI names both profiles Informational, so reload the

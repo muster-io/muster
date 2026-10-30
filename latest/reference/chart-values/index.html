@@ -2659,10 +2659,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#globalimageregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>global.imageRegistry</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>image</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imageregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.registry</code>
       </span>
     </span>
   </a>
@@ -4420,10 +4442,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#globalimageregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>global.imageRegistry</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#image" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>image</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#imageregistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>image.registry</code>
       </span>
     </span>
   </a>
@@ -6085,14 +6129,20 @@
 <code>values.schema.json</code>, which rejects a value it does not list, and the defaults from its <code>values.yaml</code>. Set
 <code>existingSecret</code>: the chart never generates the master keys, and rendering fails without it.</p>
 <h3 id="global"><code>global</code><a class="headerlink" href="#global" title="Permanent link">&para;</a></h3>
-<p>object · no default</p>
-<p>Helm's global values, shared with subcharts; Muster reads none of them.</p>
+<p>object</p>
+<p>Helm's global values, shared with subcharts; Muster reads only imageRegistry.</p>
+<h3 id="globalimageregistry"><code>global.imageRegistry</code><a class="headerlink" href="#globalimageregistry" title="Permanent link">&para;</a></h3>
+<p>string or null · default: <code>""</code></p>
+<p>Replaces image.registry when set, for every image the chart renders.</p>
 <h3 id="image"><code>image</code><a class="headerlink" href="#image" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>The container image of Muster.</p>
+<h3 id="imageregistry"><code>image.registry</code><a class="headerlink" href="#imageregistry" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>ghcr.io</code></p>
+<p>The registry host of the image; global.imageRegistry wins over it.</p>
 <h3 id="imagerepository"><code>image.repository</code><a class="headerlink" href="#imagerepository" title="Permanent link">&para;</a></h3>
-<p>string · default: <code>ghcr.io/muster-io/muster</code></p>
-<p>The image repository.</p>
+<p>string · default: <code>muster-io/muster</code></p>
+<p>The path of the image in the registry. A value that starts with a registry host (a first path segment with a dot or a colon, or localhost) is used as it is, with neither registry applied.</p>
 <h3 id="imagetag"><code>image.tag</code><a class="headerlink" href="#imagetag" title="Permanent link">&para;</a></h3>
 <p>string or null · default: <code>""</code></p>
 <p>The image tag; empty uses the appVersion of the chart.</p>
@@ -6263,13 +6313,13 @@
 <p>The class of the Ingresses; empty uses the cluster's default.</p>
 <h3 id="ingressannotations"><code>ingress.annotations</code><a class="headerlink" href="#ingressannotations" title="Permanent link">&para;</a></h3>
 <p>object · default: <code>{}</code></p>
-<p>Extra annotations of the Ingresses.</p>
+<p>Extra annotations of both Ingresses; app.annotations and ingest.annotations are merged over a copy of them for their own Ingress, and their keys win.</p>
 <h3 id="ingressapp"><code>ingress.app</code><a class="headerlink" href="#ingressapp" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"hosts":[],"tls":[]}</code></p>
-<p>The hosts and tls of the Ingress of the app listener, as in an Ingress spec.</p>
+<p>object · default: <code>{"annotations":{},"hosts":[],"tls":[]}</code></p>
+<p>The annotations, hosts and tls of the Ingress of the app listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.</p>
 <h3 id="ingressingest"><code>ingress.ingest</code><a class="headerlink" href="#ingressingest" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"hosts":[],"tls":[]}</code></p>
-<p>The hosts and tls of the Ingress of the ingest listener, as in an Ingress spec.</p>
+<p>object · default: <code>{"annotations":{},"hosts":[],"tls":[]}</code></p>
+<p>The annotations, hosts and tls of the Ingress of the ingest listener; the annotations are merged over ingress.annotations, the hosts and tls are as in an Ingress spec.</p>
 <h3 id="httproute"><code>httpRoute</code><a class="headerlink" href="#httproute" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>The Gateway API HTTPRoutes of the app and ingest listeners; the internal listener is never exposed.</p>
@@ -6281,16 +6331,16 @@
 <p>The Gateways the HTTPRoutes attach to, as in an HTTPRoute spec.</p>
 <h3 id="httprouteannotations"><code>httpRoute.annotations</code><a class="headerlink" href="#httprouteannotations" title="Permanent link">&para;</a></h3>
 <p>object · default: <code>{}</code></p>
-<p>Extra annotations of the HTTPRoutes.</p>
+<p>Extra annotations of both HTTPRoutes; app.annotations and ingest.annotations are merged over a copy of them for their own HTTPRoute, and their keys win.</p>
 <h3 id="httproutelabels"><code>httpRoute.labels</code><a class="headerlink" href="#httproutelabels" title="Permanent link">&para;</a></h3>
 <p>object · default: <code>{}</code></p>
 <p>Extra labels of the HTTPRoutes.</p>
 <h3 id="httprouteapp"><code>httpRoute.app</code><a class="headerlink" href="#httprouteapp" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"hostnames":[]}</code></p>
-<p>The hostnames of the HTTPRoute of the app listener.</p>
+<p>object · default: <code>{"annotations":{},"hostnames":[]}</code></p>
+<p>The annotations and hostnames of the HTTPRoute of the app listener; the annotations are merged over httpRoute.annotations.</p>
 <h3 id="httprouteingest"><code>httpRoute.ingest</code><a class="headerlink" href="#httprouteingest" title="Permanent link">&para;</a></h3>
-<p>object · default: <code>{"hostnames":[]}</code></p>
-<p>The hostnames of the HTTPRoute of the ingest listener.</p>
+<p>object · default: <code>{"annotations":{},"hostnames":[]}</code></p>
+<p>The annotations and hostnames of the HTTPRoute of the ingest listener; the annotations are merged over httpRoute.annotations.</p>
 <h3 id="servicemonitor"><code>serviceMonitor</code><a class="headerlink" href="#servicemonitor" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>A Prometheus Operator ServiceMonitor that scrapes /metrics on the internal listener.</p>
