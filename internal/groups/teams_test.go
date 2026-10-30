@@ -240,8 +240,7 @@ func byMatcher(team int64, m string) fakeAlertTeam {
 func (h *harness) teamEntries(g *dbgen.LockGroupsRow) []string {
 	var out []string
 	for _, e := range h.entriesOf(g) {
-		switch Event(e.Event.String) {
-		case EventTeamJoined, EventUnknownTeamValue:
+		if ev := Event(e.Event.String); ev == EventTeamJoined || ev == EventUnknownTeamValue {
 			out = append(out, strings.Join([]string{e.Event.String, e.Kind, e.Loudness.String, e.SystemEvent.String,
 				refName(h, e.TeamID), e.TeamRule.String, e.TeamMatcher.String, e.TeamValue.String}, "/"))
 		}
@@ -370,10 +369,10 @@ func TestTeamsReads(t *testing.T) {
 	}
 	var joined, unknown *TimelineEntry
 	for i, e := range tl.Entries {
-		switch Event(e.Event) {
-		case EventTeamJoined:
+		if Event(e.Event) == EventTeamJoined {
 			joined = &tl.Entries[i]
-		case EventUnknownTeamValue:
+		}
+		if Event(e.Event) == EventUnknownTeamValue {
 			unknown = &tl.Entries[i]
 		}
 	}
