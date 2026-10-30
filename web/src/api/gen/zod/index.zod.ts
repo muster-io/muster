@@ -15,6 +15,7 @@ export * from './organization/organization.zod';
 export * from './profile/profile.zod';
 export * from './request-log/request-log.zod';
 export * from './routes/routes.zod';
+export * from './schedules/schedules.zod';
 export * from './sessions/sessions.zod';
 export * from './system/system.zod';
 export * from './teams/teams.zod';

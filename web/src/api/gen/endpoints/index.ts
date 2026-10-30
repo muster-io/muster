@@ -15,6 +15,7 @@ export * from './organization/organization';
 export * from './profile/profile';
 export * from './request-log/request-log';
 export * from './routes/routes';
+export * from './schedules/schedules';
 export * from './sessions/sessions';
 export * from './system/system';
 export * from './teams/teams';

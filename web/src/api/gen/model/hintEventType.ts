@@ -14,6 +14,7 @@ export const HintEventType = {
   connection: 'connection',
   destination: 'destination',
   team: 'team',
+  schedule: 'schedule',
   organization: 'organization',
   'system-notices': 'system-notices',
   'system-status': 'system-status',

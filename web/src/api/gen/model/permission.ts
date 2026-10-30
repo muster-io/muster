@@ -14,6 +14,9 @@
  * | `alert-groups:acknowledge` (also "Still on it"), `alert-groups:resolve`, `alert-groups:snooze`, `alert-groups:note` | yes | yes | no |
  * | `integrations:write`, `routes:write`, `connections:write`, `destinations:write`, `destinations:test`, `link-rules:write`, `lookup-tables:write`, `templates:preview` | yes | no | no |
  * | `teams:write` (Teams and the people in them) | yes | no | no |
+ * | `schedules:read` (Schedules, Rotation layers, Overrides and the On-call) | yes | yes | yes |
+ * | `schedules:write` (Schedules and Rotation layers, and a Team's main Schedule) | yes | no | no |
+ * | `schedule-overrides:write` (Overrides, when the caller is in the Team or is an Admin) | yes | yes | no |
  * | `stored-snapshots:read` | yes | no | no |
  * | `users:read`, `users:write`, `oidc:read`, `oidc:write`, `service-accounts:read`, `service-accounts:write`, `organization:read`, `organization:write` | yes | no | no |
  * | `audit-log:read`, `system-status:read` | yes | no | no |
@@ -59,4 +62,7 @@ export const Permission = {
   'system-status:read': 'system-status:read',
   'teams:read': 'teams:read',
   'teams:write': 'teams:write',
+  'schedules:read': 'schedules:read',
+  'schedules:write': 'schedules:write',
+  'schedule-overrides:write': 'schedule-overrides:write',
 } as const;
