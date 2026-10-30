@@ -95,7 +95,7 @@ WHERE id = @org_id;
 
 -- UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 -- URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
--- null button set keeps the stored one. A changed Team label raises teams_version, the stamp of the classification that
+-- null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the stamp of the classification that
 -- every replica caches (C-25.FR-5).
 -- name: UpdateSettings :execrows
 UPDATE organizations
@@ -123,8 +123,9 @@ SET name                                         = @name,
     outgoing_heartbeat_proxy_password_key_id     = @proxy_password_key_id,
     outgoing_heartbeat_proxy_password_updated_at = @proxy_password_updated_at,
     buttons                                      = coalesce(sqlc.narg('buttons')::jsonb, buttons),
-    team_label                                   = @team_label,
-    teams_version = teams_version + CASE WHEN team_label <> @team_label THEN 1 ELSE 0 END,
+    team_label                                   = coalesce(sqlc.narg('team_label')::text, team_label),
+    teams_version = teams_version + CASE WHEN team_label <> coalesce(sqlc.narg('team_label')::text, team_label)
+                                         THEN 1 ELSE 0 END,
     outgoing_heartbeat_last_attempt_at = CASE WHEN @url_changed::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
     outgoing_heartbeat_last_ok         = CASE WHEN @url_changed::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,

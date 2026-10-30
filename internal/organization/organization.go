@@ -415,7 +415,7 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			ProxyPasswordKeyID:               optText(password.KeyID),
 			ProxyPasswordUpdatedAt:           optTime(password.UpdatedAt),
 			Buttons:                          set,
-			TeamLabel:                        after.TeamLabel,
+			TeamLabel:                        pgtype.Text{String: after.TeamLabel, Valid: true},
 			UrlChanged:                       urlChanged,
 			Now:                              now,
 		}); err != nil {

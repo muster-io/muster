@@ -568,8 +568,9 @@ SET name                                         = $1,
     outgoing_heartbeat_proxy_password_key_id     = $22,
     outgoing_heartbeat_proxy_password_updated_at = $23,
     buttons                                      = coalesce($24::jsonb, buttons),
-    team_label                                   = $25,
-    teams_version = teams_version + CASE WHEN team_label <> $25 THEN 1 ELSE 0 END,
+    team_label                                   = coalesce($25::text, team_label),
+    teams_version = teams_version + CASE WHEN team_label <> coalesce($25::text, team_label)
+                                         THEN 1 ELSE 0 END,
     outgoing_heartbeat_last_attempt_at = CASE WHEN $26::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
     outgoing_heartbeat_last_ok         = CASE WHEN $26::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
@@ -605,7 +606,7 @@ type UpdateSettingsParams struct {
 	ProxyPasswordKeyID               pgtype.Text
 	ProxyPasswordUpdatedAt           pgtype.Timestamptz
 	Buttons                          []byte
-	TeamLabel                        string
+	TeamLabel                        pgtype.Text
 	UrlChanged                       bool
 	Now                              time.Time
 	OrgID                            int64
@@ -613,7 +614,7 @@ type UpdateSettingsParams struct {
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 // URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
-// null button set keeps the stored one. A changed Team label raises teams_version, the stamp of the classification that
+// null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the stamp of the classification that
 // every replica caches (C-25.FR-5).
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,

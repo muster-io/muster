@@ -108,7 +108,9 @@ func (f *fakeAlertGroups) Alerts(_ context.Context, id string, fl groups.AlertFi
 	page := groups.AlertPage{Alerts: []groups.GroupAlert{
 		{Fingerprint: "a", Integration: groups.Ref{PublicID: "NTAAAAAAAAAAAA", Name: "lab"},
 			Labels: map[string]string{"pod": "i1"}, Annotations: map[string]string{"summary": "s"}, Firing: true,
-			StartsAt: t0, LastSeenAt: t0, GroupKeys: []string{`{}:{alertname="DiskFull"}`}, SourceURL: &url},
+			StartsAt: t0, LastSeenAt: t0, GroupKeys: []string{`{}:{alertname="DiskFull"}`}, SourceURL: &url,
+			Teams: []groups.TeamMembership{{Team: groups.TeamRef{PublicID: "TM0000000000CH", Name: "Checkout",
+				Slug: "checkout-team", Deleted: true}, Rule: groups.TeamRuleMatcher, Matcher: ptr(`pod=~"i.*"`)}}},
 		{Fingerprint: "b", Integration: groups.Ref{PublicID: "NTAAAAAAAAAAAA", Name: "lab"},
 			Labels: map[string]string{"pod": "i2"}, StartsAt: t0, LastSeenAt: t0, ResolvedAt: ptr(t0),
 			Reason: &reason, ReasonText: &text, GroupKeys: []string{}},
@@ -837,5 +839,70 @@ func TestListSnoozePresetsAPI(t *testing.T) {
 	fg.err = errBoom
 	if a := x.as(t, fullToken, http.MethodGet, "/api/v1/snooze-presets", ""); a.status != http.StatusInternalServerError {
 		t.Errorf("a failure = %d", a.status)
+	}
+}
+
+// TestTeamsAPI is C-25.FR-6, C-06.FR-19, C-09.FR-11 and C-09.FR-13 revised for L2 on the API: getAlertGroup and
+// listAlertGroups carry the Teams of the Alert Group, each with the Team, the rule, the matcher and when it joined, a
+// deleted Team marked deleted with its name; listAlertGroupAlerts carries the Teams of each Alert; the team_joined
+// and unknown_team_value entries of the Timeline carry the Team, the rule, the matcher and the value; listAlertGroups
+// and getAlertGroupCounts take team, a Team's public_id or mine, and answer the refusal of the service at /query/team.
+func TestAlertGroupTeamsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	matcher := `namespace=~"checkout|billing"`
+	fg.view.Teams = []groups.GroupTeam{
+		{TeamMembership: groups.TeamMembership{Team: groups.TeamRef{PublicID: "TM0000000000PA", Name: "Payments",
+			Slug: "payments"}, Rule: groups.TeamRuleLabel}, JoinedAt: t0},
+		{TeamMembership: groups.TeamMembership{Team: groups.TeamRef{PublicID: "TM0000000000CH", Name: "Checkout",
+			Slug: "checkout-team", Deleted: true}, Rule: groups.TeamRuleMatcher, Matcher: &matcher},
+			JoinedAt: t0.Add(time.Minute)},
+	}
+	want := `"teams":[{"joined_at":"2026-10-05T12:00:00Z","matcher":null,"rule":"label","team":{"deleted":false,` +
+		`"id":"TM0000000000PA","name":"Payments","slug":"payments"}},{"joined_at":"2026-10-05T12:01:00Z",` +
+		`"matcher":"namespace=~\"checkout|billing\"","rule":"matcher","team":{"deleted":true,"id":"TM0000000000CH",` +
+		`"name":"Checkout","slug":"checkout-team"}}]`
+	a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID, "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), want) {
+		t.Errorf("alert group = %d %s", a.status, a.body)
+	}
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups?team=mine", "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), want) || fg.lists[0].Team != groups.TeamMine ||
+		fg.lists[0].Me.Kind != audit.ActorUser {
+		t.Errorf("list = %d %s, filter %+v", a.status, a.body, fg.lists[0].Filter)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-counts?team=TM0000000000SE", ""); a.status !=
+		http.StatusOK || fg.counts[0].Team != "TM0000000000SE" {
+		t.Errorf("counts = %d %+v", a.status, fg.counts)
+	}
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-groups/"+groupID+"/alerts", "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), `"teams":[{"matcher":"pod=~\"i.*\"",`+
+		`"rule":"matcher","team":{"deleted":true,"id":"TM0000000000CH","name":"Checkout","slug":"checkout-team"}}]`) ||
+		!strings.Contains(string(a.body), `"teams":[]`) {
+		t.Errorf("alerts = %d %s", a.status, a.body)
+	}
+	joined, err := timelineEntryOf(groups.TimelineEntry{PublicID: "TEAAAAAAAAAAA7", At: t0, Kind: groups.KindAlerts,
+		Event: string(groups.EventTeamJoined), Loudness: groups.Quiet, Mentions: []string{},
+		Actor: groups.TimelineActor{Kind: "system", Transport: "system"}, Team: &groups.TeamRef{
+			PublicID: "TM0000000000CH", Name: "Checkout", Slug: "checkout-team"}, TeamRule: ptr(groups.TeamRuleMatcher),
+		TeamMatcher: &matcher})
+	raw, _ := json.Marshal(joined)
+	if err != nil || !strings.Contains(string(raw), `"team":{"deleted":false,"id":"TM0000000000CH","name":"Checkout",`+
+		`"slug":"checkout-team"},"team_matcher":"namespace=~\"checkout|billing\"","team_rule":"matcher"`) {
+		t.Errorf("team_joined %s, %v", raw, err)
+	}
+	unknown, err := timelineEntryOf(groups.TimelineEntry{PublicID: "TEAAAAAAAAAAA8", At: t0, Kind: groups.KindSystem,
+		System: string(groups.SystemUnknownTeamValue), Event: string(groups.EventUnknownTeamValue),
+		Loudness: groups.Quiet, Mentions: []string{}, Actor: groups.TimelineActor{Kind: "system", Transport: "system"},
+		TeamValue: ptr("Payments")})
+	raw, _ = json.Marshal(unknown)
+	if err != nil || !strings.Contains(string(raw), `"event":"unknown_team_value"`) ||
+		!strings.Contains(string(raw), `"system_event":"unknown_team_value"`) ||
+		!strings.Contains(string(raw), `"team_value":"Payments"`) {
+		t.Errorf("unknown_team_value %s, %v", raw, err)
+	}
+	fg.err = &groups.FieldError{Pointer: "/query/team", Code: groups.CodeUnsupported, Detail: "x"}
+	a = x.as(t, serviceToken, http.MethodGet, "/api/v1/alert-groups?team=mine", "")
+	if a.status != http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"pointer":"/query/team"`) {
+		t.Errorf("team=mine by a service account = %d %s", a.status, a.body)
 	}
 }

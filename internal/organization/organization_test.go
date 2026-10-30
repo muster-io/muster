@@ -293,7 +293,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.RetentionAuditLogDays = arg.RetentionAuditLogDays
 	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
-	s.row.OutgoingHeartbeatProxy, s.row.Buttons, s.row.TeamLabel = arg.Proxy, arg.Buttons, arg.TeamLabel
+	s.row.OutgoingHeartbeatProxy, s.row.Buttons, s.row.TeamLabel = arg.Proxy, arg.Buttons, arg.TeamLabel.String
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
 	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
 	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
@@ -1180,7 +1180,7 @@ func TestTeamLabel(t *testing.T) {
 	in := inputOf(o)
 	in.TeamLabel = new("owner_team")
 	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
-	if err != nil || got.TeamLabel != "owner_team" || len(s.updates) != 1 || s.updates[0].TeamLabel != "owner_team" {
+	if err != nil || got.TeamLabel != "owner_team" || len(s.updates) != 1 || s.updates[0].TeamLabel.String != "owner_team" {
 		t.Fatalf("owner_team = %q, %v", got.TeamLabel, err)
 	}
 	if len(s.audit) != 1 || s.audit[0].Action != ActionUpdated || string(s.audit[0].Diff) !=
@@ -1190,7 +1190,7 @@ func TestTeamLabel(t *testing.T) {
 	in = inputOf(got)
 	in.Name = "Ops"
 	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
-		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel != "owner_team" {
+		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel.String != "owner_team" {
 		t.Errorf("an update that omits it = %q, %v", kept.TeamLabel, err)
 	}
 	reserved := internalalerts.ReservedLabels()

@@ -80,6 +80,9 @@ func setup(t *testing.T, s dbtest.Server) *env {
 		t.Fatal(err)
 	}
 	stmts := []string{
+		// The Alerts of these tests carry the label team, by which their Routes take them; the Team label (C-25.FR-5)
+		// moves off it, so that no unknown_team_value joins their Timelines. teams_integration_test.go covers it.
+		`UPDATE organizations SET team_label = 'muster_team'`,
 		`CREATE TABLE audit_log_p202610 PARTITION OF audit_log
 			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`,
 		`CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
