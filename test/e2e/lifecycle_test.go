@@ -38,6 +38,7 @@ func TestLifecycle(t *testing.T) {
 	perms, _ := json.Marshal(admin.json(http.MethodGet, "/api/v1/me", "", http.StatusOK)["permissions"])
 	token := admin.json(http.MethodPost, "/api/v1/me/personal-access-tokens",
 		`{"name":"lifecycle","permissions":`+string(perms)+`}`, http.StatusCreated)["value"].(string)
+	withoutTeamLabel(patClient{t: t, base: r.App, token: token})
 	read := func(path string) map[string]any {
 		t.Helper()
 		a := (patClient{t: t, base: reader.App, token: token}).do(http.MethodGet, path, "")

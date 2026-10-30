@@ -23,11 +23,11 @@ files_touched:
   - internal/api/teams_test.go
   - internal/routing/evaluate.go
   - internal/routing/evaluate_test.go
+  - internal/routing/routes_test.go
   - internal/routing/query.sql
-  - internal/groups/grouping.go
-  - internal/groups/grouping_test.go
   - internal/groups/dispatcher.go
   - internal/groups/dispatcher_test.go
+  - internal/groups/groups_integration_test.go
   - internal/groups/transitions.go
   - internal/groups/list.go
   - internal/groups/counts.go
@@ -46,20 +46,26 @@ files_touched:
   - internal/ingest/query.sql
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
+  - internal/delivery/live_test.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
   - internal/webhooks/query.sql
   - internal/organization/organization.go
   - internal/organization/settings.go
+  - internal/organization/defaults.go
   - internal/organization/query.sql
   - internal/organization/organization_test.go
   - internal/api/organization.go
+  - internal/api/organization_test.go
   - internal/internalalerts/registry.go
   - internal/archlint/archlint.go
   - AGENTS.md
   - web/src/test/fixtures/alert-groups.ts
   - web/src/test/fixtures/teams.ts
   - test/e2e/team_label_test.go
+  - test/e2e/lifecycle_test.go
+  - test/e2e/webhook_events_test.go
+  - test/e2e/webhook_template_test.go
   - docs/concepts/teams.md
   - docs/outgoing-webhooks/events.md
 acceptance:
@@ -146,7 +152,7 @@ issue: 407
   resolve, which starts a new episode. A Continuation is not a new firing (C-06), so it decides no Teams, and neither
   `alert_continued` nor `annotations_changed` adds a Team to an Alert Group; Teams created or changed meanwhile reach
   such Alerts only through the evaluation on save of S-163.
-- **Groups** (`internal/groups/teams.go`, `grouping.go`): when Alerts join an Alert Group — `created`, `alerts_added`,
+- **Groups** (`internal/groups/teams.go`, called from the joins of `transitions.go`): when Alerts join an Alert Group — `created`, `alerts_added`,
   `reopened`, a Replacement — the dispatcher adds the Teams of the joining Alerts that the Alert Group lacks to
   `alert_group_teams` and records one Quiet `team_joined` per Team, and one Quiet `unknown_team_value` per value not yet
   in `unknown_team_values`; both are rows of the closed table of `events.go` and of delivery's `Table` (`team_joined`: a
@@ -175,8 +181,8 @@ issue: 407
    every event of 0023 and the two new ones.
 2. Write the Team label, the matchers and the classification. Check: `organization_test.go`; `classify_test.go` covers
    the exact slug, Static labels, each operator, several Teams, a deleted Team and the cache across `teams_version`.
-3. Record the Teams of Alerts in routing and of Alert Groups in the dispatcher. Check: `evaluate_test.go`,
-   `teams_test.go`, `grouping_test.go` cover a Replacement, a Reopen, a resolved Alert and "once per value".
+3. Record the Teams of Alerts in routing and of Alert Groups in the dispatcher. Check: `evaluate_test.go` and
+   `teams_test.go` cover a Replacement, a Reopen, a resolved Alert and "once per value".
 4. Add the reads, filters, the Alerts view, outgoing webhooks and lint 2. Check: `make generate-check`;
    `alertgroups_test.go`, `body_test.go`; `make lint-arch`.
 5. Write `test/e2e/team_label_test.go` and the documentation. Check: the Verification below; `make docs-check`.

@@ -28,6 +28,15 @@ type teamOf struct {
 	Matcher *string `json:"matcher"`
 }
 
+// withoutTeamLabel moves the Team label (C-25.FR-5) off the label team, which a test routes by and asserts its
+// Timeline or webhook events for, so that no unknown_team_value joins them: such a test is not about Teams.
+func withoutTeamLabel(api patClient) {
+	api.t.Helper()
+	if a := putOrganization(api, func(m map[string]any) { m["team_label"] = "muster_team" }); a.status != http.StatusOK {
+		api.t.Fatalf("move the team label = %d %s", a.status, a.body)
+	}
+}
+
 // slugs are the slugs of Teams, sorted, with their rule and matcher.
 func slugs(ts []teamOf) []string {
 	out := []string{}
