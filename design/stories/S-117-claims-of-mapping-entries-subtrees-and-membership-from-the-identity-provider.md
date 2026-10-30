@@ -48,11 +48,11 @@ files_touched:
   - docs/install/versions.md
   - AGENTS.md
 acceptance:
-  - "[C-03.FR-5, C-03.AC-28] Every entry of the Role mapping (`OidcGroupMapping`) takes an optional `claim`, by default `groups_claim`; a claim is read from the ID token, then from userinfo; an entry `a/b/*` matches `a/b` and every group below it at `/` boundaries only, any other entry matches exactly, and the highest Role found over all entries wins: against the fake OIDC server in its GitLab mode, `https://gitlab.org/claims/groups/owner` `example/platform/infra` → Admin and `groups` `example/platform/*` → Viewer make an Owner of `example/platform/infra` an Admin and a person in `example/platform/apps` a Viewer, whether the claim comes in the ID token or in userinfo, and `example/platformx` matches neither (`claims_test.go`, `oidc_test.go`)."
+  - "[C-03.FR-5, C-03.AC-28] Every entry of the Role mapping (`OidcGroupMapping`) takes an optional `claim`, by default `groups_claim`; a claim is read from the ID token, then from userinfo; an entry `a/b/*` matches `a/b` and every group below it at `/` boundaries only, any other entry matches exactly, and the highest Role found over all entries wins: against the fake OIDC server in its GitLab mode, which puts the role claims and `groups` in userinfo only (F-117), `https://gitlab.org/claims/groups/owner` `example/platform/*` → Admin and `groups` `example/platform/*` → Viewer make an Owner of `example/platform` (whose direct-only claim lists just `example/platform`, F-118) and an Owner of `example/platform/infra` Admins and a person in `example/platform/apps` a Viewer, and `example/platformx` matches neither; a claim found in the ID token (the Keycloak flavor) is read the same way (`claims_test.go`, `oidc_test.go`)."
   - "[C-03.FR-6] `getOidcSettings` carries one warning `groups_claim_missing` per claim that an entry names, the groups claim included, each with `claim`; a connection check that finds a claim not listed in discovery's `claims_supported` raises its warning, one that finds it listed clears it, and a sign-in whose tokens carry it clears it for good; `claims_supported` of the last check is read back on the settings for the editors to suggest (`settings_test.go`)."
   - "[C-03.FR-7, C-03.AC-28] A refused sign-in writes `session.oidc_refused` with `claims`, the values of every claim the mapping read, by claim (`signin_test.go`)."
   - "[C-25.FR-4, C-25.AC-3] A Team takes `idp_entries` (`{claim, group}`, the claim optional), matched as the Role mapping's; at every OIDC sign-in and every successful background re-check, with or without `oidc.sync_role`, a User joins each Team with an entry that matches them and leaves each Team they are in only through entries that no longer match; a person added by hand stays and, when an entry also matches, has both sources: against the fake OIDC server, `teams/payments/*` takes in a User with `teams/payments` and one with `teams/payments/oncall`, not one with `teams/paymentsx`; after the second User's group is removed, their next sign-in takes them out; the Audit log has `team.user_added` and `team.user_removed` by the system with the source `idp` and the entry; the Roles of all three are unchanged (`idp_test.go`, `team_membership_test.go`)."
-  - "[C-25.FR-4, C-25.AC-4, C-03.FR-30] An entry naming `https://gitlab.org/claims/groups/maintainer` matches a User whose ID token carries that claim with the group, and also when only userinfo carries it; with an identity provider that grants no offline token, membership changes only at sign-in; a refused or unavailable re-check changes no membership (`idp_test.go`, `recheck_test.go`)."
+  - "[C-25.FR-4, C-25.AC-4, C-03.FR-30] An entry naming `https://gitlab.org/claims/groups/maintainer` matches a User whose userinfo carries that claim with the group, where GitLab puts it (F-117), and also a User whose ID token carries it, with a provider that does; with an identity provider that grants no offline token, membership changes only at sign-in; a refused or unavailable re-check changes no membership (`idp_test.go`, `recheck_test.go`)."
   - "[C-25.FR-1, C-25.FR-11] `idp_entries` are part of `TeamInput`, saved with `If-Match` and recorded in the diff of `team.updated`; `listTeamUsers` gives a person the source `idp` with the entries that matched them; a change of a Team's entries changes nobody's membership until their next sign-in or re-check (`teams_test.go`)."
   - "[C-03.FR-5] Until S-119 gives the Role mapping editor its claim column, the L1 editor of the OIDC settings keeps the `claim` of every entry it loads and sends it back unchanged on save, so an entry of another claim is never saved against the groups claim (`group-mapping-editor.test.tsx`)."
   - "[C-25.FR-12] The documentation of GitLab sign-in maps Roles with GitLab's role claims and subtrees as the facts of S-116 say, the Keycloak page names the claim of an entry, and Concepts → Teams has the section \"Membership from the identity provider\"; `make docs-check` passes."
@@ -83,9 +83,12 @@ issue: 406
 
 ## Contracts
 
-- **Facts**: S-116's entries decide which token the GitLab mode puts each claim in and whether it lists inherited
-  groups; until they exist this contract assumes the role claims may come in either token, which the matching handles
-  in both cases.
+- **Facts** (S-116, F-116 to F-120): GitLab lists the three role claims in discovery; the role claims and `groups` come
+  only from userinfo and the ID token has only `groups_direct`; a role claim lists only the groups where the person
+  holds the role directly, never inherited subgroups, and a person has only the claim of their own role. The reading
+  order stays the ID token, then userinfo, which finds GitLab's claims in userinfo. An entry `a/b/*` against a
+  direct-only role claim must still match the subgroups of a direct group, because the subtree rule does that; an exact
+  entry `a/b/c` does not match an Owner of `a/b`, and the documentation says to use a subtree entry.
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
   - `OidcGroupMapping` gains `claim` (string, optional; omitted or empty reads `groups_claim`); `group` is described
     with the subtree rule; `OidcWarning` gains `claim` (string, set for `groups_claim_missing`); `OidcSettings` gains
@@ -123,9 +126,11 @@ issue: 406
   "entry": {claim, group}}`, and the hint `team`. It never changes a Role. A refused or unavailable re-check does not
   call it.
 - **Fake OIDC server** (`internal/fakes/fakeoidc`): in the GitLab mode a scripted user may carry the claims
-  `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, placed in the ID token, in userinfo or in
-  both as the facts say, and configurable per user through `/_fake/next-user` (`role_claims`, `role_claims_in`) so that
-  a test can put them in either; discovery lists them in `claims_supported` as the facts say.
+  `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, placed in userinfo only, with `groups`, while the ID
+  token carries `groups_direct` alone (F-117); a scripted user's `role_claims` hold the direct groups of each role, only
+  the claims of the roles they hold are present (F-118, F-119), and `/_fake/next-user` takes `role_claims`; the
+  Keycloak flavor keeps putting its claims in the ID token, so that both readings are tested; discovery lists the three
+  role claims, `groups` and `groups_direct` in `claims_supported` (F-116).
 - **AGENTS.md**: the paragraph on development mode names the GitLab mode of the fake OIDC server and the role claims it
   serves.
 - **Role mapping editor of L1** (`web/src/components/group-mapping-editor.tsx`, used by
@@ -169,13 +174,13 @@ PUTOS() { O=$(curl -s "${A[@]}" $API/oidc-settings); curl -s "${A[@]}" -X PUT -H
 SIGNIN() { curl -s -X POST $IDP/next-user -d "$2" > /dev/null; curl -s -c $1 -b $1 -L -o /dev/null "$API/sessions/oidc/start"; }
 curl -s -X POST $IDP/config -d '{"flavor":"gitlab"}' > /dev/null
 PUTOS '.groups_claim = "groups" | .unmatched_role = "none" | .sync_role = true | .group_mappings = [
-  {"claim":"https://gitlab.org/claims/groups/owner","group":"example/platform/infra","role":"admin"},
+  {"claim":"https://gitlab.org/claims/groups/owner","group":"example/platform/*","role":"admin"},
   {"group":"example/platform/*","role":"viewer"}]'
 
-# C-03.AC-28: the role claim in the ID token, then in userinfo; a subtree; a near miss
-SIGNIN u1 '{"sub":"g-1","preferred_username":"ann","groups":[],"role_claims":{"owner":["example/platform/infra"]},"role_claims_in":"id_token"}'
+# C-03.AC-28: the role claim from userinfo, direct groups only, matched as a subtree; a near miss
+SIGNIN u1 '{"sub":"g-1","preferred_username":"ann","groups":["example/platform","example/platform/infra"],"role_claims":{"owner":["example/platform"]}}'
 curl -s -b u1 $API/me | jq -r .user.role                                                                  # admin
-SIGNIN u2 '{"sub":"g-2","preferred_username":"ben","groups":[],"role_claims":{"owner":["example/platform/infra"]},"role_claims_in":"userinfo"}'
+SIGNIN u2 '{"sub":"g-2","preferred_username":"ben","groups":["example/platform/infra"],"role_claims":{"owner":["example/platform/infra"]}}'
 curl -s -b u2 $API/me | jq -r .user.role                                                                  # admin
 SIGNIN u3 '{"sub":"g-3","preferred_username":"cid","groups":["example/platform/apps"]}'
 curl -s -b u3 $API/me | jq -r .user.role                                                                  # viewer
@@ -213,8 +218,8 @@ User leaves the Team without signing in.
 
 ## Open questions
 
-None, once S-116's facts are in; a fact that contradicts C-03.FR-5 is proposed as a change of the PRD in this pull
-request (S-116).
+None. S-116's facts (F-116 to F-120) do not contradict C-03.FR-5 or C-25.FR-4; the pull request of S-116 proposes the
+rewording of C-03.AC-28 and C-25.AC-4, which still name an exact entry and the ID token, for the maintainer to decide.
 
 ## Notes
 
