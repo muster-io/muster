@@ -26,23 +26,21 @@ export const Route = createFileRoute("/admin/organization/alert-handling")({
   component: AlertHandlingPage,
 });
 
-const schema = z
-  .object({ instance_labels: z.array(z.string()) })
-  .superRefine((v, ctx) => {
-    const seen = new Set<string>();
-    v.instance_labels.forEach((raw, index) => {
-      const name = raw.trim();
-      const path = ["instance_labels", index];
-      if (name === "") {
-        ctx.addIssue({ code: "custom", path, message: "required" });
-      } else if (!LABEL_NAME.test(name)) {
-        ctx.addIssue({ code: "custom", path, message: "invalid_format" });
-      } else if (seen.has(name)) {
-        ctx.addIssue({ code: "custom", path, message: "duplicate" });
-      }
-      seen.add(name);
-    });
+const schema = z.object({ instance_labels: z.array(z.string()) }).superRefine((v, ctx) => {
+  const seen = new Set<string>();
+  v.instance_labels.forEach((raw, index) => {
+    const name = raw.trim();
+    const path = ["instance_labels", index];
+    if (name === "") {
+      ctx.addIssue({ code: "custom", path, message: "required" });
+    } else if (!LABEL_NAME.test(name)) {
+      ctx.addIssue({ code: "custom", path, message: "invalid_format" });
+    } else if (seen.has(name)) {
+      ctx.addIssue({ code: "custom", path, message: "duplicate" });
+    }
+    seen.add(name);
   });
+});
 type AlertHandlingValues = z.infer<typeof schema>;
 
 function AlertHandlingForm({ organization }: { organization: Organization }) {

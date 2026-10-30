@@ -478,12 +478,10 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
   expect(body).toMatchObject({ minimum_severity: "critical" });
   expect(body).not.toHaveProperty("urgent");
 
-  await expect(
-    routeRow(page, "hb").getByTestId("route-minimum-severity"),
-  ).toHaveText("Minimum severity: critical");
-  await expect(
-    routeRow(page, "disk").getByTestId("route-minimum-severity"),
-  ).toHaveCount(0);
+  await expect(routeRow(page, "hb").getByTestId("route-minimum-severity")).toHaveText(
+    "Minimum severity: critical",
+  );
+  await expect(routeRow(page, "disk").getByTestId("route-minimum-severity")).toHaveCount(0);
   expect((await readHb())?.minimum_severity).toBe("critical");
 
   await ensureRussianAdmin();
@@ -502,9 +500,9 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
   await ru.getByRole("button", { name: "С призывом" }).click();
   const ruSection = ru.getByTestId("route-severity-section");
   await expect(ruSection).toContainText("Важность, эскалация и владелец");
-  await expect(
-    ruSection.getByLabel("Минимальная важность маршрута", { exact: true }),
-  ).toHaveValue("none");
+  await expect(ruSection.getByLabel("Минимальная важность маршрута", { exact: true })).toHaveValue(
+    "none",
+  );
   await expect(
     ruSection.getByLabel("Минимальная важность маршрута", { exact: true }).locator("option"),
   ).toHaveText(["Нет", "warning", "critical"]);

@@ -73,25 +73,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const card = (name: string) => page.getByRole("button", { name, exact: true });
+
 describe("the Route profile cards", () => {
   test("name the profiles Paging and Informational", async () => {
     await renderPicker(["paging", "informational"]);
-    await expect.element(page.getByTestId("route-profile-paging")).toHaveTextContent("Paging");
-    await expect
-      .element(page.getByTestId("route-profile-informational"))
-      .toHaveTextContent("Informational");
+    await expect.element(card("Paging")).toBeVisible();
+    await expect.element(card("Informational")).toBeVisible();
   });
 
   test("read the id on_call of a 0.1 replica as Paging", async () => {
     await renderPicker(["on_call", "informational"]);
-    const card = page.getByTestId("route-profile-on_call");
-    await expect.element(card).toHaveTextContent("Paging");
-    await expect.element(card).not.toHaveTextContent("Informational");
+    await expect.element(card("Paging")).toBeVisible();
+    await expect.element(page.getByTestId("route-profile-on_call")).toHaveAccessibleName("Paging");
+    expect(card("Informational").elements()).toHaveLength(1);
   });
 
   test("read Paging as «С призывом» in Russian", async () => {
     await i18n.changeLanguage("ru");
     await renderPicker(["on_call", "informational"]);
-    await expect.element(page.getByTestId("route-profile-on_call")).toHaveTextContent("С призывом");
+    await expect.element(card("С призывом")).toBeVisible();
+    await expect.element(card("Информационный")).toBeVisible();
   });
 });
