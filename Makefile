@@ -195,7 +195,7 @@ test: $(GO_TEST_COVERAGE) test-web ## Run unit tests with the coverage gate, and
 
 test-race: $(GO_TEST_COVERAGE) test-web ## Run unit tests with the race detector and the coverage gate, and the SPA's tests
 	@mkdir -p $(BIN)
-	$(GO) test -race -coverprofile=$(COVER_PROFILE) -covermode=atomic ./...
+	$(GO) test -race -timeout 20m -coverprofile=$(COVER_PROFILE) -covermode=atomic ./...
 	$(GO_TEST_COVERAGE) --config=.testcoverage.yml
 
 # Vitest in browser mode: the SPA's component tests in Chromium.

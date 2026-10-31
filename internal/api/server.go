@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
+	"sync"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
@@ -324,7 +325,13 @@ var implemented = map[string]bool{
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
 // the router and the request validation match request paths.
-func LoadSpec() (*openapi3.T, error) {
+//
+// The document is parsed once per process and shared; callers must not modify it.
+func LoadSpec() (*openapi3.T, error) { return loadSpecOnce() }
+
+var loadSpecOnce = sync.OnceValues(parseSpec)
+
+func parseSpec() (*openapi3.T, error) {
 	loader := openapi3.NewLoader()
 	doc, err := loader.LoadFromData(spec.Spec())
 	if err != nil {
