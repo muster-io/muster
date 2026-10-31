@@ -541,7 +541,7 @@ export const useDeleteSchedule = <TError = UnauthorizedResponse | ForbiddenRespo
 }
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCall = async (scheduleId: string,

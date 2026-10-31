@@ -24,13 +24,13 @@ export interface RotationLayerInput {
      */
   user_ids: PublicId[];
   shift_length: ShiftLength;
-  /** The length of a Shift with `hours`, whole hours from one hour — a multiple of 3600 from 3600, else `422` `out_of_range`; required with `hours` and refused with the others. */
+  /** The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600 from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others. */
   shift_seconds?: number;
   /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
   handover_time: string;
   /** The day of the handover of weekly Shifts; required with `week` and refused with the others. */
   handover_day?: Weekday;
-  /** The day the first Shift starts, at `handover_time`, with the first person. */
+  /** The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to 2100-12-31, else `422` `out_of_range`. */
   start_date: string;
   /** The days and time of day to which the Shifts are cut; null for none. */
   limits?: RotationLimits | null;
