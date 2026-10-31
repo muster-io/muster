@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.5](https://github.com/muster-io/muster/compare/v0.1.4...v0.1.5) (2026-10-31)
+
+
+### Features
+
+* **destinations:** choose the buttons of root messages per organization and destination ([#478](https://github.com/muster-io/muster/issues/478)) ([8c8d180](https://github.com/muster-io/muster/commit/8c8d1803fc7541a43d3fec4b0fb699f80ae93558))
+* **helm:** set annotations per ingress and the image registry as its own key ([#481](https://github.com/muster-io/muster/issues/481)) ([4b1bc34](https://github.com/muster-io/muster/commit/4b1bc34bd976005d2bc5893fd32016ba33ce8779))
+* **routing:** rename the route profile on-call to paging ([#477](https://github.com/muster-io/muster/issues/477)) ([9ec5a31](https://github.com/muster-io/muster/commit/9ec5a31f649d39c02fca72c3b31b72b6979662c8))
+* **routing:** replace the urgent mark with a minimum severity on routes ([#474](https://github.com/muster-io/muster/issues/474)) ([1c80616](https://github.com/muster-io/muster/commit/1c8061639df5537f4c9386b397da5fe50d1e16e4))
+* **schedules:** add schedules with rotation layers, overrides and the on-call ([#489](https://github.com/muster-io/muster/issues/489)) ([74c3409](https://github.com/muster-io/muster/commit/74c3409fb401d500cb9266ec20500951977a9753))
+* **teams:** add teams with people, owners and working hours ([#476](https://github.com/muster-io/muster/issues/476)) ([175e700](https://github.com/muster-io/muster/commit/175e700815cf0f8e0b042d086d40117b0b5f6cf5))
+* **teams:** give alerts and alert groups their teams from the team label and team matchers ([#487](https://github.com/muster-io/muster/issues/487)) ([7e77391](https://github.com/muster-io/muster/commit/7e77391461c45f1e05d95314d81cd5ad3b19ea78))
+* **web:** choose the buttons of root messages on the destination form and the organization page ([#485](https://github.com/muster-io/muster/issues/485)) ([e8c2510](https://github.com/muster-io/muster/commit/e8c2510c278c525a49285b630c6ddaa791f91df9))
+* **web:** choose the minimum severity on the route form ([#482](https://github.com/muster-io/muster/issues/482)) ([65639ee](https://github.com/muster-io/muster/commit/65639ee4361c7c7328363b4f5998e77e47894730))
+
+
+### Bug Fixes
+
+* tighten chart image host detection and route form follow-ups ([#486](https://github.com/muster-io/muster/issues/486)) ([19f99ae](https://github.com/muster-io/muster/commit/19f99aec761172c528af564590a0f718cacb1253))
+
+
+### Dependencies
+
+* **deps:** update go-jose to 4.1.6 ([#483](https://github.com/muster-io/muster/issues/483)) ([d103624](https://github.com/muster-io/muster/commit/d1036247ab1d56dcf1ef2d4f02190a1ffb9d8adc))
+
 ## [0.1.4](https://github.com/muster-io/muster/compare/v0.1.3...v0.1.4) (2026-10-26)
 
 
