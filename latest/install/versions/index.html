@@ -1493,6 +1493,8 @@
       
         
       
+        
+      
     
     
     
@@ -1714,6 +1716,33 @@
     
   
   Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/schedules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Schedules
 
     
   </span>
@@ -3005,6 +3034,9 @@ critical, and a Route raises the level of its Alert Groups with its
   Team label is <code>team</code> by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
   label <code>team</code> records one Quiet <code>unknown_team_value</code> per value in its Timeline, and outgoing webhooks in events
   mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.</li>
+<li>Migration 0025 adds <a href="../../concepts/schedules/">Schedules</a> and the Permissions <code>schedules:read</code>,
+  <code>schedules:write</code> and <code>schedule-overrides:write</code>. Roles get them at once; a Personal access token keeps the
+  Permissions it was issued with, so issue a new one to reach Schedules with a token.</li>
 </ul>
 <p><strong>Helm chart.</strong> <code>ingress.app.annotations</code> and <code>ingress.ingest.annotations</code> set the annotations of one Ingress, over
 the shared <code>ingress.annotations</code>, so an installation that turned the chart's Ingress off to get different annotations
@@ -3138,6 +3170,10 @@ recover, with the same database role as Muster:</p>
 <p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
 </li>
 </ol>
+<p>Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
+dirty at version 25. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 24, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
