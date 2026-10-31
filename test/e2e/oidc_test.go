@@ -397,3 +397,172 @@ func TestOIDCGitLabWithoutOfflineAccess(t *testing.T) {
 		t.Errorf("sam's oidc_offline_access = %v", v)
 	}
 }
+
+// The role claims of GitLab, as the fake IdP serves them in its GitLab mode.
+const (
+	ownerClaim      = "https://gitlab.org/claims/groups/owner"
+	maintainerClaim = "https://gitlab.org/claims/groups/maintainer"
+)
+
+// scriptUser scripts the person the fake IdP approves next, with any of its fields: groups, role_claims and so on.
+func scriptUser(t *testing.T, user map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(user)
+	if a := call(t, http.MethodPost, "http://"+devmode.OIDCAddr+"/_fake/next-user", string(body)); a.status !=
+		http.StatusNoContent {
+		t.Fatalf("next-user = %d %s", a.status, a.body)
+	}
+}
+
+// adminAPI signs the bootstrap Admin in and returns a Personal access token client with every Permission of the Admin,
+// which outlives the jumps of the development clock.
+func adminAPI(t *testing.T, base string) patClient {
+	t.Helper()
+	admin := newAgent(t, base)
+	if a := admin.signIn(devAdmin, devAdminPassword); a.status != http.StatusCreated {
+		t.Fatalf("the Admin's sign-in = %d %s", a.status, a.body)
+	}
+	perms, _ := json.Marshal(admin.json(http.MethodGet, "/api/v1/me", "", http.StatusOK)["permissions"])
+	return patClient{t: t, base: base, token: admin.json(http.MethodPost, "/api/v1/me/personal-access-tokens",
+		`{"name":"oidc","permissions":`+string(perms)+`}`, http.StatusCreated)["value"].(string)}
+}
+
+// putOIDC changes the OIDC settings as read, through the API with If-Match.
+func putOIDC(t *testing.T, api patClient, change func(map[string]any)) {
+	t.Helper()
+	read := api.do(http.MethodGet, "/api/v1/oidc-settings", "")
+	var m map[string]any
+	decode(t, read, &m)
+	for _, k := range []string{"etag", "warnings", "client_secret_status", "updated_at", "claims_supported"} {
+		delete(m, k)
+	}
+	if p, ok := m["proxy"].(map[string]any); ok {
+		delete(p, "password_status")
+	}
+	change(m)
+	body, _ := json.Marshal(m)
+	api.json(http.MethodPut, "/api/v1/oidc-settings", string(body), http.StatusOK, "If-Match", read.header.Get("ETag"))
+}
+
+// roleOf signs the person scripted next in and returns their Role, or the error of the sign-in page.
+func roleOf(t *testing.T, base string, user map[string]any) string {
+	t.Helper()
+	scriptUser(t, user)
+	a := newAgent(t, base)
+	if to := a.oidcSignIn(); to != "/" {
+		return to
+	}
+	return a.json(http.MethodGet, "/api/v1/me", "", http.StatusOK)["user"].(map[string]any)["role"].(string)
+}
+
+// TestOIDCRoleClaims is C-03.FR-5 to FR-7 and C-03.AC-28 against `muster dev`, with the fake IdP in its GitLab mode,
+// which puts the role claims and groups in userinfo alone: the owner claim example/platform/* → Admin and groups
+// example/platform/* → Viewer make an Owner of example/platform, whose claim lists only that group, and an Owner of
+// example/platform/infra Admins and a person in example/platform/apps a Viewer; example/platformx is refused, with both
+// claims in session.oidc_refused. The maintainer's setup — groups corp/* → Responder and the owner claim corp → Admin —
+// makes an Owner of corp an Admin and a Developer of corp/team-a a Responder. The connection check keeps
+// claims_supported and warns per claim discovery does not list, with the Keycloak flavor; a sign-in carrying the claim
+// clears it. A group with * other than a trailing /* is 422 at the entry.
+func TestOIDCRoleClaims(t *testing.T) {
+	h := Start(t, DevProcess)
+	base := h.Replicas[0].App
+	config := "http://" + devmode.OIDCAddr + "/_fake/config"
+	if a := call(t, http.MethodPost, config, `{"flavor":"gitlab"}`); a.status != http.StatusNoContent {
+		t.Fatalf("config = %d %s", a.status, a.body)
+	}
+	t.Cleanup(func() { restore(t, http.MethodPost, config, `{"flavor":"keycloak"}`) })
+	api := adminAPI(t, base)
+	entries := func(list ...map[string]any) func(map[string]any) {
+		return func(m map[string]any) {
+			m["groups_claim"], m["unmatched_role"], m["sync_role"], m["group_mappings"] = "groups", "none", true, list
+		}
+	}
+	putOIDC(t, api, entries(map[string]any{"claim": ownerClaim, "group": "example/platform/*", "role": "admin"},
+		map[string]any{"group": "example/platform/*", "role": "viewer"}))
+	for _, tc := range []struct {
+		user map[string]any
+		want string
+	}{
+		{map[string]any{"sub": "g-1", "preferred_username": "ann", "groups": []string{"example/platform",
+			"example/platform/infra"}, "role_claims": map[string]any{"owner": []string{"example/platform"}}}, "admin"},
+		{map[string]any{"sub": "g-2", "preferred_username": "ben", "groups": []string{"example/platform/infra"},
+			"role_claims": map[string]any{"owner": []string{"example/platform/infra"}}}, "admin"},
+		{map[string]any{"sub": "g-3", "preferred_username": "cid", "groups": []string{"example/platform/apps"}},
+			"viewer"},
+		{map[string]any{"sub": "g-4", "preferred_username": "dan", "groups": []string{"example/platformx"}},
+			"/sign-in?error=no_access"},
+	} {
+		if got := roleOf(t, base, tc.user); got != tc.want {
+			t.Errorf("%s = %s, want %s", tc.user["preferred_username"], got, tc.want)
+		}
+	}
+	refused := api.json(http.MethodGet, "/api/v1/audit-log?action=session.oidc_refused&limit=1", "", http.StatusOK)
+	claims, _ := json.Marshal(refused["items"].([]any)[0].(map[string]any)["details"].(map[string]any)["claims"])
+	if string(claims) != `{"groups":["example/platformx"],"https://gitlab.org/claims/groups/owner":[]}` {
+		t.Errorf("the refusal's claims = %s", claims)
+	}
+
+	putOIDC(t, api, entries(map[string]any{"group": "corp/*", "role": "responder"},
+		map[string]any{"claim": ownerClaim, "group": "corp", "role": "admin"}))
+	if got := roleOf(t, base, map[string]any{"sub": "c-1", "preferred_username": "olga", "groups": []string{"corp",
+		"corp/team-a"}, "role_claims": map[string]any{"owner": []string{"corp"}}}); got != "admin" {
+		t.Errorf("an Owner of corp = %s", got)
+	}
+	if got := roleOf(t, base, map[string]any{"sub": "c-2", "preferred_username": "petr", "groups": []string{"corp",
+		"corp/team-a"}, "role_claims": map[string]any{"developer": []string{"corp/team-a"}}}); got != "responder" {
+		t.Errorf("a Developer of corp/team-a = %s", got)
+	}
+	if got := roleOf(t, base, map[string]any{"sub": "c-3", "preferred_username": "rita",
+		"groups": []string{"other"}}); got != "/sign-in?error=no_access" {
+		t.Errorf("someone outside corp = %s", got)
+	}
+
+	check := api.json(http.MethodPost, "/api/v1/oidc-settings/checks", "", http.StatusOK)
+	if check["ok"] != true || len(check["warnings"].([]any)) != 0 {
+		t.Errorf("the check against GitLab = %v", check)
+	}
+	read := api.json(http.MethodGet, "/api/v1/oidc-settings", "", http.StatusOK)
+	if supported := fmt.Sprint(read["claims_supported"]); !strings.Contains(supported, ownerClaim) ||
+		!strings.Contains(supported, maintainerClaim) {
+		t.Errorf("claims_supported = %s", supported)
+	}
+	useFlavor(t, api, "keycloak")
+	putOIDC(t, api, entries(map[string]any{"group": "corp/*", "role": "responder"},
+		map[string]any{"claim": maintainerClaim, "group": "corp/*", "role": "responder"}))
+	missing := func() []string {
+		var out []string
+		check := api.json(http.MethodPost, "/api/v1/oidc-settings/checks", "", http.StatusOK)
+		for _, w := range check["warnings"].([]any) {
+			if w := w.(map[string]any); w["kind"] == "groups_claim_missing" {
+				out = append(out, fmt.Sprint(w["claim"]))
+			}
+		}
+		return out
+	}
+	if got := missing(); fmt.Sprint(got) != "["+maintainerClaim+"]" {
+		t.Errorf("Keycloak's discovery lists no role claim: %v", got)
+	}
+	if got := roleOf(t, base, map[string]any{"sub": "k-1", "preferred_username": "vera", "groups": []string{"x"},
+		"role_claims": map[string]any{"maintainer": []string{"corp/payments"}}}); got != "responder" {
+		t.Errorf("the maintainer claim in the ID token = %s", got)
+	}
+	if got := missing(); len(got) != 0 {
+		t.Errorf("after a sign-in that carried the claim: %v", got)
+	}
+	for _, group := range []string{"*", "corp/*/x", "corp*"} {
+		read := api.do(http.MethodGet, "/api/v1/oidc-settings", "")
+		var m map[string]any
+		decode(t, read, &m)
+		for _, k := range []string{"etag", "warnings", "client_secret_status", "updated_at", "claims_supported"} {
+			delete(m, k)
+		}
+		delete(m["proxy"].(map[string]any), "password_status")
+		m["group_mappings"] = []map[string]any{{"claim": ownerClaim, "group": group, "role": "admin"}}
+		body, _ := json.Marshal(m)
+		a := api.do(http.MethodPut, "/api/v1/oidc-settings", string(body), "If-Match", read.header.Get("ETag"))
+		if p, c := firstError(t, a); a.status != http.StatusUnprocessableEntity || p != "/group_mappings/0/group" ||
+			c != "invalid_format" {
+			t.Errorf("group %q = %d %s", group, a.status, a.body)
+		}
+	}
+}

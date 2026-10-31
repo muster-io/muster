@@ -920,9 +920,11 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	}, p.clocks.Business, p.hub, p.log)
 	p.listener = db.NewListener(p.db.SessionListenConn, p.log)
 	p.policies = organization.NewOutboundPolicies(p.db.OrganizationStore(), orgID, p.clocks.Real)
+	p.teams = teams.New(teams.Config{OrgID: orgID, Store: p.db.TeamsStore(), Audit: w, Business: p.clocks.Business})
+	// Every OIDC sign-in, link and successful re-check follows the identity provider entries of the Teams (C-25.FR-4).
 	signIn := oidc.NewService(oidc.Config{
 		OrgID: orgID, Store: p.db.OIDCStore(), Keyring: p.keyring, Audit: w, Clocks: p.clocks, Log: p.log,
-		Sessions: sessions, PublicURL: p.cfg.PublicURL,
+		Sessions: sessions, PublicURL: p.cfg.PublicURL, Membership: p.teams,
 		Network: oidc.Network{
 			Policy: p.policies,
 			Log:    p.log, Real: p.clocks.Real,
@@ -940,7 +942,6 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.router = routing.NewRouter(orgID)
 	p.routes = routing.New(routing.Config{OrgID: orgID, Store: p.db.RoutingStore(), Audit: w,
 		Business: p.clocks.Business, Real: p.clocks.Real, Router: p.router, Snapshots: p.snapshots, Log: p.log})
-	p.teams = teams.New(teams.Config{OrgID: orgID, Store: p.db.TeamsStore(), Audit: w, Business: p.clocks.Business})
 	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
 		Business: p.clocks.Business, Log: p.log,
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {

@@ -202,7 +202,23 @@ func teamInputOf(b gen.TeamInput) teams.Input {
 		}
 		in.Matchers = &ms
 	}
+	if b.IdpEntries != nil {
+		entries := make([]teams.IdpEntry, len(*b.IdpEntries))
+		for i, e := range *b.IdpEntries {
+			entries[i] = teams.IdpEntry{Claim: deref(e.Claim), Group: e.Group}
+		}
+		in.IdpEntries = &entries
+	}
 	return in
+}
+
+// idpEntriesOf is the API form of identity provider entries.
+func idpEntriesOf(entries []teams.IdpEntry) []gen.TeamIdpEntry {
+	out := make([]gen.TeamIdpEntry, len(entries))
+	for i, e := range entries {
+		out[i] = gen.TeamIdpEntry{Claim: optional(e.Claim), Group: e.Group}
+	}
+	return out
 }
 
 // workingHoursIn are Working hours as internal/teams takes them.
@@ -231,16 +247,17 @@ func teamOf(t teams.Team) gen.Team {
 		ms[i] = gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value}
 	}
 	return gen.Team{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Description: t.Description,
-		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours), UserCount: int(t.UserCount),
-		CreatedAt: t.CreatedAt.UTC(), Etag: &tag, Matchers: ms}
+		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours),
+		IdpEntries: idpEntriesOf(t.IdpEntries), UserCount: int(t.UserCount), CreatedAt: t.CreatedAt.UTC(), Etag: &tag,
+		Matchers: ms}
 }
 
 // teamUserOf is the API form of a person in a Team.
 func teamUserOf(m teams.Person) gen.TeamUser {
 	login := m.Login
 	out := gen.TeamUser{User: gen.UserRef{Id: m.PublicID, Name: m.Name, Login: &login}, Role: gen.RoleName(m.Role),
-		Sources: make([]gen.TeamUserSource, 0, len(m.Sources)), LinkedMessengers: make([]gen.LinkedMessenger, 0,
-			len(m.Linked))}
+		Sources: make([]gen.TeamUserSource, 0, len(m.Sources)), IdpEntries: idpEntriesOf(m.IdpEntries),
+		LinkedMessengers: make([]gen.LinkedMessenger, 0, len(m.Linked))}
 	for _, src := range m.Sources {
 		out.Sources = append(out.Sources, gen.TeamUserSource(src))
 	}

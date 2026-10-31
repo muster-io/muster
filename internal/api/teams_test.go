@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -276,6 +277,64 @@ func TestTeamsAPI(t *testing.T) {
 			http.StatusInternalServerError {
 			t.Errorf("%s %s failed = %d", r.method, r.path, a.status)
 		}
+	}
+}
+
+// TestTeamIdpEntriesAPI is C-25.FR-1, FR-4 and FR-11 at the API: idp_entries of TeamInput reach internal/teams with
+// their claims, omitted on an update to keep them; a Team reads them back, an empty list without any; listTeamUsers
+// gives a person the source idp with the entries that matched; removeTeamUser of a person with no source by_hand is
+// 404; the domain's refusal of an entry is 422 at its group.
+func TestTeamIdpEntriesAPI(t *testing.T) {
+	x, ft, _ := newTeamsAPI(t)
+	maintainer := "https://gitlab.org/claims/groups/maintainer"
+	a := x.as(t, teamsAdmin, http.MethodGet, "/api/v1/teams/"+teamID, "")
+	if !strings.Contains(string(a.body), `"idp_entries":[]`) {
+		t.Errorf("a Team without entries = %s", a.body)
+	}
+	ft.team.IdpEntries = []teams.IdpEntry{{Group: "teams/payments/*"}, {Claim: maintainer, Group: "teams/payments"}}
+	ft.people[0].Sources = []string{teams.SourceByHand, teams.SourceIdp}
+	ft.people[0].IdpEntries = []teams.IdpEntry{{Group: "teams/payments/*"}}
+	body := `{"name":"Payments","slug":"payments","own_working_hours":false,"idp_entries":[` +
+		`{"group":"teams/payments/*"},{"claim":"` + maintainer + `","group":"teams/payments"}]}`
+	a = x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams", body)
+	var team struct {
+		IdpEntries []map[string]string `json:"idp_entries"`
+	}
+	decodeInto(t, a, &team)
+	if a.status != http.StatusCreated || len(team.IdpEntries) != 2 || team.IdpEntries[0]["group"] != "teams/payments/*" ||
+		len(team.IdpEntries[0]) != 1 || team.IdpEntries[1]["claim"] != maintainer {
+		t.Fatalf("create = %d %s", a.status, a.body)
+	}
+	if in := ft.inputs[0].IdpEntries; in == nil || len(*in) != 2 || (*in)[0] != (teams.IdpEntry{Group: "teams/payments/*"}) ||
+		(*in)[1] != (teams.IdpEntry{Claim: maintainer, Group: "teams/payments"}) {
+		t.Errorf("input entries = %+v", in)
+	}
+	if a = x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID, `{"name":"P","slug":"p",`+
+		`"own_working_hours":false}`, "If-Match", `"2"`); a.status != http.StatusOK || ft.inputs[1].IdpEntries != nil {
+		t.Errorf("an update without entries = %d, %+v", a.status, ft.inputs[1].IdpEntries)
+	}
+	a = x.as(t, teamsReader, http.MethodGet, "/api/v1/teams/"+teamID+"/users", "")
+	var people struct {
+		Items []struct {
+			Sources    []string            `json:"sources"`
+			IdpEntries []map[string]string `json:"idp_entries"`
+		} `json:"items"`
+	}
+	decodeInto(t, a, &people)
+	if len(people.Items) != 1 || fmt.Sprint(people.Items[0].Sources) != "[by_hand idp]" ||
+		len(people.Items[0].IdpEntries) != 1 || people.Items[0].IdpEntries[0]["group"] != "teams/payments/*" {
+		t.Errorf("people = %s", a.body)
+	}
+	ft.err = teams.ErrNotInTeam
+	if a = x.as(t, teamsAdmin, http.MethodDelete, "/api/v1/teams/"+teamID+"/users/"+bobPublicID, ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("a person only through the identity provider = %d %s", a.status, a.body)
+	}
+	ft.err = &teams.FieldError{Pointer: "/idp_entries/0/group", Code: teams.CodeInvalidFormat}
+	status, _, ptr, code := firstProblemError(t, x.as(t, teamsAdmin, http.MethodPost, "/api/v1/teams",
+		`{"name":"P","slug":"p","own_working_hours":false,"idp_entries":[{"group":""}]}`))
+	if status != http.StatusUnprocessableEntity || ptr != "/idp_entries/0/group" || code != "invalid_format" {
+		t.Errorf("an empty group = %d %s %s", status, ptr, code)
 	}
 }
 

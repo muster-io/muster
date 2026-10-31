@@ -110,10 +110,11 @@ FROM (SELECT x.id
 WHERE r.org_id = @org_id AND r.id = locked.id
 RETURNING r.public_id, r.name;
 
--- ListTeamUsers lists the people in a Team, by name, with their Role and status; a deleted User, whom the deletion
--- took out of every Team, is never listed.
+-- ListTeamUsers lists the people in a Team, by name, with their Role and status, how they are in it and the entries
+-- of the identity provider that matched them; a deleted User, whom the deletion took out of every Team, is never
+-- listed.
 -- name: ListTeamUsers :many
-SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
 WHERE tu.org_id = @org_id AND tu.team_id = @team_id AND u.status <> 'deleted'
@@ -138,13 +139,23 @@ FOR SHARE;
 
 -- GetTeamUser reads one person in a Team.
 -- name: GetTeamUser :one
-SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
 WHERE tu.org_id = @org_id AND tu.team_id = @team_id AND u.public_id = @public_id;
 
--- InsertTeamUser adds a User to a Team by hand, or marks a person who is in it otherwise as added by hand too; it
--- changes nothing, and counts no row, when the User is in it by hand already.
+-- LockTeamMember reads one person in a Team and locks their row in it, so that a removal by hand decides from what a
+-- sign-in that changes the same row committed; a removal locks the Team first, a sign-in the User first, and both then
+-- the row.
+-- name: LockTeamMember :one
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
+FROM team_users tu
+JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+WHERE tu.org_id = @org_id AND tu.team_id = @team_id AND u.public_id = @public_id
+FOR UPDATE OF tu;
+
+-- InsertTeamUser adds a User to a Team by hand, or marks a person who is in it through the identity provider as added
+-- by hand too; it changes nothing, and counts no row, when the User is in it by hand already.
 -- name: InsertTeamUser :execrows
 INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
 VALUES (@org_id, @team_id, @user_id, true, @now)
@@ -156,15 +167,93 @@ WHERE NOT team_users.by_hand;
 DELETE FROM team_users
 WHERE org_id = @org_id AND team_id = @team_id AND user_id = @user_id;
 
+-- ClearByHand takes away the source by_hand of a person who is in a Team through the identity provider too.
+-- name: ClearByHand :execrows
+UPDATE team_users
+SET by_hand = false
+WHERE org_id = @org_id AND team_id = @team_id AND user_id = @user_id AND by_hand AND by_idp;
+
+-- ListTeamIdpEntries lists the entries of the identity provider of the Teams, in their order.
+-- name: ListTeamIdpEntries :many
+SELECT team_id, claim, group_name
+FROM team_idp_entries
+WHERE org_id = @org_id AND team_id = ANY (@team_ids::bigint[])
+ORDER BY team_id, position;
+
+-- DeleteTeamIdpEntries removes the entries of the identity provider of a Team, which an update replaces as a whole.
+-- name: DeleteTeamIdpEntries :exec
+DELETE FROM team_idp_entries
+WHERE org_id = @org_id AND team_id = @team_id;
+
+-- InsertTeamIdpEntries stores the entries of a Team in their order; an empty claim reads the groups claim.
+-- name: InsertTeamIdpEntries :exec
+INSERT INTO team_idp_entries (org_id, team_id, claim, group_name, position)
+SELECT @org_id, @team_id, nullif(c.claim, ''), g.group_name, g.position::integer
+FROM unnest(@group_names::text[]) WITH ORDINALITY AS g (group_name, position)
+JOIN unnest(@claims::text[]) WITH ORDINALITY AS c (claim, position) ON c.position = g.position;
+
+-- ListIdpEntryClaims lists the claims the entries of the Teams that are not deleted read, the empty string for the
+-- groups claim, so that a sign-in reads them.
+-- name: ListIdpEntryClaims :many
+SELECT DISTINCT coalesce(e.claim, '')::text AS claim
+FROM team_idp_entries e
+JOIN teams t ON t.org_id = e.org_id AND t.id = e.team_id
+WHERE e.org_id = @org_id AND t.deleted_at IS NULL
+ORDER BY 1;
+
+-- ListIdpEntries lists the entries of the identity provider of every Team that is not deleted, by Team and in their
+-- order, with the Team as the Audit log names it.
+-- name: ListIdpEntries :many
+SELECT e.team_id, t.public_id, t.name, e.claim, e.group_name
+FROM team_idp_entries e
+JOIN teams t ON t.org_id = e.org_id AND t.id = e.team_id
+WHERE e.org_id = @org_id AND t.deleted_at IS NULL
+ORDER BY e.team_id, e.position;
+
+-- LockUserMemberships locks the rows of a User in the Teams that are not deleted, in Team order, with how they are in
+-- each and the entries that matched them.
+-- name: LockUserMemberships :many
+SELECT tu.team_id, t.public_id, t.name, tu.by_hand, tu.by_idp, tu.idp_matches
+FROM team_users tu
+JOIN teams t ON t.org_id = tu.org_id AND t.id = tu.team_id
+WHERE tu.org_id = @org_id AND tu.user_id = @user_id AND t.deleted_at IS NULL
+ORDER BY tu.team_id
+FOR UPDATE OF tu;
+
+-- GetMember reads the User whose membership the identity provider changes, as the Audit log names them.
+-- name: GetMember :one
+SELECT public_id, name
+FROM users
+WHERE org_id = @org_id AND id = @id AND status <> 'deleted';
+
+-- JoinThroughIdp puts a User into a Team through the identity provider with the entries that matched them, or adds the
+-- source idp to a person added by hand.
+-- name: JoinThroughIdp :exec
+INSERT INTO team_users (org_id, team_id, user_id, by_hand, by_idp, idp_matches, created_at)
+VALUES (@org_id, @team_id, @user_id, false, true, @idp_matches, @now)
+ON CONFLICT (team_id, user_id) DO UPDATE SET by_idp = true, idp_matches = excluded.idp_matches;
+
+-- SetIdpMatches records the entries that matched a person who stays in a Team through the identity provider.
+-- name: SetIdpMatches :exec
+UPDATE team_users
+SET idp_matches = @idp_matches
+WHERE org_id = @org_id AND team_id = @team_id AND user_id = @user_id;
+
+-- LeaveThroughIdp takes away the source idp of a person who is in a Team by hand too.
+-- name: LeaveThroughIdp :exec
+UPDATE team_users
+SET by_idp = false, idp_matches = '[]'
+WHERE org_id = @org_id AND team_id = @team_id AND user_id = @user_id AND by_hand;
+
 -- DeleteUserTeams takes a deleted User out of every Team and returns the Teams with the User, as the deletion left
 -- their name, and how they were in each.
 -- name: DeleteUserTeams :many
 WITH removed AS (
     DELETE FROM team_users
     WHERE org_id = @org_id AND user_id = @user_id
-    RETURNING team_id, by_hand
+    RETURNING team_id, by_hand, by_idp
 )
-SELECT t.public_id, t.name, u.public_id AS user_public_id, u.name AS user_name, r.by_hand
+SELECT t.public_id, t.name, u.public_id AS user_public_id, u.name AS user_name, r.by_hand, r.by_idp
 FROM teams t
 JOIN removed r ON r.team_id = t.id
 JOIN users u ON u.org_id = t.org_id AND u.id = @user_id

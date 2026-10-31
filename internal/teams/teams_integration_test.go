@@ -16,6 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
@@ -25,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/teams"
@@ -165,13 +169,13 @@ func TestIntegrationTeams(t *testing.T) {
 		if _, added, err := e.svc.AddUser(ctx, by, pay.PublicID, e.bob); err != nil || added {
 			t.Errorf("again = %v, %v", added, err)
 		}
-		// A person in a Team other than by hand — later, through the identity provider — is added by hand too.
-		if _, err := e.d.Pool.Exec(ctx, `UPDATE team_users SET by_hand = false WHERE user_id = $1 AND team_id =
-			(SELECT id FROM teams WHERE public_id = $2)`, e.bobID, search.PublicID); err != nil {
+		// A person in a Team through the identity provider is added by hand too.
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE team_users SET by_hand = false, by_idp = true WHERE user_id = $1
+			AND team_id = (SELECT id FROM teams WHERE public_id = $2)`, e.bobID, search.PublicID); err != nil {
 			t.Fatal(err)
 		}
 		if m, added, err := e.svc.AddUser(ctx, by, search.PublicID, e.bob); err != nil || !added ||
-			len(m.Sources) != 1 || m.Sources[0] != "by_hand" {
+			strings.Join(m.Sources, ",") != "by_hand,idp" {
 			t.Errorf("by hand too = %+v, %v, %v", m, added, err)
 		}
 		// A deleted User is neither counted nor listed, should a row of theirs be left.
@@ -369,6 +373,168 @@ func TestIntegrationTeamsOfAlertGroups(t *testing.T) {
 		if got := classes.Classify(map[string]string{"team": "payments", "pod": "checkout-api-1"}); len(got.Teams) != 0 ||
 			got.UnknownValue != "payments" {
 			t.Errorf("after the deletion %+v", got)
+		}
+	})
+}
+
+// sync follows the entries of the Teams for the User userID with claims, in a transaction of its own, as a sign-in
+// does after it locked the user.
+func (e *env) sync(t *testing.T, userID int64, claims oidc.Claims) {
+	t.Helper()
+	if err := pgx.BeginFunc(t.Context(), e.d.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE`, userID); err != nil {
+			return err
+		}
+		return e.svc.SyncMembership(t.Context(), tx, userID, "groups", claims)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestIntegrationIdpMembership is C-25.FR-4 and C-25.AC-3 against PostgreSQL: the entries of a Team are stored in their
+// order and replaced as a whole; teams/payments/* takes in teams/payments and teams/payments/oncall, not
+// teams/paymentsx; a person added by hand who matches has both sources, and leaves only through the identity provider
+// when the entry no longer matches; removing by hand keeps the source idp; every change is in the Audit log by the
+// system; the CHECK refuses a row with no source; deleting the Team removes its entries.
+func TestIntegrationIdpMembership(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		ids := map[string]int64{"bob": e.bobID}
+		for login, pid := range map[string]string{"olga": "SR00000000000A", "petr": "SR00000000000P",
+			"rita": "SR00000000000R"} {
+			var id int64
+			if err := e.d.Pool.QueryRow(ctx, `INSERT INTO users (org_id, public_id, login, name, role, source, status,
+				created_at, updated_at) VALUES ($1, $4, $2, $2, 'viewer', 'oidc', 'active', $3, $3) RETURNING id`,
+				e.orgID, login, t0, pid).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids[login] = id
+		}
+		maintainer := "https://gitlab.org/claims/groups/maintainer"
+		pay, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments",
+			IdpEntries: &[]teams.IdpEntry{{Group: "teams/payments/*"}, {Claim: maintainer, Group: "teams/billing"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.svc.EntryClaims(ctx); err != nil || strings.Join(got, ",") != ","+maintainer {
+			t.Errorf("EntryClaims = %q, %v", got, err)
+		}
+		if got, err := e.svc.Get(ctx, pay.PublicID); err != nil || len(got.IdpEntries) != 2 ||
+			got.IdpEntries[1] != (teams.IdpEntry{Claim: maintainer, Group: "teams/billing"}) {
+			t.Errorf("read entries = %+v, %v", got.IdpEntries, err)
+		}
+		if _, _, err := e.svc.AddUser(ctx, by, pay.PublicID, e.bob); err != nil {
+			t.Fatal(err)
+		}
+		e.sync(t, ids["olga"], oidc.Claims{"groups": {"teams/payments"}, maintainer: {}})
+		e.sync(t, ids["petr"], oidc.Claims{"groups": {"teams/payments/oncall"}, maintainer: {}})
+		e.sync(t, ids["rita"], oidc.Claims{"groups": {"teams/paymentsx"}, maintainer: {}})
+		e.sync(t, ids["bob"], oidc.Claims{"groups": {}, maintainer: {"teams/billing"}})
+		members := func(t *testing.T) string {
+			t.Helper()
+			people, err := e.svc.Users(ctx, pay.PublicID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, p := range people {
+				out = append(out, p.Login+":"+strings.Join(p.Sources, "+"))
+			}
+			return strings.Join(out, " ")
+		}
+		if got := members(t); got != "bob:by_hand+idp olga:idp petr:idp" {
+			t.Errorf("Payments = %s", got)
+		}
+		e.sync(t, ids["petr"], oidc.Claims{"groups": {"teams/other"}, maintainer: {}})
+		e.sync(t, ids["bob"], oidc.Claims{"groups": {}, maintainer: {}})
+		if got := members(t); got != "bob:by_hand olga:idp" {
+			t.Errorf("after the groups changed = %s", got)
+		}
+		if err := e.svc.RemoveUser(ctx, by, pay.PublicID, "SR00000000000A"); !errors.Is(err, teams.ErrNotInTeam) {
+			t.Errorf("removing by hand olga = %v", err)
+		}
+		if _, _, err := e.svc.AddUser(ctx, by, pay.PublicID, "SR00000000000A"); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.svc.RemoveUser(ctx, by, pay.PublicID, "SR00000000000A"); err != nil {
+			t.Fatal(err)
+		}
+		if got := members(t); got != "bob:by_hand olga:idp" {
+			t.Errorf("after removing olga by hand = %s", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM audit_log WHERE actor_kind = 'system'
+			AND action IN ('team.user_added', 'team.user_removed') AND details ->> 'source' = 'idp'
+			AND details -> 'entry' ? 'group'`); got != 5 {
+			t.Errorf("%d entries by the identity provider, want 5", got)
+		}
+		_, err = e.d.Pool.Exec(ctx, `UPDATE team_users SET by_idp = false WHERE user_id = $1`, ids["olga"])
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.ConstraintName != "team_users_source_check" {
+			t.Errorf("a row with no source = %v", err)
+		}
+		if err := e.svc.Delete(ctx, by, pay.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM team_idp_entries`); got != 0 {
+			t.Errorf("%d entries of a deleted Team are left", got)
+		}
+		if got, err := e.svc.EntryClaims(ctx); err != nil || len(got) != 0 {
+			t.Errorf("EntryClaims after the deletion = %q, %v", got, err)
+		}
+	})
+}
+
+// TestIntegrationRemoveByHandWaitsForSignIn is the race of a removal by hand with a sign-in that changes the same row:
+// a sign-in that takes the source idp of bob, who has both sources, holds his row while the Admin removes him by hand;
+// the removal waits for it and decides from what it committed, so bob leaves the Team and team.user_removed records
+// by_hand before and nothing after, instead of the removal being lost.
+func TestIntegrationRemoveByHandWaitsForSignIn(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		pay, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments",
+			IdpEntries: &[]teams.IdpEntry{{Group: "teams/payments"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.sync(t, e.bobID, oidc.Claims{"groups": {"teams/payments"}})
+		if _, _, err := e.svc.AddUser(ctx, by, pay.PublicID, e.bob); err != nil {
+			t.Fatal(err)
+		}
+		tx, err := e.d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+		if err := e.svc.SyncMembership(ctx, tx, e.bobID, "groups", oidc.Claims{"groups": {}}); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- e.svc.RemoveUser(ctx, by, pay.PublicID, e.bob) }()
+		deadline := time.Now().Add(10 * time.Second)
+		for e.count(t, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock'`) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the removal did not wait for the sign-in")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("the removal = %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM team_users WHERE user_id = $1`, e.bobID); n != 0 {
+			t.Errorf("bob is still in the Team (%d rows)", n)
+		}
+		var diff string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT diff::text FROM audit_log WHERE action = 'team.user_removed'
+			AND actor_kind = 'system' AND details ->> 'source' IS NULL ORDER BY id DESC LIMIT 1`).Scan(&diff); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(diff, `"before": {"sources": ["by_hand"]}`) || strings.Contains(diff, `"after": {`) {
+			t.Errorf("the removal by hand recorded %s", diff)
 		}
 	})
 }
