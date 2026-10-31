@@ -34,6 +34,12 @@ export const listTeamsResponseItemsItemOneWorkingHoursEndRegExp = new RegExp('^(
 
 export const listTeamsResponseItemsItemOneMatchersMax = 50;
 
+export const listTeamsResponseItemsItemOneIdpEntriesItemClaimMax = 200;
+
+export const listTeamsResponseItemsItemOneIdpEntriesItemGroupMax = 200;
+
+export const listTeamsResponseItemsItemOneIdpEntriesMax = 100;
+
 export const listTeamsResponseItemsItemTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -53,7 +59,11 @@ export const ListTeamsResponse = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(listTeamsResponseItemsItemOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(listTeamsResponseItemsItemOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(listTeamsResponseItemsItemOneIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(listTeamsResponseItemsItemOneIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(listTeamsResponseItemsItemOneIdpEntriesMax).describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 }).and(zod.object({
   "id": zod.string().regex(listTeamsResponseItemsItemTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -81,6 +91,12 @@ export const createTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3
 
 export const createTeamBodyMatchersMax = 50;
 
+export const createTeamBodyIdpEntriesItemClaimMax = 200;
+
+export const createTeamBodyIdpEntriesItemGroupMax = 200;
+
+export const createTeamBodyIdpEntriesMax = 100;
+
 
 
 export const CreateTeamBody = zod.object({
@@ -98,7 +114,11 @@ export const CreateTeamBody = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(createTeamBodyIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(createTeamBodyIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(createTeamBodyIdpEntriesMax).optional().describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 })
 
 export const createTeamResponseOneNameMax = 200;
@@ -114,6 +134,12 @@ export const createTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0
 export const createTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 export const createTeamResponseOneMatchersMax = 50;
+
+export const createTeamResponseOneIdpEntriesItemClaimMax = 200;
+
+export const createTeamResponseOneIdpEntriesItemGroupMax = 200;
+
+export const createTeamResponseOneIdpEntriesMax = 100;
 
 export const createTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -133,7 +159,11 @@ export const CreateTeamResponse = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(createTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(createTeamResponseOneIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(createTeamResponseOneIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(createTeamResponseOneIdpEntriesMax).describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 }).and(zod.object({
   "id": zod.string().regex(createTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -165,6 +195,12 @@ export const getTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2
 
 export const getTeamResponseOneMatchersMax = 50;
 
+export const getTeamResponseOneIdpEntriesItemClaimMax = 200;
+
+export const getTeamResponseOneIdpEntriesItemGroupMax = 200;
+
+export const getTeamResponseOneIdpEntriesMax = 100;
+
 export const getTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -183,7 +219,11 @@ export const GetTeamResponse = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(getTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(getTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(getTeamResponseOneIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(getTeamResponseOneIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(getTeamResponseOneIdpEntriesMax).describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 }).and(zod.object({
   "id": zod.string().regex(getTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -220,6 +260,12 @@ export const updateTeamBodyWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3
 
 export const updateTeamBodyMatchersMax = 50;
 
+export const updateTeamBodyIdpEntriesItemClaimMax = 200;
+
+export const updateTeamBodyIdpEntriesItemGroupMax = 200;
+
+export const updateTeamBodyIdpEntriesMax = 100;
+
 
 
 export const UpdateTeamBody = zod.object({
@@ -237,7 +283,11 @@ export const UpdateTeamBody = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamBodyMatchersMax).optional().describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(updateTeamBodyIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(updateTeamBodyIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(updateTeamBodyIdpEntriesMax).optional().describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 })
 
 export const updateTeamResponseOneNameMax = 200;
@@ -253,6 +303,12 @@ export const updateTeamResponseOneWorkingHoursStartRegExp = new RegExp('^([01][0
 export const updateTeamResponseOneWorkingHoursEndRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
 
 export const updateTeamResponseOneMatchersMax = 50;
+
+export const updateTeamResponseOneIdpEntriesItemClaimMax = 200;
+
+export const updateTeamResponseOneIdpEntriesItemGroupMax = 200;
+
+export const updateTeamResponseOneIdpEntriesMax = 100;
 
 export const updateTeamResponseTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -272,7 +328,11 @@ export const UpdateTeamResponse = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).max(updateTeamResponseOneMatchersMax).describe('The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.'),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(updateTeamResponseOneIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(updateTeamResponseOneIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).max(updateTeamResponseOneIdpEntriesMax).describe('The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.')
 }).and(zod.object({
   "id": zod.string().regex(updateTeamResponseTwoIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "user_count": zod.int().describe('How many people are in the Team, disabled Users included.'),
@@ -309,6 +369,10 @@ export const ListTeamUsersParams = zod.object({
 })
 
 export const listTeamUsersResponseItemsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listTeamUsersResponseItemsItemIdpEntriesItemClaimMax = 200;
+
+export const listTeamUsersResponseItemsItemIdpEntriesItemGroupMax = 200;
+
 export const listTeamUsersResponseItemsItemLinkedMessengersItemConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -321,7 +385,11 @@ export const ListTeamUsersResponse = zod.object({
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
 }).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "sources": zod.array(zod.enum(['by_hand']).describe('How a person is in a Team. `by_hand` is an Admin\'s addition; membership through the groups of the identity provider, `idp`, comes with C-25.FR-4.')),
+  "sources": zod.array(zod.enum(['by_hand', 'idp']).describe('How a person is in a Team. `by_hand` is an Admin\'s addition; `idp` is an identity provider entry of the Team that matched the person at their last OIDC sign-in or re-check. A person may have both.')),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(listTeamUsersResponseItemsItemIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(listTeamUsersResponseItemsItemIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).describe('With the source `idp`, the entries of the Team that matched the person at their last OIDC sign-in or re-check; empty without it.'),
   "linked_messengers": zod.array(zod.object({
   "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "connection": zod.object({
@@ -333,7 +401,7 @@ export const ListTeamUsersResponse = zod.object({
 })
 
 /**
- * Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+ * Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
  * @summary Add a person to a Team
  */
 export const addTeamUserPathTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -351,6 +419,10 @@ export const AddTeamUserBody = zod.object({
 })
 
 export const addTeamUserResponseUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const addTeamUserResponseIdpEntriesItemClaimMax = 200;
+
+export const addTeamUserResponseIdpEntriesItemGroupMax = 200;
+
 export const addTeamUserResponseLinkedMessengersItemConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -362,7 +434,11 @@ export const AddTeamUserResponse = zod.object({
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
 }).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),
   "role": zod.enum(['admin', 'responder', 'viewer']),
-  "sources": zod.array(zod.enum(['by_hand']).describe('How a person is in a Team. `by_hand` is an Admin\'s addition; membership through the groups of the identity provider, `idp`, comes with C-25.FR-4.')),
+  "sources": zod.array(zod.enum(['by_hand', 'idp']).describe('How a person is in a Team. `by_hand` is an Admin\'s addition; `idp` is an identity provider entry of the Team that matched the person at their last OIDC sign-in or re-check. A person may have both.')),
+  "idp_entries": zod.array(zod.object({
+  "claim": zod.string().max(addTeamUserResponseIdpEntriesItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.'),
+  "group": zod.string().max(addTeamUserResponseIdpEntriesItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.')
+}).describe('An identity provider entry of a Team.')).describe('With the source `idp`, the entries of the Team that matched the person at their last OIDC sign-in or re-check; empty without it.'),
   "linked_messengers": zod.array(zod.object({
   "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']),
   "connection": zod.object({
@@ -373,7 +449,7 @@ export const AddTeamUserResponse = zod.object({
 })
 
 /**
- * Takes a person added by hand out of the Team; `404` when the User is not in it.
+ * Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
  * @summary Remove a person from a Team
  */
 export const removeTeamUserPathTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

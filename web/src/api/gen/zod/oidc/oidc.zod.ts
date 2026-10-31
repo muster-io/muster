@@ -9,6 +9,9 @@ import * as zod from 'zod';
  * The client secret is never returned; `client_secret_status` shows whether it is set and when it changed.
  * @summary Read OIDC settings
  */
+export const getOidcSettingsResponseOneGroupMappingsItemClaimMax = 200;
+
+export const getOidcSettingsResponseOneGroupMappingsItemGroupMax = 200;
 
 export const getOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -22,9 +25,10 @@ export const GetOidcSettingsResponse = zod.object({
   "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
-  "group": zod.string().min(1),
+  "claim": zod.string().max(getOidcSettingsResponseOneGroupMappingsItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads `groups_claim`. GitLab\'s role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and GitLab puts them in userinfo.'),
+  "group": zod.string().max(getOidcSettingsResponseOneGroupMappingsItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.'),
   "role": zod.enum(['admin', 'responder', 'viewer'])
-})),
+}).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
   "skip_totp_with_idp_mfa": zod.boolean()
@@ -44,7 +48,8 @@ export const GetOidcSettingsResponse = zod.object({
 }).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
 }).describe('Per-client proxy as read. The password is a Secret.'),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "claim": zod.string().optional().describe('For `groups_claim_missing`, the claim no sign-in has carried yet.'),
   "expires_on": zod.iso.date().nullish(),
   "user": zod.object({
   "id": zod.string().regex(getOidcSettingsResponseTwoWarningsItemUserIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
@@ -54,6 +59,7 @@ export const GetOidcSettingsResponse = zod.object({
 }).optional().describe('For `last_admin_kept`, the Admin whose Role sync was not applied.'),
   "role": zod.enum(['admin', 'responder', 'viewer']).optional().describe('For `last_admin_kept`, the Role the identity provider maps the user to.')
 })),
+  "claims_supported": zod.array(zod.string()).describe('The claims that discovery listed in `claims_supported` at the last connection check, for the editors to suggest; empty before a check, and after the issuer URL changed until the next one.'),
   "updated_at": zod.iso.datetime({"offset":true}).nullish(),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 }))
@@ -66,6 +72,9 @@ export const UpdateOidcSettingsHeader = zod.object({
   "If-Match": zod.string().describe('ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.')
 })
 
+export const updateOidcSettingsBodyOneGroupMappingsItemClaimMax = 200;
+
+export const updateOidcSettingsBodyOneGroupMappingsItemGroupMax = 200;
 
 
 
@@ -78,9 +87,10 @@ export const UpdateOidcSettingsBody = zod.object({
   "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
-  "group": zod.string().min(1),
+  "claim": zod.string().max(updateOidcSettingsBodyOneGroupMappingsItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads `groups_claim`. GitLab\'s role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and GitLab puts them in userinfo.'),
+  "group": zod.string().max(updateOidcSettingsBodyOneGroupMappingsItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.'),
   "role": zod.enum(['admin', 'responder', 'viewer'])
-})),
+}).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
   "skip_totp_with_idp_mfa": zod.boolean()
@@ -95,6 +105,9 @@ export const UpdateOidcSettingsBody = zod.object({
 }).describe('Per-client proxy as written. Omitting `password` keeps the stored one; `null` clears it.')
 }))
 
+export const updateOidcSettingsResponseOneGroupMappingsItemClaimMax = 200;
+
+export const updateOidcSettingsResponseOneGroupMappingsItemGroupMax = 200;
 
 export const updateOidcSettingsResponseTwoWarningsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
@@ -108,9 +121,10 @@ export const UpdateOidcSettingsResponse = zod.object({
   "scopes": zod.array(zod.string()).optional().describe('Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP\'s discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests.'),
   "groups_claim": zod.string(),
   "group_mappings": zod.array(zod.object({
-  "group": zod.string().min(1),
+  "claim": zod.string().max(updateOidcSettingsResponseOneGroupMappingsItemClaimMax).optional().describe('The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads `groups_claim`. GitLab\'s role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and GitLab puts them in userinfo.'),
+  "group": zod.string().max(updateOidcSettingsResponseOneGroupMappingsItemGroupMax).describe('A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry\'s `group`.'),
   "role": zod.enum(['admin', 'responder', 'viewer'])
-})),
+}).describe('An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.')).describe('The Role mapping, at most 500 entries, each with the claim it reads.'),
   "unmatched_role": zod.enum(['none', 'viewer', 'responder']).describe('Role for users without a matching group; `none` refuses the sign-in.'),
   "sync_role": zod.boolean().describe('On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created.'),
   "skip_totp_with_idp_mfa": zod.boolean()
@@ -130,7 +144,8 @@ export const UpdateOidcSettingsResponse = zod.object({
 }).optional().describe('What a read shows instead of a Secret. The value itself is never returned.')
 }).describe('Per-client proxy as read. The password is a Secret.'),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "claim": zod.string().optional().describe('For `groups_claim_missing`, the claim no sign-in has carried yet.'),
   "expires_on": zod.iso.date().nullish(),
   "user": zod.object({
   "id": zod.string().regex(updateOidcSettingsResponseTwoWarningsItemUserIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
@@ -140,12 +155,13 @@ export const UpdateOidcSettingsResponse = zod.object({
 }).optional().describe('For `last_admin_kept`, the Admin whose Role sync was not applied.'),
   "role": zod.enum(['admin', 'responder', 'viewer']).optional().describe('For `last_admin_kept`, the Role the identity provider maps the user to.')
 })),
+  "claims_supported": zod.array(zod.string()).describe('The claims that discovery listed in `claims_supported` at the last connection check, for the editors to suggest; empty before a check, and after the issuer URL changed until the next one.'),
   "updated_at": zod.iso.datetime({"offset":true}).nullish(),
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 }))
 
 /**
- * Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+ * Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported` for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
  * @summary Check the connection to the identity provider
  */
 export const checkOidcSettingsResponseWarningsItemUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -163,7 +179,8 @@ export const CheckOidcSettingsResponse = zod.object({
   "offline_access_offered": zod.boolean().optional().describe('Present when discovery was read. True when discovery lists `offline_access` in `scopes_supported` or publishes no `scopes_supported`; Muster then requests it, and users who are granted an offline token are re-checked in the background. False when the list lacks it (as GitLab\'s does) — Muster does not add it, and unless the provider grants an offline token OIDC sessions end `auth.oidc_fallback_session_lifetime` after sign-in, there is no background re-check, and Personal access tokens follow `auth.oidc_token_grace`. `offline_access` is also requested, whatever this value, when the Admin adds it to the configured scopes; `requested_scopes` then lists it. Neither value is a warning.'),
   "error": zod.string().nullish().describe('What failed; names the blocking rule when the outbound address policy refused the target. Secrets and tokens are masked.'),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "kind": zod.enum(['nobody_can_sign_in', 'groups_claim_missing', 'secret_expiring', 'last_admin_kept']).describe('`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.'),
+  "claim": zod.string().optional().describe('For `groups_claim_missing`, the claim no sign-in has carried yet.'),
   "expires_on": zod.iso.date().nullish(),
   "user": zod.object({
   "id": zod.string().regex(checkOidcSettingsResponseWarningsItemUserIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),

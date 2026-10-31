@@ -4,6 +4,7 @@
  */
 import type { LinkedMessenger } from './linkedMessenger';
 import type { RoleName } from './roleName';
+import type { TeamIdpEntry } from './teamIdpEntry';
 import type { TeamUserSource } from './teamUserSource';
 import type { UserRef } from './userRef';
 
@@ -11,5 +12,7 @@ export interface TeamUser {
   user: UserRef;
   role: RoleName;
   sources: TeamUserSource[];
+  /** With the source `idp`, the entries of the Team that matched the person at their last OIDC sign-in or re-check; empty without it. */
+  idp_entries: TeamIdpEntry[];
   linked_messengers: LinkedMessenger[];
 }

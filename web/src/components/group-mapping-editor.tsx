@@ -2,7 +2,9 @@
 // Copyright The Muster Authors
 
 // The mapping from identity provider groups to Roles of the OIDC settings (C-03.FR-5): one row per group, added and
-// removed freely; when a user's groups map to several Roles, the highest wins.
+// removed freely; when a user's groups map to several Roles, the highest wins. Each entry also reads a claim, by
+// default the groups claim; the editor shows no claim yet, but keeps the claim of every entry it loads and sends it
+// back unchanged, so that an entry of another claim is never saved against the groups claim.
 
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -15,9 +17,13 @@ import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { ROLES, roleLabel } from "./user-create-dialog";
 
-/** A row of the editor; key keeps a row's inputs in place when another row is removed. */
+/**
+ * A row of the editor; key keeps a row's inputs in place when another row is removed. claim is the claim the entry
+ * reads, kept as loaded; undefined reads the groups claim.
+ */
 export interface MappingRow {
   key: string;
+  claim?: string;
   group: string;
   role: RoleName;
 }
@@ -30,11 +36,17 @@ function newKey(): string {
 }
 
 export function mappingRows(mappings: readonly OidcGroupMapping[]): MappingRow[] {
-  return mappings.map((m) => ({ key: newKey(), group: m.group, role: m.role }));
+  return mappings.map((m) => ({ key: newKey(), claim: m.claim, group: m.group, role: m.role }));
 }
 
 export function mappingsOf(rows: readonly MappingRow[]): OidcGroupMapping[] {
-  return rows.map((r) => ({ group: r.group.trim(), role: r.role }));
+  return rows.map((r) => {
+    const entry: OidcGroupMapping = { group: r.group.trim(), role: r.role };
+    if (r.claim !== undefined && r.claim !== "") {
+      entry.claim = r.claim;
+    }
+    return entry;
+  });
 }
 
 export interface GroupMappingEditorProps {

@@ -431,6 +431,7 @@ export * from './systemNoticeList';
 export * from './systemStatus';
 export * from './systemStatusRecovery';
 export * from './team';
+export * from './teamIdpEntry';
 export * from './teamInput';
 export * from './teamList';
 export * from './teamMembership';

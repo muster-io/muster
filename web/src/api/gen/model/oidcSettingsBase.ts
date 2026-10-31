@@ -19,6 +19,7 @@ export interface OidcSettingsBase {
   /** Scopes requested at sign-in and linking. Muster always adds `openid`, and `offline_access` when the IdP's discovery lists it in `scopes_supported` or publishes no `scopes_supported`; when Muster requests it, allow `offline_access` for the Muster client at the IdP. Without an offline token users are not re-checked in the background, OIDC sessions end after `auth.oidc_fallback_session_lifetime`, and Personal access tokens follow `auth.oidc_token_grace`. The connection check shows the scopes a sign-in requests. */
   scopes?: string[];
   groups_claim: string;
+  /** The Role mapping, at most 500 entries, each with the claim it reads. */
   group_mappings: OidcGroupMapping[];
   unmatched_role: OidcUnmatchedRole;
   /** On: the identity provider decides the Role at every sign-in. Off: the mapping applies only when the user is created. */
