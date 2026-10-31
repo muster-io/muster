@@ -178,11 +178,10 @@ const scheduleBody = `{"team_id":"` + teamID + `","name":"Main","time_zone":"Eur
 const overrideBody = `{"user_id":"` + bobPublicID + `","replaces_user_id":"SRCCCCCCCCCCCC",
 	"start":"2026-11-18T10:00:00Z","end":"2026-11-18T20:00:00Z"}`
 
-// TestSchedulesAPI is C-27.FR-1, FR-2 and FR-13 at the API: the list with its cursor, team and q, a Schedule with its
+// testSchedulesAPI is C-27.FR-1, FR-2 and FR-13 at the API: the list with its cursor, team and q, a Schedule with its
 // Rotation layers, ETag and Location on creation, If-Match on update (428 without), the deletion, and the refusals of
 // the domain as problems.
-func TestSchedulesAPI(t *testing.T) {
-	x, fs := newSchedulesAPI(t)
+func testSchedulesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	a := x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules?team="+teamID+"&q=ma&limit=1", "")
 	var list struct {
 		Items []struct {
@@ -331,11 +330,10 @@ func TestSchedulesAPI(t *testing.T) {
 	}
 }
 
-// TestScheduleOnCallAPI is C-27.FR-4 and FR-5 at the API: the segments with their person and source, or a gap, the
+// testScheduleOnCallAPI is C-27.FR-4 and FR-5 at the API: the segments with their person and source, or a gap, the
 // Shifts of each Rotation layer with the skipped ones, the Overrides and the warnings; from and to are passed on, and a
 // period the domain refuses is 422 out_of_range at /query/to.
-func TestScheduleOnCallAPI(t *testing.T) {
-	x, fs := newSchedulesAPI(t)
+func testScheduleOnCallAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	a := x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/"+scheduleID+
 		"/on-call?from=2026-11-02T00:00:00Z&to=2026-11-09T00:00:00Z", "")
 	var res struct {
@@ -390,11 +388,10 @@ func TestScheduleOnCallAPI(t *testing.T) {
 	}
 }
 
-// TestScheduleOverridesAPI is C-27.FR-3, FR-6 and C-27.AC-3 at the API: the Overrides listed with their cursor, an
+// testScheduleOverridesAPI is C-27.FR-3, FR-6 and C-27.AC-3 at the API: the Overrides listed with their cursor, an
 // Override created by a Responder with its people, changed with If-Match and deleted, and the refusals not_in_team,
 // override_ended, a stale If-Match and not_pageable at /user_id.
-func TestScheduleOverridesAPI(t *testing.T) {
-	x, fs := newSchedulesAPI(t)
+func testScheduleOverridesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	base := "/api/v1/schedules/" + scheduleID + "/overrides"
 	a := x.as(t, schedulesViewer, http.MethodGet, base+"?from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z&limit=1",
 		"")
@@ -472,10 +469,9 @@ func TestScheduleOverridesAPI(t *testing.T) {
 	}
 }
 
-// TestSchedulesPermissions is C-27.FR-13 and C-27.AC-10 at the API: a Responder reads Schedules and the On-call and
+// testSchedulesPermissions is C-27.FR-13 and C-27.AC-10 at the API: a Responder reads Schedules and the On-call and
 // makes Overrides, and gets 403 on createSchedule, updateSchedule and deleteSchedule; a Viewer only reads.
-func TestSchedulesPermissions(t *testing.T) {
-	x, fs := newSchedulesAPI(t)
+func testSchedulesPermissions(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	for _, token := range []string{schedulesResponder, schedulesViewer} {
 		for _, path := range []string{"/api/v1/schedules", "/api/v1/schedules/" + scheduleID,
 			"/api/v1/schedules/" + scheduleID + "/on-call", "/api/v1/schedules/" + scheduleID + "/overrides"} {
@@ -499,10 +495,10 @@ func TestSchedulesPermissions(t *testing.T) {
 	}
 }
 
-// TestTeamInUseProblem is C-25.FR-10 and AC-9 at the API: deleteTeam of a Team with Schedules is 409 team_in_use
+// testTeamInUseProblem is C-25.FR-10 and AC-9 at the API: deleteTeam of a Team with Schedules is 409 team_in_use
 // naming them in in_use_by.
-func TestTeamInUseProblem(t *testing.T) {
-	x, ft, _ := newTeamsAPI(t)
+func testTeamInUseProblem(t *testing.T, x *testAPI, _ *fakeSchedules) {
+	ft := x.srv.teams.(*fakeTeams)
 	ft.err = &teams.InUseError{Holders: []teams.Holder{{Type: teams.HolderSchedule, PublicID: scheduleID,
 		Name: "Main"}, {Type: teams.HolderSchedule, PublicID: "SC0000000000NN", Name: "Nights"}}}
 	a := x.as(t, teamsAdmin, http.MethodDelete, "/api/v1/teams/"+teamID, "")
@@ -520,5 +516,24 @@ func TestTeamInUseProblem(t *testing.T) {
 		p.InUseBy[0].Type != "schedule" || p.InUseBy[0].ID != scheduleID || p.InUseBy[1].Name != "Nights" ||
 		!strings.Contains(p.Detail, `"Main", "Nights"`) {
 		t.Errorf("team in use = %d %s", a.status, a.body)
+	}
+}
+
+// TestSchedules runs the tests of the Schedules API on one server, which is slow to build under the race detector;
+// each starts from a fresh fake.
+func TestSchedules(t *testing.T) {
+	x, fs := newSchedulesAPI(t)
+	for _, c := range []struct {
+		name string
+		run  func(*testing.T, *testAPI, *fakeSchedules)
+	}{
+		{"schedules", testSchedulesAPI}, {"on-call", testScheduleOnCallAPI}, {"overrides", testScheduleOverridesAPI},
+		{"permissions", testSchedulesPermissions}, {"team in use", testTeamInUseProblem},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			*fs = *newFakeSchedules()
+			x.srv.teams.(*fakeTeams).err = nil
+			c.run(t, x, fs)
+		})
 	}
 }

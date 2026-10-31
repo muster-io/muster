@@ -216,11 +216,16 @@ func TestIntegrationSchedules(t *testing.T) {
 		if err := e.svc.RefreshInfo(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if got := infoLines(t); got != 2 {
-			t.Errorf("%d muster_schedule_info series, want 2", got)
+		for _, sc := range []schedules.Schedule{main, promoted} {
+			if got := infoLines(t, sc.PublicID); got != 1 {
+				t.Errorf("%d muster_schedule_info series of %s, want 1", got, sc.Name)
+			}
 		}
 		if err := e.svc.Delete(ctx, admin, promoted.PublicID, nil); err != nil {
 			t.Fatal(err)
+		}
+		if got := infoLines(t, promoted.PublicID); got != 0 {
+			t.Errorf("%d muster_schedule_info series of the deleted schedule", got)
 		}
 		if n := e.count(t, `SELECT count(*) FROM schedules WHERE team_id = $1 AND main`, e.team.ID); n != 0 {
 			t.Errorf("after deleting the main schedule %d are main", n)
@@ -236,12 +241,13 @@ func TestIntegrationSchedules(t *testing.T) {
 	})
 }
 
-// infoLines counts the muster_schedule_info series.
-func infoLines(t *testing.T) int {
+// infoLines counts the muster_schedule_info series of the Schedule id; the registry is the process's, which other
+// tests of the package fill too.
+func infoLines(t *testing.T, id string) int {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	metrics.Handler(nil).ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
-	return strings.Count(rec.Body.String(), "\nmuster_schedule_info{")
+	return strings.Count(rec.Body.String(), "\nmuster_schedule_info{schedule=\""+id+"\",")
 }
 
 // TestIntegrationOverridesAndTeams is C-27.FR-3, FR-6, C-27.AC-2, AC-3 and C-25.FR-10 on PostgreSQL: an Override by a
