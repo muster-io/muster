@@ -49,6 +49,12 @@ func (f *fakeOIDC) Update(_ context.Context, _ oidc.Requester, version *int64, i
 	if in.ClientID == "bad" {
 		return oidc.Settings{}, &oidc.FieldError{Pointer: "/client_id", Code: "invalid_format", Detail: "bad"}
 	}
+	for i, m := range in.GroupMappings {
+		if !oidc.ValidGroup(m.Group) {
+			return oidc.Settings{}, &oidc.FieldError{Pointer: fmt.Sprintf("/group_mappings/%d/group", i),
+				Code: "invalid_format", Detail: "bad"}
+		}
+	}
 	f.settings.Version++
 	f.settings.ClientID = in.ClientID
 	return f.settings, nil
@@ -215,6 +221,55 @@ func TestUpdateOidcSettings(t *testing.T) {
 	}
 	if a = x.call(t, http.MethodGet, "/api/v1/oidc-settings", "", "Cookie", adminCookie); a.status != http.StatusInternalServerError {
 		t.Errorf("a failed read = %d", a.status)
+	}
+}
+
+// TestOidcEntryClaims is C-03.FR-5 and FR-6 revised for L2 at the API: every entry of the Role mapping carries its
+// claim, omitted for the groups claim; each groups_claim_missing names its claim; claims_supported is read back, and a
+// group the domain refuses, the empty one included, is 422 invalid_format at the entry's group.
+func TestOidcEntryClaims(t *testing.T) {
+	x, f := newOIDCAPI(t)
+	owner := "https://gitlab.org/claims/groups/owner"
+	f.settings.GroupMappings = []oidc.GroupMapping{{Claim: owner, Group: "example/platform/*", Role: "admin"},
+		{Group: "oncall", Role: "responder"}}
+	f.settings.Warnings = []oidc.Warning{{Kind: oidc.WarningGroupsClaimMissing, Claim: owner}}
+	f.settings.ClaimsSupported = []string{"groups", owner}
+	a := x.call(t, http.MethodGet, "/api/v1/oidc-settings", "", "Cookie", adminCookie)
+	var read struct {
+		GroupMappings   []map[string]any `json:"group_mappings"`
+		Warnings        []map[string]any `json:"warnings"`
+		ClaimsSupported []string         `json:"claims_supported"`
+	}
+	decodeInto(t, a, &read)
+	if a.status != http.StatusOK || read.GroupMappings[0]["claim"] != owner ||
+		read.GroupMappings[0]["group"] != "example/platform/*" || read.GroupMappings[1]["claim"] != nil ||
+		len(read.GroupMappings[1]) != 2 || read.Warnings[0]["claim"] != owner ||
+		fmt.Sprint(read.ClaimsSupported) != "[groups "+owner+"]" {
+		t.Fatalf("= %d %s", a.status, a.body)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(a.body, &m)
+	for _, k := range []string{"etag", "client_secret_status", "warnings", "updated_at", "claims_supported"} {
+		delete(m, k)
+	}
+	body, _ := json.Marshal(m)
+	if a = x.mutate(t, adminCookie, http.MethodPut, "/api/v1/oidc-settings", string(body), "If-Match", `"3"`); a.status !=
+		http.StatusOK {
+		t.Fatalf("update = %d %s", a.status, a.body)
+	}
+	in := f.inputs[0].GroupMappings
+	if len(in) != 2 || in[0] != (oidc.GroupMapping{Claim: owner, Group: "example/platform/*", Role: "admin"}) ||
+		in[1] != (oidc.GroupMapping{Group: "oncall", Role: "responder"}) {
+		t.Errorf("entries = %+v", in)
+	}
+	for _, group := range []string{"", "*", "corp/*/x"} {
+		m["group_mappings"] = []map[string]any{{"claim": owner, "group": group, "role": "admin"}}
+		body, _ = json.Marshal(m)
+		status, _, ptr, code := firstProblemError(t, x.mutate(t, adminCookie, http.MethodPut, "/api/v1/oidc-settings",
+			string(body), "If-Match", "*"))
+		if status != http.StatusUnprocessableEntity || ptr != "/group_mappings/0/group" || code != "invalid_format" {
+			t.Errorf("group %q = %d %s %s", group, status, ptr, code)
+		}
 	}
 }
 

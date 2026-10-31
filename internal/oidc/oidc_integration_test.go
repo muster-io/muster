@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/oidc"
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -50,6 +51,7 @@ type world struct {
 	admin    *users.Admin
 	sessions *auth.Service
 	keyring  *keyring.Keyring
+	teams    *teams.Service
 }
 
 // setup migrates a new database with the Organization, the Audit log partition of October 2026 and the bootstrap
@@ -118,7 +120,9 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 	if wrap != nil {
 		store = wrap(store, admin)
 	}
-	svc := oidc.NewService(oidc.Config{OrgID: org.ID, Store: store, Keyring: k, Audit: w,
+	// The Teams follow their identity provider entries as the runtime wires them.
+	tm := teams.New(teams.Config{OrgID: org.ID, Store: teams.NewStore(d.Pool), Audit: w, Business: business})
+	svc := oidc.NewService(oidc.Config{OrgID: org.ID, Store: store, Keyring: k, Audit: w, Membership: tm,
 		Clocks: clocks, Log: log, Sessions: sessions, PublicURL: public, RecheckBudget: 500 * time.Millisecond,
 		Network: oidc.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(d.Pool), org.ID,
 			clock.Real{}), Log: log, Real: clock.Real{}}})
@@ -128,7 +132,152 @@ func setupWith(t *testing.T, s dbtest.Server, wrap func(oidc.Store, *users.Admin
 		t.Fatal(err)
 	}
 	return &world{d: d, orgID: org.ID, svc: svc, idp: idp, business: business, admin: admin, sessions: sessions,
-		keyring: k}
+		keyring: k, teams: tm}
+}
+
+// update saves the settings read with change applied.
+func (w *world) update(t *testing.T, change func(*oidc.Input)) oidc.Settings {
+	t.Helper()
+	st, err := w.svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := slices.Clone(st.Scopes)
+	in := oidc.Input{Enabled: st.Enabled, DisplayName: &st.DisplayName, IssuerURL: st.IssuerURL,
+		ClientID: st.ClientID, Scopes: &scopes, GroupsClaim: st.GroupsClaim, GroupMappings: st.GroupMappings,
+		UnmatchedRole: st.UnmatchedRole, SyncRole: st.SyncRole}
+	change(&in)
+	out, err := w.svc.Update(t.Context(), oidc.Requester{Actor: audit.System, Transport: audit.TransportUI},
+		&st.Version, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestIntegrationClaimsAndTeams is C-03.FR-5 to FR-7, C-03.AC-28, C-25.FR-4 and C-25.AC-3 against PostgreSQL and the
+// fake IdP in its GitLab mode, with the Teams wired as the runtime wires them: the role claims, read from userinfo,
+// match as subtrees; group_mappings keeps only what a replica of 0.1 reads the same way, and a mapping that replica
+// saves beside role_mappings applies until the next save; a refusal lists the claims; a Team entry takes people in and
+// out at their sign-ins, by the system with the source idp, never changing a Role, and removing a person by hand keeps
+// them in the Team through the identity provider.
+func TestIntegrationClaimsAndTeams(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		w := setup(t, s)
+		w.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorGitLab)})
+		owner := fakeoidc.RoleClaim(fakeoidc.RoleOwner)
+		w.update(t, func(in *oidc.Input) {
+			in.GroupMappings = []oidc.GroupMapping{{Claim: owner, Group: "example/platform/*", Role: auth.RoleAdmin},
+				{Group: "example/platform/*", Role: auth.RoleViewer}, {Group: "teams/*", Role: auth.RoleResponder},
+				{Group: "oncall", Role: auth.RoleResponder}}
+		})
+		if got := fmt.Sprint(w.scalar(t, `SELECT group_mappings::text FROM oidc_settings`)); got !=
+			`[{"role": "responder", "group": "oncall"}]` {
+			t.Errorf("group_mappings = %s", got)
+		}
+		r := teams.Requester{Actor: audit.System, Transport: audit.TransportSystem}
+		pay, err := w.teams.Create(ctx, r, teams.Input{Name: "Payments", Slug: "payments",
+			IdpEntries: &[]teams.IdpEntry{{Group: "teams/payments/*"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, u := range []fakeoidc.User{
+			{Subject: "g-1", PreferredUsername: "ann", Groups: []string{"example/platform", "example/platform/infra"},
+				RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"example/platform"}}},
+			{Subject: "g-2", PreferredUsername: "ben", Groups: []string{"example/platform/infra"},
+				RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"example/platform/infra"}}},
+			{Subject: "g-3", PreferredUsername: "cid", Groups: []string{"example/platform/apps"}},
+			{Subject: "t-1", PreferredUsername: "olga", Groups: []string{"teams/payments"}},
+			{Subject: "t-2", PreferredUsername: "petr", Groups: []string{"teams/payments/oncall"}},
+			{Subject: "t-3", PreferredUsername: "rita", Groups: []string{"teams/paymentsx"}},
+		} {
+			if out := w.signIn(t, u, ""); out.Session == nil {
+				t.Fatalf("%s = %+v", u.PreferredUsername, out)
+			}
+		}
+		roles := fmt.Sprint(w.scalar(t, `SELECT string_agg(login || ':' || role, ' ' ORDER BY login) FROM users
+			WHERE source = 'oidc'`))
+		if roles != "ann:admin ben:admin cid:viewer olga:responder petr:responder rita:responder" {
+			t.Errorf("roles = %s", roles)
+		}
+		if out := w.signIn(t, fakeoidc.User{Subject: "g-4", PreferredUsername: "dan",
+			Groups: []string{"example/platformx"}}, ""); out.Error != oidc.ErrorNoAccess {
+			t.Fatalf("example/platformx = %+v", out)
+		}
+		refused := w.actions(t, oidc.ActionSignInRefused)
+		if got := fmt.Sprint(refused[len(refused)-1]["claims"]); got !=
+			"map[groups:[example/platformx] https://gitlab.org/claims/groups/owner:[]]" {
+			t.Errorf("the refusal's claims = %s", got)
+		}
+		members := func(t *testing.T) string {
+			t.Helper()
+			people, err := w.teams.Users(ctx, pay.PublicID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, p := range people {
+				out = append(out, p.Login+":"+strings.Join(p.Sources, "+"))
+			}
+			return strings.Join(out, " ")
+		}
+		if got := members(t); got != "olga:idp petr:idp" {
+			t.Errorf("Payments = %s", got)
+		}
+		rita := fmt.Sprint(w.scalar(t, `SELECT public_id FROM users WHERE login = 'rita'`))
+		if _, _, err := w.teams.AddUser(ctx, r, pay.PublicID, rita); err != nil {
+			t.Fatal(err)
+		}
+		w.signIn(t, fakeoidc.User{Subject: "t-2", PreferredUsername: "petr", Groups: []string{"teams/other"}}, "")
+		w.signIn(t, fakeoidc.User{Subject: "t-3", PreferredUsername: "rita", Groups: []string{"teams/paymentsx"}}, "")
+		if got := members(t); got != "olga:idp rita:by_hand" {
+			t.Errorf("Payments after the sign-ins = %s", got)
+		}
+		if got := fmt.Sprint(w.scalar(t, `SELECT role FROM users WHERE login = 'petr'`)); got != "responder" {
+			t.Errorf("petr's Role = %s", got)
+		}
+		if got := fmt.Sprint(w.scalar(t, `SELECT string_agg(action || ' ' || actor_kind || ' ' ||
+			(details ->> 'source') || ' ' || (details -> 'entry' ->> 'claim') || ' ' ||
+			(details -> 'entry' ->> 'group'), '; ' ORDER BY at, id) FROM audit_log
+			WHERE action LIKE 'team.user_%' AND actor_kind = 'system'`)); got !=
+			"team.user_added system idp groups teams/payments/*; team.user_added system idp groups teams/payments/*; "+
+				"team.user_removed system idp groups teams/payments/*" {
+			t.Errorf("the Audit log = %s", got)
+		}
+
+		olga := fmt.Sprint(w.scalar(t, `SELECT public_id FROM users WHERE login = 'olga'`))
+		if err := w.teams.RemoveUser(ctx, r, pay.PublicID, olga); !errors.Is(err, teams.ErrNotInTeam) {
+			t.Errorf("removing by hand a person only through the identity provider = %v", err)
+		}
+		if _, _, err := w.teams.AddUser(ctx, r, pay.PublicID, olga); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.teams.RemoveUser(ctx, r, pay.PublicID, olga); err != nil {
+			t.Fatal(err)
+		}
+		if got := members(t); got != "olga:idp rita:by_hand" {
+			t.Errorf("after removing olga by hand = %s", got)
+		}
+
+		// A replica of 0.1 saves its mapping into group_mappings alone: it applies until the next save.
+		if _, err := w.d.Pool.Exec(ctx, `UPDATE oidc_settings SET group_mappings =
+			'[{"group": "example/platform/apps", "role": "admin"}]', version = version + 1`); err != nil {
+			t.Fatal(err)
+		}
+		st, err := w.svc.Get(ctx)
+		if err != nil || len(st.GroupMappings) != 1 || st.GroupMappings[0].Group != "example/platform/apps" {
+			t.Errorf("a mapping a 0.1 replica saved = %+v, %v", st.GroupMappings, err)
+		}
+		w.update(t, func(in *oidc.Input) {
+			in.GroupMappings = append(in.GroupMappings, oidc.GroupMapping{Claim: owner, Group: "corp",
+				Role: auth.RoleAdmin})
+		})
+		if got := fmt.Sprint(w.scalar(t, `SELECT jsonb_array_length(role_mappings)::text || ' ' ||
+			group_mappings::text FROM oidc_settings`)); got != `2 [{"role": "admin", "group": "example/platform/apps"}]` {
+			t.Errorf("after the next save = %s", got)
+		}
+	})
 }
 
 var browser = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -515,9 +664,9 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		seen := oidcdb.RecordGroupsClaimSeenParams{OrgID: w.orgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL,
-			ClientID: st.ClientID, Scopes: st.Scopes, At: t0.Add(2 * time.Hour)}
-		if n, err := q.RecordGroupsClaimSeen(t.Context(), seen); err != nil || n != 1 {
+		seen := oidcdb.RecordClaimsSeenParams{OrgID: w.orgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL,
+			ClientID: st.ClientID, Scopes: st.Scopes, Claims: []string{st.GroupsClaim}, At: t0.Add(2 * time.Hour)}
+		if n, err := q.RecordClaimsSeen(t.Context(), seen); err != nil || n != 1 {
 			t.Errorf("a sign-in on a 0.1.0 state: %d rows, %v", n, err)
 		}
 		expect(t, "a sign-in on a 0.1.0 state", "seen=t missing=f version=3 warned=false")
@@ -527,21 +676,21 @@ func TestIntegrationGroupsClaimSeen(t *testing.T) {
 
 		for _, tc := range []struct {
 			name  string
-			stale func(*oidcdb.RecordGroupsClaimSeenParams)
+			stale func(*oidcdb.RecordClaimsSeenParams)
 		}{
-			{"groups claim", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.GroupsClaim = "groups" }},
-			{"issuer", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.IssuerUrl += "/" }},
-			{"client ID", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.ClientID = "muster-2" }},
-			{"scopes", func(p *oidcdb.RecordGroupsClaimSeenParams) { p.Scopes = []string{"profile"} }},
+			{"groups claim", func(p *oidcdb.RecordClaimsSeenParams) { p.GroupsClaim = "groups" }},
+			{"issuer", func(p *oidcdb.RecordClaimsSeenParams) { p.IssuerUrl += "/" }},
+			{"client ID", func(p *oidcdb.RecordClaimsSeenParams) { p.ClientID = "muster-2" }},
+			{"scopes", func(p *oidcdb.RecordClaimsSeenParams) { p.Scopes = []string{"profile"} }},
 		} {
 			p := seen
 			p.Scopes = slices.Clone(seen.Scopes)
 			tc.stale(&p)
 			set(t, false, true)
-			n1, err1 := q.RecordGroupsClaimSeen(t.Context(), p)
-			n2, err2 := q.RecordGroupsClaimAdvertised(t.Context(), oidcdb.RecordGroupsClaimAdvertisedParams{
+			n1, err1 := q.RecordClaimsSeen(t.Context(), p)
+			n2, err2 := q.RecordClaimsAdvertised(t.Context(), oidcdb.RecordClaimsAdvertisedParams{
 				OrgID: w.orgID, GroupsClaim: p.GroupsClaim, IssuerUrl: p.IssuerUrl, ClientID: p.ClientID,
-				Scopes: p.Scopes, Advertised: true, At: t0})
+				Scopes: p.Scopes, GroupsAdvertised: true, Missing: []string{}, Supported: []string{}, At: t0})
 			if err1 != nil || err2 != nil || n1 != 0 || n2 != 0 {
 				t.Errorf("stale %s records: %d, %v; %d, %v", tc.name, n1, err1, n2, err2)
 			}

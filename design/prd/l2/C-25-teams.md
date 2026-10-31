@@ -157,8 +157,9 @@ Checked with the fake Alertmanager and the fake OIDC server, through the API and
   claim carries `teams/payments` and one with `teams/payments/oncall`, not one with `teams/paymentsx`; after the second
   User's group is removed, their next sign-in takes them out of the Team, while a User added by hand stays, and the
   Audit log records the change with the source `idp`; the Roles of all three are unchanged.
-- **C-25.AC-4** An entry naming the claim `https://gitlab.org/claims/groups/maintainer` matches a User whose ID token
-  carries that claim with the group, and also when only userinfo carries it.
+- **C-25.AC-4** An entry naming the claim `https://gitlab.org/claims/groups/maintainer` matches a User whose userinfo
+  carries that claim with the group, where GitLab puts it, and also a User whose ID token carries it, with an identity
+  provider that does.
 - **C-25.AC-5** The Alert Group of an Alert of "payments" that is later joined by an Alert of "search" lists both Teams,
   with two `team_joined` entries naming the rule; after the Alert of "search" resolves, both Teams are still listed.
 - **C-25.AC-6** A Responder who is in a Team gets `403` on changing it, and a Viewer in a Team is refused Acknowledge as

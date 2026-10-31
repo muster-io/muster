@@ -7,11 +7,12 @@
 // who holds a refresh token.
 // Control endpoints under /_fake/ script the next user, disable and enable users, grant or withhold offline_access,
 // leave the groups claim out of discovery, switch the flavor and rotate the signing key. The flavor keycloak, the
-// default, offers and grants offline_access; the flavor gitlab behaves as GitLab does: discovery does not offer
-// offline_access, an authorization request with a scope it does not offer is answered invalid_scope, every code
-// exchange returns a refresh token with the granted scope, the ID token carries groups_direct and userinfo carries
-// groups. The same server runs in Go tests and in `muster dev`. It is a test double: it accepts any client secret and
-// keeps everything in memory.
+// default, offers and grants offline_access and puts its claims in the ID token and userinfo; the flavor gitlab behaves
+// as GitLab does (F-116 to F-119): discovery lists GitLab's role claims and does not offer offline_access, an
+// authorization request with a scope it does not offer is answered invalid_scope, every code exchange returns a
+// refresh token with the granted scope, the ID token carries groups_direct alone and userinfo carries groups and the
+// role claims a scripted user holds. The same server runs in Go tests and in `muster dev`. It is a test double: it
+// accepts any client secret and keeps everything in memory.
 package fakeoidc
 
 import (
@@ -37,6 +38,9 @@ const (
 	GroupsClaim = "groups"
 	// GroupsDirectClaim is the claim of the flavor gitlab with the groups the user is a direct member of.
 	GroupsDirectClaim = "groups_direct"
+	// RoleClaimPrefix starts the names of GitLab's role claims; each lists the groups where the person holds the role
+	// directly (F-118).
+	RoleClaimPrefix = "https://gitlab.org/claims/groups/"
 	// tokenLifetime is how long the ID tokens and access tokens the fake issues are valid.
 	tokenLifetime = 5 * time.Minute
 	keyBits       = 2048
@@ -53,6 +57,21 @@ const (
 	// at every code exchange, groups_direct in the ID token and groups in userinfo.
 	FlavorGitLab Flavor = "gitlab"
 )
+
+// RoleOwner, RoleMaintainer and RoleDeveloper are the roles of GitLab's role claims, as a scripted user names them.
+const (
+	RoleOwner      = "owner"
+	RoleMaintainer = "maintainer"
+	RoleDeveloper  = "developer"
+)
+
+// roles are the roles of GitLab's role claims, in the order discovery lists their claims.
+var roles = []string{RoleOwner, RoleMaintainer, RoleDeveloper}
+
+// RoleClaim is the name of GitLab's claim of role, such as https://gitlab.org/claims/groups/owner.
+func RoleClaim(role string) string {
+	return RoleClaimPrefix + role
+}
 
 // keycloakScopes and gitLabScopes are the scopes_supported of each flavor.
 var (
@@ -78,6 +97,19 @@ type User struct {
 	// NoGroupsClaim leaves the groups claim out of the ID token and userinfo, as identity providers do for a user in
 	// no group.
 	NoGroupsClaim bool `json:"no_groups_claim,omitempty"`
+	// RoleClaims are the groups where the user holds each role of GitLab directly — owner, maintainer, developer —
+	// served as the claims https://gitlab.org/claims/groups/<role>: in userinfo alone with the flavor gitlab (F-117), in
+	// the ID token and userinfo with the flavor keycloak. A role without groups has no claim (F-119).
+	RoleClaims map[string][]string `json:"role_claims,omitempty"`
+}
+
+// roleClaims adds to claims the role claims of u that hold groups.
+func roleClaims(u User, claims map[string]any) {
+	for _, role := range roles {
+		if groups := u.RoleClaims[role]; len(groups) > 0 {
+			claims[RoleClaim(role)] = groups
+		}
+	}
 }
 
 // Config is the behaviour of the fake that /_fake/config changes; a field that a request omits keeps its value.
@@ -234,6 +266,11 @@ func (f *Fake) discovery(w http.ResponseWriter, r *http.Request) {
 		claims = append(claims, GroupsClaim)
 		if gitLab {
 			claims = append(claims, GroupsDirectClaim)
+		}
+	}
+	if gitLab {
+		for _, role := range roles {
+			claims = append(claims, RoleClaim(role))
 		}
 	}
 	f.mu.Unlock()
@@ -413,11 +450,15 @@ func (f *Fake) issue(w http.ResponseWriter, r *http.Request, g grant, withNonce 
 		claims["amr"] = g.user.AMR
 	}
 	switch {
-	case g.user.NoGroupsClaim:
 	case gitLab:
-		claims[GroupsDirectClaim] = groupsDirect(g.user)
-	case !g.user.GroupsInUserinfoOnly:
-		claims[GroupsClaim] = groups(g.user)
+		if !g.user.NoGroupsClaim {
+			claims[GroupsDirectClaim] = groupsDirect(g.user)
+		}
+	default:
+		if !g.user.NoGroupsClaim && !g.user.GroupsInUserinfoOnly {
+			claims[GroupsClaim] = groups(g.user)
+		}
+		roleClaims(g.user, claims)
 	}
 	idToken, err := f.Sign(claims)
 	if err != nil {
@@ -467,6 +508,7 @@ func (f *Fake) userinfo(w http.ResponseWriter, r *http.Request) {
 	if !u.NoGroupsClaim {
 		claims[GroupsClaim] = groups(u)
 	}
+	roleClaims(u, claims)
 	for k, v := range map[string]string{"preferred_username": u.PreferredUsername, "email": u.Email, "name": u.Name} {
 		if v != "" {
 			claims[k] = v
@@ -484,6 +526,12 @@ func (f *Fake) setNextUser(w http.ResponseWriter, r *http.Request) {
 	if u.Subject == "" {
 		fakeserver.WriteError(w, http.StatusBadRequest, "sub is required")
 		return
+	}
+	for role := range u.RoleClaims {
+		if !slices.Contains(roles, role) {
+			fakeserver.WriteError(w, http.StatusBadRequest, "role_claims takes owner, maintainer and developer")
+			return
+		}
 	}
 	f.SetNextUser(u)
 	w.WriteHeader(http.StatusNoContent)

@@ -72,7 +72,8 @@ func (s *Server) UpdateOidcSettings(ctx context.Context, req gen.UpdateOidcSetti
 		in.ClientSecretExpiresOn = &d
 	}
 	for _, m := range b.GroupMappings {
-		in.GroupMappings = append(in.GroupMappings, oidc.GroupMapping{Group: m.Group, Role: string(m.Role)})
+		in.GroupMappings = append(in.GroupMappings, oidc.GroupMapping{Claim: deref(m.Claim), Group: m.Group,
+			Role: string(m.Role)})
 	}
 	st, err := s.oidc.Update(ctx, oidc.Requester{Actor: r.Actor, Transport: r.Transport, Address: r.Address}, version,
 		in)
@@ -137,14 +138,17 @@ func (s *Server) CheckOidcSettings(ctx context.Context, _ gen.CheckOidcSettingsR
 
 func oidcSettingsOf(st oidc.Settings) gen.OidcSettings {
 	tag := etag(st.Version)
-	scopes := st.Scopes
+	scopes, supported := st.Scopes, st.ClaimsSupported
+	if supported == nil {
+		supported = []string{}
+	}
 	out := gen.OidcSettings{
 		Enabled: st.Enabled, IssuerUrl: st.IssuerURL, ClientId: st.ClientID,
 		ClientSecretStatus: keyStatusOf(st.ClientSecret), Scopes: &scopes, GroupsClaim: st.GroupsClaim,
 		GroupMappings: make([]gen.OidcGroupMapping, 0, len(st.GroupMappings)),
 		UnmatchedRole: gen.OidcUnmatchedRole(st.UnmatchedRole), SyncRole: st.SyncRole,
 		SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: proxyOf(st.Proxy, st.ProxyPassword),
-		Warnings: warningsOf(st.Warnings), Etag: &tag,
+		Warnings: warningsOf(st.Warnings), ClaimsSupported: &supported, Etag: &tag,
 	}
 	// Only a display name the Admin set is returned, so that a read sent back unchanged does not turn the default —
 	// the host of the issuer URL — into a fixed name.
@@ -153,7 +157,8 @@ func oidcSettingsOf(st oidc.Settings) gen.OidcSettings {
 		out.DisplayName = &display
 	}
 	for _, m := range st.GroupMappings {
-		out.GroupMappings = append(out.GroupMappings, gen.OidcGroupMapping{Group: m.Group, Role: gen.RoleName(m.Role)})
+		out.GroupMappings = append(out.GroupMappings, gen.OidcGroupMapping{Claim: optional(m.Claim), Group: m.Group,
+			Role: gen.RoleName(m.Role)})
 	}
 	if st.ClientSecretExpiresOn != nil {
 		out.ClientSecretExpiresOn.Set(openapi_types.Date{Time: *st.ClientSecretExpiresOn})
@@ -166,6 +171,14 @@ func oidcSettingsOf(st oidc.Settings) gen.OidcSettings {
 		out.UpdatedAt.SetNull()
 	}
 	return out
+}
+
+// optional is an optional string of a read: omitted when empty.
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func keyStatusOf(st keyring.SecretStatus) gen.SecretStatus {
@@ -200,7 +213,7 @@ func proxyOf(c proxyconf.Config, password keyring.SecretStatus) gen.ProxyConfig 
 func warningsOf(ws []oidc.Warning) []gen.OidcWarning {
 	out := make([]gen.OidcWarning, 0, len(ws))
 	for _, w := range ws {
-		item := gen.OidcWarning{Kind: gen.OidcWarningKind(w.Kind)}
+		item := gen.OidcWarning{Kind: gen.OidcWarningKind(w.Kind), Claim: optional(w.Claim)}
 		if w.ExpiresOn != nil {
 			item.ExpiresOn.Set(openapi_types.Date{Time: *w.ExpiresOn})
 		}

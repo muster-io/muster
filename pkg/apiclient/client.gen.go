@@ -2689,12 +2689,15 @@ func (e TeamRule) Valid() bool {
 // Defines values for TeamUserSource.
 const (
 	ByHand TeamUserSource = "by_hand"
+	Idp    TeamUserSource = "idp"
 )
 
 // Valid indicates whether the value is a known member of the TeamUserSource enum.
 func (e TeamUserSource) Valid() bool {
 	switch e {
 	case ByHand:
+		return true
+	case Idp:
 		return true
 	default:
 		return false
@@ -5724,8 +5727,12 @@ type OidcCheckResult struct {
 	Warnings *[]OidcWarning `json:"warnings,omitempty"`
 }
 
-// OidcGroupMapping defines model for OidcGroupMapping.
+// OidcGroupMapping An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.
 type OidcGroupMapping struct {
+	// Claim The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads `groups_claim`. GitLab's role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and GitLab puts them in userinfo.
+	Claim *string `json:"claim,omitempty"`
+
+	// Group A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry's `group`.
 	Group string   `json:"group"`
 	Role  RoleName `json:"role"`
 }
@@ -5741,7 +5748,9 @@ type OidcLinkStart struct {
 
 // OidcSettings defines model for OidcSettings.
 type OidcSettings struct {
-	ClientId string `json:"client_id"`
+	// ClaimsSupported The claims that discovery listed in `claims_supported` at the last connection check, for the editors to suggest; empty before a check, and after the issuer URL changed until the next one.
+	ClaimsSupported *[]string `json:"claims_supported,omitempty"`
+	ClientId        string    `json:"client_id"`
 
 	// ClientSecretExpiresOn Optional expiry date of the client secret; the OIDC settings warn within `oidc.secret_expiry_lead`.
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
@@ -5754,7 +5763,9 @@ type OidcSettings struct {
 	Enabled     bool    `json:"enabled"`
 
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
-	Etag          *string            `json:"etag,omitempty"`
+	Etag *string `json:"etag,omitempty"`
+
+	// GroupMappings The Role mapping, at most 500 entries, each with the claim it reads.
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
@@ -5783,8 +5794,10 @@ type OidcSettingsBase struct {
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
 	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
-	DisplayName   *string            `json:"display_name,omitempty"`
-	Enabled       bool               `json:"enabled"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Enabled     bool    `json:"enabled"`
+
+	// GroupMappings The Role mapping, at most 500 entries, each with the claim it reads.
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
@@ -5811,8 +5824,10 @@ type OidcSettingsInput struct {
 	ClientSecretExpiresOn nullable.Nullable[openapi_types.Date] `json:"client_secret_expires_on,omitempty"`
 
 	// DisplayName Provider name for the button "Sign in with {display_name}". Defaults to the host of the issuer URL; a read leaves it out while the default applies, and an empty value returns to the default.
-	DisplayName   *string            `json:"display_name,omitempty"`
-	Enabled       bool               `json:"enabled"`
+	DisplayName *string `json:"display_name,omitempty"`
+	Enabled     bool    `json:"enabled"`
+
+	// GroupMappings The Role mapping, at most 500 entries, each with the claim it reads.
 	GroupMappings []OidcGroupMapping `json:"group_mappings"`
 	GroupsClaim   string             `json:"groups_claim"`
 	IssuerUrl     string             `json:"issuer_url"`
@@ -5836,9 +5851,11 @@ type OidcUnmatchedRole string
 
 // OidcWarning defines model for OidcWarning.
 type OidcWarning struct {
+	// Claim For `groups_claim_missing`, the claim no sign-in has carried yet.
+	Claim     *string                               `json:"claim,omitempty"`
 	ExpiresOn nullable.Nullable[openapi_types.Date] `json:"expires_on,omitempty"`
 
-	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+	// Kind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 	Kind OidcWarningKind `json:"kind"`
 
 	// Role For `last_admin_kept`, the Role the identity provider maps the user to.
@@ -5848,7 +5865,7 @@ type OidcWarning struct {
 	User *UserRef `json:"user,omitempty"`
 }
 
-// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+// OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 type OidcWarningKind string
 
 // Organization defines model for Organization.
@@ -7328,6 +7345,9 @@ type Team struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
+	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
+	IdpEntries []TeamIdpEntry `json:"idp_entries"`
+
 	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
 	Matchers []Matcher `json:"matchers"`
 
@@ -7347,10 +7367,22 @@ type Team struct {
 	WorkingHours WorkingHours `json:"working_hours"`
 }
 
+// TeamIdpEntry An identity provider entry of a Team.
+type TeamIdpEntry struct {
+	// Claim The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads the groups claim of the OIDC settings.
+	Claim *string `json:"claim,omitempty"`
+
+	// Group A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry's `group`.
+	Group string `json:"group"`
+}
+
 // TeamInput defines model for TeamInput.
 type TeamInput struct {
 	// Description Omit it on an update to keep it.
 	Description *string `json:"description,omitempty"`
+
+	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
+	IdpEntries *[]TeamIdpEntry `json:"idp_entries,omitempty"`
 
 	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
 	Matchers *[]Matcher `json:"matchers,omitempty"`
@@ -7401,6 +7433,8 @@ type TeamRule string
 
 // TeamUser defines model for TeamUser.
 type TeamUser struct {
+	// IdpEntries With the source `idp`, the entries of the Team that matched the person at their last OIDC sign-in or re-check; empty without it.
+	IdpEntries       []TeamIdpEntry    `json:"idp_entries"`
 	LinkedMessengers []LinkedMessenger `json:"linked_messengers"`
 	Role             RoleName          `json:"role"`
 	Sources          []TeamUserSource  `json:"sources"`
@@ -7420,7 +7454,7 @@ type TeamUserList struct {
 	Items []TeamUser `json:"items"`
 }
 
-// TeamUserSource How a person is in a Team. `by_hand` is an Admin's addition; membership through the groups of the identity provider, `idp`, comes with C-25.FR-4.
+// TeamUserSource How a person is in a Team. `by_hand` is an Admin's addition; `idp` is an identity provider entry of the Team that matched the person at their last OIDC sign-in or re-check. A person may have both.
 type TeamUserSource string
 
 // TelegramConnection defines model for TelegramConnection.
@@ -12555,7 +12589,7 @@ type ClientInterface interface {
 
 	// CheckOidcSettings Check the connection to the identity provider
 	//
-	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+	// Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported` for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
 	//
 	// Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 	CheckOidcSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -13052,7 +13086,7 @@ type ClientInterface interface {
 
 	// AddTeamUserWithBody Add a person to a Team
 	//
-	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -13061,7 +13095,7 @@ type ClientInterface interface {
 
 	// AddTeamUser Add a person to a Team
 	//
-	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -13070,7 +13104,7 @@ type ClientInterface interface {
 
 	// RemoveTeamUser Remove a person from a Team
 	//
-	// Takes a person added by hand out of the Team; `404` when the User is not in it.
+	// Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
 	//
 	// Corresponds with DELETE /teams/{team_id}/users/{user_id} (the `RemoveTeamUser` operationId).
 	RemoveTeamUser(ctx context.Context, teamId TeamId, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -15726,7 +15760,7 @@ func (c *Client) UpdateOidcSettings(ctx context.Context, params *UpdateOidcSetti
 
 // CheckOidcSettings Check the connection to the identity provider
 //
-// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+// Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported` for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
 //
 // Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 func (c *Client) CheckOidcSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -16873,7 +16907,7 @@ func (c *Client) ListTeamUsers(ctx context.Context, teamId TeamId, reqEditors ..
 
 // AddTeamUserWithBody Add a person to a Team
 //
-// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 //
 // Takes any type of body and a specified content type.
 //
@@ -16892,7 +16926,7 @@ func (c *Client) AddTeamUserWithBody(ctx context.Context, teamId TeamId, content
 
 // AddTeamUser Add a person to a Team
 //
-// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -16911,7 +16945,7 @@ func (c *Client) AddTeamUser(ctx context.Context, teamId TeamId, body AddTeamUse
 
 // RemoveTeamUser Remove a person from a Team
 //
-// Takes a person added by hand out of the Team; `404` when the User is not in it.
+// Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
 //
 // Corresponds with DELETE /teams/{team_id}/users/{user_id} (the `RemoveTeamUser` operationId).
 func (c *Client) RemoveTeamUser(ctx context.Context, teamId TeamId, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -26693,7 +26727,7 @@ type ClientWithResponsesInterface interface {
 
 	// CheckOidcSettingsWithResponse Check the connection to the identity provider
 	//
-	// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+	// Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported` for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -27264,7 +27298,7 @@ type ClientWithResponsesInterface interface {
 
 	// AddTeamUserWithBodyWithResponse Add a person to a Team
 	//
-	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -27273,7 +27307,7 @@ type ClientWithResponsesInterface interface {
 
 	// AddTeamUserWithResponse Add a person to a Team
 	//
-	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+	// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -27282,7 +27316,7 @@ type ClientWithResponsesInterface interface {
 
 	// RemoveTeamUserWithResponse Remove a person from a Team
 	//
-	// Takes a person added by hand out of the Team; `404` when the User is not in it.
+	// Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -43372,7 +43406,7 @@ func (c *ClientWithResponses) UpdateOidcSettingsWithResponse(ctx context.Context
 
 // CheckOidcSettingsWithResponse Check the connection to the identity provider
 //
-// Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+// Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported` for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing` for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -44333,7 +44367,7 @@ func (c *ClientWithResponses) ListTeamUsersWithResponse(ctx context.Context, tea
 
 // AddTeamUserWithBodyWithResponse Add a person to a Team
 //
-// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -44348,7 +44382,7 @@ func (c *ClientWithResponses) AddTeamUserWithBodyWithResponse(ctx context.Contex
 
 // AddTeamUserWithResponse Add a person to a Team
 //
-// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+// Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -44363,7 +44397,7 @@ func (c *ClientWithResponses) AddTeamUserWithResponse(ctx context.Context, teamI
 
 // RemoveTeamUserWithResponse Remove a person from a Team
 //
-// Takes a person added by hand out of the Team; `404` when the User is not in it.
+// Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
 //
 // Returns a wrapper object for the known response body format(s).
 //

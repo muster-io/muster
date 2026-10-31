@@ -883,7 +883,7 @@ func (s *probeOIDCStore) InsertSettings(_ context.Context, a odb.InsertSettingsP
 	s.row = &odb.OidcSetting{OrgID: a.OrgID, Enabled: a.Enabled, IssuerUrl: a.IssuerUrl, ClientID: a.ClientID,
 		ClientSecretCiphertext: a.ClientSecretCiphertext, ClientSecretKeyID: a.ClientSecretKeyID,
 		ClientSecretUpdatedAt: a.ClientSecretUpdatedAt, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
-		GroupMappings: a.GroupMappings, UnmatchedRole: a.UnmatchedRole, Proxy: a.Proxy,
+		GroupMappings: a.GroupMappings, RoleMappings: a.RoleMappings, UnmatchedRole: a.UnmatchedRole, Proxy: a.Proxy,
 		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
 		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, Version: 1, UpdatedAt: a.UpdatedAt}
 	return 1, nil
@@ -895,12 +895,11 @@ func (s *probeOIDCStore) UpdateSettings(_ context.Context, a odb.UpdateSettingsP
 	return 1, nil
 }
 
-func (s *probeOIDCStore) RecordGroupsClaimSeen(context.Context, odb.RecordGroupsClaimSeenParams) (int64, error) {
+func (s *probeOIDCStore) RecordClaimsSeen(context.Context, odb.RecordClaimsSeenParams) (int64, error) {
 	return 0, nil
 }
 
-func (s *probeOIDCStore) RecordGroupsClaimAdvertised(context.Context, odb.RecordGroupsClaimAdvertisedParams) (int64,
-	error) {
+func (s *probeOIDCStore) RecordClaimsAdvertised(context.Context, odb.RecordClaimsAdvertisedParams) (int64, error) {
 	return 0, nil
 }
 

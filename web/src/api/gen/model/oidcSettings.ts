@@ -11,6 +11,8 @@ export type OidcSettings = OidcSettingsBase & ({
   client_secret_status: SecretStatus;
   proxy: ProxyConfig;
   warnings: OidcWarning[];
+  /** The claims that discovery listed in `claims_supported` at the last connection check, for the editors to suggest; empty before a check, and after the issuer URL changed until the next one. */
+  readonly claims_supported: readonly string[];
   /** @nullable */
   updated_at?: string | null;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */

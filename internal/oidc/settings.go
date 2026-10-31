@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"net/url"
 	"slices"
@@ -54,6 +55,8 @@ const (
 	maxURL         = 2000
 	maxClaimName   = 200
 	maxGroups      = 500
+	// maxClaimsSupported bounds the claims a check keeps of discovery's claims_supported, which comes from outside.
+	maxClaimsSupported = 500
 )
 
 // DefaultScopes are the configured scopes before an Admin saves the settings; openid is always added, and
@@ -96,8 +99,10 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
-// GroupMapping maps an IdP group to a Role.
+// GroupMapping is an entry of the Role mapping: a group, or a subtree a/b/*, of a claim — by default the groups claim —
+// and the Role it gives (C-03.FR-5).
 type GroupMapping struct {
+	Claim string `json:"claim,omitempty"`
 	Group string `json:"group"`
 	Role  string `json:"role"`
 }
@@ -109,9 +114,11 @@ type UserRef struct {
 	Login    string
 }
 
-// Warning is a warning of the settings; ExpiresOn goes with secret_expiring, User and Role with last_admin_kept.
+// Warning is a warning of the settings; Claim goes with groups_claim_missing, ExpiresOn with secret_expiring, User and
+// Role with last_admin_kept.
 type Warning struct {
 	Kind      string
+	Claim     string
 	ExpiresOn *time.Time
 	User      *UserRef
 	Role      string
@@ -141,6 +148,11 @@ type Settings struct {
 	// GroupsClaimSeen says that a sign-in or a link found the groups claim in an ID token or in userinfo since the
 	// groups claim, the issuer, the client ID or the scopes last changed.
 	GroupsClaimSeen bool
+	// ClaimsSeen are the claims sign-ins and links found since then, ClaimsMissing those the latest check found not
+	// advertised, and ClaimsSupported what discovery listed at the latest check of the issuer.
+	ClaimsSeen      []string
+	ClaimsMissing   []string
+	ClaimsSupported []string
 	Warnings        []Warning
 	Version         int64
 	UpdatedAt       *time.Time
@@ -183,14 +195,16 @@ type Requester struct {
 	Address   netip.Addr
 }
 
-// Queries are the queries of the package, with the insert of the Audit log.
+// Queries are the queries of the package, with the insert of the Audit log; DBTX is the connection or the transaction
+// they run on, which the Membership takes.
 type Queries interface {
+	DBTX() dbgen.DBTX
 	GetSettings(ctx context.Context, orgID int64) (dbgen.OidcSetting, error)
 	LockSettings(ctx context.Context, orgID int64) (int64, error)
 	InsertSettings(ctx context.Context, arg dbgen.InsertSettingsParams) (int64, error)
 	UpdateSettings(ctx context.Context, arg dbgen.UpdateSettingsParams) (int64, error)
-	RecordGroupsClaimSeen(ctx context.Context, arg dbgen.RecordGroupsClaimSeenParams) (int64, error)
-	RecordGroupsClaimAdvertised(ctx context.Context, arg dbgen.RecordGroupsClaimAdvertisedParams) (int64, error)
+	RecordClaimsSeen(ctx context.Context, arg dbgen.RecordClaimsSeenParams) (int64, error)
+	RecordClaimsAdvertised(ctx context.Context, arg dbgen.RecordClaimsAdvertisedParams) (int64, error)
 	LatestKeptAdmin(ctx context.Context, orgID int64) (dbgen.LatestKeptAdminRow, error)
 	InsertAuthRequest(ctx context.Context, arg dbgen.InsertAuthRequestParams) (int64, error)
 	TakeAuthRequest(ctx context.Context, arg dbgen.TakeAuthRequestParams) (dbgen.TakeAuthRequestRow, error)
@@ -231,13 +245,20 @@ type Store interface {
 
 // NewStore is the Store over the main pool.
 func NewStore(pool *pgxpool.Pool) Store {
-	return pgStore{pgQueries: pgQueries{Queries: dbgen.New(pool), Store: audit.NewStore(pool)}, pool: pool}
+	return pgStore{pgQueries: newQueries(pool), pool: pool}
 }
 
 type pgQueries struct {
 	*dbgen.Queries
 	audit.Store
+	db dbgen.DBTX
 }
+
+func newQueries(d dbgen.DBTX) pgQueries {
+	return pgQueries{Queries: dbgen.New(d), Store: audit.NewStore(d), db: d}
+}
+
+func (q pgQueries) DBTX() dbgen.DBTX { return q.db }
 
 type pgStore struct {
 	pgQueries
@@ -246,7 +267,7 @@ type pgStore struct {
 
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		return f(pgQueries{Queries: dbgen.New(tx), Store: audit.NewStore(tx)})
+		return f(newQueries(tx))
 	})
 }
 
@@ -270,6 +291,9 @@ type Config struct {
 	PublicURL *url.URL
 	// RecheckBudget bounds the refresh of a background re-check; zero is RecheckBudget, tests make it shorter.
 	RecheckBudget time.Duration
+	// Membership follows the identity provider entries of the Teams at every sign-in, link and successful re-check;
+	// nil follows none.
+	Membership Membership
 }
 
 // Service holds the OIDC settings and the sign-in flow of the Organization.
@@ -312,7 +336,8 @@ func (s *Service) read(ctx context.Context, q Queries) (Settings, dbgen.OidcSett
 
 func defaults() Settings {
 	return Settings{Scopes: slices.Clone(DefaultScopes), GroupsClaim: DefaultGroupsClaim, GroupMappings: []GroupMapping{},
-		UnmatchedRole: UnmatchedNone, SyncRole: true}
+		UnmatchedRole: UnmatchedNone, SyncRole: true, ClaimsSeen: []string{}, ClaimsMissing: []string{},
+		ClaimsSupported: []string{}}
 }
 
 func settingsOf(row dbgen.OidcSetting) (Settings, error) {
@@ -337,17 +362,62 @@ func settingsOf(row dbgen.OidcSetting) (Settings, error) {
 	if st.Scopes == nil {
 		st.Scopes = []string{}
 	}
-	if err := json.Unmarshal(row.GroupMappings, &st.GroupMappings); err != nil {
-		return Settings{}, fmt.Errorf("read the group mappings: %w", err)
-	}
-	if st.GroupMappings == nil {
-		st.GroupMappings = []GroupMapping{}
-	}
 	var err error
+	if st.GroupMappings, err = roleMappingsOf(row); err != nil {
+		return Settings{}, err
+	}
+	var seen map[string]any
+	if len(row.ClaimsSeen) > 0 {
+		if err := json.Unmarshal(row.ClaimsSeen, &seen); err != nil {
+			return Settings{}, fmt.Errorf("read the claims seen: %w", err)
+		}
+	}
+	st.ClaimsSeen = slices.Sorted(maps.Keys(seen))
+	st.ClaimsMissing = nonNil(row.ClaimsMissing)
+	st.ClaimsSupported = nonNil(row.ClaimsSupported)
 	if st.Proxy, err = proxyconf.Parse(row.Proxy); err != nil {
 		return Settings{}, err
 	}
 	return st, nil
+}
+
+// roleMappingsOf reads the Role mapping of row: role_mappings, unless group_mappings is no longer what 0.2.0 wrote
+// beside it — the entries of the groups claim with an exact group — because a replica of 0.1 saved the settings during
+// a rolling update; the mapping that replica saved, which reads the groups claim, then applies until the next save.
+func roleMappingsOf(row dbgen.OidcSetting) ([]GroupMapping, error) {
+	var roles, legacy []GroupMapping
+	if len(row.RoleMappings) > 0 {
+		if err := json.Unmarshal(row.RoleMappings, &roles); err != nil {
+			return nil, fmt.Errorf("read the role mappings: %w", err)
+		}
+	}
+	if err := json.Unmarshal(row.GroupMappings, &legacy); err != nil {
+		return nil, fmt.Errorf("read the group mappings: %w", err)
+	}
+	if !slices.Equal(legacyMappings(roles, row.GroupsClaim), nonNil(legacy)) {
+		roles = legacy
+	}
+	return nonNil(roles), nil
+}
+
+// legacyMappings are the entries of a Role mapping that a replica of 0.1, which reads every entry of group_mappings
+// against the groups claim and exactly, reads the same way: those of the groups claim with an exact group, without
+// their claim (C-03.FR-5 revised for L2).
+func legacyMappings(entries []GroupMapping, groupsClaim string) []GroupMapping {
+	out := []GroupMapping{}
+	for _, m := range entries {
+		if claimOf(m.Claim, groupsClaim) == groupsClaim && !strings.Contains(m.Group, "*") {
+			out = append(out, GroupMapping{Group: m.Group, Role: m.Role})
+		}
+	}
+	return out
+}
+
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }
 
 func secretOf(ct []byte, keyID pgtype.Text, at pgtype.Timestamptz) keyring.StoredSecret {
@@ -365,8 +435,11 @@ func (s *Service) warn(ctx context.Context, q Queries, st *Settings) error {
 	if len(st.GroupMappings) == 0 && st.UnmatchedRole == UnmatchedNone {
 		st.Warnings = append(st.Warnings, Warning{Kind: WarningNobodyCanSignIn})
 	}
-	if st.GroupsClaimMissing {
-		st.Warnings = append(st.Warnings, Warning{Kind: WarningGroupsClaimMissing})
+	for _, c := range mappingClaims(*st) {
+		if c == st.GroupsClaim && st.GroupsClaimMissing ||
+			c != st.GroupsClaim && slices.Contains(st.ClaimsMissing, c) && !slices.Contains(st.ClaimsSeen, c) {
+			st.Warnings = append(st.Warnings, Warning{Kind: WarningGroupsClaimMissing, Claim: c})
+		}
 	}
 	if d := st.ClientSecretExpiresOn; d != nil && d.Sub(s.cfg.Clocks.Business.Now()) < SecretExpiryLead {
 		st.Warnings = append(st.Warnings, Warning{Kind: WarningSecretExpiring, ExpiresOn: d})
@@ -495,7 +568,11 @@ func secretError(pointer string, err error) error {
 
 func (s *Service) store(ctx context.Context, q Queries, exists bool, version int64, st Settings, secret,
 	password keyring.StoredSecret, now time.Time) error {
-	mappings, err := json.Marshal(st.GroupMappings)
+	roles, err := json.Marshal(st.GroupMappings)
+	if err != nil {
+		return fmt.Errorf("encode the role mappings: %w", err)
+	}
+	mappings, err := json.Marshal(legacyMappings(st.GroupMappings, st.GroupsClaim))
 	if err != nil {
 		return fmt.Errorf("encode the group mappings: %w", err)
 	}
@@ -509,8 +586,8 @@ func (s *Service) store(ctx context.Context, q Queries, exists bool, version int
 			OrgID: s.cfg.OrgID, Enabled: st.Enabled, DisplayName: display, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
 			ClientSecretCiphertext: secret.Ciphertext, ClientSecretKeyID: optText(secret.KeyID),
 			ClientSecretUpdatedAt: optTime(secret.UpdatedAt), ClientSecretExpiresOn: expires, Scopes: st.Scopes,
-			GroupsClaim: st.GroupsClaim, GroupMappings: mappings, UnmatchedRole: st.UnmatchedRole, SyncRole: st.SyncRole,
-			SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(),
+			GroupsClaim: st.GroupsClaim, GroupMappings: mappings, RoleMappings: roles, UnmatchedRole: st.UnmatchedRole,
+			SyncRole: st.SyncRole, SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(),
 			ProxyPasswordCiphertext: password.Ciphertext, ProxyPasswordKeyID: optText(password.KeyID),
 			ProxyPasswordUpdatedAt: optTime(password.UpdatedAt), UpdatedAt: now.UTC(),
 		})
@@ -526,9 +603,10 @@ func (s *Service) store(ctx context.Context, q Queries, exists bool, version int
 		OrgID: s.cfg.OrgID, Version: version, Enabled: st.Enabled, DisplayName: display, IssuerUrl: st.IssuerURL,
 		ClientID: st.ClientID, ClientSecretCiphertext: secret.Ciphertext, ClientSecretKeyID: optText(secret.KeyID),
 		ClientSecretUpdatedAt: optTime(secret.UpdatedAt), ClientSecretExpiresOn: expires, Scopes: st.Scopes,
-		GroupsClaim: st.GroupsClaim, GroupMappings: mappings, UnmatchedRole: st.UnmatchedRole, SyncRole: st.SyncRole,
-		SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(), ProxyPasswordCiphertext: password.Ciphertext,
-		ProxyPasswordKeyID: optText(password.KeyID), ProxyPasswordUpdatedAt: optTime(password.UpdatedAt),
+		GroupsClaim: st.GroupsClaim, GroupMappings: mappings, RoleMappings: roles, UnmatchedRole: st.UnmatchedRole,
+		SyncRole: st.SyncRole, SkipTotpWithIdpMfa: st.SkipTOTPWithIDPMFA, Proxy: st.Proxy.JSON(),
+		ProxyPasswordCiphertext: password.Ciphertext,
+		ProxyPasswordKeyID:      optText(password.KeyID), ProxyPasswordUpdatedAt: optTime(password.UpdatedAt),
 		UpdatedAt: now.UTC(),
 	})
 	if err != nil {
@@ -592,11 +670,18 @@ func apply(before Settings, in Input) (Settings, error) {
 	}
 	after.GroupMappings = make([]GroupMapping, 0, len(in.GroupMappings))
 	for i, m := range in.GroupMappings {
-		m.Group = strings.TrimSpace(m.Group)
+		m.Claim, m.Group = strings.TrimSpace(m.Claim), strings.TrimSpace(m.Group)
 		pointer := fmt.Sprintf("/group_mappings/%d", i)
 		switch {
-		case m.Group == "" || len(m.Group) > maxClaimName:
-			return Settings{}, &FieldError{Pointer: pointer + "/group", Code: "required", Detail: "The group is empty."}
+		case len(m.Claim) > maxClaimName:
+			return Settings{}, &FieldError{Pointer: pointer + "/claim", Code: "too_long",
+				Detail: fmt.Sprintf("The claim is longer than %d characters.", maxClaimName)}
+		case !ValidGroup(m.Group):
+			return Settings{}, &FieldError{Pointer: pointer + "/group", Code: "invalid_format",
+				Detail: "The group is empty, or has a * other than a trailing /*."}
+		case len(m.Group) > maxClaimName:
+			return Settings{}, &FieldError{Pointer: pointer + "/group", Code: "too_long",
+				Detail: fmt.Sprintf("The group is longer than %d characters.", maxClaimName)}
 		case !slices.Contains(auth.RoleNames, m.Role):
 			return Settings{}, &FieldError{Pointer: pointer + "/role", Code: "invalid_format",
 				Detail: "The Role is not admin, responder or viewer."}
@@ -649,10 +734,10 @@ type CheckResult struct {
 }
 
 // Check fetches discovery with the saved settings through the interactive class and the OIDC proxy, says which scopes
-// a sign-in requests and whether the provider offers offline_access — neither is a warning — and records whether
-// discovery advertises the groups claim: while no sign-in has seen the claim, a claim it does not list raises
-// groups_claim_missing and a listed one clears it; once a sign-in has seen it, discovery's list, which is optional,
-// changes nothing.
+// a sign-in requests and whether the provider offers offline_access — neither is a warning — keeps the claims
+// discovery lists for the editors to suggest, and records whether it advertises the groups claim and every claim the
+// Role mapping reads: while no sign-in has seen a claim, a claim it does not list raises groups_claim_missing for it
+// and a listed one clears it; once a sign-in has seen the claim, discovery's list, which is optional, changes nothing.
 func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 	st, row, err := s.read(ctx, s.cfg.Store)
 	if err != nil {
@@ -678,11 +763,20 @@ func (s *Service) Check(ctx context.Context) (CheckResult, error) {
 	}
 	res.OK, res.Discovery = true, d
 	res.RequestedScopes, res.OfflineAccess = d.RequestedScopes(st.Scopes), d.OffersOfflineAccess()
-	if _, err := s.cfg.Store.RecordGroupsClaimAdvertised(ctx, dbgen.RecordGroupsClaimAdvertisedParams{
+	// A claim a sign-in has seen is never missing again, so that a check of the same discovery writes nothing.
+	missing := []string{}
+	for _, c := range mappingClaims(st) {
+		seen := slices.Contains(st.ClaimsSeen, c) || c == st.GroupsClaim && st.GroupsClaimSeen
+		if !seen && !d.AdvertisesClaim(c) {
+			missing = append(missing, c)
+		}
+	}
+	if _, err := s.cfg.Store.RecordClaimsAdvertised(ctx, dbgen.RecordClaimsAdvertisedParams{
 		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
-		Scopes: st.Scopes, Advertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),
+		Scopes: st.Scopes, Missing: missing, Supported: supportedClaims(d),
+		GroupsAdvertised: d.AdvertisesClaim(st.GroupsClaim), At: s.businessNow(),
 	}); err != nil {
-		return CheckResult{}, fmt.Errorf("record the groups claim: %w", err)
+		return CheckResult{}, fmt.Errorf("record the claims: %w", err)
 	}
 	return res, s.finishCheck(ctx, &res)
 }
@@ -705,19 +799,34 @@ func masked(err error) string {
 	return err.Error()
 }
 
-// recordGroupsClaim records that a sign-in or a link found the groups claim in an ID token or in userinfo, which
-// clears groups_claim_missing for good. A sign-in without the claim records nothing: identity providers leave it out
-// for a user in no group. The query applies only while the groups claim, the issuer, the client ID and the scopes are
-// still those of st, and writes no row when there is nothing to change.
-func (s *Service) recordGroupsClaim(ctx context.Context, st Settings, found bool) error {
-	if !found {
+// supportedClaims are the claims discovery lists, as a check keeps them: at most maxClaimsSupported, each a claim name
+// of at most maxClaimName bytes, once.
+func supportedClaims(d Discovery) []string {
+	out := []string{}
+	for _, c := range d.ClaimsSupported {
+		if len(out) == maxClaimsSupported {
+			break
+		}
+		if c != "" && len(c) <= maxClaimName && utf8.ValidString(c) && !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// recordClaims records the claims that a sign-in or a link found in an ID token or in userinfo, which clears their
+// groups_claim_missing for good. A claim the sign-in lacks is not recorded: identity providers leave it out for a user
+// in no group. The query applies only while the groups claim, the issuer, the client ID and the scopes are still those
+// of st, and writes no row when there is nothing to change.
+func (s *Service) recordClaims(ctx context.Context, st Settings, found []string) error {
+	if len(found) == 0 {
 		return nil
 	}
-	if _, err := s.cfg.Store.RecordGroupsClaimSeen(ctx, dbgen.RecordGroupsClaimSeenParams{
+	if _, err := s.cfg.Store.RecordClaimsSeen(ctx, dbgen.RecordClaimsSeenParams{
 		OrgID: s.cfg.OrgID, GroupsClaim: st.GroupsClaim, IssuerUrl: st.IssuerURL, ClientID: st.ClientID,
-		Scopes: st.Scopes, At: s.businessNow(),
+		Scopes: st.Scopes, Claims: found, At: s.businessNow(),
 	}); err != nil {
-		return fmt.Errorf("record the groups claim: %w", err)
+		return fmt.Errorf("record the claims: %w", err)
 	}
 	return nil
 }
@@ -779,7 +888,11 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 	if err != nil {
 		return fmt.Errorf("encrypt the demo client secret: %w", err)
 	}
-	mappings, err := json.Marshal(d.Mappings)
+	roles, err := json.Marshal(d.Mappings)
+	if err != nil {
+		return fmt.Errorf("encode the demo mappings: %w", err)
+	}
+	mappings, err := json.Marshal(legacyMappings(d.Mappings, DefaultGroupsClaim))
 	if err != nil {
 		return fmt.Errorf("encode the demo mappings: %w", err)
 	}
@@ -788,6 +901,7 @@ func (s *Service) EnsureDemo(ctx context.Context, d Demo) error {
 			OrgID: s.cfg.OrgID, DisplayName: optText(d.DisplayName), IssuerUrl: d.IssuerURL, ClientID: d.ClientID,
 			ClientSecretCiphertext: ct, ClientSecretKeyID: optText(keyID), UpdatedAt: optTime(&now),
 			Scopes: slices.Clone(DefaultScopes), GroupsClaim: DefaultGroupsClaim, GroupMappings: mappings,
+			RoleMappings: roles,
 		})
 		if err != nil {
 			return fmt.Errorf("store the demo OIDC settings: %w", err)

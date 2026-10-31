@@ -138,7 +138,18 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
     does not know them and renders every button on the messages it touches. A 0.1 replica gives the Alerts it
     processes no Teams, and the events-mode webhook bodies it sends lack `alert_group.teams`: create Teams only after
-    every replica runs 0.2.0.
+    every replica runs 0.2.0. A 0.1 replica reads the Role mapping against the groups claim alone, so 0.2.0 shows it
+    only the entries it reads the same way — the groups claim and an exact group: while the rollout lasts, a sign-in
+    on a 0.1 replica ignores the entries of another claim, such as GitLab's role claims, and the subtrees `a/b/*`,
+    which may refuse it or give a lower Role, never a higher one, and it changes no Team membership. Do not save the
+    OIDC settings until every replica runs 0.2.0: a save on a 0.1 replica keeps only the entries it knows, so the
+    entries of another claim and the subtrees are lost; that mapping applies from then on, and the lost entries must
+    be added again on a 0.2.0 replica after the rollout.
+
+    **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
+    that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
+    anywhere else still matches only that exact group name, but saving the OIDC settings is refused with `422`
+    `invalid_format` at that entry until it is changed or removed.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of

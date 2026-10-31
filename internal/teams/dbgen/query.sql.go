@@ -25,6 +25,27 @@ func (q *Queries) BumpTeamsVersion(ctx context.Context, orgID int64) error {
 	return err
 }
 
+const clearByHand = `-- name: ClearByHand :execrows
+UPDATE team_users
+SET by_hand = false
+WHERE org_id = $1 AND team_id = $2 AND user_id = $3 AND by_hand AND by_idp
+`
+
+type ClearByHandParams struct {
+	OrgID  int64
+	TeamID int64
+	UserID int64
+}
+
+// ClearByHand takes away the source by_hand of a person who is in a Team through the identity provider too.
+func (q *Queries) ClearByHand(ctx context.Context, arg ClearByHandParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearByHand, arg.OrgID, arg.TeamID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteTeam = `-- name: DeleteTeam :exec
 UPDATE teams
 SET deleted_at = $1, updated_at = $1, own_working_hours = false, working_days = NULL, working_start = NULL,
@@ -42,6 +63,22 @@ type DeleteTeamParams struct {
 // name and slug are free at once.
 func (q *Queries) DeleteTeam(ctx context.Context, arg DeleteTeamParams) error {
 	_, err := q.db.Exec(ctx, deleteTeam, arg.Now, arg.OrgID, arg.ID)
+	return err
+}
+
+const deleteTeamIdpEntries = `-- name: DeleteTeamIdpEntries :exec
+DELETE FROM team_idp_entries
+WHERE org_id = $1 AND team_id = $2
+`
+
+type DeleteTeamIdpEntriesParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DeleteTeamIdpEntries removes the entries of the identity provider of a Team, which an update replaces as a whole.
+func (q *Queries) DeleteTeamIdpEntries(ctx context.Context, arg DeleteTeamIdpEntriesParams) error {
+	_, err := q.db.Exec(ctx, deleteTeamIdpEntries, arg.OrgID, arg.TeamID)
 	return err
 }
 
@@ -101,9 +138,9 @@ const deleteUserTeams = `-- name: DeleteUserTeams :many
 WITH removed AS (
     DELETE FROM team_users
     WHERE org_id = $2 AND user_id = $1
-    RETURNING team_id, by_hand
+    RETURNING team_id, by_hand, by_idp
 )
-SELECT t.public_id, t.name, u.public_id AS user_public_id, u.name AS user_name, r.by_hand
+SELECT t.public_id, t.name, u.public_id AS user_public_id, u.name AS user_name, r.by_hand, r.by_idp
 FROM teams t
 JOIN removed r ON r.team_id = t.id
 JOIN users u ON u.org_id = t.org_id AND u.id = $1
@@ -122,6 +159,7 @@ type DeleteUserTeamsRow struct {
 	UserPublicID string
 	UserName     string
 	ByHand       bool
+	ByIdp        bool
 }
 
 // DeleteUserTeams takes a deleted User out of every Team and returns the Teams with the User, as the deletion left
@@ -141,6 +179,7 @@ func (q *Queries) DeleteUserTeams(ctx context.Context, arg DeleteUserTeamsParams
 			&i.UserPublicID,
 			&i.UserName,
 			&i.ByHand,
+			&i.ByIdp,
 		); err != nil {
 			return nil, err
 		}
@@ -150,6 +189,30 @@ func (q *Queries) DeleteUserTeams(ctx context.Context, arg DeleteUserTeamsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const getMember = `-- name: GetMember :one
+SELECT public_id, name
+FROM users
+WHERE org_id = $1 AND id = $2 AND status <> 'deleted'
+`
+
+type GetMemberParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetMemberRow struct {
+	PublicID string
+	Name     string
+}
+
+// GetMember reads the User whose membership the identity provider changes, as the Audit log names them.
+func (q *Queries) GetMember(ctx context.Context, arg GetMemberParams) (GetMemberRow, error) {
+	row := q.db.QueryRow(ctx, getMember, arg.OrgID, arg.ID)
+	var i GetMemberRow
+	err := row.Scan(&i.PublicID, &i.Name)
+	return i, err
 }
 
 const getOrganizationWorkingHours = `-- name: GetOrganizationWorkingHours :one
@@ -238,7 +301,7 @@ func (q *Queries) GetTeam(ctx context.Context, arg GetTeamParams) (GetTeamRow, e
 }
 
 const getTeamUser = `-- name: GetTeamUser :one
-SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
 WHERE tu.org_id = $1 AND tu.team_id = $2 AND u.public_id = $3
@@ -251,13 +314,15 @@ type GetTeamUserParams struct {
 }
 
 type GetTeamUserRow struct {
-	ID       int64
-	PublicID string
-	Name     string
-	Login    string
-	Role     string
-	Status   string
-	ByHand   bool
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	Role       string
+	Status     string
+	ByHand     bool
+	ByIdp      bool
+	IdpMatches []byte
 }
 
 // GetTeamUser reads one person in a Team.
@@ -272,6 +337,8 @@ func (q *Queries) GetTeamUser(ctx context.Context, arg GetTeamUserParams) (GetTe
 		&i.Role,
 		&i.Status,
 		&i.ByHand,
+		&i.ByIdp,
+		&i.IdpMatches,
 	)
 	return i, err
 }
@@ -323,6 +390,31 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	return id, err
 }
 
+const insertTeamIdpEntries = `-- name: InsertTeamIdpEntries :exec
+INSERT INTO team_idp_entries (org_id, team_id, claim, group_name, position)
+SELECT $1, $2, nullif(c.claim, ''), g.group_name, g.position::integer
+FROM unnest($3::text[]) WITH ORDINALITY AS g (group_name, position)
+JOIN unnest($4::text[]) WITH ORDINALITY AS c (claim, position) ON c.position = g.position
+`
+
+type InsertTeamIdpEntriesParams struct {
+	OrgID      int64
+	TeamID     int64
+	GroupNames []string
+	Claims     []string
+}
+
+// InsertTeamIdpEntries stores the entries of a Team in their order; an empty claim reads the groups claim.
+func (q *Queries) InsertTeamIdpEntries(ctx context.Context, arg InsertTeamIdpEntriesParams) error {
+	_, err := q.db.Exec(ctx, insertTeamIdpEntries,
+		arg.OrgID,
+		arg.TeamID,
+		arg.GroupNames,
+		arg.Claims,
+	)
+	return err
+}
+
 const insertTeamMatchers = `-- name: InsertTeamMatchers :exec
 INSERT INTO team_matchers (org_id, team_id, label, op, value, position)
 SELECT $1, $2, m.label, m.op, m.value, m.position
@@ -364,8 +456,8 @@ type InsertTeamUserParams struct {
 	Now    time.Time
 }
 
-// InsertTeamUser adds a User to a Team by hand, or marks a person who is in it otherwise as added by hand too; it
-// changes nothing, and counts no row, when the User is in it by hand already.
+// InsertTeamUser adds a User to a Team by hand, or marks a person who is in it through the identity provider as added
+// by hand too; it changes nothing, and counts no row, when the User is in it by hand already.
 func (q *Queries) InsertTeamUser(ctx context.Context, arg InsertTeamUserParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertTeamUser,
 		arg.OrgID,
@@ -377,6 +469,51 @@ func (q *Queries) InsertTeamUser(ctx context.Context, arg InsertTeamUserParams) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const joinThroughIdp = `-- name: JoinThroughIdp :exec
+INSERT INTO team_users (org_id, team_id, user_id, by_hand, by_idp, idp_matches, created_at)
+VALUES ($1, $2, $3, false, true, $4, $5)
+ON CONFLICT (team_id, user_id) DO UPDATE SET by_idp = true, idp_matches = excluded.idp_matches
+`
+
+type JoinThroughIdpParams struct {
+	OrgID      int64
+	TeamID     int64
+	UserID     int64
+	IdpMatches []byte
+	Now        time.Time
+}
+
+// JoinThroughIdp puts a User into a Team through the identity provider with the entries that matched them, or adds the
+// source idp to a person added by hand.
+func (q *Queries) JoinThroughIdp(ctx context.Context, arg JoinThroughIdpParams) error {
+	_, err := q.db.Exec(ctx, joinThroughIdp,
+		arg.OrgID,
+		arg.TeamID,
+		arg.UserID,
+		arg.IdpMatches,
+		arg.Now,
+	)
+	return err
+}
+
+const leaveThroughIdp = `-- name: LeaveThroughIdp :exec
+UPDATE team_users
+SET by_idp = false, idp_matches = '[]'
+WHERE org_id = $1 AND team_id = $2 AND user_id = $3 AND by_hand
+`
+
+type LeaveThroughIdpParams struct {
+	OrgID  int64
+	TeamID int64
+	UserID int64
+}
+
+// LeaveThroughIdp takes away the source idp of a person who is in a Team by hand too.
+func (q *Queries) LeaveThroughIdp(ctx context.Context, arg LeaveThroughIdpParams) error {
+	_, err := q.db.Exec(ctx, leaveThroughIdp, arg.OrgID, arg.TeamID, arg.UserID)
+	return err
 }
 
 const listClassifiedMatchers = `-- name: ListClassifiedMatchers :many
@@ -460,6 +597,80 @@ func (q *Queries) ListClassifiedTeams(ctx context.Context, orgID int64) ([]ListC
 	return items, nil
 }
 
+const listIdpEntries = `-- name: ListIdpEntries :many
+SELECT e.team_id, t.public_id, t.name, e.claim, e.group_name
+FROM team_idp_entries e
+JOIN teams t ON t.org_id = e.org_id AND t.id = e.team_id
+WHERE e.org_id = $1 AND t.deleted_at IS NULL
+ORDER BY e.team_id, e.position
+`
+
+type ListIdpEntriesRow struct {
+	TeamID    int64
+	PublicID  string
+	Name      string
+	Claim     pgtype.Text
+	GroupName string
+}
+
+// ListIdpEntries lists the entries of the identity provider of every Team that is not deleted, by Team and in their
+// order, with the Team as the Audit log names it.
+func (q *Queries) ListIdpEntries(ctx context.Context, orgID int64) ([]ListIdpEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listIdpEntries, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIdpEntriesRow{}
+	for rows.Next() {
+		var i ListIdpEntriesRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.PublicID,
+			&i.Name,
+			&i.Claim,
+			&i.GroupName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIdpEntryClaims = `-- name: ListIdpEntryClaims :many
+SELECT DISTINCT coalesce(e.claim, '')::text AS claim
+FROM team_idp_entries e
+JOIN teams t ON t.org_id = e.org_id AND t.id = e.team_id
+WHERE e.org_id = $1 AND t.deleted_at IS NULL
+ORDER BY 1
+`
+
+// ListIdpEntryClaims lists the claims the entries of the Teams that are not deleted read, the empty string for the
+// groups claim, so that a sign-in reads them.
+func (q *Queries) ListIdpEntryClaims(ctx context.Context, orgID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, listIdpEntryClaims, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var claim string
+		if err := rows.Scan(&claim); err != nil {
+			return nil, err
+		}
+		items = append(items, claim)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinkedMessengers = `-- name: ListLinkedMessengers :many
 SELECT al.user_id, c.type, c.public_id, c.name
 FROM account_links al
@@ -497,6 +708,45 @@ func (q *Queries) ListLinkedMessengers(ctx context.Context, arg ListLinkedMessen
 			&i.PublicID,
 			&i.Name,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamIdpEntries = `-- name: ListTeamIdpEntries :many
+SELECT team_id, claim, group_name
+FROM team_idp_entries
+WHERE org_id = $1 AND team_id = ANY ($2::bigint[])
+ORDER BY team_id, position
+`
+
+type ListTeamIdpEntriesParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamIdpEntriesRow struct {
+	TeamID    int64
+	Claim     pgtype.Text
+	GroupName string
+}
+
+// ListTeamIdpEntries lists the entries of the identity provider of the Teams, in their order.
+func (q *Queries) ListTeamIdpEntries(ctx context.Context, arg ListTeamIdpEntriesParams) ([]ListTeamIdpEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listTeamIdpEntries, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamIdpEntriesRow{}
+	for rows.Next() {
+		var i ListTeamIdpEntriesRow
+		if err := rows.Scan(&i.TeamID, &i.Claim, &i.GroupName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -585,7 +835,7 @@ func (q *Queries) ListTeamMatchers(ctx context.Context, arg ListTeamMatchersPara
 }
 
 const listTeamUsers = `-- name: ListTeamUsers :many
-SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
 FROM team_users tu
 JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
 WHERE tu.org_id = $1 AND tu.team_id = $2 AND u.status <> 'deleted'
@@ -598,17 +848,20 @@ type ListTeamUsersParams struct {
 }
 
 type ListTeamUsersRow struct {
-	ID       int64
-	PublicID string
-	Name     string
-	Login    string
-	Role     string
-	Status   string
-	ByHand   bool
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	Role       string
+	Status     string
+	ByHand     bool
+	ByIdp      bool
+	IdpMatches []byte
 }
 
-// ListTeamUsers lists the people in a Team, by name, with their Role and status; a deleted User, whom the deletion
-// took out of every Team, is never listed.
+// ListTeamUsers lists the people in a Team, by name, with their Role and status, how they are in it and the entries
+// of the identity provider that matched them; a deleted User, whom the deletion took out of every Team, is never
+// listed.
 func (q *Queries) ListTeamUsers(ctx context.Context, arg ListTeamUsersParams) ([]ListTeamUsersRow, error) {
 	rows, err := q.db.Query(ctx, listTeamUsers, arg.OrgID, arg.TeamID)
 	if err != nil {
@@ -626,6 +879,8 @@ func (q *Queries) ListTeamUsers(ctx context.Context, arg ListTeamUsersParams) ([
 			&i.Role,
 			&i.Status,
 			&i.ByHand,
+			&i.ByIdp,
+			&i.IdpMatches,
 		); err != nil {
 			return nil, err
 		}
@@ -746,6 +1001,52 @@ func (q *Queries) LockTeam(ctx context.Context, arg LockTeamParams) (int64, erro
 	return id, err
 }
 
+const lockTeamMember = `-- name: LockTeamMember :one
+SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
+FROM team_users tu
+JOIN users u ON u.org_id = tu.org_id AND u.id = tu.user_id
+WHERE tu.org_id = $1 AND tu.team_id = $2 AND u.public_id = $3
+FOR UPDATE OF tu
+`
+
+type LockTeamMemberParams struct {
+	OrgID    int64
+	TeamID   int64
+	PublicID string
+}
+
+type LockTeamMemberRow struct {
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	Role       string
+	Status     string
+	ByHand     bool
+	ByIdp      bool
+	IdpMatches []byte
+}
+
+// LockTeamMember reads one person in a Team and locks their row in it, so that a removal by hand decides from what a
+// sign-in that changes the same row committed; a removal locks the Team first, a sign-in the User first, and both then
+// the row.
+func (q *Queries) LockTeamMember(ctx context.Context, arg LockTeamMemberParams) (LockTeamMemberRow, error) {
+	row := q.db.QueryRow(ctx, lockTeamMember, arg.OrgID, arg.TeamID, arg.PublicID)
+	var i LockTeamMemberRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Name,
+		&i.Login,
+		&i.Role,
+		&i.Status,
+		&i.ByHand,
+		&i.ByIdp,
+		&i.IdpMatches,
+	)
+	return i, err
+}
+
 const lockTeamUser = `-- name: LockTeamUser :one
 SELECT id, public_id, name, login, role, status
 FROM users
@@ -799,6 +1100,58 @@ func (q *Queries) LockTeamsVersion(ctx context.Context, orgID int64) (int64, err
 	var teams_version int64
 	err := row.Scan(&teams_version)
 	return teams_version, err
+}
+
+const lockUserMemberships = `-- name: LockUserMemberships :many
+SELECT tu.team_id, t.public_id, t.name, tu.by_hand, tu.by_idp, tu.idp_matches
+FROM team_users tu
+JOIN teams t ON t.org_id = tu.org_id AND t.id = tu.team_id
+WHERE tu.org_id = $1 AND tu.user_id = $2 AND t.deleted_at IS NULL
+ORDER BY tu.team_id
+FOR UPDATE OF tu
+`
+
+type LockUserMembershipsParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+type LockUserMembershipsRow struct {
+	TeamID     int64
+	PublicID   string
+	Name       string
+	ByHand     bool
+	ByIdp      bool
+	IdpMatches []byte
+}
+
+// LockUserMemberships locks the rows of a User in the Teams that are not deleted, in Team order, with how they are in
+// each and the entries that matched them.
+func (q *Queries) LockUserMemberships(ctx context.Context, arg LockUserMembershipsParams) ([]LockUserMembershipsRow, error) {
+	rows, err := q.db.Query(ctx, lockUserMemberships, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockUserMembershipsRow{}
+	for rows.Next() {
+		var i LockUserMembershipsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.PublicID,
+			&i.Name,
+			&i.ByHand,
+			&i.ByIdp,
+			&i.IdpMatches,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const releaseOwnedDestinations = `-- name: ReleaseOwnedDestinations :many
@@ -889,6 +1242,30 @@ func (q *Queries) ReleaseOwnedRoutes(ctx context.Context, arg ReleaseOwnedRoutes
 		return nil, err
 	}
 	return items, nil
+}
+
+const setIdpMatches = `-- name: SetIdpMatches :exec
+UPDATE team_users
+SET idp_matches = $1
+WHERE org_id = $2 AND team_id = $3 AND user_id = $4
+`
+
+type SetIdpMatchesParams struct {
+	IdpMatches []byte
+	OrgID      int64
+	TeamID     int64
+	UserID     int64
+}
+
+// SetIdpMatches records the entries that matched a person who stays in a Team through the identity provider.
+func (q *Queries) SetIdpMatches(ctx context.Context, arg SetIdpMatchesParams) error {
+	_, err := q.db.Exec(ctx, setIdpMatches,
+		arg.IdpMatches,
+		arg.OrgID,
+		arg.TeamID,
+		arg.UserID,
+	)
+	return err
 }
 
 const updateTeam = `-- name: UpdateTeam :exec

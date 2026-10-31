@@ -6,6 +6,7 @@ package oidc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -476,6 +477,62 @@ func TestRecheckGroups(t *testing.T) {
 	if len(refused) != 1 || refused[0]["details"].(map[string]any)["reason"] != reasonNoAccess ||
 		olga.refusedAt == nil || e.store.checks[olga.id] != nil {
 		t.Errorf("groups that map to nothing = %v, %+v", refused, olga)
+	}
+}
+
+// TestRecheckMembership is C-03.FR-30 and C-25.FR-4, AC-4 at a re-check: a successful re-check follows the entries of
+// the Teams with the claims of the refreshed ID token alone, with or without oidc.sync_role — a claim it lacks is not
+// decided; the Role follows only when the token carries every claim the Role mapping reads; an unavailable or refused
+// re-check, and a refresh without an ID token, follow nothing.
+func TestRecheckMembership(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) {
+		in.SyncRole = false
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin})
+	})
+	m := e.withMembership("", maintainerClaim)
+	olga := e.signedInWithToken(t)
+	m.taken()
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"teams/payments"},
+		RoleClaims: map[string][]string{fakeoidc.RoleMaintainer: {"teams/payments"}}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	calls := m.taken()
+	if len(calls) != 1 || calls[0].userID != olga.id || fmt.Sprint(calls[0].claims) !=
+		"map[groups:[teams/payments] https://gitlab.org/claims/groups/maintainer:[teams/payments]]" {
+		t.Fatalf("a re-check without sync_role: %+v", calls)
+	}
+	if olga.role != auth.RoleResponder {
+		t.Errorf("membership changed the Role: %s", olga.role)
+	}
+
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin})
+	})
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"contractors"}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if calls := m.taken(); len(calls) != 1 || olga.role != auth.RoleResponder || olga.refusedAt != nil {
+		t.Errorf("a token without the owner claim decided the Role: %s, %+v", olga.role, calls)
+	}
+
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}})
+	e.svc.cfg.RecheckBudget = 300 * time.Millisecond
+	if err := e.idp.SetFault(fakeserver.Fault{Path: "/token", Status: http.StatusServiceUnavailable}); err != nil {
+		t.Fatal(err)
+	}
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if c := e.store.checks[olga.id]; c.outcome != CheckUnavailable || len(m.taken()) != 0 {
+		t.Errorf("an unavailable re-check followed the teams: %+v", c)
+	}
+	e.idp.ResetFaults()
+
+	e.idp.SetDisabled("u-1", true)
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if olga.refusedAt == nil || len(m.taken()) != 0 {
+		t.Errorf("a refused re-check followed the teams: %+v", olga)
 	}
 }
 

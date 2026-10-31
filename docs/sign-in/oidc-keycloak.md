@@ -51,6 +51,12 @@ Muster reads the groups from the ID token, and from the userinfo endpoint when t
 userinfo answer must be plain JSON, not a signed JWT. The name of the claim is the **Groups claim** of the OIDC
 settings; it is `groups` unless you change both.
 
+An entry of the mapping may also read **another claim**, named in the entry, such as a claim of client roles added
+by another mapper; Muster reads it the same way, from the ID token and then from userinfo. Without a claim, an entry
+reads the groups claim. A group in an entry is matched exactly, or as a subtree `a/b/*`, which matches `a/b` and every
+group below it at `/` boundaries — useful with **Full group path** on, where `/platform/*` matches `/platform` and
+`/platform/sre`.
+
 ## 3. Allow `offline_access`
 
 Muster asks for the scope `offline_access` at every sign-in, besides the scopes of the settings, from every identity
@@ -95,7 +101,7 @@ Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oi
 | Display name | the name on the button "Sign in with {name}"; by default the host of the issuer URL |
 | Scopes | `profile email`; `openid` is always added, and `offline_access` because Keycloak offers it |
 | Groups claim | `groups` |
-| Group mapping | for example `muster-admins` → Admin, `oncall` → Responder; when a person's groups map to several Roles, the highest wins |
+| Group mapping | for example `muster-admins` → Admin, `oncall` → Responder; each entry reads the groups claim unless it names another claim; when the entries map a person to several Roles, the highest wins |
 | Role for users without a matching group | none (the default) refuses their sign-in; Viewer or Responder lets them in |
 | Sync Role at sign-in | on (the default): Keycloak decides the Role at every sign-in and re-check; off: the mapping applies only when the user is created |
 | Skip TOTP when the IdP asserted MFA | off by default; on skips Muster's own TOTP step when the ID token's `amr` claim says that Keycloak used multi-factor authentication. Keycloak sends `amr` only when the client has an *Authentication Method Reference (AMR)* mapper |
@@ -134,7 +140,14 @@ token or userinfo carries the groups claim, and later checks no longer raise it;
 the client ID or the scopes starts over. A sign-in without the claim changes nothing: Keycloak leaves it out for a user
 in no group. If the warning stays after a sign-in of a user in a group, the mapper is missing or not added to the ID
 token. A mapper removed after it worked raises no warning: you notice it through refused sign-ins, whose Audit log
-entry `session.oidc_refused` lists no groups.
+entry `session.oidc_refused` lists no groups; it lists the values of every claim the mapping read.
+
+An entry that names another claim gets the same warning for its claim, which names it, until a sign-in carries that
+claim. The check also keeps the claims Keycloak lists, for the editor to suggest.
+
+The **Roles** section shows the groups and Roles of the entries; it shows their claims only in a later version, so set
+an entry of another claim through `PUT /api/v1/oidc-settings`, as `{"claim": "…", "group": "…", "role": "…"}` in
+`group_mappings`. A save on the page keeps the claim of every entry.
 
 The settings also warn when the mapping is empty and users without a matching group get no Role
 (`nobody_can_sign_in`), and two weeks before the client secret expires.

@@ -64,7 +64,7 @@ function warningShown(
       };
     case "groups_claim_missing":
       return {
-        text: t("oidc.warnings.groupsClaimMissing", { claim: groupsClaim }),
+        text: t("oidc.warnings.groupsClaimMissing", { claim: w.claim ?? groupsClaim }),
         fix: (
           <DocsLink
             to="fix.oidc_mapping"

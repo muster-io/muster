@@ -2,11 +2,12 @@
 // Copyright The Muster Authors
 
 // Package teams holds the Teams of C-25: a name and a slug, each unique among the Teams that are not deleted, a
-// description, the people added by hand and the Working hours, the Team's own or the Organization's. A Team grants no
-// Permission and limits none (ADR-0018). Every change is recorded in the Audit log and announced with the live hint
-// team, and the package exports muster_team_info. Deleting a Team keeps its row, marked deleted, removes its people and
-// Working hours and leaves the Routes and Destinations it owned without an owner, through its own queries, so that the
-// package stays a leaf of the import graph.
+// description, the people added by hand, the groups of the identity provider whose people are in the Team and the
+// Working hours, the Team's own or the Organization's. A Team grants no Permission and limits none (ADR-0018). Every
+// change is recorded in the Audit log and announced with the live hint team, and the package exports muster_team_info.
+// Deleting a Team keeps its row, marked deleted, removes its people, entries and Working hours and leaves the Routes
+// and Destinations it owned without an owner, through its own queries, so that the package imports no other domain
+// than internal/oidc, whose rule of matching groups it shares.
 package teams
 
 import (
@@ -128,6 +129,7 @@ type Team struct {
 	Own          *WorkingHours
 	WorkingHours WorkingHours
 	Matchers     []Matcher
+	IdpEntries   []IdpEntry
 	UserCount    int64
 	CreatedAt    time.Time
 	Version      int64
@@ -140,9 +142,9 @@ type Matcher struct {
 	Value string `json:"value"`
 }
 
-// Input is what createTeam and updateTeam write. A nil Description keeps the stored one on an update and is empty on a
-// creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the Team's own on an update; nil Matchers
-// keep the stored ones on an update and are none on a creation, and others replace them as a whole.
+// Input is what createTeam and updateTeam write. A nil Description or IdpEntries keeps the stored one on an update and
+// is empty on a creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the Team's own on an update; nil
+// Matchers keep the stored ones on an update and are none on a creation, and others replace them as a whole.
 type Input struct {
 	Name            string
 	Slug            string
@@ -150,17 +152,20 @@ type Input struct {
 	OwnWorkingHours bool
 	WorkingHours    *WorkingHours
 	Matchers        *[]Matcher
+	IdpEntries      *[]IdpEntry
 }
 
-// Person is someone in a Team with their Role, how they are in it and the messengers they linked.
+// Person is someone in a Team with their Role, how they are in it, the identity provider entries that matched them and
+// the messengers they linked.
 type Person struct {
-	ID       int64
-	PublicID string
-	Name     string
-	Login    string
-	Role     string
-	Sources  []string
-	Linked   []LinkedMessenger
+	ID         int64
+	PublicID   string
+	Name       string
+	Login      string
+	Role       string
+	Sources    []string
+	IdpEntries []IdpEntry
+	Linked     []LinkedMessenger
 }
 
 // LinkedMessenger is an Account link of a person: the type of its Connection and the Connection.
@@ -215,6 +220,7 @@ type Queries interface {
 		[]dbgen.ListLinkedMessengersRow, error)
 	LockTeamUser(ctx context.Context, arg dbgen.LockTeamUserParams) (dbgen.LockTeamUserRow, error)
 	GetTeamUser(ctx context.Context, arg dbgen.GetTeamUserParams) (dbgen.GetTeamUserRow, error)
+	LockTeamMember(ctx context.Context, arg dbgen.LockTeamMemberParams) (dbgen.LockTeamMemberRow, error)
 	InsertTeamUser(ctx context.Context, arg dbgen.InsertTeamUserParams) (int64, error)
 	DeleteTeamUser(ctx context.Context, arg dbgen.DeleteTeamUserParams) (int64, error)
 	DeleteUserTeams(ctx context.Context, arg dbgen.DeleteUserTeamsParams) ([]dbgen.DeleteUserTeamsRow, error)
@@ -224,6 +230,18 @@ type Queries interface {
 	InsertTeamMatchers(ctx context.Context, arg dbgen.InsertTeamMatchersParams) error
 	LockTeamsVersion(ctx context.Context, orgID int64) (int64, error)
 	BumpTeamsVersion(ctx context.Context, orgID int64) error
+	ClearByHand(ctx context.Context, arg dbgen.ClearByHandParams) (int64, error)
+	ListTeamIdpEntries(ctx context.Context, arg dbgen.ListTeamIdpEntriesParams) ([]dbgen.ListTeamIdpEntriesRow, error)
+	DeleteTeamIdpEntries(ctx context.Context, arg dbgen.DeleteTeamIdpEntriesParams) error
+	InsertTeamIdpEntries(ctx context.Context, arg dbgen.InsertTeamIdpEntriesParams) error
+	ListIdpEntryClaims(ctx context.Context, orgID int64) ([]string, error)
+	ListIdpEntries(ctx context.Context, orgID int64) ([]dbgen.ListIdpEntriesRow, error)
+	LockUserMemberships(ctx context.Context, arg dbgen.LockUserMembershipsParams) (
+		[]dbgen.LockUserMembershipsRow, error)
+	GetMember(ctx context.Context, arg dbgen.GetMemberParams) (dbgen.GetMemberRow, error)
+	JoinThroughIdp(ctx context.Context, arg dbgen.JoinThroughIdpParams) error
+	SetIdpMatches(ctx context.Context, arg dbgen.SetIdpMatchesParams) error
+	LeaveThroughIdp(ctx context.Context, arg dbgen.LeaveThroughIdpParams) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -313,10 +331,10 @@ type teamRow struct {
 	UserCount       int64
 }
 
-// teamOf is the Team of a row with the Organization's Working hours org.
-func teamOf(r teamRow, org WorkingHours) Team {
+// teamOf is the Team of a row with the Organization's Working hours org and its identity provider entries.
+func teamOf(r teamRow, org WorkingHours, entries []IdpEntry) Team {
 	t := Team{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug, Description: r.Description,
-		UserCount: r.UserCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
+		IdpEntries: nonNilEntries(entries), UserCount: r.UserCount, CreatedAt: r.CreatedAt.UTC(), Version: r.Version}
 	if r.OwnWorkingHours {
 		t.Own = &WorkingHours{Days: r.WorkingDays, Start: r.WorkingStart.String, End: r.WorkingEnd.String,
 			TimeZone: r.WorkingTimeZone.String}
@@ -358,6 +376,14 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	if err != nil {
 		return Page{}, fmt.Errorf("list the teams: %w", err)
 	}
+	ids := make([]int64, 0, len(rows))
+	for _, r := range rows[:min(len(rows), limit)] {
+		ids = append(ids, r.ID)
+	}
+	entries, err := s.idpEntries(ctx, s.store, ids)
+	if err != nil {
+		return Page{}, err
+	}
 	page := Page{Teams: make([]Team, 0, min(len(rows), limit))}
 	for i, r := range rows {
 		if i == limit {
@@ -369,7 +395,7 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 		page.Teams = append(page.Teams, teamOf(teamRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Slug: r.Slug,
 			Description: r.Description, OwnWorkingHours: r.OwnWorkingHours, WorkingDays: r.WorkingDays,
 			WorkingStart: r.WorkingStart, WorkingEnd: r.WorkingEnd, WorkingTimeZone: r.WorkingTimeZone,
-			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount}, org))
+			CreatedAt: r.CreatedAt, Version: r.Version, UserCount: r.UserCount}, org, entries[r.ID]))
 	}
 	if err := s.withMatchers(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
@@ -421,11 +447,22 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Team, er
 	if err != nil {
 		return Team{}, err
 	}
-	out := []Team{teamOf(teamRow(r), org)}
+	entries, err := s.idpEntries(ctx, q, []int64{r.ID})
+	if err != nil {
+		return Team{}, err
+	}
+	out := []Team{teamOf(teamRow(r), org, entries[r.ID])}
 	if err := s.withMatchers(ctx, q, out); err != nil {
 		return Team{}, err
 	}
 	return out[0], nil
+}
+
+func nonNilEntries(entries []IdpEntry) []IdpEntry {
+	if entries == nil {
+		return []IdpEntry{}
+	}
+	return entries
 }
 
 // lock locks the Team publicID for a change and reads it.
@@ -444,7 +481,8 @@ func (s *Service) lock(ctx context.Context, q Queries, publicID string) (Team, e
 }
 
 // check refuses an Input that is not valid, with the pointer of the field: the name, the slug (team.slug_format), the
-// description and the Working hours when they are given with own_working_hours. It returns the input normalized.
+// description, the identity provider entries and the Working hours when they are given with own_working_hours. It
+// returns the input normalized.
 func check(in Input) (Input, error) {
 	in.Name = strings.TrimSpace(in.Name)
 	switch {
@@ -467,6 +505,13 @@ func check(in Input) (Input, error) {
 				return in, err
 			}
 		}
+	}
+	if in.IdpEntries != nil {
+		entries, err := checkIdpEntries(*in.IdpEntries)
+		if err != nil {
+			return in, err
+		}
+		in.IdpEntries = &entries
 	}
 	if !in.OwnWorkingHours {
 		in.WorkingHours = nil
@@ -573,6 +618,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
+		if in.IdpEntries != nil {
+			if err := s.replaceIdpEntries(ctx, q, id, *in.IdpEntries); err != nil {
+				return err
+			}
+		}
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
 		}
@@ -631,6 +681,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if in.Matchers != nil {
 			next.Matchers = *in.Matchers
 		}
+		if in.IdpEntries != nil {
+			next.IdpEntries = *in.IdpEntries
+		}
 		if in.OwnWorkingHours && next.Own == nil {
 			if before.Own == nil {
 				return missingHours()
@@ -650,6 +703,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		if !slices.Equal(before.Matchers, next.Matchers) {
 			if err := s.writeMatchers(ctx, q, before.ID, next.Matchers); err != nil {
+				return err
+			}
+		}
+		// A change of the entries changes nobody's membership until their next sign-in or re-check (C-25.FR-4).
+		if !slices.Equal(before.IdpEntries, next.IdpEntries) {
+			if err := s.replaceIdpEntries(ctx, q, before.ID, next.IdpEntries); err != nil {
 				return err
 			}
 		}
@@ -724,6 +783,10 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
 		}
+		if err := q.DeleteTeamIdpEntries(ctx, dbgen.DeleteTeamIdpEntriesParams{OrgID: s.orgID,
+			TeamID: before.ID}); err != nil {
+			return fmt.Errorf("remove the identity provider entries of the team %s: %w", before.PublicID, err)
+		}
 		if err := q.DeleteTeam(ctx, dbgen.DeleteTeamParams{OrgID: s.orgID, ID: before.ID,
 			Now: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
 			return fmt.Errorf("delete the team %s: %w", before.PublicID, err)
@@ -781,9 +844,9 @@ func (s *Service) Users(ctx context.Context, publicID string) ([]Person, error) 
 
 func personOf(r dbgen.GetTeamUserRow) Person {
 	m := Person{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Login: r.Login, Role: r.Role,
-		Sources: []string{}, Linked: []LinkedMessenger{}}
-	if r.ByHand {
-		m.Sources = append(m.Sources, SourceByHand)
+		Sources: sourcesOf(r.ByHand, r.ByIdp), IdpEntries: []IdpEntry{}, Linked: []LinkedMessenger{}}
+	if r.ByIdp {
+		m.IdpEntries = matchesOf(r.IdpMatches)
 	}
 	return m
 }
@@ -817,8 +880,8 @@ func unknownUser() *FieldError {
 }
 
 // AddUser adds the User userID to the Team teamID by hand (C-25.FR-3) and reports whether it added them: a User
-// already in the Team by hand changes nothing. A User that does not exist or is deleted is an unknown_id FieldError;
-// a disabled one may be added.
+// already in the Team by hand changes nothing, and one in it through the identity provider gets the source by_hand too.
+// A User that does not exist or is deleted is an unknown_id FieldError; a disabled one may be added.
 func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID string) (Person, bool, error) {
 	uid, err := publicid.Parse(publicid.User, userID)
 	if err != nil {
@@ -840,6 +903,13 @@ func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID strin
 		if err != nil {
 			return fmt.Errorf("read the user %s: %w", uid, err)
 		}
+		var was []string
+		if prior, err := q.GetTeamUser(ctx, dbgen.GetTeamUserParams{OrgID: s.orgID, TeamID: t.ID,
+			PublicID: uid}); err == nil {
+			was = sourcesOf(prior.ByHand, prior.ByIdp)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read %s in the team %s: %w", uid, t.PublicID, err)
+		}
 		n, err := q.InsertTeamUser(ctx, dbgen.InsertTeamUserParams{OrgID: s.orgID, TeamID: t.ID, UserID: u.ID,
 			Now: s.clock.Now().UTC()})
 		if err != nil {
@@ -857,9 +927,12 @@ func (s *Service) AddUser(ctx context.Context, r Requester, teamID, userID strin
 		if !added {
 			return nil
 		}
+		change := audit.Change{Pointer: "/users/" + u.PublicID, After: personView{Sources: out.Sources}}
+		if len(was) > 0 {
+			change.Before = personView{Sources: was}
+		}
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
-			Action: ActionUserAdded, Resource: resourceOf(t),
-			Diff:    []audit.Change{{Pointer: "/users/" + u.PublicID, After: personView{Sources: out.Sources}}},
+			Action: ActionUserAdded, Resource: resourceOf(t), Diff: []audit.Change{change},
 			Details: map[string]any{"user": u.PublicID, "user_name": u.Name}, SourceAddress: r.Address}); err != nil {
 			return err
 		}
@@ -876,7 +949,10 @@ type personView struct {
 	Sources []string `json:"sources"`
 }
 
-// RemoveUser takes the User userID out of the Team teamID (C-25.FR-3); a User who is not in it is ErrNotInTeam.
+// RemoveUser takes away the source by_hand of the User userID in the Team teamID (C-25.FR-3, FR-4): a person also in
+// it through the identity provider stays in it with the source idp, any other leaves it. A User with no source by_hand
+// in the Team, such as one in it only through the identity provider, is ErrNotInTeam. The row is read locked, so that
+// a sign-in that changes the same row meanwhile is waited for and its outcome decides.
 func (s *Service) RemoveUser(ctx context.Context, r Requester, teamID, userID string) error {
 	uid, err := publicid.Parse(publicid.User, userID)
 	if err != nil {
@@ -887,21 +963,30 @@ func (s *Service) RemoveUser(ctx context.Context, r Requester, teamID, userID st
 		if err != nil {
 			return err
 		}
-		row, err := q.GetTeamUser(ctx, dbgen.GetTeamUserParams{OrgID: s.orgID, TeamID: t.ID, PublicID: uid})
-		if errors.Is(err, pgx.ErrNoRows) {
+		locked, err := q.LockTeamMember(ctx, dbgen.LockTeamMemberParams{OrgID: s.orgID, TeamID: t.ID, PublicID: uid})
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && !locked.ByHand {
 			return ErrNotInTeam
 		}
 		if err != nil {
-			return fmt.Errorf("read %s in the team %s: %w", uid, t.PublicID, err)
+			return fmt.Errorf("lock %s in the team %s: %w", uid, t.PublicID, err)
 		}
-		if _, err := q.DeleteTeamUser(ctx, dbgen.DeleteTeamUserParams{OrgID: s.orgID, TeamID: t.ID,
-			UserID: row.ID}); err != nil {
-			return fmt.Errorf("remove %s from the team %s: %w", uid, t.PublicID, err)
+		row := dbgen.GetTeamUserRow(locked)
+		change := audit.Change{Pointer: "/users/" + row.PublicID, Before: personView{Sources: personOf(row).Sources}}
+		var n int64
+		if row.ByIdp {
+			n, err = q.ClearByHand(ctx, dbgen.ClearByHandParams{OrgID: s.orgID, TeamID: t.ID, UserID: row.ID})
+			change.After = personView{Sources: sourcesOf(false, true)}
+		} else {
+			n, err = q.DeleteTeamUser(ctx, dbgen.DeleteTeamUserParams{OrgID: s.orgID, TeamID: t.ID, UserID: row.ID})
 		}
-		m := personOf(row)
+		if err != nil {
+			return fmt.Errorf("take the source by_hand of %s in the team %s: %w", uid, t.PublicID, err)
+		}
+		if n != 1 { // the row is locked, so it is as read
+			return fmt.Errorf("take the source by_hand of %s in the team %s: %d rows changed", uid, t.PublicID, n)
+		}
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
-			Action: ActionUserRemoved, Resource: resourceOf(t),
-			Diff:    []audit.Change{{Pointer: "/users/" + row.PublicID, Before: personView{Sources: m.Sources}}},
+			Action: ActionUserRemoved, Resource: resourceOf(t), Diff: []audit.Change{change},
 			Details: map[string]any{"user": row.PublicID, "user_name": row.Name}, SourceAddress: r.Address}); err != nil {
 			return err
 		}
@@ -921,7 +1006,7 @@ func (s *Service) RemoveUserTeams(ctx context.Context, tx usersdb.DBTX, userID i
 		return nil, fmt.Errorf("remove the user %d from their teams: %w", userID, err)
 	}
 	for _, r := range rows {
-		m := personOf(dbgen.GetTeamUserRow{ByHand: r.ByHand})
+		m := personOf(dbgen.GetTeamUserRow{ByHand: r.ByHand, ByIdp: r.ByIdp})
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: actor, Transport: t,
 			Action: ActionUserRemoved, Resource: audit.Resource{Type: ResourceTeam, PublicID: r.PublicID, Name: r.Name},
 			Diff:          []audit.Change{{Pointer: "/users/" + r.UserPublicID, Before: personView{Sources: m.Sources}}},
@@ -954,7 +1039,8 @@ func resourceOf(t Team) audit.Resource {
 	return audit.Resource{Type: ResourceTeam, PublicID: t.PublicID, Name: t.Name}
 }
 
-// view is a Team as its Audit log diff shows it: its own Working hours, null when it follows the Organization's.
+// view is a Team as its Audit log diff shows it: its own Working hours, null when it follows the Organization's, and
+// its identity provider entries.
 type view struct {
 	Name            string        `json:"name"`
 	Slug            string        `json:"slug"`
@@ -962,6 +1048,7 @@ type view struct {
 	OwnWorkingHours bool          `json:"own_working_hours"`
 	WorkingHours    *WorkingHours `json:"working_hours"`
 	Matchers        []Matcher     `json:"matchers"`
+	IdpEntries      []IdpEntry    `json:"idp_entries"`
 }
 
 func viewOf(t Team) view {
@@ -969,8 +1056,13 @@ func viewOf(t Team) view {
 	if ms == nil {
 		ms = []Matcher{}
 	}
-	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
+	v := view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
 		WorkingHours: t.Own, Matchers: ms}
+	// A Team without entries shows none, so that its creation and its other changes list no empty entries.
+	if len(t.IdpEntries) > 0 {
+		v.IdpEntries = t.IdpEntries
+	}
+	return v
 }
 
 // exportInfo sets the muster_team_info series of a Team.

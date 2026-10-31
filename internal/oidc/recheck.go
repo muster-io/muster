@@ -212,15 +212,13 @@ func (s *Service) check(ctx context.Context, owner string, userID int64) {
 	s.granted(ctx, owner, u, st, p, d, tokens)
 }
 
-// granted records a refresh the identity provider granted: the rotated token, the contact and, with oidc.sync_role and
-// a groups claim in the refreshed ID token, the Role (D247). An ID token that does not verify, or names another
-// subject, decides nothing; the rotated token is still kept when it is the user's.
+// granted records a refresh the identity provider granted: the rotated token, the contact, with oidc.sync_role and
+// every claim the Role mapping reads in the refreshed ID token the Role (D247), and the entries of the Teams whose claim
+// it carries (C-25.FR-4); the claims are read from the refreshed ID token alone. An ID token that does not verify, or
+// names another subject, decides nothing; the rotated token is still kept when it is the user's.
 func (s *Service) granted(ctx context.Context, owner string, u dbgen.GetCheckUserRow, st Settings, p *Provider,
 	d Discovery, tokens Tokens) {
-	var (
-		groups []string
-		found  bool
-	)
+	claims := Claims{}
 	if tokens.IDToken != "" {
 		idt, err := p.VerifyRefreshed(ctx, d, tokens.IDToken)
 		switch {
@@ -231,14 +229,19 @@ func (s *Service) granted(ctx context.Context, owner string, u dbgen.GetCheckUse
 			s.undecided(ctx, owner, u, tokens.RefreshToken, err)
 			return
 		}
-		if v, ok := idt.Claims[st.GroupsClaim]; ok {
-			groups, found = stringList(v), true
+		names, err := s.claimNames(ctx, st)
+		if err != nil {
+			s.unavailable(ctx, owner, u, "settings", err)
+			return
 		}
+		claims = presentClaims(idt, names)
 	}
-	sync := found && st.SyncRole
-	role, mapped := MapRole(groups, st.GroupMappings, st.UnmatchedRole)
+	sync := st.SyncRole && claims.decidesAll(mappingClaims(st))
+	role, mapped := MapRole(claims, st.GroupsClaim, st.GroupMappings, st.UnmatchedRole)
 	if sync && !mapped {
-		s.refuseAtCheck(ctx, owner, u, map[string]any{"reason": reasonNoAccess, "groups": auditGroups(groups)})
+		details := refusalClaims(st, claims)
+		details["reason"] = reasonNoAccess
+		s.refuseAtCheck(ctx, owner, u, details)
 		return
 	}
 	now := s.cfg.Clocks.Business.Now().UTC()
@@ -265,11 +268,14 @@ func (s *Service) granted(ctx context.Context, owner string, u dbgen.GetCheckUse
 		if err := q.RecordContact(ctx, dbgen.RecordContactParams{OrgID: s.cfg.OrgID, ID: u.ID, Now: now}); err != nil {
 			return fmt.Errorf("record the contact with the identity provider: %w", err)
 		}
-		if !sync || role == cur.Role {
-			return nil
+		if sync && role != cur.Role {
+			if err := s.syncRole(ctx, q, dbgen.GetIdentityUserRow{ID: u.ID, PublicID: u.PublicID, Name: u.Name}, role,
+				now, syncAtRecheck); err != nil {
+				return err
+			}
 		}
-		return s.syncRole(ctx, q, dbgen.GetIdentityUserRow{ID: u.ID, PublicID: u.PublicID, Name: u.Name}, role, now,
-			syncAtRecheck)
+		// lockCheck locked the row of the user, which the Membership needs.
+		return s.syncMembership(ctx, q, u.ID, st, claims)
 	})
 	if errors.Is(err, errLeaseLost) {
 		s.rescueRotated(rctx, u, tokens.RefreshToken)

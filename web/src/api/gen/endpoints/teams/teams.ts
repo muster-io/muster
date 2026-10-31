@@ -631,7 +631,7 @@ export const getAddTeamUserUrl = (teamId: string,) => {
 }
 
 /**
- * Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
+ * Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422` `unknown_id` at `/user_id`.
  * @summary Add a person to a Team
  */
 export const addTeamUser = async (teamId: string,
@@ -721,7 +721,7 @@ export const useAddTeamUser = <TError = BadRequestResponse | UnauthorizedRespons
 }
 
 /**
- * Takes a person added by hand out of the Team; `404` when the User is not in it.
+ * Takes away the source `by_hand` of a person in the Team. A person also in it through the identity provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only through the identity provider.
  * @summary Remove a person from a Team
  */
 export const removeTeamUser = async (teamId: string,

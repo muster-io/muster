@@ -211,7 +211,12 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   on `:8080`, ingest on `:8081`, internal on `:8082` (health, `/metrics`, `/_dev/`) from S-006, which adds the runtime.
   The fake Alertmanager, Mattermost, Telegram and Slack servers and the fake bridge listen on `127.0.0.1:19093`,
   `:18065`, `:18081`, `:18097` and `:18094`, and a second fake Mattermost server on `:18066`; each records requests at
-  `/_fake/requests` and takes scripted faults at `/_fake/faults`. Both Mattermost servers and the Telegram server also
+  `/_fake/requests` and takes scripted faults at `/_fake/faults`. The fake OIDC server, on `127.0.0.1:18090`, is the
+  identity provider of the demo OIDC configuration; `/_fake/next-user` scripts the person it approves next. Its flavor
+  `keycloak`, the default, puts the claims in the ID token and userinfo; `/_fake/config` `{"flavor":"gitlab"}` makes it
+  behave as GitLab: `groups_direct` in the ID token, and `groups` and GitLab's role claims
+  `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer` in userinfo only, the role claims of a
+  scripted person from its `role_claims`, the direct groups of each role they hold. Both Mattermost servers and the Telegram server also
   serve a second bot, with the published tokens `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for
   which `muster dev` creates no Connection. The fake bridge serves two bots: `muster-dev-bridge-token`, which the demo
   Connection "Example Bridge" uses in poll mode, and `muster-dev-bridge-token-b`, for which `muster dev` creates no

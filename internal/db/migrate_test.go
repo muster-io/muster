@@ -2233,24 +2233,117 @@ func TestIntegrationTeamLabelAndMatchers(t *testing.T) {
 	})
 }
 
+// TestIntegrationIdentityProviderClaims runs 0025 over a database of 0.1 whose OIDC settings carry a mapping and the
+// warning groups_claim_missing, and whose Team has a person added by hand: up fills role_mappings from group_mappings
+// and keeps the warning, as claims_missing beside groups_claim_missing_since, keeps the person by hand and validates
+// every new CHECK; a row in a Team with no source, role_mappings that are not an array and an entry without a group are
+// refused. Down takes out the people only the identity provider put in and drops the columns and the table; up again
+// carries a groups claim seen over into claims_seen. The versions are reached by number, so that the test holds
+// whichever migration precedes 0025.
+func TestIntegrationIdentityProviderClaims(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 24)
+		e.exec(t, `INSERT INTO oidc_settings (org_id, enabled, issuer_url, client_id, scopes, groups_claim,
+			group_mappings, unmatched_role, sync_role, skip_totp_with_idp_mfa, groups_claim_missing_since, updated_at)
+			SELECT id, true, 'https://idp.example.org', 'muster', '{}', 'roles',
+				'[{"group": "oncall", "role": "responder"}, {"group": "admins", "role": "admin"}]', 'none', true, false,
+				'2026-10-05', '2026-10-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000PA', 'Payments', 'payments', '2026-10-27', '2026-10-27' FROM organizations`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, u.p, u.l, u.l, 'viewer', 'oidc', 'active', '2026-10-27', '2026-10-27'
+			FROM organizations, (VALUES ('SR0000000000BB', 'bob'), ('SR0000000000CC', 'cid')) AS u (p, l)`)
+		e.exec(t, `INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
+			SELECT t.org_id, t.id, u.id, true, '2026-10-27' FROM teams t JOIN users u ON u.login = 'bob'`)
+
+		if err := e.mm.Migrate(25); err != nil {
+			t.Fatalf("up to 25: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM oidc_settings WHERE role_mappings = group_mappings
+			AND jsonb_array_length(role_mappings) = 2 AND claims_missing = '{roles}' AND claims_seen = '{}'
+			AND claims_supported = '{}' AND groups_claim_missing_since IS NOT NULL AND version = 1`); n != 1 {
+			t.Errorf("after up: %d settings with the mapping and the warning kept, want 1", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM team_users WHERE by_hand AND NOT by_idp AND idp_matches = '[]'`); n != 1 {
+			t.Errorf("after up: %d people by hand, want 1", n)
+		}
+		want := "oidc_settings.oidc_settings_claims_seen_check:true oidc_settings.oidc_settings_role_mappings_check:true " +
+			"team_users.team_users_idp_matches_check:true team_users.team_users_source_check:true"
+		got := e.constraints(t, []string{"oidc_settings"}, "oidc_settings_claims_seen") + " " +
+			e.constraints(t, []string{"oidc_settings"}, "oidc_settings_role_mappings") + " " +
+			e.constraints(t, []string{"team_users"}, "team_users_idp_matches") + " " +
+			e.constraints(t, []string{"team_users"}, "team_users_source")
+		if got != want {
+			t.Errorf("after up: constraints\n%s\nwant\n%s", got, want)
+		}
+		refused := func(t *testing.T, name, sql, constraint string) {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), sql)
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		refused(t, "a row with no source", `UPDATE team_users SET by_hand = false`, "team_users_source_check")
+		refused(t, "role_mappings as an object", `UPDATE oidc_settings SET role_mappings = '{}'`,
+			"oidc_settings_role_mappings_check")
+		refused(t, "an entry without a group", `INSERT INTO team_idp_entries (org_id, team_id, group_name, position)
+			SELECT org_id, id, '', 0 FROM teams`, "team_idp_entries_group_name_check")
+		e.exec(t, `INSERT INTO team_idp_entries (org_id, team_id, claim, group_name, position)
+			SELECT org_id, id, NULL, 'teams/payments/*', 1 FROM teams`)
+		e.exec(t, `INSERT INTO team_users (org_id, team_id, user_id, by_hand, by_idp, idp_matches, created_at)
+			SELECT t.org_id, t.id, u.id, false, true, '[{"group": "teams/payments/*"}]', '2026-10-27'
+			FROM teams t JOIN users u ON u.login = 'cid'`)
+		e.exec(t, `UPDATE team_users SET by_idp = true WHERE user_id = (SELECT id FROM users WHERE login = 'bob')`)
+		e.exec(t, `UPDATE oidc_settings SET groups_claim_seen_at = '2026-10-06', groups_claim_missing_since = NULL`)
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 25 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		for what, sql := range map[string]string{
+			"team_idp_entries": `SELECT count(*) FROM information_schema.tables WHERE table_name = 'team_idp_entries'`,
+			"the new columns": `SELECT count(*) FROM information_schema.columns WHERE (table_name = 'oidc_settings'
+				AND column_name IN ('role_mappings', 'claims_seen', 'claims_missing', 'claims_supported'))
+				OR (table_name = 'team_users' AND column_name IN ('by_idp', 'idp_matches'))`,
+			"cid, in the Team only through the identity provider": `SELECT count(*) FROM team_users
+				WHERE user_id = (SELECT id FROM users WHERE login = 'cid')`,
+		} {
+			if n := e.count(t, sql); n != 0 {
+				t.Errorf("after down: %s is left", what)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM team_users WHERE by_hand`); n != 1 {
+			t.Error("after down: bob, added by hand, left the Team")
+		}
+
+		if err := e.mm.Migrate(25); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM oidc_settings WHERE claims_seen ? 'roles' AND claims_missing = '{}'`); n != 1 {
+			t.Error("up again: the groups claim seen is not carried over")
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (24)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (25)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":24`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":25`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":24`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":25`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2266,10 +2359,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (24)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (25)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":24`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":25`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
