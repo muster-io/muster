@@ -116,7 +116,7 @@ func referenceMatrix(t *testing.T) map[string][]auth.Permission {
 
 // TestIntegrationRoleMatrix is C-03.FR-2: the allocation seeded by the migration is the matrix of reference.md —
 // 36, 15 and 10 Permissions, teams:read and teams:write of 0022 and schedules:read, schedules:write and
-// schedule-overrides:write of 0024 included.
+// schedule-overrides:write of 0025 included.
 func TestIntegrationRoleMatrix(t *testing.T) {
 	want := referenceMatrix(t)
 	if len(want[auth.RoleAdmin]) != 36 || len(want[auth.RoleResponder]) != 15 || len(want[auth.RoleViewer]) != 10 {

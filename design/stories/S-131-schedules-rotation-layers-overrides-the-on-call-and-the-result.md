@@ -9,8 +9,8 @@ covers: [C-27.FR-1, C-27.FR-2, C-27.FR-3, C-27.FR-4, C-27.FR-5, C-27.FR-6, C-27.
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0024_schedules.up.sql
-  - internal/db/migrations/0024_schedules.down.sql
+  - internal/db/migrations/0025_schedules.up.sql
+  - internal/db/migrations/0025_schedules.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -47,6 +47,7 @@ files_touched:
   - design/prd/L2.md
   - design/prd/l2/C-25-teams.md
   - design/prd/l2/C-27-schedules.md
+  - docs/install/versions.md
   - test/e2e/schedules_test.go
   - docs/concepts/schedules.md
   - mkdocs.yml
@@ -146,7 +147,7 @@ issue: 420
     `not_in_team`, `override_ended`, `schedule_in_use` and `team_in_use` with `in_use_by` — and `Problem` gains the
     member `InUseBy` that `writeProblem` writes as `in_use_by`; the L1 `inUseProblem` of Lookup tables generalizes to
     it, its `LinkRules` staying as they are; the error item of `not_pageable` gains `reason` through `gen.ProblemError`.
-- **Schema** (migration `0024_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
+- **Schema** (migration `0025_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
   - `schedules`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^SC[0-9A-HJKMNP-TV-Z]{12}$')`), `team_id` (FK
     `teams`), `name`, `time_zone`, `main boolean NOT NULL DEFAULT false`, `version`, `created_at`, `updated_at`;
     unique `(team_id, lower(name))`; unique partial index `(team_id) WHERE main` — one main Schedule per Team.
@@ -321,16 +322,16 @@ None open. Settled:
 - Suggested commit: `feat(schedules): add schedules with rotation layers, overrides and the on-call`.
 - Migration numbers follow the story map: 0029 to 0035 for S-131, S-133, S-164, S-134, S-139, S-140 and S-165. A story
   merged out of that order renumbers its migration to the next free number in its own pull request, with its tests and
-  `schema.md`, as S-092 did. S-131 is merged first of them and takes `0024_schedules`, the number after
-  `0023_button_sets` on `master` (journal D585).
-- Corrected with the implementation: `files_touched` names the migration `0024_schedules`, and adds the files that
+  `schema.md`, as S-092 did. S-131 is merged first of them and takes `0025_schedules`, the number after
+  `0024_team_label_and_matchers` of S-118 on `master` (journal D585).
+- Corrected with the implementation: `files_touched` names the migration `0025_schedules`, and adds the files that
   carry what the Contracts ask for — `sqlc.yaml` (the new package's generated queries), `internal/publicid/publicid_test.go`
   (the new prefixes), `internal/api/server_test.go` (the Permission enum of 36 values), `internal/runtime/runtime_test.go`
   (the fake database's Schedules store), and `internal/metrics/metrics.go`, `metrics_test.go` and
   `internal/tools/refgen/main.go` (the entity label `schedule` joins the label policy of ADR-0014 with the first metric
   that carries it). The refusal of a period of `getScheduleOnCall` is at `/query/to`, the pointer of a query parameter
   (`api/README.md`), not `/to`. `C-25-teams.md` and `C-27-schedules.md` drop the marks _provisional_ of the values this
-  story confirms.
+  story confirms, and `docs/install/versions.md` lists migration 0025 among the changes of 0.2.0.
 - Bounds added in review, so that every computation of Shifts ends: `from` and `to` of `getScheduleOnCall` are at most
   10 years from the business clock's now (`422` `out_of_range` at `/query/from` or `/query/to`), a Rotation layer's
   `start_date` is from 2000-01-01 to 2100-12-31 and `shift_seconds` at most 2419200, 28 days (`422` `out_of_range` at

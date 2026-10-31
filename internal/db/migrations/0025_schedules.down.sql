@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
--- Reverts 0024_schedules.up.sql. The Schedules, their Rotation layers with their people and their Overrides are lost;
+-- Reverts 0025_schedules.up.sql. The Schedules, their Rotation layers with their people and their Overrides are lost;
 -- Personal access tokens lose the Permissions schedules:read, schedules:write and schedule-overrides:write. The Audit
 -- log entries about Schedules and Overrides stay.
 

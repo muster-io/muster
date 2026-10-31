@@ -104,6 +104,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
       label `team` records one Quiet `unknown_team_value` per value in its Timeline, and outgoing webhooks in events
       mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.
+    - Migration 0025 adds [Schedules](../concepts/schedules.md) and the Permissions `schedules:read`,
+      `schedules:write` and `schedule-overrides:write`. Roles get them at once; a Personal access token keeps the
+      Permissions it was issued with, so issue a new one to reach Schedules with a token.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations

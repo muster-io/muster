@@ -584,6 +584,44 @@ func (q *Queries) ListTeamMatchers(ctx context.Context, arg ListTeamMatchersPara
 	return items, nil
 }
 
+const listTeamSchedules = `-- name: ListTeamSchedules :many
+SELECT public_id, name
+FROM schedules
+WHERE org_id = $1 AND team_id = $2
+ORDER BY lower(name), id
+`
+
+type ListTeamSchedulesParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+type ListTeamSchedulesRow struct {
+	PublicID string
+	Name     string
+}
+
+// ListTeamSchedules lists the Schedules of a Team by name, which refuse its deletion (P-64).
+func (q *Queries) ListTeamSchedules(ctx context.Context, arg ListTeamSchedulesParams) ([]ListTeamSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listTeamSchedules, arg.OrgID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamSchedulesRow{}
+	for rows.Next() {
+		var i ListTeamSchedulesRow
+		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamUsers = `-- name: ListTeamUsers :many
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
 FROM team_users tu

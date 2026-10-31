@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
--- Migration 0024 adds the Schedules of C-27: schedules, each of a Team, with a name unique in the Team ignoring case, a
+-- Migration 0025 adds the Schedules of C-27: schedules, each of a Team, with a name unique in the Team ignoring case, a
 -- time zone and at most one main Schedule per Team; rotation_layers, the Rotation layers of a Schedule from the lowest,
 -- with their Shift length, handover and limits, a window whose end is earlier than its start crossing midnight;
 -- rotation_layer_users, the people of each Rotation layer in turn; schedule_overrides, the Overrides on top, made by a

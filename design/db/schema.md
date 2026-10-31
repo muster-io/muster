@@ -1421,7 +1421,7 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
 
 ### 4.16 Schedules
 
-Serves C-27 (from 0.2.0, migration 0024); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
+Serves C-27 (from 0.2.0, migration 0025); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
 Every change of a Team's Schedules locks the Team `FOR NO KEY UPDATE` first, then the Schedule, so that the first
 Schedule of a Team is its main one and a Team with Schedules is never deleted.
 
@@ -1448,7 +1448,7 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
   `schedule_overrides_period_idx` on `(org_id, schedule_id, ends_at)` serves the reads of a period.
 
 The Permissions `schedules:read`, `schedules:write` and `schedule-overrides:write` and their allocation are reference
-data of migration 0024, as in 0001 and 0022.
+data of migration 0025, as in 0001 and 0022.
 
 ## 5. Queues and claims
 
