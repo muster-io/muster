@@ -159,6 +159,12 @@ SELECT id, public_id, name, login, role, status
 FROM users
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND status <> 'deleted';
 
+-- FindUser reads the internal id of a User, a deleted one included.
+-- name: FindUser :one
+SELECT id
+FROM users
+WHERE org_id = @org_id AND public_id = @public_id;
+
 -- ListPageable reads Users with whether they are in a Team, for "may be Paged": active, not a Viewer and in the Team.
 -- name: ListPageable :many
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status,

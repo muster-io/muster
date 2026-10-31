@@ -269,27 +269,30 @@ func manyOverrides(from time.Time, n int) []Override {
 	return out
 }
 
-// TestManyOverrides is the Result of 5000 overlapping Overrides over 67 days: each segment is the Override that began
-// last, and the sweep takes far less than a second.
+// TestManyOverrides is the Result of 30000 overlapping Overrides over 67 days: each segment is the Override that
+// began last. Choosing it by scanning the Overrides, as a quadratic sweep would, takes about half the 30000² / 2
+// comparisons and seconds; the heap takes milliseconds, well within 500 ms. The race detector slows everything too
+// much to time, so it only checks the Result then, and BenchmarkManyOverrides measures it.
 func TestManyOverrides(t *testing.T) {
+	const n = 30000
 	loc := zone(t, "Europe/Berlin")
 	from := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	overrides := manyOverrides(from, 5000)
+	overrides := manyOverrides(from, n)
 	layer := RotationLayer{Name: "L", PublicID: "L", Users: oraclePeople, ShiftLength: ShiftHours, ShiftSeconds: 3600,
 		HandoverTime: "00:00", StartDate: FirstStartDate}
 	start := time.Now()
 	res := compute(loc, []RotationLayer{layer}, overrides, nil, from, from.Add(67*24*time.Hour))
 	took := time.Since(start)
-	if len(res.Segments) != 5000 {
-		t.Fatalf("%d segments, want 5000", len(res.Segments))
+	if len(res.Segments) != n {
+		t.Fatalf("%d segments, want %d", len(res.Segments), n)
 	}
 	for i, s := range res.Segments {
 		if s.Source.Override != overrides[i].PublicID || !s.Start.Equal(overrides[i].Start) {
 			t.Fatalf("segment %d is %s from %s, want %s", i, s.Source.Override, s.Start, overrides[i].PublicID)
 		}
 	}
-	if took > 5*time.Second {
-		t.Errorf("5000 Overrides took %s", took)
+	if !raceDetector && took > 500*time.Millisecond {
+		t.Errorf("%d Overrides took %s", n, took)
 	}
 }
 

@@ -492,3 +492,66 @@ func TestOverlappingOverridesCap(t *testing.T) {
 		t.Errorf("the count fails = %v", err)
 	}
 }
+
+// TestOverrideDeletedPeople: the person whose Shift an Override takes may be anyone, a deleted User included; a begun
+// Override whose people were deleted since still gets a new end, since they stay as stored; and an Override deleted
+// exactly at its start, which has not begun, is removed.
+func TestOverrideDeletedPeople(t *testing.T) {
+	svc, store, c := newService(t)
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, mainInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.users = append(store.users, Person{ID: 9, PublicID: "SR0000000000GN", Name: "Gone", Login: "gone",
+		Role: "responder", Status: "deleted"})
+	o, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: sergey.PublicID,
+		ReplacesUserID: "SR0000000000GN", Start: t0.Add(time.Hour), End: t0.Add(3 * time.Hour)})
+	if err != nil || o.Replaces == nil || o.Replaces.PublicID != "SR0000000000GN" {
+		t.Fatalf("replacing a deleted user = %+v, %v", o, err)
+	}
+	if f := fieldError(t, func() error {
+		_, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: sergey.PublicID,
+			ReplacesUserID: "SR00000000NNNE", Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)})
+		return err
+	}()); f.Pointer != "/replaces_user_id" || f.Code != CodeUnknownID {
+		t.Errorf("replacing nobody = %+v", f)
+	}
+	if f := fieldError(t, func() error {
+		_, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: "SR0000000000GN",
+			Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour)})
+		return err
+	}()); f.Pointer != "/user_id" || f.Code != CodeUnknownID {
+		t.Errorf("a deleted user taking the Shift = %+v", f)
+	}
+	c.Set(t0.Add(2 * time.Hour))
+	store.users[1].Status = "deleted" // sergey, who takes the Shift
+	got, err := svc.UpdateOverride(ctx, asPetr, sc.PublicID, o.PublicID, nil, OverrideInput{UserID: sergey.PublicID,
+		ReplacesUserID: "SR0000000000GN", Start: o.Start, End: t0.Add(4 * time.Hour)})
+	if err != nil || !got.End.Equal(t0.Add(4*time.Hour)) {
+		t.Errorf("a new end of a begun Override whose people were deleted = %+v, %v", got, err)
+	}
+	store.users[1].Status = "active"
+	store.fail["FindUser"] = errBoom
+	if _, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: sergey.PublicID,
+		ReplacesUserID: olga.PublicID, Start: t0.Add(3 * time.Hour), End: t0.Add(5 * time.Hour)}); !errors.Is(err,
+		errBoom) {
+		t.Errorf("the lookup fails = %v", err)
+	}
+	delete(store.fail, "FindUser")
+
+	later, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: t0.Add(5 * time.Hour), End: t0.Add(6 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Set(later.Start)
+	n, audits := len(store.overrides), len(store.audit)
+	if err := svc.DeleteOverride(ctx, asPetr, sc.PublicID, later.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := store.audit[audits]; len(store.overrides) != n-1 || e.Action != ActionOverrideDeleted ||
+		!strings.Contains(string(e.Diff), `"pointer":"/user_id","before":"`+olga.PublicID+`"`) {
+		t.Errorf("deleted at its start: %d overrides, audit %s %s", len(store.overrides), e.Action, e.Diff)
+	}
+}

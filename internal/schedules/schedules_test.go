@@ -412,6 +412,18 @@ func (s *fakeStore) LookupUsers(_ context.Context, arg dbgen.LookupUsersParams) 
 	return out, nil
 }
 
+func (s *fakeStore) FindUser(_ context.Context, arg dbgen.FindUserParams) (int64, error) {
+	if err := s.err("FindUser"); err != nil {
+		return 0, err
+	}
+	for _, u := range s.users {
+		if u.PublicID == arg.PublicID {
+			return u.ID, nil
+		}
+	}
+	return 0, pgx.ErrNoRows
+}
+
 func (s *fakeStore) ListPageable(_ context.Context, arg dbgen.ListPageableParams) ([]dbgen.ListPageableRow, error) {
 	if err := s.err("ListPageable"); err != nil {
 		return nil, err

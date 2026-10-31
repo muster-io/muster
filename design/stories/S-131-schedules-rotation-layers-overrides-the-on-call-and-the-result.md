@@ -21,6 +21,8 @@ files_touched:
   - internal/schedules/rotation.go
   - internal/schedules/rotation_test.go
   - internal/schedules/rotation_oracle_test.go
+  - internal/schedules/race_on_test.go
+  - internal/schedules/race_off_test.go
   - internal/schedules/result.go
   - internal/schedules/result_test.go
   - internal/schedules/overrides.go
@@ -186,7 +188,9 @@ issue: 420
     sweep over the boundaries with a heap ordered by id, O((S+N) log N) for S segments and N Overrides. The business
     clock (`clock.Business`) is the only time it reads (C-02).
   - `overrides.go` — the precondition, checked after the Permission: the caller is in the Team or is an Admin, else
-    `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`. An Override may not rewrite the
+    `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`; the person whose Shift it takes
+    may be anyone, a deleted User included, and on a change a person the input names as stored stays as stored,
+    deleted since or not. An Override may not rewrite the
     past (maintainer's decision on PR #489): a `start` more than 5 minutes before the business clock's now is `422`
     `out_of_range` at `/start`; the end is after the start and after now (P-91) and at most 31 days after the start,
     else `422` `out_of_range` at `/end`, while the start may be any time ahead; checked on create and change. Of an

@@ -237,15 +237,9 @@ type overrideFields struct {
 // overlaps fewer than MaxOverlappingOverrides other Overrides (out_of_range at /end).
 func (s *Service) checkOverride(ctx context.Context, q Queries, sc Schedule, in OverrideInput, before *Override,
 	now time.Time) (overrideFields, error) {
-	var f overrideFields
-	var err error
-	if f.user, f.userPublic, err = s.lookup(ctx, q, in.UserID, "/user_id"); err != nil {
+	f, err := s.overridePeople(ctx, q, in, before)
+	if err != nil {
 		return f, err
-	}
-	if in.ReplacesUserID != "" {
-		if f.replaces, f.replacesPublic, err = s.lookup(ctx, q, in.ReplacesUserID, "/replaces_user_id"); err != nil {
-			return f, err
-		}
 	}
 	begun := before != nil && !before.Start.After(now)
 	if begun {
@@ -298,13 +292,50 @@ func (s *Service) checkOverride(ctx context.Context, q Queries, sc Schedule, in 
 	return f, nil
 }
 
-// lookup reads the internal id and the public id of the User publicID who is not deleted; another is an unknown_id
-// FieldError at pointer.
-func (s *Service) lookup(ctx context.Context, q Queries, publicID, pointer string) (int64, string, error) {
+// overridePeople finds the people of an OverrideInput. On a change, a person the input names as the stored Override
+// does is kept as stored, deleted since or not. Otherwise the person who takes the Shift is a User who is not deleted,
+// and the person whose Shift it takes, who may be anyone (C-27.FR-6), any User, a deleted one included; another is an
+// unknown_id FieldError at the field.
+func (s *Service) overridePeople(ctx context.Context, q Queries, in OverrideInput, before *Override) (overrideFields,
+	error) {
+	var f overrideFields
+	var err error
+	user, _ := publicid.Parse(publicid.User, in.UserID)
+	if before != nil && user != "" && user == before.User.PublicID {
+		f.user, f.userPublic = before.User.ID, before.User.PublicID
+	} else if f.user, f.userPublic, err = s.lookup(ctx, q, in.UserID, "/user_id", false); err != nil {
+		return f, err
+	}
+	if in.ReplacesUserID == "" {
+		return f, nil
+	}
+	replaces, _ := publicid.Parse(publicid.User, in.ReplacesUserID)
+	if before != nil && before.Replaces != nil && replaces != "" && replaces == before.Replaces.PublicID {
+		f.replaces, f.replacesPublic = before.ReplacesID, before.Replaces.PublicID
+		return f, nil
+	}
+	f.replaces, f.replacesPublic, err = s.lookup(ctx, q, in.ReplacesUserID, "/replaces_user_id", true)
+	return f, err
+}
+
+// lookup reads the internal id and the public id of the User publicID, a deleted one only with deleted; another is an
+// unknown_id FieldError at pointer.
+func (s *Service) lookup(ctx context.Context, q Queries, publicID, pointer string, deleted bool) (int64, string,
+	error) {
 	unknown := &FieldError{Pointer: pointer, Code: CodeUnknownID, Detail: "No such User."}
 	id, err := publicid.Parse(publicid.User, publicID)
 	if err != nil {
 		return 0, "", unknown
+	}
+	if deleted {
+		uid, err := q.FindUser(ctx, dbgen.FindUserParams{OrgID: s.orgID, PublicID: id})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, "", unknown
+		}
+		if err != nil {
+			return 0, "", fmt.Errorf("read the user %s: %w", id, err)
+		}
+		return uid, id, nil
 	}
 	rows, err := q.LookupUsers(ctx, dbgen.LookupUsersParams{OrgID: s.orgID, PublicIds: []string{id}})
 	if err != nil {

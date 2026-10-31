@@ -255,6 +255,7 @@ type Queries interface {
 	DeleteRotationLayerUsers(ctx context.Context, arg dbgen.DeleteRotationLayerUsersParams) error
 	InsertRotationLayerUsers(ctx context.Context, arg dbgen.InsertRotationLayerUsersParams) error
 	LookupUsers(ctx context.Context, arg dbgen.LookupUsersParams) ([]dbgen.LookupUsersRow, error)
+	FindUser(ctx context.Context, arg dbgen.FindUserParams) (int64, error)
 	ListPageable(ctx context.Context, arg dbgen.ListPageableParams) ([]dbgen.ListPageableRow, error)
 	IsTeamUser(ctx context.Context, arg dbgen.IsTeamUserParams) (bool, error)
 	ListScheduleOverrides(ctx context.Context, arg dbgen.ListScheduleOverridesParams) (

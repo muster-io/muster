@@ -190,6 +190,25 @@ func (q *Queries) FindScheduleTeam(ctx context.Context, arg FindScheduleTeamPara
 	return team_id, err
 }
 
+const findUser = `-- name: FindUser :one
+SELECT id
+FROM users
+WHERE org_id = $1 AND public_id = $2
+`
+
+type FindUserParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// FindUser reads the internal id of a User, a deleted one included.
+func (q *Queries) FindUser(ctx context.Context, arg FindUserParams) (int64, error) {
+	row := q.db.QueryRow(ctx, findUser, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getOrganizationTimeZone = `-- name: GetOrganizationTimeZone :one
 
 
