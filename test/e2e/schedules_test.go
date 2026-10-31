@@ -221,8 +221,13 @@ func TestSchedules(t *testing.T) {
 		t.Errorf("an Admin outside the team = %d %s", a.status, a.body)
 	}
 	if a = ov(o, `{"user_id":"`+olga+`","start":"2020-01-01T00:00:00Z","end":"2020-01-01T01:00:00Z"}`); a.status !=
-		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"pointer":"/end"`) {
+		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"pointer":"/start"`) {
 		t.Errorf("an override in the past = %d %s", a.status, a.body)
+	}
+	if a = ov(o, `{"user_id":"`+olga+`","start":"`+at(day(17), "13:00")+
+		`","end":"`+at(day(49), "13:00")+`"}`); a.status != http.StatusUnprocessableEntity ||
+		!strings.Contains(string(a.body), `"pointer":"/end"`) {
+		t.Errorf("an override of 32 days = %d %s", a.status, a.body)
 	}
 
 	// C-27.AC-10: of two overlapping Overrides the one created last wins; a stale If-Match is refused.
@@ -308,11 +313,31 @@ func TestSchedules(t *testing.T) {
 		ID string `json:"id"`
 	}
 	decode(t, ended, &endedID)
-	advance(t, r, 3600)
+	advance(t, r, 600)
 	endedPath := "/api/v1/schedules/" + scID + "/overrides/" + endedID.ID
+	if a = api.do(http.MethodPut, endedPath, `{"user_id":"`+olga+`","start":"`+now.Add(time.Minute).Format(time.RFC3339)+
+		`","end":"`+now.Add(3*time.Hour).Format(time.RFC3339)+`"}`, "If-Match", ended.header.Get("ETag")); a.status !=
+		http.StatusUnprocessableEntity || !strings.Contains(string(a.body), `"code":"unsupported"`) {
+		t.Errorf("moving the start of a begun override = %d %s", a.status, a.body)
+	}
+	if a = api.do(http.MethodDelete, endedPath, ""); a.status != http.StatusNoContent {
+		t.Fatalf("deleting a begun override = %d %s", a.status, a.body)
+	}
+	var kept struct {
+		Segments []struct {
+			Source *struct {
+				OverrideID string `json:"override_id"`
+			} `json:"source"`
+		} `json:"segments"`
+	}
+	decode(t, api.do(http.MethodGet, "/api/v1/schedules/"+scID+"/on-call?from="+now.Add(time.Minute).Format(time.RFC3339)+
+		"&to="+now.Add(2*time.Minute).Format(time.RFC3339), ""), &kept)
+	if len(kept.Segments) != 1 || kept.Segments[0].Source == nil || kept.Segments[0].Source.OverrideID != endedID.ID {
+		t.Errorf("the past part of a deleted begun override: %+v", kept)
+	}
 	if a = api.do(http.MethodPut, endedPath, `{"user_id":"`+olga+`","start":"`+now.Format(time.RFC3339)+`","end":"`+
-		now.Add(3*time.Hour).Format(time.RFC3339)+`"}`, "If-Match", ended.header.Get("ETag")); a.status !=
-		http.StatusConflict || !strings.Contains(string(a.body), `"code":"override_ended"`) {
+		now.Add(3*time.Hour).Format(time.RFC3339)+`"}`, "If-Match", `"2"`); a.status != http.StatusConflict ||
+		!strings.Contains(string(a.body), `"code":"override_ended"`) {
 		t.Errorf("changing an ended override = %d %s", a.status, a.body)
 	}
 	if a = api.do(http.MethodDelete, endedPath, ""); a.status != http.StatusConflict ||
