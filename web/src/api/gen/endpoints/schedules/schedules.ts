@@ -541,7 +541,7 @@ export const useDeleteSchedule = <TError = UnauthorizedResponse | ForbiddenRespo
 }
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCall = async (scheduleId: string,
@@ -765,7 +765,7 @@ export const getCreateScheduleOverrideUrl = (scheduleId: string,) => {
 }
 
 /**
- * From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+ * From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
  * @summary Create an Override
  */
 export const createScheduleOverride = async (scheduleId: string,
@@ -855,7 +855,7 @@ export const useCreateScheduleOverride = <TError = BadRequestResponse | Unauthor
 }
 
 /**
- * Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+ * Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
  * @summary Update an Override
  */
 export const updateScheduleOverride = async (scheduleId: string,
@@ -946,7 +946,7 @@ export const useUpdateScheduleOverride = <TError = BadRequestResponse | Unauthor
 }
 
 /**
- * With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+ * With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
  * @summary Delete an Override
  */
 export const deleteScheduleOverride = async (scheduleId: string,

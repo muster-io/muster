@@ -8,7 +8,7 @@ import type { ShiftLength } from './shiftLength';
 import type { Weekday } from './weekday';
 
 /**
- * A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks.
+ * A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).
  */
 export interface RotationLayerInput {
   /** The `id` of one of the Schedule's Rotation layers, which keeps its identity; omit it for a new one. */
@@ -19,7 +19,7 @@ export interface RotationLayerInput {
      */
   name: string;
   /**
-     * The people who take Shifts in turn, in order.
+     * The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.
      * @minItems 1
      */
   user_ids: PublicId[];

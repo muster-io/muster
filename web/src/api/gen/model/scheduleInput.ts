@@ -18,6 +18,6 @@ export interface ScheduleInput {
   time_zone?: string;
   /** True makes the Schedule its Team's main Schedule, whose On-call is the Team's; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead. */
   main?: boolean;
-  /** From the lowest to the highest. */
+  /** From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`. */
   rotation_layers: RotationLayerInput[];
 }

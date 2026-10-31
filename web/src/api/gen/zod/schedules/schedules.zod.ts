@@ -100,7 +100,7 @@ export const CreateScheduleBody = zod.object({
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(createScheduleBodyRotationLayersItemIdRegExp).optional().describe('The `id` of one of the Schedule\'s Rotation layers, which keeps its identity; omit it for a new one.'),
   "name": zod.string().min(1).max(createScheduleBodyRotationLayersItemNameMax),
-  "user_ids": zod.array(zod.string().regex(createScheduleBodyRotationLayersItemUserIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')).min(1).describe('The people who take Shifts in turn, in order.'),
+  "user_ids": zod.array(zod.string().regex(createScheduleBodyRotationLayersItemUserIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')).min(1).describe('The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.'),
   "shift_length": zod.enum(['day', 'week', 'hours']).describe('How long a Shift of a Rotation layer lasts: a day, a week handed over on `handover_day`, or `shift_seconds` of wall-clock time.'),
   "shift_seconds": zod.int().optional().describe('The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600 from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others.'),
   "handover_time": zod.string().regex(createScheduleBodyRotationLayersItemHandoverTimeRegExp),
@@ -111,7 +111,7 @@ export const CreateScheduleBody = zod.object({
   "start": zod.string().regex(createScheduleBodyRotationLayersItemLimitsOneStartRegExp).optional().describe('Given with `end`.'),
   "end": zod.string().regex(createScheduleBodyRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()]).optional().describe('The days and time of day to which the Shifts are cut; null for none.')
-}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks.')).describe('From the lowest to the highest.')
+}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.')
 })
 
 export const createScheduleResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -261,7 +261,7 @@ export const UpdateScheduleBody = zod.object({
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(updateScheduleBodyRotationLayersItemIdRegExp).optional().describe('The `id` of one of the Schedule\'s Rotation layers, which keeps its identity; omit it for a new one.'),
   "name": zod.string().min(1).max(updateScheduleBodyRotationLayersItemNameMax),
-  "user_ids": zod.array(zod.string().regex(updateScheduleBodyRotationLayersItemUserIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')).min(1).describe('The people who take Shifts in turn, in order.'),
+  "user_ids": zod.array(zod.string().regex(updateScheduleBodyRotationLayersItemUserIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')).min(1).describe('The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.'),
   "shift_length": zod.enum(['day', 'week', 'hours']).describe('How long a Shift of a Rotation layer lasts: a day, a week handed over on `handover_day`, or `shift_seconds` of wall-clock time.'),
   "shift_seconds": zod.int().optional().describe('The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600 from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others.'),
   "handover_time": zod.string().regex(updateScheduleBodyRotationLayersItemHandoverTimeRegExp),
@@ -272,7 +272,7 @@ export const UpdateScheduleBody = zod.object({
   "start": zod.string().regex(updateScheduleBodyRotationLayersItemLimitsOneStartRegExp).optional().describe('Given with `end`.'),
   "end": zod.string().regex(updateScheduleBodyRotationLayersItemLimitsOneEndRegExp).optional().describe('Given with `start`.')
 }).describe('The days of the week, and optionally a time of day, to which a Rotation layer\'s Shifts are cut. An `end` earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.'),zod.null()]).optional().describe('The days and time of day to which the Shifts are cut; null for none.')
-}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks.')).describe('From the lowest to the highest.')
+}).describe('A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule\'s time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).')).describe('From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.')
 })
 
 export const updateScheduleResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -343,7 +343,7 @@ export const DeleteScheduleHeader = zod.object({
 export const DeleteScheduleResponse = zod.void()
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCallPathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -520,7 +520,7 @@ export const ListScheduleOverridesResponse = zod.object({
 })
 
 /**
- * From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+ * From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
  * @summary Create an Override
  */
 export const createScheduleOverridePathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -537,8 +537,8 @@ export const createScheduleOverrideBodyReplacesUserIdRegExp = new RegExp('^[A-HJ
 export const CreateScheduleOverrideBody = zod.object({
   "user_id": zod.string().regex(createScheduleOverrideBodyUserIdRegExp).describe('The person who takes the Shift.'),
   "replaces_user_id": zod.string().regex(createScheduleOverrideBodyReplacesUserIdRegExp).nullish().describe('The person whose Shift it takes, which the Schedule shows and which changes nothing in the On-call; anyone, or null.'),
-  "start": zod.iso.datetime({"offset":true}),
-  "end": zod.iso.datetime({"offset":true}).describe('After `start` and not before the business clock\'s now (P-91).')
+  "start": zod.iso.datetime({"offset":true}).describe('At most 5 minutes before the business clock\'s now; fixed once the Override has begun.'),
+  "end": zod.iso.datetime({"offset":true}).describe('After `start` and after the business clock\'s now (P-91), at most 31 days after `start`.')
 })
 
 export const createScheduleOverrideResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -579,7 +579,7 @@ export const CreateScheduleOverrideResponse = zod.object({
 })
 
 /**
- * Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+ * Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
  * @summary Update an Override
  */
 export const updateScheduleOverridePathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -602,8 +602,8 @@ export const updateScheduleOverrideBodyReplacesUserIdRegExp = new RegExp('^[A-HJ
 export const UpdateScheduleOverrideBody = zod.object({
   "user_id": zod.string().regex(updateScheduleOverrideBodyUserIdRegExp).describe('The person who takes the Shift.'),
   "replaces_user_id": zod.string().regex(updateScheduleOverrideBodyReplacesUserIdRegExp).nullish().describe('The person whose Shift it takes, which the Schedule shows and which changes nothing in the On-call; anyone, or null.'),
-  "start": zod.iso.datetime({"offset":true}),
-  "end": zod.iso.datetime({"offset":true}).describe('After `start` and not before the business clock\'s now (P-91).')
+  "start": zod.iso.datetime({"offset":true}).describe('At most 5 minutes before the business clock\'s now; fixed once the Override has begun.'),
+  "end": zod.iso.datetime({"offset":true}).describe('After `start` and after the business clock\'s now (P-91), at most 31 days after `start`.')
 })
 
 export const updateScheduleOverrideResponseIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -644,7 +644,7 @@ export const UpdateScheduleOverrideResponse = zod.object({
 })
 
 /**
- * With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+ * With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
  * @summary Delete an Override
  */
 export const deleteScheduleOverridePathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

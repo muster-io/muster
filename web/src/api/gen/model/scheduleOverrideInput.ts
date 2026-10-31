@@ -10,7 +10,8 @@ export interface ScheduleOverrideInput {
   user_id: PublicId;
   /** The person whose Shift it takes, which the Schedule shows and which changes nothing in the On-call; anyone, or null. */
   replaces_user_id?: NullablePublicId | null;
+  /** At most 5 minutes before the business clock's now; fixed once the Override has begun. */
   start: string;
-  /** After `start` and not before the business clock's now (P-91). */
+  /** After `start` and after the business clock's now (P-91), at most 31 days after `start`. */
   end: string;
 }
