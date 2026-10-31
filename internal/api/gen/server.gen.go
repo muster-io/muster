@@ -6708,7 +6708,7 @@ type RotationLayer struct {
 	Users []UserRef `json:"users"`
 }
 
-// RotationLayerInput A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks.
+// RotationLayerInput A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).
 type RotationLayerInput struct {
 	// HandoverDay The day of the handover of weekly Shifts; required with `week` and refused with the others.
 	HandoverDay  *Weekday `json:"handover_day,omitempty"`
@@ -6730,7 +6730,7 @@ type RotationLayerInput struct {
 	// StartDate The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to 2100-12-31, else `422` `out_of_range`.
 	StartDate openapi_types.Date `json:"start_date"`
 
-	// UserIds The people who take Shifts in turn, in order.
+	// UserIds The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.
 	UserIds []PublicId `json:"user_ids"`
 }
 
@@ -6967,7 +6967,7 @@ type ScheduleInput struct {
 	// Name Unique in the Team, ignoring case.
 	Name string `json:"name"`
 
-	// RotationLayers From the lowest to the highest.
+	// RotationLayers From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
 	RotationLayers []RotationLayerInput `json:"rotation_layers"`
 
 	// TeamId The Team of the Schedule, set on creation; a different one on an update is refused with `422` `unsupported`.
@@ -7027,12 +7027,14 @@ type ScheduleOverride struct {
 
 // ScheduleOverrideInput defines model for ScheduleOverrideInput.
 type ScheduleOverrideInput struct {
-	// End After `start` and not before the business clock's now (P-91).
+	// End After `start` and after the business clock's now (P-91), at most 31 days after `start`.
 	End time.Time `json:"end"`
 
 	// ReplacesUserId The person whose Shift it takes, which the Schedule shows and which changes nothing in the On-call; anyone, or null.
 	ReplacesUserId nullable.Nullable[NullablePublicId] `json:"replaces_user_id,omitempty"`
-	Start          time.Time                           `json:"start"`
+
+	// Start At most 5 minutes before the business clock's now; fixed once the Override has begun.
+	Start time.Time `json:"start"`
 
 	// UserId The person who takes the Shift.
 	UserId PublicId `json:"user_id"`

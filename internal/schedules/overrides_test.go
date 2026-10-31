@@ -5,6 +5,7 @@ package schedules
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,11 @@ func TestOverridePrecondition(t *testing.T) {
 			"/replaces_user_id", CodeUnknownID, ""},
 		{OverrideInput{UserID: olga.PublicID, Start: t0.Add(time.Hour), End: t0.Add(time.Hour)}, "/end",
 			CodeOutOfRange, ""},
-		{OverrideInput{UserID: olga.PublicID, Start: t0.Add(-2 * time.Hour), End: t0.Add(-time.Hour)}, "/end",
+		{OverrideInput{UserID: olga.PublicID, Start: t0.Add(-2 * time.Hour), End: t0.Add(-time.Hour)}, "/start",
+			CodeOutOfRange, ""},
+		{OverrideInput{UserID: olga.PublicID, Start: t0.Add(-6 * time.Minute), End: t0.Add(time.Hour)}, "/start",
+			CodeOutOfRange, ""},
+		{OverrideInput{UserID: olga.PublicID, Start: t0, End: t0.Add(MaxOverrideLength + time.Second)}, "/end",
 			CodeOutOfRange, ""},
 	} {
 		f := fieldError(t, func() error { _, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, c.in); return err }())
@@ -287,7 +292,7 @@ func TestOnCall(t *testing.T) {
 	}
 	c.Set(berlinAt(t, "2026-11-02 00:00"))
 	res, err := svc.OnCall(ctx, sc.PublicID, nil, nil)
-	if err != nil || !res.From.Equal(c.Now()) || !res.To.Equal(c.Now().Add(GapView)) || len(res.Layers) != 2 ||
+	if err != nil || !res.From.Equal(c.Now()) || !res.To.Equal(c.Now().Add(GapView)) || len(res.RotationLayers) != 2 ||
 		len(res.Overrides) != 0 || len(res.Warnings) != 0 {
 		t.Fatalf("the default period = %+v, %v", res, err)
 	}
@@ -343,5 +348,147 @@ func TestOnCall(t *testing.T) {
 	store.schedules[0].tz = "Nowhere/Else"
 	if res, err := svc.OnCall(ctx, sc.PublicID, &from, &to); err != nil || len(res.Segments) == 0 {
 		t.Errorf("an unknown stored time zone reads as UTC = %v", err)
+	}
+}
+
+// TestOverridePast is the maintainer's rule that an Override may not rewrite the past: it starts no earlier than
+// OverrideGrace before now and lasts at most 31 days, however far ahead; once it has begun only its end changes, and
+// deleting it ends it now, keeping its past part in the Result and recording schedule_override.deleted with the end;
+// a change that changes nothing writes nothing.
+func TestOverridePast(t *testing.T) {
+	svc, store, c := newService(t)
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, mainInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: t0.Add(-4 * time.Minute), End: t0.Add(time.Hour)}); err != nil {
+		t.Errorf("a start within the grace = %v", err)
+	}
+	if _, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: t0.AddDate(3, 0, 0), End: t0.AddDate(3, 0, 0).Add(MaxOverrideLength)}); err != nil {
+		t.Errorf("31 days three years ahead = %v", err)
+	}
+	running, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: petr.PublicID,
+		ReplacesUserID: olga.PublicID, Start: t0.Add(time.Hour), End: t0.Add(5 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := OverrideInput{UserID: petr.PublicID, ReplacesUserID: olga.PublicID, Start: running.Start, End: running.End}
+	audits := len(store.audit)
+	if got, err := svc.UpdateOverride(ctx, asPetr, sc.PublicID, running.PublicID, ptr(int64(1)), same); err != nil ||
+		got.Version != 1 || len(store.audit) != audits {
+		t.Errorf("a change that changes nothing = %+v, %v, %d entries", got, err, len(store.audit)-audits)
+	}
+	c.Set(t0.Add(2 * time.Hour))
+	for _, ch := range []struct {
+		in      func(OverrideInput) OverrideInput
+		pointer string
+	}{
+		{func(in OverrideInput) OverrideInput { in.Start = in.Start.Add(30 * time.Minute); return in }, "/start"},
+		{func(in OverrideInput) OverrideInput { in.UserID = sergey.PublicID; return in }, "/user_id"},
+		{func(in OverrideInput) OverrideInput { in.ReplacesUserID = ""; return in }, "/replaces_user_id"},
+	} {
+		f := fieldError(t, func() error {
+			_, err := svc.UpdateOverride(ctx, asPetr, sc.PublicID, running.PublicID, nil, ch.in(same))
+			return err
+		}())
+		if f.Pointer != ch.pointer || f.Code != CodeUnsupported {
+			t.Errorf("a change of a begun Override = %+v, want %s unsupported", f, ch.pointer)
+		}
+	}
+	longer := same
+	longer.End = running.End.Add(time.Hour)
+	if got, err := svc.UpdateOverride(ctx, asPetr, sc.PublicID, running.PublicID, nil, longer); err != nil ||
+		!got.End.Equal(longer.End) || got.Version != 2 {
+		t.Errorf("a new end of a begun Override = %+v, %v", got, err)
+	}
+	store.users[0].Status = "disabled" // petr, the person of the begun Override
+	shorter := same
+	if _, err := svc.UpdateOverride(ctx, asPetr, sc.PublicID, running.PublicID, nil, shorter); err != nil {
+		t.Errorf("the end of a begun Override whose person was disabled since = %v", err)
+	}
+	store.users[0].Status = "active"
+	c.Set(t0.Add(3 * time.Hour))
+	audits = len(store.audit)
+	if err := svc.DeleteOverride(ctx, asPetr, sc.PublicID, running.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	var kept *overrideRec
+	for _, o := range store.overrides {
+		if o.publicID == running.PublicID {
+			kept = o
+		}
+	}
+	e := store.audit[audits]
+	if kept == nil || !kept.end.Equal(t0.Add(3*time.Hour)) || !kept.start.Equal(running.Start) ||
+		e.Action != ActionOverrideDeleted || string(e.Diff) != `[{"pointer":"/end","before":"`+
+		running.End.Format(time.RFC3339)+`","after":"`+t0.Add(3*time.Hour).Format(time.RFC3339)+`"}]` {
+		t.Fatalf("a begun Override deleted: kept %+v, audit %s %s", kept, e.Action, e.Diff)
+	}
+	from, to := t0, t0.Add(4*time.Hour)
+	res, err := svc.OnCall(ctx, sc.PublicID, &from, &to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := segmentsText(time.UTC, res.Segments); !strings.Contains(got, "10-28 13:00–10-28 15:00 petr "+
+		running.PublicID) {
+		t.Errorf("the past part of the deleted Override is not in the Result:\n%s", got)
+	}
+	if err := svc.DeleteOverride(ctx, asPetr, sc.PublicID, running.PublicID, nil); !errors.Is(err, ErrOverrideEnded) {
+		t.Errorf("deleting it again = %v", err)
+	}
+	store.fail["UpdateScheduleOverride"] = errBoom
+	soon, err := svc.CreateOverride(ctx, asPetr, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: c.Now().Add(-time.Minute), End: c.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteOverride(ctx, asPetr, sc.PublicID, soon.PublicID, nil); !errors.Is(err, errBoom) {
+		t.Errorf("ending a begun Override fails = %v", err)
+	}
+}
+
+// TestOverlappingOverridesCap: a span that would overlap MaxOverlappingOverrides other Overrides is refused at /end;
+// the Override itself does not count on a change.
+func TestOverlappingOverridesCap(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, mainInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := t0.Add(time.Hour)
+	for i := range MaxOverlappingOverrides - 1 {
+		store.overrides = append(store.overrides, &overrideRec{id: int64(10000 + i), schedule: store.schedules[0].id,
+			user: olga.ID, byUser: olga.ID, version: 1, publicID: fmt.Sprintf("VR%012d", i), start: start,
+			end: start.Add(time.Hour), created: t0})
+	}
+	last, err := svc.CreateOverride(ctx, admin, sc.PublicID, OverrideInput{UserID: olga.PublicID, Start: start,
+		End: start.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("the 1000th Override = %v", err)
+	}
+	if _, err := svc.UpdateOverride(ctx, admin, sc.PublicID, last.PublicID, nil, OverrideInput{UserID: olga.PublicID,
+		Start: start, End: start.Add(2 * time.Hour)}); err != nil {
+		t.Errorf("a change of the 1000th = %v", err)
+	}
+	f := fieldError(t, func() error {
+		_, err := svc.CreateOverride(ctx, admin, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+			Start: start.Add(30 * time.Minute), End: start.Add(40 * time.Minute)})
+		return err
+	}())
+	if f.Pointer != "/end" || f.Code != CodeOutOfRange {
+		t.Errorf("the 1001st = %+v", f)
+	}
+	if _, err := svc.CreateOverride(ctx, admin, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: start.Add(3 * time.Hour), End: start.Add(4 * time.Hour)}); err != nil {
+		t.Errorf("an Override that overlaps none = %v", err)
+	}
+	store.fail["CountOverlappingOverrides"] = errBoom
+	if _, err := svc.CreateOverride(ctx, admin, sc.PublicID, OverrideInput{UserID: olga.PublicID,
+		Start: start.Add(5 * time.Hour), End: start.Add(6 * time.Hour)}); !errors.Is(err, errBoom) {
+		t.Errorf("the count fails = %v", err)
 	}
 }

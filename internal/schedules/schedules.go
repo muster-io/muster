@@ -52,12 +52,27 @@ const (
 const (
 	// GapView is schedule.gap_view, the default period of the On-call.
 	GapView = 14 * 24 * time.Hour
-	// MaxPeriod is the length of ical.window, from 7 days back to 60 days ahead: the longest period of the On-call.
-	MaxPeriod = 67 * 24 * time.Hour
+	// ICalWindowBack and ICalWindowAhead are ical.window (P-81): the iCal feed reaches from 7 days back to 60 days
+	// ahead.
+	ICalWindowBack  = 7 * 24 * time.Hour
+	ICalWindowAhead = 60 * 24 * time.Hour
+	// MaxPeriod is the length of ical.window: the longest period of the On-call.
+	MaxPeriod = ICalWindowBack + ICalWindowAhead
 	// Reach is how far from the business clock's now a period of the On-call may start or end.
 	Reach = 10 * 365 * 24 * time.Hour
 	// MaxShiftSeconds is the longest Shift in hours: 28 days.
 	MaxShiftSeconds = 28 * 24 * 60 * 60
+	// MaxRotationLayers and MaxRotationLayerUsers are the most Rotation layers of a Schedule and people of a Rotation
+	// layer.
+	MaxRotationLayers     = 20
+	MaxRotationLayerUsers = 100
+	// OverrideGrace is how far before the business clock's now an Override may start: the time it takes to fill the
+	// form.
+	OverrideGrace = 5 * time.Minute
+	// MaxOverrideLength is the longest Override: 31 days.
+	MaxOverrideLength = 31 * 24 * time.Hour
+	// MaxOverlappingOverrides is how many Overrides of a Schedule a new span may overlap, short of one more.
+	MaxOverlappingOverrides = 1000
 )
 
 // The first and the last start date of a Rotation layer.
@@ -149,30 +164,30 @@ type TeamRef struct {
 
 // Schedule is a Schedule as the API reads it, with its Rotation layers from the lowest.
 type Schedule struct {
-	ID        int64
-	PublicID  string
-	Name      string
-	TimeZone  string
-	Main      bool
-	Team      TeamRef
-	Layers    []Layer
-	CreatedAt time.Time
-	Version   int64
+	ID             int64
+	PublicID       string
+	Name           string
+	TimeZone       string
+	Main           bool
+	Team           TeamRef
+	RotationLayers []RotationLayer
+	CreatedAt      time.Time
+	Version        int64
 }
 
 // Input is what createSchedule and updateSchedule write. A nil TimeZone is the Organization's on a creation and keeps
 // the stored one on an update; a nil Main is false on a creation, unless the Team has no Schedule, and keeps the
 // stored value on an update.
 type Input struct {
-	TeamID   string
-	Name     string
-	TimeZone *string
-	Main     *bool
-	Layers   []LayerInput
+	TeamID         string
+	Name           string
+	TimeZone       *string
+	Main           *bool
+	RotationLayers []RotationLayerInput
 }
 
-// LayerInput is a Rotation layer of an Input; an ID names one of the Schedule's, which keeps its identity.
-type LayerInput struct {
+// RotationLayerInput is a Rotation layer of an Input; an ID names one of the Schedule's, which keeps its identity.
+type RotationLayerInput struct {
 	ID           string
 	Name         string
 	UserIDs      []string
@@ -247,6 +262,7 @@ type Queries interface {
 	ListPeriodOverrides(ctx context.Context, arg dbgen.ListPeriodOverridesParams) ([]dbgen.ListPeriodOverridesRow,
 		error)
 	GetScheduleOverride(ctx context.Context, arg dbgen.GetScheduleOverrideParams) (dbgen.GetScheduleOverrideRow, error)
+	CountOverlappingOverrides(ctx context.Context, arg dbgen.CountOverlappingOverridesParams) (int64, error)
 	LockScheduleOverride(ctx context.Context, arg dbgen.LockScheduleOverrideParams) (int64, error)
 	InsertScheduleOverride(ctx context.Context, arg dbgen.InsertScheduleOverrideParams) (int64, error)
 	UpdateScheduleOverride(ctx context.Context, arg dbgen.UpdateScheduleOverrideParams) error
@@ -399,7 +415,7 @@ func (s *Service) withLayers(ctx context.Context, q Queries, list []Schedule) er
 	index := make(map[int64]int, len(list))
 	for i, sc := range list {
 		ids[i], index[sc.ID] = sc.ID, i
-		list[i].Layers = []Layer{}
+		list[i].RotationLayers = []RotationLayer{}
 	}
 	rows, err := q.ListRotationLayers(ctx, dbgen.ListRotationLayersParams{OrgID: s.orgID, ScheduleIds: ids})
 	if err != nil {
@@ -410,8 +426,8 @@ func (s *Service) withLayers(ctx context.Context, q Queries, list []Schedule) er
 	for i, r := range rows {
 		layerIDs[i] = r.ID
 		at := index[r.ScheduleID]
-		where[r.ID] = [2]int{at, len(list[at].Layers)}
-		list[at].Layers = append(list[at].Layers, layerOf(r))
+		where[r.ID] = [2]int{at, len(list[at].RotationLayers)}
+		list[at].RotationLayers = append(list[at].RotationLayers, rotationLayerOf(r))
 	}
 	if len(rows) == 0 {
 		return nil
@@ -423,16 +439,16 @@ func (s *Service) withLayers(ctx context.Context, q Queries, list []Schedule) er
 	}
 	for _, u := range users {
 		w := where[u.RotationLayerID]
-		l := &list[w[0]].Layers[w[1]]
+		l := &list[w[0]].RotationLayers[w[1]]
 		l.Users = append(l.Users, Person{ID: u.ID, PublicID: u.PublicID, Name: u.Name, Login: u.Login, Role: u.Role,
 			Status: u.Status})
 	}
 	return nil
 }
 
-// layerOf is the Rotation layer of a row, without its people.
-func layerOf(r dbgen.ListRotationLayersRow) Layer {
-	l := Layer{ID: r.ID, PublicID: r.PublicID, Number: int(r.Position), Name: r.Name, Users: []Person{},
+// rotationLayerOf is the Rotation layer of a row, without its people.
+func rotationLayerOf(r dbgen.ListRotationLayersRow) RotationLayer {
+	l := RotationLayer{ID: r.ID, PublicID: r.PublicID, Number: int(r.Position), Name: r.Name, Users: []Person{},
 		ShiftLength: r.ShiftLength, ShiftSeconds: int(r.ShiftSeconds.Int32), HandoverTime: r.HandoverTime,
 		HandoverDay: r.HandoverDay.String, StartDate: r.StartDate.Time}
 	if r.LimitDays != nil {
@@ -458,9 +474,13 @@ func check(in Input) (Input, error) {
 				Detail: "The time zone is not an IANA time zone, such as Europe/Berlin."}
 		}
 	}
+	if len(in.RotationLayers) > MaxRotationLayers {
+		return in, &FieldError{Pointer: "/rotation_layers", Code: CodeOutOfRange,
+			Detail: fmt.Sprintf("A Schedule has at most %d Rotation layers.", MaxRotationLayers)}
+	}
 	ids := map[string]bool{}
-	for i := range in.Layers {
-		l, err := checkLayer(in.Layers[i], "/rotation_layers/"+strconv.Itoa(i))
+	for i := range in.RotationLayers {
+		l, err := checkRotationLayer(in.RotationLayers[i], "/rotation_layers/"+strconv.Itoa(i))
 		if err != nil {
 			return in, err
 		}
@@ -471,7 +491,7 @@ func check(in Input) (Input, error) {
 			}
 			ids[l.ID] = true
 		}
-		in.Layers[i] = l
+		in.RotationLayers[i] = l
 	}
 	return in, nil
 }
@@ -484,8 +504,8 @@ func location(name string) (*time.Location, error) {
 	return time.LoadLocation(name)
 }
 
-// checkLayer refuses a Rotation layer that is not valid, at the pointer base.
-func checkLayer(l LayerInput, base string) (LayerInput, error) {
+// checkRotationLayer refuses a Rotation layer that is not valid, at the pointer base.
+func checkRotationLayer(l RotationLayerInput, base string) (RotationLayerInput, error) {
 	l.Name = strings.TrimSpace(l.Name)
 	if l.ID != "" {
 		id, err := publicid.Parse(publicid.RotationLayer, l.ID)
@@ -503,6 +523,9 @@ func checkLayer(l LayerInput, base string) (LayerInput, error) {
 	case len(l.UserIDs) == 0:
 		return l, &FieldError{Pointer: base + "/user_ids", Code: CodeRequired,
 			Detail: "A Rotation layer needs at least one person."}
+	case len(l.UserIDs) > MaxRotationLayerUsers:
+		return l, &FieldError{Pointer: base + "/user_ids", Code: CodeOutOfRange,
+			Detail: fmt.Sprintf("A Rotation layer has at most %d people.", MaxRotationLayerUsers)}
 	case !timeOfDay.MatchString(l.HandoverTime):
 		return l, &FieldError{Pointer: base + "/handover_time", Code: CodeInvalidFormat,
 			Detail: "The handover time is not a time HH:MM on the 24-hour clock, such as 10:00."}
@@ -534,7 +557,7 @@ func checkLayer(l LayerInput, base string) (LayerInput, error) {
 
 // checkShift refuses a Shift length with the wrong fields: shift_seconds exactly with hours, as whole hours from one
 // hour, and handover_day exactly with week.
-func checkShift(l LayerInput, base string) error {
+func checkShift(l RotationLayerInput, base string) error {
 	switch l.ShiftLength {
 	case ShiftDay, ShiftWeek, ShiftHours:
 	default:
@@ -675,10 +698,10 @@ func (s *Service) pageable(ctx context.Context, q Queries, teamID int64, ids []i
 // (C-27.FR-5, settled 6). The people it adds must exist and not be deleted, else unknown_id at their pointer, and be
 // able to be Paged in the Team, else not_pageable with the reason (C-27.FR-2); a stored id that the Schedule does not
 // have is unknown_id.
-func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, stored []Layer) (
+func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, stored []RotationLayer) (
 	map[string]Person, error) {
 	var ids []string
-	for _, l := range in.Layers {
+	for _, l := range in.RotationLayers {
 		ids = append(ids, l.UserIDs...)
 	}
 	found := map[string]Person{} // the Users that are not deleted
@@ -693,7 +716,7 @@ func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, 
 		}
 	}
 	people := map[string]Person{}
-	byID := make(map[string]Layer, len(stored))
+	byID := make(map[string]RotationLayer, len(stored))
 	storedPeople := map[string]Person{}
 	for _, l := range stored {
 		byID[l.PublicID] = l
@@ -703,7 +726,7 @@ func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, 
 	}
 	var added []int64
 	addedAt := map[int64]string{}
-	for i, l := range in.Layers {
+	for i, l := range in.RotationLayers {
 		base := "/rotation_layers/" + strconv.Itoa(i)
 		kept := map[string]bool{}
 		if l.ID != "" {
@@ -800,7 +823,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Schedule, 
 		if err != nil {
 			return fmt.Errorf("create the schedule: %w", taken(err))
 		}
-		if err := s.writeLayers(ctx, q, sid, in.Layers, nil, people); err != nil {
+		if err := s.writeLayers(ctx, q, sid, in.RotationLayers, nil, people); err != nil {
 			return err
 		}
 		if created, err = s.get(ctx, q, id); err != nil {
@@ -847,7 +870,7 @@ func (s *Service) clearMain(ctx context.Context, q Queries, r Requester, team, e
 
 // writeLayers writes the Rotation layers of the Schedule sid from the lowest: those with the id of a stored one are
 // updated, the others inserted, and the stored ones left out deleted; the people of each are written again.
-func (s *Service) writeLayers(ctx context.Context, q Queries, sid int64, layers []LayerInput, stored []Layer,
+func (s *Service) writeLayers(ctx context.Context, q Queries, sid int64, layers []RotationLayerInput, stored []RotationLayer,
 	people map[string]Person) error {
 	storedID := make(map[string]int64, len(stored))
 	for _, l := range stored {
@@ -864,7 +887,7 @@ func (s *Service) writeLayers(ctx context.Context, q Queries, sid int64, layers 
 		return fmt.Errorf("delete the rotation layers left out: %w", err)
 	}
 	for i, l := range layers {
-		f := layerFields(l)
+		f := rotationLayerFields(l)
 		position := int32(i + 1)
 		id, ok := storedID[l.ID]
 		if ok {
@@ -909,7 +932,7 @@ type fields struct {
 	from, to pgtype.Text
 }
 
-func layerFields(l LayerInput) fields {
+func rotationLayerFields(l RotationLayerInput) fields {
 	f := fields{start: pgtype.Date{Time: l.StartDate, Valid: true}}
 	if l.ShiftSeconds != nil {
 		f.seconds = pgtype.Int4{Int32: int32(*l.ShiftSeconds), Valid: true} //nolint:gosec // G115: at most MaxShiftSeconds
@@ -962,15 +985,15 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if in.TimeZone != nil {
 			zone = *in.TimeZone
 		}
-		people, err := s.resolve(ctx, q, before.Team.ID, in, before.Layers)
+		people, err := s.resolve(ctx, q, before.Team.ID, in, before.RotationLayers)
 		if err != nil {
 			return err
 		}
 		next := before
 		next.Name, next.TimeZone, next.Main = in.Name, zone, main
-		next.Layers = make([]Layer, len(in.Layers))
-		for i, l := range in.Layers {
-			next.Layers[i] = layerFromInput(l, people)
+		next.RotationLayers = make([]RotationLayer, len(in.RotationLayers))
+		for i, l := range in.RotationLayers {
+			next.RotationLayers[i] = rotationLayerFromInput(l, people)
 		}
 		changes := audit.Diff(viewOf(before), viewOf(next))
 		if len(changes) == 0 {
@@ -987,7 +1010,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			TimeZone: zone, Main: main, Now: now}); err != nil {
 			return fmt.Errorf("update the schedule %s: %w", before.PublicID, taken(err))
 		}
-		if err := s.writeLayers(ctx, q, before.ID, in.Layers, before.Layers, people); err != nil {
+		if err := s.writeLayers(ctx, q, before.ID, in.RotationLayers, before.RotationLayers, people); err != nil {
 			return err
 		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
@@ -1009,9 +1032,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return updated, nil
 }
 
-// layerFromInput is the Rotation layer an input describes, as the Audit log diff compares it with the stored one.
-func layerFromInput(l LayerInput, people map[string]Person) Layer {
-	out := Layer{PublicID: l.ID, Name: l.Name, ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime,
+// rotationLayerFromInput is the Rotation layer an input describes, as the Audit log diff compares it with the stored one.
+func rotationLayerFromInput(l RotationLayerInput, people map[string]Person) RotationLayer {
+	out := RotationLayer{PublicID: l.ID, Name: l.Name, ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime,
 		HandoverDay: l.HandoverDay, StartDate: l.StartDate, Limits: l.Limits, Users: make([]Person, len(l.UserIDs))}
 	if l.ShiftSeconds != nil {
 		out.ShiftSeconds = *l.ShiftSeconds
@@ -1089,15 +1112,15 @@ func resourceOf(sc Schedule) audit.Resource {
 
 // view is a Schedule as its Audit log diff shows it.
 type view struct {
-	TeamID         string      `json:"team_id"`
-	Name           string      `json:"name"`
-	TimeZone       string      `json:"time_zone"`
-	Main           bool        `json:"main"`
-	RotationLayers []layerView `json:"rotation_layers"`
+	TeamID         string              `json:"team_id"`
+	Name           string              `json:"name"`
+	TimeZone       string              `json:"time_zone"`
+	Main           bool                `json:"main"`
+	RotationLayers []rotationLayerView `json:"rotation_layers"`
 }
 
-// layerView is a Rotation layer as the Audit log diff shows it.
-type layerView struct {
+// rotationLayerView is a Rotation layer as the Audit log diff shows it.
+type rotationLayerView struct {
 	ID           string   `json:"id,omitempty"`
 	Name         string   `json:"name"`
 	UserIDs      []string `json:"user_ids"`
@@ -1111,9 +1134,9 @@ type layerView struct {
 
 func viewOf(sc Schedule) view {
 	v := view{TeamID: sc.Team.PublicID, Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main,
-		RotationLayers: make([]layerView, len(sc.Layers))}
-	for i, l := range sc.Layers {
-		lv := layerView{ID: l.PublicID, Name: l.Name, UserIDs: make([]string, len(l.Users)),
+		RotationLayers: make([]rotationLayerView, len(sc.RotationLayers))}
+	for i, l := range sc.RotationLayers {
+		lv := rotationLayerView{ID: l.PublicID, Name: l.Name, UserIDs: make([]string, len(l.Users)),
 			ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime, StartDate: l.StartDate.Format(time.DateOnly),
 			Limits: l.Limits}
 		for j, u := range l.Users {

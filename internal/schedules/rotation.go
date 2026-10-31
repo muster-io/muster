@@ -41,9 +41,9 @@ type Person struct {
 	Status   string
 }
 
-// Layer is a Rotation layer: its people take Shifts in turn from StartDate at HandoverTime, the first person first.
-// Number is its position, 1 for the lowest.
-type Layer struct {
+// RotationLayer is a Rotation layer: its people take Shifts in turn from StartDate at HandoverTime, the first person
+// first. Number is its position, 1 for the lowest.
+type RotationLayer struct {
 	ID           int64
 	PublicID     string
 	Number       int
@@ -79,8 +79,9 @@ const (
 )
 
 // at is the instant of the wall-clock time hh:mm on the day y-m-d (d may overflow the month) in loc, by its rules on
-// that day. A wall-clock time that the clocks skip, in the hour they move forward, is the instant they move: the
-// first instant whose wall-clock time is not earlier, in every zone, where time.Date may choose either side.
+// that day, the same in every zone, where time.Date may choose either side: a wall-clock time that the clocks skip,
+// when they move forward, is the instant they move, the first instant whose wall-clock time is not earlier; a
+// wall-clock time that happens twice, when they move back, is its first occurrence (RFC 5545).
 func at(loc *time.Location, y int, m time.Month, d, hh, mm int) time.Time {
 	t := time.Date(y, m, d, hh, mm, 0, 0, loc)
 	want := time.Date(y, m, d, hh, mm, 0, 0, time.UTC)
@@ -91,11 +92,25 @@ func at(loc *time.Location, y int, m time.Month, d, hh, mm int) time.Time {
 		if _, change := t.ZoneBounds(); !change.IsZero() {
 			return change
 		}
+		return t
 	case got.After(want):
 		// time.Date went on into the zone after the change: the change is where that zone starts.
 		if change, _ := t.ZoneBounds(); !change.IsZero() {
 			return change
 		}
+		return t
+	}
+	// The same wall-clock time in the zone before the one of t, when the clocks moved back into it less than that
+	// zone's lead ago, is the first occurrence.
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return t
+	}
+	_, now := t.Zone()
+	_, before := start.Add(-time.Second).Zone()
+	lead := time.Duration(before-now) * time.Second
+	if lead > 0 && t.Sub(start) < lead {
+		return t.Add(-lead)
 	}
 	return t
 }
@@ -108,7 +123,7 @@ func wallSeconds(loc *time.Location, t time.Time) int64 {
 }
 
 // length is the length of a Shift of the layer in seconds of wall-clock time; the first weekly Shift may be shorter.
-func (l Layer) length() int64 {
+func (l RotationLayer) length() int64 {
 	switch l.ShiftLength {
 	case ShiftWeek:
 		return weekSeconds
@@ -122,7 +137,7 @@ func (l Layer) length() int64 {
 // handover is the instant of the k-th handover of the layer in loc: the start of its k-th Shift, k from 0. Weekly
 // Shifts are handed over on HandoverDay: the first one runs from the start until the first HandoverDay after
 // StartDate. Shifts in hours last ShiftSeconds of wall-clock time. The arithmetic is in calendar days and whole seconds.
-func (l Layer) handover(loc *time.Location, k int) time.Time {
+func (l RotationLayer) handover(loc *time.Location, k int) time.Time {
 	y, m, d := l.StartDate.Date()
 	hh, mm := clockOf(l.HandoverTime)
 	switch l.ShiftLength {
@@ -146,7 +161,7 @@ func (l Layer) handover(loc *time.Location, k int) time.Time {
 
 // firstShift is the index of a Shift that starts no later than t, close before it: two before the one whose wall-clock
 // start the elapsed wall-clock time points at, which a change of the clocks moves by an hour at most.
-func (l Layer) firstShift(loc *time.Location, t time.Time) int {
+func (l RotationLayer) firstShift(loc *time.Location, t time.Time) int {
 	y, m, d := l.StartDate.Date()
 	hh, mm := clockOf(l.HandoverTime)
 	elapsed := wallSeconds(loc, t) - time.Date(y, m, d, hh, mm, 0, 0, time.UTC).Unix()
@@ -159,7 +174,7 @@ func (l Layer) firstShift(loc *time.Location, t time.Time) int {
 // Shifts are the Shifts of the layer that overlap the period from from to to in the time zone loc, cut to its limits
 // and to the period, in order. A layer without people has none. Every Shift lasts at least an hour, so the loop takes
 // at most one step per hour of the period, and a few more.
-func (l Layer) Shifts(loc *time.Location, from, to time.Time) []Shift {
+func (l RotationLayer) Shifts(loc *time.Location, from, to time.Time) []Shift {
 	if len(l.Users) == 0 || !to.After(from) || (l.ShiftLength == ShiftHours && l.ShiftSeconds < 3600) {
 		return nil
 	}
@@ -191,7 +206,7 @@ type span struct{ Start, End time.Time }
 // cut is the span from start to end cut to the limits of the layer: the parts within its windows, joined where they
 // touch. It looks at the windows of each day from the day before start, since a window that crosses midnight starts
 // then, to the day of end.
-func (l Layer) cut(loc *time.Location, start, end time.Time) []span {
+func (l RotationLayer) cut(loc *time.Location, start, end time.Time) []span {
 	if l.Limits == nil {
 		return []span{{start, end}}
 	}
@@ -223,7 +238,7 @@ func (l Layer) cut(loc *time.Location, start, end time.Time) []span {
 
 // window is the window of the limits that starts on the day of date: the whole day without a time of day, else from
 // Start until End that day, or the next day when End is not later than Start.
-func (l Layer) window(loc *time.Location, date time.Time) span {
+func (l RotationLayer) window(loc *time.Location, date time.Time) span {
 	y, m, d := date.Date()
 	if l.Limits.Start == "" {
 		return span{at(loc, y, m, d, 0, 0), at(loc, y, m, d+1, 0, 0)}

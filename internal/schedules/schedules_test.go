@@ -65,7 +65,7 @@ type scheduleRec struct {
 	created            time.Time
 }
 
-type layerRec struct {
+type rotationLayerRec struct {
 	dbgen.ListRotationLayersRow
 	users []int64
 }
@@ -83,7 +83,7 @@ type fakeStore struct {
 	inTeam    map[int64][]int64
 	users     []Person
 	schedules []*scheduleRec
-	layers    []*layerRec
+	layers    []*rotationLayerRec
 	overrides []*overrideRec
 	sas       map[int64]string
 	audit     []auditdb.InsertAuditEntryParams
@@ -299,7 +299,7 @@ func (s *fakeStore) DeleteSchedule(_ context.Context, arg dbgen.DeleteSchedulePa
 		return err
 	}
 	s.schedules = slices.DeleteFunc(s.schedules, func(sc *scheduleRec) bool { return sc.id == arg.ID })
-	s.layers = slices.DeleteFunc(s.layers, func(l *layerRec) bool { return l.ScheduleID == arg.ID })
+	s.layers = slices.DeleteFunc(s.layers, func(l *rotationLayerRec) bool { return l.ScheduleID == arg.ID })
 	s.overrides = slices.DeleteFunc(s.overrides, func(o *overrideRec) bool { return o.schedule == arg.ID })
 	return nil
 }
@@ -347,7 +347,7 @@ func (s *fakeStore) InsertRotationLayer(_ context.Context, arg dbgen.InsertRotat
 		return 0, err
 	}
 	id := s.id()
-	s.layers = append(s.layers, &layerRec{ListRotationLayersRow: dbgen.ListRotationLayersRow{ID: id,
+	s.layers = append(s.layers, &rotationLayerRec{ListRotationLayersRow: dbgen.ListRotationLayersRow{ID: id,
 		PublicID: arg.PublicID, ScheduleID: arg.ScheduleID, Position: arg.Position, Name: arg.Name,
 		ShiftLength: arg.ShiftLength, ShiftSeconds: arg.ShiftSeconds, HandoverTime: arg.HandoverTime,
 		HandoverDay: arg.HandoverDay, StartDate: arg.StartDate, LimitDays: arg.LimitDays, LimitStart: arg.LimitStart,
@@ -374,7 +374,7 @@ func (s *fakeStore) DeleteRotationLayers(_ context.Context, arg dbgen.DeleteRota
 	if err := s.err("DeleteRotationLayers"); err != nil {
 		return err
 	}
-	s.layers = slices.DeleteFunc(s.layers, func(l *layerRec) bool {
+	s.layers = slices.DeleteFunc(s.layers, func(l *rotationLayerRec) bool {
 		return l.ScheduleID == arg.ScheduleID && !slices.Contains(arg.Keep, l.ID)
 	})
 	return nil
@@ -531,6 +531,21 @@ func (s *fakeStore) GetScheduleOverride(_ context.Context, arg dbgen.GetSchedule
 		ByServiceAccountName: r.ByServiceAccountName, ByServiceAccountStatus: r.ByServiceAccountStatus}, nil
 }
 
+func (s *fakeStore) CountOverlappingOverrides(_ context.Context, arg dbgen.CountOverlappingOverridesParams) (int64,
+	error) {
+	if err := s.err("CountOverlappingOverrides"); err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, o := range s.overrides {
+		if o.schedule == arg.ScheduleID && o.id != arg.ExceptID && o.end.After(arg.SpanStart) &&
+			o.start.Before(arg.SpanEnd) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) LockScheduleOverride(_ context.Context, arg dbgen.LockScheduleOverrideParams) (int64, error) {
 	if err := s.err("LockScheduleOverride"); err != nil {
 		return 0, err
@@ -611,13 +626,13 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	return err
 }
 
-func (s *fakeStore) snapshot() ([]*scheduleRec, []*layerRec, []*overrideRec) {
+func (s *fakeStore) snapshot() ([]*scheduleRec, []*rotationLayerRec, []*overrideRec) {
 	schedules := make([]*scheduleRec, len(s.schedules))
 	for i, sc := range s.schedules {
 		c := *sc
 		schedules[i] = &c
 	}
-	layers := make([]*layerRec, len(s.layers))
+	layers := make([]*rotationLayerRec, len(s.layers))
 	for i, l := range s.layers {
 		c := *l
 		c.users = slices.Clone(l.users)
@@ -670,7 +685,7 @@ func infoSeries(t *testing.T, id string) string {
 
 // mainInput is the Schedule "Main" of payments with the two Rotation layers of scenario 1 from 2 November 2026.
 func mainInput() Input {
-	return Input{TeamID: teamPay, Name: "Main", TimeZone: ptr("Europe/Berlin"), Layers: []LayerInput{
+	return Input{TeamID: teamPay, Name: "Main", TimeZone: ptr("Europe/Berlin"), RotationLayers: []RotationLayerInput{
 		{Name: "Around the clock", UserIDs: []string{petr.PublicID, sergey.PublicID, olga.PublicID},
 			ShiftLength: ShiftWeek, HandoverTime: "10:00", HandoverDay: "monday", StartDate: date("2026-11-02")},
 		{Name: "Working hours 11-19", UserIDs: []string{olga.PublicID, petr.PublicID}, ShiftLength: ShiftWeek,
@@ -683,8 +698,8 @@ func mainInput() Input {
 // inputOf is the input that saves sc as it is.
 func inputOf(sc Schedule) Input {
 	in := Input{TeamID: sc.Team.PublicID, Name: sc.Name, TimeZone: &sc.TimeZone}
-	for _, l := range sc.Layers {
-		li := LayerInput{ID: l.PublicID, Name: l.Name, ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime,
+	for _, l := range sc.RotationLayers {
+		li := RotationLayerInput{ID: l.PublicID, Name: l.Name, ShiftLength: l.ShiftLength, HandoverTime: l.HandoverTime,
 			HandoverDay: l.HandoverDay, StartDate: l.StartDate, Limits: l.Limits}
 		if l.ShiftLength == ShiftHours {
 			li.ShiftSeconds = ptr(l.ShiftSeconds)
@@ -692,7 +707,7 @@ func inputOf(sc Schedule) Input {
 		for _, u := range l.Users {
 			li.UserIDs = append(li.UserIDs, u.PublicID)
 		}
-		in.Layers = append(in.Layers, li)
+		in.RotationLayers = append(in.RotationLayers, li)
 	}
 	return in
 }
@@ -701,9 +716,9 @@ func inputOf(sc Schedule) Input {
 // code — a Shift length in hours that is not whole hours from one hour, 5400 included, and a window whose end equals
 // its start among them.
 func TestCheck(t *testing.T) {
-	layer := func(f func(l *LayerInput)) Input {
+	layer := func(f func(l *RotationLayerInput)) Input {
 		in := mainInput()
-		f(&in.Layers[1])
+		f(&in.RotationLayers[1])
 		return in
 	}
 	for _, c := range []struct {
@@ -716,64 +731,76 @@ func TestCheck(t *testing.T) {
 		{"a time zone that is not one", Input{Name: "x", TimeZone: ptr("Mars/Olympus")}, "/time_zone",
 			CodeInvalidFormat},
 		{"Local is no time zone", Input{Name: "x", TimeZone: ptr("Local")}, "/time_zone", CodeInvalidFormat},
-		{"a layer id that is not one", layer(func(l *LayerInput) { l.ID = "TM0000000000AA" }),
+		{"a layer id that is not one", layer(func(l *RotationLayerInput) { l.ID = "TM0000000000AA" }),
 			"/rotation_layers/1/id", CodeUnknownID},
-		{"a layer without a name", layer(func(l *LayerInput) { l.Name = "" }), "/rotation_layers/1/name",
+		{"a layer without a name", layer(func(l *RotationLayerInput) { l.Name = "" }), "/rotation_layers/1/name",
 			CodeRequired},
-		{"a layer with a long name", layer(func(l *LayerInput) { l.Name = strings.Repeat("x", 201) }),
+		{"a layer with a long name", layer(func(l *RotationLayerInput) { l.Name = strings.Repeat("x", 201) }),
 			"/rotation_layers/1/name", CodeTooLong},
-		{"a layer without people", layer(func(l *LayerInput) { l.UserIDs = nil }), "/rotation_layers/1/user_ids",
+		{"a layer without people", layer(func(l *RotationLayerInput) { l.UserIDs = nil }), "/rotation_layers/1/user_ids",
 			CodeRequired},
-		{"a person who is not a User id", layer(func(l *LayerInput) { l.UserIDs[1] = "TM0000000000AA" }),
+		{"a person who is not a User id", layer(func(l *RotationLayerInput) { l.UserIDs[1] = "TM0000000000AA" }),
 			"/rotation_layers/1/user_ids/1", CodeUnknownID},
-		{"a handover that is not HH:MM", layer(func(l *LayerInput) { l.HandoverTime = "24:00" }),
+		{"a handover that is not HH:MM", layer(func(l *RotationLayerInput) { l.HandoverTime = "24:00" }),
 			"/rotation_layers/1/handover_time", CodeInvalidFormat},
-		{"an unknown Shift length", layer(func(l *LayerInput) { l.ShiftLength = "month" }),
+		{"an unknown Shift length", layer(func(l *RotationLayerInput) { l.ShiftLength = "month" }),
 			"/rotation_layers/1/shift_length", CodeInvalidFormat},
-		{"hours without a length", layer(func(l *LayerInput) { l.ShiftLength, l.HandoverDay = ShiftHours, "" }),
+		{"hours without a length", layer(func(l *RotationLayerInput) { l.ShiftLength, l.HandoverDay = ShiftHours, "" }),
 			"/rotation_layers/1/shift_seconds", CodeRequired},
-		{"a length with weeks", layer(func(l *LayerInput) { l.ShiftSeconds = ptr(3600) }),
+		{"a length with weeks", layer(func(l *RotationLayerInput) { l.ShiftSeconds = ptr(3600) }),
 			"/rotation_layers/1/shift_seconds", CodeUnsupported},
-		{"5400 seconds", layer(func(l *LayerInput) {
+		{"5400 seconds", layer(func(l *RotationLayerInput) {
 			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(5400)
 		}), "/rotation_layers/1/shift_seconds", CodeOutOfRange},
-		{"less than an hour", layer(func(l *LayerInput) {
+		{"less than an hour", layer(func(l *RotationLayerInput) {
 			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(1800)
 		}), "/rotation_layers/1/shift_seconds", CodeOutOfRange},
-		{"weeks without a day", layer(func(l *LayerInput) { l.HandoverDay = "" }), "/rotation_layers/1/handover_day",
+		{"weeks without a day", layer(func(l *RotationLayerInput) { l.HandoverDay = "" }), "/rotation_layers/1/handover_day",
 			CodeRequired},
-		{"a day with days", layer(func(l *LayerInput) { l.ShiftLength = ShiftDay }), "/rotation_layers/1/handover_day",
+		{"a day with days", layer(func(l *RotationLayerInput) { l.ShiftLength = ShiftDay }), "/rotation_layers/1/handover_day",
 			CodeUnsupported},
-		{"a day that is not one", layer(func(l *LayerInput) { l.HandoverDay = "funday" }),
+		{"a day that is not one", layer(func(l *RotationLayerInput) { l.HandoverDay = "funday" }),
 			"/rotation_layers/1/handover_day", CodeInvalidFormat},
-		{"limits without days", layer(func(l *LayerInput) { l.Limits.Days = nil }), "/rotation_layers/1/limits/days",
+		{"limits without days", layer(func(l *RotationLayerInput) { l.Limits.Days = nil }), "/rotation_layers/1/limits/days",
 			CodeRequired},
-		{"limits with a day that is not one", layer(func(l *LayerInput) { l.Limits.Days[2] = "x" }),
+		{"limits with a day that is not one", layer(func(l *RotationLayerInput) { l.Limits.Days[2] = "x" }),
 			"/rotation_layers/1/limits/days/2", CodeInvalidFormat},
-		{"limits with a day twice", layer(func(l *LayerInput) { l.Limits.Days[2] = "friday" }),
+		{"limits with a day twice", layer(func(l *RotationLayerInput) { l.Limits.Days[2] = "friday" }),
 			"/rotation_layers/1/limits/days/2", CodeDuplicate},
-		{"limits with an end alone", layer(func(l *LayerInput) { l.Limits.Start = "" }),
+		{"limits with an end alone", layer(func(l *RotationLayerInput) { l.Limits.Start = "" }),
 			"/rotation_layers/1/limits/start", CodeRequired},
-		{"limits with a start alone", layer(func(l *LayerInput) { l.Limits.End = "" }),
+		{"limits with a start alone", layer(func(l *RotationLayerInput) { l.Limits.End = "" }),
 			"/rotation_layers/1/limits/end", CodeRequired},
-		{"limits with a malformed start", layer(func(l *LayerInput) { l.Limits.Start = "7:00" }),
+		{"limits with a malformed start", layer(func(l *RotationLayerInput) { l.Limits.Start = "7:00" }),
 			"/rotation_layers/1/limits/start", CodeInvalidFormat},
-		{"limits with a malformed end", layer(func(l *LayerInput) { l.Limits.End = "7:00" }),
+		{"limits with a malformed end", layer(func(l *RotationLayerInput) { l.Limits.End = "7:00" }),
 			"/rotation_layers/1/limits/end", CodeInvalidFormat},
-		{"a window whose end equals its start", layer(func(l *LayerInput) { l.Limits.End = "11:00" }),
+		{"a window whose end equals its start", layer(func(l *RotationLayerInput) { l.Limits.End = "11:00" }),
 			"/rotation_layers/1/limits/end", CodeOutOfRange},
-		{"a start date before 2000", layer(func(l *LayerInput) { l.StartDate = date("1999-12-31") }),
+		{"a start date before 2000", layer(func(l *RotationLayerInput) { l.StartDate = date("1999-12-31") }),
 			"/rotation_layers/1/start_date", CodeOutOfRange},
-		{"a start date of the year 1", layer(func(l *LayerInput) { l.StartDate = date("0001-01-01") }),
+		{"a start date of the year 1", layer(func(l *RotationLayerInput) { l.StartDate = date("0001-01-01") }),
 			"/rotation_layers/1/start_date", CodeOutOfRange},
-		{"a start date after 2100", layer(func(l *LayerInput) { l.StartDate = date("2101-01-01") }),
+		{"a start date after 2100", layer(func(l *RotationLayerInput) { l.StartDate = date("2101-01-01") }),
 			"/rotation_layers/1/start_date", CodeOutOfRange},
-		{"more than 28 days", layer(func(l *LayerInput) {
+		{"101 people", layer(func(l *RotationLayerInput) {
+			for len(l.UserIDs) <= MaxRotationLayerUsers {
+				l.UserIDs = append(l.UserIDs, petr.PublicID)
+			}
+		}), "/rotation_layers/1/user_ids", CodeOutOfRange},
+		{"21 Rotation layers", func() Input {
+			in := mainInput()
+			for len(in.RotationLayers) <= MaxRotationLayers {
+				in.RotationLayers = append(in.RotationLayers, mainInput().RotationLayers[0])
+			}
+			return in
+		}(), "/rotation_layers", CodeOutOfRange},
+		{"more than 28 days", layer(func(l *RotationLayerInput) {
 			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(MaxShiftSeconds+3600)
 		}), "/rotation_layers/1/shift_seconds", CodeOutOfRange},
 		{"a layer twice", func() Input {
 			in := mainInput()
-			in.Layers[0].ID, in.Layers[1].ID = "RY0000000000AA", "ry0000000000aa"
+			in.RotationLayers[0].ID, in.RotationLayers[1].ID = "RY0000000000AA", "ry0000000000aa"
 			return in
 		}(), "/rotation_layers/1/id", CodeDuplicate},
 	} {
@@ -785,22 +812,22 @@ func TestCheck(t *testing.T) {
 			}
 		})
 	}
-	in, err := check(layer(func(l *LayerInput) { l.Limits = &Limits{Days: []string{"sunday", "monday"}} }))
-	if err != nil || !slices.Equal(in.Layers[1].Limits.Days, []string{"monday", "sunday"}) {
-		t.Errorf("limits of days alone = %+v, %v", in.Layers[1].Limits, err)
+	in, err := check(layer(func(l *RotationLayerInput) { l.Limits = &Limits{Days: []string{"sunday", "monday"}} }))
+	if err != nil || !slices.Equal(in.RotationLayers[1].Limits.Days, []string{"monday", "sunday"}) {
+		t.Errorf("limits of days alone = %+v, %v", in.RotationLayers[1].Limits, err)
 	}
-	if _, err := check(layer(func(l *LayerInput) { l.Limits.End = "09:00"; l.Limits.Start = "19:00" })); err != nil {
+	if _, err := check(layer(func(l *RotationLayerInput) { l.Limits.End = "09:00"; l.Limits.Start = "19:00" })); err != nil {
 		t.Errorf("a window across midnight = %v", err)
 	}
 	for _, seconds := range []int{43200, MaxShiftSeconds} {
-		if _, err := check(layer(func(l *LayerInput) {
+		if _, err := check(layer(func(l *RotationLayerInput) {
 			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(seconds)
 		})); err != nil {
 			t.Errorf("%d seconds = %v", seconds, err)
 		}
 	}
 	for _, d := range []string{"2000-01-01", "2100-12-31"} {
-		if _, err := check(layer(func(l *LayerInput) { l.StartDate = date(d) })); err != nil {
+		if _, err := check(layer(func(l *RotationLayerInput) { l.StartDate = date(d) })); err != nil {
 			t.Errorf("the start date %s = %v", d, err)
 		}
 	}
@@ -816,12 +843,12 @@ func TestCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sc.Main || sc.TimeZone != "Europe/Berlin" || sc.Team.PublicID != teamPay || len(sc.Layers) != 2 ||
-		sc.Layers[0].Number != 1 || sc.Layers[1].Number != 2 || len(sc.Layers[0].Users) != 3 ||
-		sc.Layers[0].Users[2].Login != "olga" || sc.Layers[1].Limits == nil ||
-		!slices.Equal(sc.Layers[1].Limits.Days, []string{"monday", "tuesday", "wednesday", "thursday", "friday"}) ||
+	if !sc.Main || sc.TimeZone != "Europe/Berlin" || sc.Team.PublicID != teamPay || len(sc.RotationLayers) != 2 ||
+		sc.RotationLayers[0].Number != 1 || sc.RotationLayers[1].Number != 2 || len(sc.RotationLayers[0].Users) != 3 ||
+		sc.RotationLayers[0].Users[2].Login != "olga" || sc.RotationLayers[1].Limits == nil ||
+		!slices.Equal(sc.RotationLayers[1].Limits.Days, []string{"monday", "tuesday", "wednesday", "thursday", "friday"}) ||
 		sc.Version != 1 || !sc.CreatedAt.Equal(t0) || !strings.HasPrefix(sc.PublicID, "SC") ||
-		!strings.HasPrefix(sc.Layers[0].PublicID, "RY") {
+		!strings.HasPrefix(sc.RotationLayers[0].PublicID, "RY") {
 		t.Fatalf("created %+v", sc)
 	}
 	if len(store.audit) != 1 || store.audit[0].Action != ActionCreated ||
@@ -832,7 +859,7 @@ func TestCreate(t *testing.T) {
 	if got := infoSeries(t, sc.PublicID); got != `muster_schedule_info{schedule="`+sc.PublicID+`",name="Main"} 1` {
 		t.Errorf("info %q", got)
 	}
-	nights := Input{TeamID: teamPay, Name: "Nights", Layers: []LayerInput{{Name: "Friday night",
+	nights := Input{TeamID: teamPay, Name: "Nights", RotationLayers: []RotationLayerInput{{Name: "Friday night",
 		UserIDs: []string{olga.PublicID}, ShiftLength: ShiftDay, HandoverTime: "10:00", StartDate: date("2026-11-02"),
 		Limits: &Limits{Days: []string{"friday"}, Start: "19:00", End: "09:00"}}}}
 	second, err := svc.Create(ctx, admin, nights)
@@ -844,7 +871,7 @@ func TestCreate(t *testing.T) {
 		t.Errorf("a name taken = %v", err)
 	}
 	ops, err := svc.Create(ctx, admin, Input{TeamID: teamOps, Name: "Main"})
-	if err != nil || !ops.Main || ops.TimeZone != "UTC" || len(ops.Layers) != 0 {
+	if err != nil || !ops.Main || ops.TimeZone != "UTC" || len(ops.RotationLayers) != 0 {
 		t.Errorf("the same name in another team = %+v, %v", ops, err)
 	}
 	for _, c := range []struct {
@@ -881,7 +908,7 @@ func TestCreate(t *testing.T) {
 		"ListPageable"} {
 		store.fail[name] = errBoom
 		if _, err := svc.Create(ctx, admin, Input{TeamID: "TM00000000NEW1", Name: "Fails " + name,
-			Layers: mainInput().Layers}); !errors.Is(err, errBoom) {
+			RotationLayers: mainInput().RotationLayers}); !errors.Is(err, errBoom) {
 			t.Errorf("%s fails = %v", name, err)
 		}
 		delete(store.fail, name)
@@ -938,14 +965,14 @@ func TestNotPageable(t *testing.T) {
 		reason string
 	}{{vic, ReasonViewer}, {dan, ReasonDisabled}, {bob, ReasonNotInTeam}} {
 		in := mainInput()
-		in.Layers[1].UserIDs = append(in.Layers[1].UserIDs, c.who.PublicID)
+		in.RotationLayers[1].UserIDs = append(in.RotationLayers[1].UserIDs, c.who.PublicID)
 		f := fieldError(t, func() error { _, err := svc.Create(ctx, admin, in); return err }())
 		if f.Pointer != "/rotation_layers/1/user_ids/2" || f.Code != CodeNotPageable || f.Reason != c.reason {
 			t.Errorf("%s = %+v", c.who.Login, f)
 		}
 	}
 	in := mainInput()
-	in.Layers[0].UserIDs[1] = "SR00000000GONE"
+	in.RotationLayers[0].UserIDs[1] = "SR00000000GONE"
 	if f := fieldError(t, func() error { _, err := svc.Create(ctx, admin, in); return err }()); f.Pointer !=
 		"/rotation_layers/0/user_ids/1" || f.Code != CodeUnknownID {
 		t.Errorf("an unknown user = %+v", f)
@@ -958,12 +985,12 @@ func TestNotPageable(t *testing.T) {
 	rename := inputOf(sc)
 	rename.Name = "Main renamed"
 	renamed, err := svc.Update(ctx, admin, sc.PublicID, nil, rename)
-	if err != nil || renamed.Name != "Main renamed" || renamed.Layers[0].Users[0].Status != "disabled" {
+	if err != nil || renamed.Name != "Main renamed" || renamed.RotationLayers[0].Users[0].Status != "disabled" {
 		t.Fatalf("a rename with a person disabled since = %+v, %v", renamed, err)
 	}
 	moved := inputOf(renamed)
-	moved.Layers[1].UserIDs = append(moved.Layers[1].UserIDs, sergey.PublicID)
-	moved.Layers = append(moved.Layers, LayerInput{Name: "new", UserIDs: []string{petr.PublicID},
+	moved.RotationLayers[1].UserIDs = append(moved.RotationLayers[1].UserIDs, sergey.PublicID)
+	moved.RotationLayers = append(moved.RotationLayers, RotationLayerInput{Name: "new", UserIDs: []string{petr.PublicID},
 		ShiftLength: ShiftDay, HandoverTime: "09:00", StartDate: date("2026-11-02")})
 	f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, sc.PublicID, nil, moved); return err }())
 	if f.Pointer != "/rotation_layers/2/user_ids/0" || f.Reason != ReasonDisabled {
@@ -973,18 +1000,18 @@ func TestNotPageable(t *testing.T) {
 	again := inputOf(renamed)
 	again.Name = "Main renamed again"
 	if got, err := svc.Update(ctx, admin, sc.PublicID, nil, again); err != nil ||
-		got.Layers[1].Users[0].Status != "deleted" {
+		got.RotationLayers[1].Users[0].Status != "deleted" {
 		t.Errorf("a rename with a person deleted since = %+v, %v", got, err)
 	}
 	added := inputOf(renamed)
-	added.Layers = append(added.Layers, LayerInput{Name: "another", UserIDs: []string{olga.PublicID},
+	added.RotationLayers = append(added.RotationLayers, RotationLayerInput{Name: "another", UserIDs: []string{olga.PublicID},
 		ShiftLength: ShiftDay, HandoverTime: "09:00", StartDate: date("2026-11-02")})
 	if f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, sc.PublicID, nil, added); return err }()); f.Pointer != "/rotation_layers/2/user_ids/0" || f.Code != CodeUnknownID {
 		t.Errorf("a deleted person added to a new layer = %+v", f)
 	}
 	store.users[2].Status = "active"
 	foreign := inputOf(renamed)
-	foreign.Layers[0].ID = "RY00000000NONE"
+	foreign.RotationLayers[0].ID = "RY00000000NONE"
 	if f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, sc.PublicID, nil, foreign); return err }()); f.Pointer != "/rotation_layers/0/id" || f.Code != CodeUnknownID {
 		t.Errorf("a layer of another schedule = %+v", f)
 	}
@@ -1026,17 +1053,17 @@ func TestUpdate(t *testing.T) {
 	in := inputOf(sc)
 	in.TimeZone = nil
 	in.Name = "Main"
-	in.Layers = []LayerInput{in.Layers[1], {Name: "Twelve hours", UserIDs: []string{sergey.PublicID, olga.PublicID},
+	in.RotationLayers = []RotationLayerInput{in.RotationLayers[1], {Name: "Twelve hours", UserIDs: []string{sergey.PublicID, olga.PublicID},
 		ShiftLength: ShiftHours, ShiftSeconds: ptr(43200), HandoverTime: "09:00", StartDate: date("2026-11-02")}}
-	in.Layers[0].Name = "Working hours"
+	in.RotationLayers[0].Name = "Working hours"
 	updated, err := svc.Update(ctx, admin, sc.PublicID, ptr(int64(1)), in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Version != 2 || updated.TimeZone != "Europe/Berlin" || len(updated.Layers) != 2 ||
-		updated.Layers[0].PublicID != sc.Layers[1].PublicID || updated.Layers[0].Number != 1 ||
-		updated.Layers[0].Name != "Working hours" || updated.Layers[1].ShiftSeconds != 43200 ||
-		updated.Layers[1].PublicID == sc.Layers[0].PublicID || len(store.layers) != 2 {
+	if updated.Version != 2 || updated.TimeZone != "Europe/Berlin" || len(updated.RotationLayers) != 2 ||
+		updated.RotationLayers[0].PublicID != sc.RotationLayers[1].PublicID || updated.RotationLayers[0].Number != 1 ||
+		updated.RotationLayers[0].Name != "Working hours" || updated.RotationLayers[1].ShiftSeconds != 43200 ||
+		updated.RotationLayers[1].PublicID == sc.RotationLayers[0].PublicID || len(store.layers) != 2 {
 		t.Errorf("updated %+v", updated)
 	}
 	if e := store.audit[len(store.audit)-1]; e.Action != ActionUpdated ||
@@ -1105,7 +1132,7 @@ func TestGetAndList(t *testing.T) {
 		}
 	}
 	got, err := svc.Get(ctx, strings.ToLower(sc.PublicID))
-	if err != nil || got.PublicID != sc.PublicID || len(got.Layers) != 2 || got.Team.Name != "Payments" {
+	if err != nil || got.PublicID != sc.PublicID || len(got.RotationLayers) != 2 || got.Team.Name != "Payments" {
 		t.Errorf("get = %+v, %v", got, err)
 	}
 	for _, id := range []string{"SC00000000NONE", "TM00000000PAY1"} {
@@ -1122,7 +1149,7 @@ func TestGetAndList(t *testing.T) {
 	}
 	page, err := svc.List(ctx, ListFilter{Limit: 2})
 	if err != nil || names(page) != "Alpha,Main" || page.Next == nil || page.Next.Name != "main" ||
-		len(page.Schedules[1].Layers) != 2 {
+		len(page.Schedules[1].RotationLayers) != 2 {
 		t.Fatalf("first page = %s %+v, %v", names(page), page.Next, err)
 	}
 	if page, err = svc.List(ctx, ListFilter{Limit: 2, After: page.Next}); err != nil || names(page) != "nights" ||

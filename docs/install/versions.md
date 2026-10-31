@@ -236,6 +236,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
 
+    Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 25. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 24, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
     are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back

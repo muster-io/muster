@@ -3742,7 +3742,7 @@ paths:
         `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
         `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
         else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the
-        clocks move.'
+        clocks move, and one that happens twice its first occurrence.'
       x-permission: schedules:read
       x-listener: app
       security:
@@ -3836,9 +3836,11 @@ paths:
         overlap, the one created last wins (P-65). The caller is in the Schedule''s Team or is an Admin, else `409`
         `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422`
         `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be
-        anyone and changes nothing in the On-call. An end that is not after the start, or not after the business
-        clock''s now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message
-        (C-27.FR-11).'
+        anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes
+        before the business clock''s now is refused with `422` `out_of_range` at `/start`; an `end` that is not after
+        the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other
+        Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead.
+        Needs no approval and sends no message (C-27.FR-11).'
       x-permission: schedule-overrides:write
       x-listener: app
       security:
@@ -3887,6 +3889,9 @@ paths:
       summary: Update an Override
       description: Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`.
         Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+        Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`,
+        `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps
+        the version.
       x-permission: schedule-overrides:write
       x-listener: app
       security:
@@ -3937,7 +3942,9 @@ paths:
       - Schedules
       summary: Delete an Override
       description: With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409`
-        `override_ended`, so that the past Result stays as it was.
+        `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of
+        removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log
+        records `schedule_override.deleted` with that change of the end.
       x-permission: schedule-overrides:write
       x-listener: app
       security:
@@ -11633,7 +11640,8 @@ components:
       type: object
       description: 'A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first
         person first. Times are wall-clock times in the Schedule''s time zone, so a handover at 10:00 stays at 10:00
-        across a change of the clocks.'
+        across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant
+        they move; one that happens twice when they move back is its first occurrence (RFC 5545).'
       required:
       - name
       - user_ids
@@ -11651,7 +11659,7 @@ components:
         user_ids:
           type: array
           minItems: 1
-          description: The people who take Shifts in turn, in order.
+          description: The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.
           items:
             $ref: '#/components/schemas/PublicId'
         shift_length:
@@ -11753,7 +11761,7 @@ components:
             instead.'
         rotation_layers:
           type: array
-          description: From the lowest to the highest.
+          description: From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
           items:
             $ref: '#/components/schemas/RotationLayerInput'
     Schedule:
@@ -11838,10 +11846,11 @@ components:
         start:
           type: string
           format: date-time
+          description: At most 5 minutes before the business clock's now; fixed once the Override has begun.
         end:
           type: string
           format: date-time
-          description: After `start` and not before the business clock's now (P-91).
+          description: After `start` and after the business clock's now (P-91), at most 31 days after `start`.
     ScheduleOverride:
       type: object
       required:

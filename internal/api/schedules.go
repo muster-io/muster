@@ -168,13 +168,13 @@ func (s *Server) GetScheduleOnCall(ctx context.Context, req gen.GetScheduleOnCal
 	}
 	out := gen.ScheduleOnCall{From: res.From.UTC(), To: res.To.UTC(),
 		Segments:       make([]gen.OnCallSegment, len(res.Segments)),
-		RotationLayers: make([]gen.RotationLayerShifts, len(res.Layers)),
+		RotationLayers: make([]gen.RotationLayerShifts, len(res.RotationLayers)),
 		Overrides:      make([]gen.ScheduleOverride, len(res.Overrides)),
 		Warnings:       make([]gen.ScheduleWarning, len(res.Warnings))}
 	for i, seg := range res.Segments {
 		out.Segments[i] = segmentOf(seg)
 	}
-	for i, l := range res.Layers {
+	for i, l := range res.RotationLayers {
 		shifts := make([]gen.RotationShift, len(l.Shifts))
 		for j, sh := range l.Shifts {
 			shifts[j] = gen.RotationShift{Start: sh.Start.UTC(), End: sh.End.UTC(), User: personRefOf(sh.User)}
@@ -184,7 +184,7 @@ func (s *Server) GetScheduleOnCall(ctx context.Context, req gen.GetScheduleOnCal
 			}
 		}
 		out.RotationLayers[i] = gen.RotationLayerShifts{
-			RotationLayer: gen.EntityRef{Id: l.Layer.PublicID, Name: l.Layer.Name}, Shifts: shifts}
+			RotationLayer: gen.EntityRef{Id: l.RotationLayer.PublicID, Name: l.RotationLayer.Name}, Shifts: shifts}
 	}
 	for i, o := range res.Overrides {
 		out.Overrides[i] = overrideOf(o)
@@ -285,9 +285,9 @@ func (s *Server) DeleteScheduleOverride(ctx context.Context, req gen.DeleteSched
 // scheduleInputOf is a Schedule as internal/schedules takes it.
 func scheduleInputOf(b gen.ScheduleInput) schedules.Input {
 	in := schedules.Input{TeamID: b.TeamId, Name: b.Name, TimeZone: b.TimeZone, Main: b.Main,
-		Layers: make([]schedules.LayerInput, len(b.RotationLayers))}
+		RotationLayers: make([]schedules.RotationLayerInput, len(b.RotationLayers))}
 	for i, l := range b.RotationLayers {
-		li := schedules.LayerInput{Name: l.Name, UserIDs: append([]string(nil), l.UserIds...),
+		li := schedules.RotationLayerInput{Name: l.Name, UserIDs: append([]string(nil), l.UserIds...),
 			ShiftLength: string(l.ShiftLength), ShiftSeconds: l.ShiftSeconds, HandoverTime: l.HandoverTime,
 			StartDate: l.StartDate.Time}
 		if l.Id != nil {
@@ -299,7 +299,7 @@ func scheduleInputOf(b gen.ScheduleInput) schedules.Input {
 		if l.Limits.IsSpecified() && !l.Limits.IsNull() {
 			li.Limits = limitsIn(l.Limits.MustGet())
 		}
-		in.Layers[i] = li
+		in.RotationLayers[i] = li
 	}
 	return in
 }
@@ -325,15 +325,15 @@ func scheduleOf(sc schedules.Schedule) gen.Schedule {
 	out := gen.Schedule{Id: sc.PublicID, TeamId: sc.Team.PublicID,
 		Team: gen.TeamRef{Id: sc.Team.PublicID, Name: sc.Team.Name, Slug: sc.Team.Slug, Deleted: sc.Team.Deleted},
 		Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, CreatedAt: sc.CreatedAt.UTC(), Etag: &tag,
-		RotationLayers: make([]gen.RotationLayer, len(sc.Layers))}
-	for i, l := range sc.Layers {
-		out.RotationLayers[i] = layerOf(l)
+		RotationLayers: make([]gen.RotationLayer, len(sc.RotationLayers))}
+	for i, l := range sc.RotationLayers {
+		out.RotationLayers[i] = rotationLayerOf(l)
 	}
 	return out
 }
 
-// layerOf is the API form of a Rotation layer.
-func layerOf(l schedules.Layer) gen.RotationLayer {
+// rotationLayerOf is the API form of a Rotation layer.
+func rotationLayerOf(l schedules.RotationLayer) gen.RotationLayer {
 	out := gen.RotationLayer{Id: l.PublicID, Number: l.Number, Name: l.Name, ShiftLength: gen.ShiftLength(l.ShiftLength),
 		HandoverTime: l.HandoverTime, StartDate: openapi_types.Date{Time: l.StartDate},
 		UserIds: make([]string, len(l.Users)), Users: make([]gen.UserRef, len(l.Users))}
@@ -413,7 +413,7 @@ func segmentOf(seg schedules.Segment) gen.OnCallSegment {
 			id := src.Override
 			s.OverrideId = &id
 		} else {
-			s.RotationLayer = &gen.EntityRef{Id: src.Layer.PublicID, Name: src.Layer.Name}
+			s.RotationLayer = &gen.EntityRef{Id: src.RotationLayer.PublicID, Name: src.RotationLayer.Name}
 		}
 		out.Source.Set(s)
 	}
@@ -425,8 +425,8 @@ func warningOf(w schedules.Warning) gen.ScheduleWarning {
 	out := gen.ScheduleWarning{Kind: gen.ScheduleWarningKind(w.Kind)}
 	out.User.Set(personRefOf(w.User))
 	out.RotationLayer.SetNull()
-	if w.Layer != nil {
-		out.RotationLayer.Set(gen.EntityRef{Id: w.Layer.PublicID, Name: w.Layer.Name})
+	if w.RotationLayer != nil {
+		out.RotationLayer.Set(gen.EntityRef{Id: w.RotationLayer.PublicID, Name: w.RotationLayer.Name})
 	}
 	out.OverrideId = nullable.NewNullNullable[string]()
 	if w.Override != "" {

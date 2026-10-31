@@ -21,7 +21,7 @@ func segmentsText(loc *time.Location, list []Segment) string {
 		if s.Source != nil {
 			src = s.Source.Override
 			if s.Source.Kind == SourceRotationLayer {
-				src = s.Source.Layer.Name
+				src = s.Source.RotationLayer.Name
 			}
 		}
 		fmt.Fprintf(&b, "%s–%s %s %s\n", s.Start.In(loc).Format("01-02 15:04"), s.End.In(loc).Format("01-02 15:04"),
@@ -35,8 +35,8 @@ func warningsText(list []Warning) string {
 	var b strings.Builder
 	for _, w := range list {
 		where := w.Override
-		if w.Layer != nil {
-			where = w.Layer.Name
+		if w.RotationLayer != nil {
+			where = w.RotationLayer.Name
 		}
 		fmt.Fprintf(&b, "%s %s %s\n", w.Kind, w.User.Login, where)
 	}
@@ -45,8 +45,8 @@ func warningsText(list []Warning) string {
 
 // scenario are the Rotation layers of C-27 scenario 1 from Monday 2 November 2026: below, weekly Shifts handed over on
 // Monday at 10:00 among petr, sergey and olga; above, weekly Shifts on weekdays from 11:00 to 19:00 among olga and petr.
-func scenario() []Layer {
-	return []Layer{
+func scenario() []RotationLayer {
+	return []RotationLayer{
 		{PublicID: "RY00000000LOW1", Number: 1, Name: "Around the clock", Users: []Person{petr, sergey, olga},
 			ShiftLength: ShiftWeek, HandoverTime: "10:00", HandoverDay: "monday", StartDate: date("2026-11-02")},
 		{PublicID: "RY00000000UP02", Number: 2, Name: "Working hours", Users: []Person{olga, petr},
@@ -73,7 +73,7 @@ func TestResult(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name      string
-		layers    []Layer
+		layers    []RotationLayer
 		overrides []Override
 		skipped   map[int64]string
 		week      int
@@ -134,7 +134,7 @@ func TestResult(t *testing.T) {
 			want: "11-04 00:00–11-04 11:00 petr Around the clock\n11-04 11:00–11-04 19:00 olga Working hours\n" +
 				"11-04 19:00–11-05 00:00 petr Around the clock\n"},
 		{name: "the daily Shifts of one person are joined", week: 1,
-			layers: []Layer{{PublicID: "RY000000000001", Name: "alone", Users: []Person{olga}, ShiftLength: ShiftDay,
+			layers: []RotationLayer{{PublicID: "RY000000000001", Name: "alone", Users: []Person{olga}, ShiftLength: ShiftDay,
 				HandoverTime: "09:00", StartDate: date("2026-11-02")}},
 			want: "11-11 00:00–11-12 00:00 olga alone\n"},
 		{name: "no layers", want: "11-04 00:00–11-05 00:00 gap -\n"},
@@ -148,8 +148,8 @@ func TestResult(t *testing.T) {
 			if got := warningsText(res.Warnings); got != c.warnings {
 				t.Errorf("warnings =\n%swant\n%s", got, c.warnings)
 			}
-			if len(res.Layers) != len(c.layers) {
-				t.Errorf("%d layers of shifts, want %d", len(res.Layers), len(c.layers))
+			if len(res.RotationLayers) != len(c.layers) {
+				t.Errorf("%d layers of shifts, want %d", len(res.RotationLayers), len(c.layers))
 			}
 		})
 	}
@@ -159,7 +159,7 @@ func TestResult(t *testing.T) {
 // 09:00 every day above: the nights are the upper layer's, the days the lower one's, and the skipped Shifts are marked.
 func TestResultWeek(t *testing.T) {
 	berlin := zone(t, "Europe/Berlin")
-	layers := []Layer{
+	layers := []RotationLayer{
 		{PublicID: "RY00000000LOW1", Number: 1, Name: "day", Users: []Person{petr}, ShiftLength: ShiftWeek,
 			HandoverTime: "10:00", HandoverDay: "monday", StartDate: date("2026-11-02")},
 		{PublicID: "RY0000000NIGHT", Number: 2, Name: "night", Users: []Person{olga, sergey}, ShiftLength: ShiftWeek,
@@ -181,12 +181,12 @@ func TestResultWeek(t *testing.T) {
 	if got := segmentsText(berlin, res.Segments); got != want.String() {
 		t.Errorf("segments =\n%swant\n%s", got, want.String())
 	}
-	if len(res.Layers) != 2 || len(res.Layers[0].Shifts) != 1 || len(res.Layers[1].Shifts) != 7 {
-		t.Errorf("shifts %+v", res.Layers)
+	if len(res.RotationLayers) != 2 || len(res.RotationLayers[0].Shifts) != 1 || len(res.RotationLayers[1].Shifts) != 7 {
+		t.Errorf("shifts %+v", res.RotationLayers)
 	}
 	skipped := compute(berlin, layers, nil, map[int64]string{olga.ID: ReasonDisabled}, from, to)
 	if len(skipped.Segments) != 1 || skipped.Segments[0].User.Login != "petr" ||
-		skipped.Layers[1].Shifts[0].Skipped != ReasonDisabled || len(skipped.Warnings) != 1 {
+		skipped.RotationLayers[1].Shifts[0].Skipped != ReasonDisabled || len(skipped.Warnings) != 1 {
 		t.Errorf("olga disabled: %s %+v", segmentsText(berlin, skipped.Segments), skipped.Warnings)
 	}
 }
@@ -203,6 +203,7 @@ func TestSkipReason(t *testing.T) {
 		{Person{Role: "viewer", Status: "active"}, true, ReasonViewer},
 		{Person{Role: "responder", Status: "active"}, false, ReasonNotInTeam},
 		{Person{Role: "responder", Status: "deleted"}, false, ReasonNotInTeam},
+		{Person{Role: "viewer", Status: "deleted"}, false, ReasonNotInTeam},
 	} {
 		if got := skipReason(c.p, c.inTeam); got != c.want {
 			t.Errorf("skipReason(%+v, %v) = %q, want %q", c.p, c.inTeam, got, c.want)

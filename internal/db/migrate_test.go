@@ -2239,8 +2239,7 @@ func TestIntegrationTeamLabelAndMatchers(t *testing.T) {
 // taken ignoring case, shift_seconds without hours or not whole hours, a weekly layer without its day, limits whose
 // end equals their start or with a time and no days, an Override that ends when it starts and one made by both a User
 // and a Service account; deleting a Schedule deletes its layers and Overrides. Down drops the tables and the
-// Permissions, those of tokens included, and keeps the Team; up again works. The versions are reached by number, so that the test holds whichever migration
-// precedes 0025.
+// Permissions, those of tokens included, and keeps the Team; up again works. The versions are reached by number.
 func TestIntegrationSchedules(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := newMigrationEnv(t, s, 24)

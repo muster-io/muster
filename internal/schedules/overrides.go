@@ -30,15 +30,17 @@ type Actor struct {
 // Override puts User On-call from Start to End on top of every Rotation layer; Replaces, the person whose Shift it
 // takes, changes nothing in the On-call (C-27.FR-3).
 type Override struct {
-	ID        int64
-	PublicID  string
-	User      Person
-	Replaces  *Person
-	Start     time.Time
-	End       time.Time
-	CreatedBy Actor
-	CreatedAt time.Time
-	Version   int64
+	ID       int64
+	PublicID string
+	User     Person
+	Replaces *Person
+	// ReplacesID is the internal id of Replaces, 0 for none, where a read gives it.
+	ReplacesID int64
+	Start      time.Time
+	End        time.Time
+	CreatedBy  Actor
+	CreatedAt  time.Time
+	Version    int64
 }
 
 // OverrideInput is what createScheduleOverride and updateScheduleOverride write; an empty ReplacesUserID is none.
@@ -190,13 +192,15 @@ func (s *Service) getOverride(ctx context.Context, q Queries, sc Schedule, publi
 	if err != nil {
 		return Override{}, fmt.Errorf("read the override %s: %w", id, err)
 	}
-	return overrideOf(overrideRow{ID: r.ID, PublicID: r.PublicID, UserID: r.UserID, StartsAt: r.StartsAt,
+	o := overrideOf(overrideRow{ID: r.ID, PublicID: r.PublicID, UserID: r.UserID, StartsAt: r.StartsAt,
 		EndsAt: r.EndsAt, Version: r.Version, CreatedAt: r.CreatedAt, UserPublicID: r.UserPublicID,
 		UserName: r.UserName, UserLogin: r.UserLogin, UserStatus: r.UserStatus, ReplacesPublicID: r.ReplacesPublicID,
 		ReplacesName: r.ReplacesName, ReplacesLogin: r.ReplacesLogin, ReplacesStatus: r.ReplacesStatus,
 		ByUserPublicID: r.ByUserPublicID, ByUserName: r.ByUserName, ByUserLogin: r.ByUserLogin,
 		ByUserStatus: r.ByUserStatus, ByServiceAccountPublicID: r.ByServiceAccountPublicID,
-		ByServiceAccountName: r.ByServiceAccountName, ByServiceAccountStatus: r.ByServiceAccountStatus}), nil
+		ByServiceAccountName: r.ByServiceAccountName, ByServiceAccountStatus: r.ByServiceAccountStatus})
+	o.ReplacesID = r.ReplacesUserID.Int64
+	return o, nil
 }
 
 // precondition refuses an Override by someone who is neither in the Team of the Schedule nor an Admin (C-27.FR-6),
@@ -218,54 +222,98 @@ func (s *Service) precondition(ctx context.Context, q Queries, r Requester, sc S
 	return nil
 }
 
-// overridePeople checks an OverrideInput against the Schedule sc and the business clock's now: the person who takes
-// the Shift exists and may be Paged, the person whose Shift it takes exists, and the end is after the start and after
-// now (P-91). It returns the ids of the two people, 0 for none.
-func (s *Service) overridePeople(ctx context.Context, q Queries, sc Schedule, in OverrideInput, now time.Time) (
-	int64, int64, error) {
-	user, err := s.lookup(ctx, q, in.UserID, "/user_id")
-	if err != nil {
-		return 0, 0, err
+// overrideFields are the people of an Override as checkOverride found them: the ids and public ids of the person who
+// takes the Shift and of the one whose Shift it takes, 0 and empty for none.
+type overrideFields struct {
+	user, replaces             int64
+	userPublic, replacesPublic string
+}
+
+// checkOverride checks an OverrideInput for the Schedule sc at the business clock's now, against the Override before
+// it changes, nil for a new one. An Override may not rewrite the past: one that has begun keeps its people and its
+// start, and only its end may change (unsupported at the field); another starts no earlier than OverrideGrace before
+// now (out_of_range at /start). The person who takes the Shift exists and may be Paged; the person whose Shift it takes
+// exists. The end is after the start and after now (P-91), at most MaxOverrideLength after the start, and the span
+// overlaps fewer than MaxOverlappingOverrides other Overrides (out_of_range at /end).
+func (s *Service) checkOverride(ctx context.Context, q Queries, sc Schedule, in OverrideInput, before *Override,
+	now time.Time) (overrideFields, error) {
+	var f overrideFields
+	var err error
+	if f.user, f.userPublic, err = s.lookup(ctx, q, in.UserID, "/user_id"); err != nil {
+		return f, err
 	}
-	var replaces int64
 	if in.ReplacesUserID != "" {
-		if replaces, err = s.lookup(ctx, q, in.ReplacesUserID, "/replaces_user_id"); err != nil {
-			return 0, 0, err
+		if f.replaces, f.replacesPublic, err = s.lookup(ctx, q, in.ReplacesUserID, "/replaces_user_id"); err != nil {
+			return f, err
 		}
 	}
-	reasons, err := s.pageable(ctx, q, sc.Team.ID, []int64{user})
-	if err != nil {
-		return 0, 0, err
+	begun := before != nil && !before.Start.After(now)
+	if begun {
+		was := ""
+		if before.Replaces != nil {
+			was = before.Replaces.PublicID
+		}
+		for _, c := range []struct {
+			changed bool
+			pointer string
+		}{{!in.Start.Equal(before.Start), "/start"}, {f.userPublic != before.User.PublicID, "/user_id"},
+			{f.replacesPublic != was, "/replaces_user_id"}} {
+			if c.changed {
+				return f, &FieldError{Pointer: c.pointer, Code: CodeUnsupported,
+					Detail: "The Override has begun: only its end may change, so that the past stays as it was."}
+			}
+		}
+	} else if in.Start.Before(now.Add(-OverrideGrace)) {
+		return f, &FieldError{Pointer: "/start", Code: CodeOutOfRange,
+			Detail: "An Override may not start in the past."}
 	}
-	if reason := reasons[user]; reason != "" {
-		return 0, 0, notPageable("/user_id", reason)
+	reasons, err := s.pageable(ctx, q, sc.Team.ID, []int64{f.user})
+	if err != nil {
+		return f, err
+	}
+	if reason := reasons[f.user]; reason != "" && !begun {
+		return f, notPageable("/user_id", reason)
 	}
 	switch {
 	case !in.End.After(in.Start):
-		return 0, 0, &FieldError{Pointer: "/end", Code: CodeOutOfRange, Detail: "The end is not after the start."}
+		return f, &FieldError{Pointer: "/end", Code: CodeOutOfRange, Detail: "The end is not after the start."}
 	case !in.End.After(now):
-		return 0, 0, &FieldError{Pointer: "/end", Code: CodeOutOfRange,
-			Detail: "An Override may not end in the past."}
+		return f, &FieldError{Pointer: "/end", Code: CodeOutOfRange, Detail: "An Override may not end in the past."}
+	case in.End.Sub(in.Start) > MaxOverrideLength:
+		return f, &FieldError{Pointer: "/end", Code: CodeOutOfRange, Detail: "An Override lasts at most 31 days."}
 	}
-	return user, replaces, nil
+	var except int64
+	if before != nil {
+		except = before.ID
+	}
+	n, err := q.CountOverlappingOverrides(ctx, dbgen.CountOverlappingOverridesParams{OrgID: s.orgID, ScheduleID: sc.ID,
+		ExceptID: except, SpanStart: in.Start.UTC(), SpanEnd: in.End.UTC()})
+	if err != nil {
+		return f, fmt.Errorf("count the overrides of the schedule %s: %w", sc.PublicID, err)
+	}
+	if n >= MaxOverlappingOverrides {
+		return f, &FieldError{Pointer: "/end", Code: CodeOutOfRange,
+			Detail: fmt.Sprintf("The span overlaps %d Overrides of the Schedule, the most there may be.", n)}
+	}
+	return f, nil
 }
 
-// lookup reads the internal id of the User publicID who is not deleted; another is an unknown_id FieldError at
-// pointer.
-func (s *Service) lookup(ctx context.Context, q Queries, publicID, pointer string) (int64, error) {
+// lookup reads the internal id and the public id of the User publicID who is not deleted; another is an unknown_id
+// FieldError at pointer.
+func (s *Service) lookup(ctx context.Context, q Queries, publicID, pointer string) (int64, string, error) {
 	unknown := &FieldError{Pointer: pointer, Code: CodeUnknownID, Detail: "No such User."}
 	id, err := publicid.Parse(publicid.User, publicID)
 	if err != nil {
-		return 0, unknown
+		return 0, "", unknown
 	}
 	rows, err := q.LookupUsers(ctx, dbgen.LookupUsersParams{OrgID: s.orgID, PublicIds: []string{id}})
 	if err != nil {
-		return 0, fmt.Errorf("read the user %s: %w", id, err)
+		return 0, "", fmt.Errorf("read the user %s: %w", id, err)
 	}
 	if len(rows) == 0 {
-		return 0, unknown
+		return 0, "", unknown
 	}
-	return rows[0].ID, nil
+	return rows[0].ID, id, nil
 }
 
 // createdBy are the columns of the maker of an Override: the User, else the Service account.
@@ -289,14 +337,14 @@ func (s *Service) CreateOverride(ctx context.Context, r Requester, scheduleID st
 			return err
 		}
 		now := s.clock.Now().UTC()
-		user, replaces, err := s.overridePeople(ctx, q, sc, in, now)
+		f, err := s.checkOverride(ctx, q, sc, in, nil, now)
 		if err != nil {
 			return err
 		}
 		byUser, bySA := createdBy(r.Actor)
 		id := publicid.New(publicid.ScheduleOverride)
 		if _, err := q.InsertScheduleOverride(ctx, dbgen.InsertScheduleOverrideParams{OrgID: s.orgID, PublicID: id,
-			ScheduleID: sc.ID, UserID: user, ReplacesUserID: pgtype.Int8{Int64: replaces, Valid: replaces != 0},
+			ScheduleID: sc.ID, UserID: f.user, ReplacesUserID: pgtype.Int8{Int64: f.replaces, Valid: f.replaces != 0},
 			StartsAt: in.Start.UTC(), EndsAt: in.End.UTC(), CreatedByUserID: byUser,
 			CreatedByServiceAccountID: bySA, Now: now}); err != nil {
 			return fmt.Errorf("create the override: %w", err)
@@ -313,7 +361,8 @@ func (s *Service) CreateOverride(ctx context.Context, r Requester, scheduleID st
 }
 
 // UpdateOverride replaces the people and the span of the Override overrideID of the Schedule scheduleID; a non-nil
-// version must be its current one. An Override that has ended is ErrOverrideEnded (settled 3).
+// version must be its current one. An Override that has ended is ErrOverrideEnded (settled 3); one that has begun only
+// changes its end. A change that changes nothing writes nothing and keeps the version.
 func (s *Service) UpdateOverride(ctx context.Context, r Requester, scheduleID, overrideID string, version *int64,
 	in OverrideInput) (Override, error) {
 	var updated Override
@@ -322,12 +371,21 @@ func (s *Service) UpdateOverride(ctx context.Context, r Requester, scheduleID, o
 		if err != nil {
 			return err
 		}
-		user, replaces, err := s.overridePeople(ctx, q, sc, in, now)
+		f, err := s.checkOverride(ctx, q, sc, in, &before, now)
 		if err != nil {
 			return err
 		}
+		next := overrideView{UserID: f.userPublic, Start: in.Start.UTC(), End: in.End.UTC()}
+		if f.replacesPublic != "" {
+			next.ReplacesUserID = &f.replacesPublic
+		}
+		changes := audit.Diff(overrideViewOf(before), next)
+		if len(changes) == 0 {
+			updated = before
+			return nil
+		}
 		if err := q.UpdateScheduleOverride(ctx, dbgen.UpdateScheduleOverrideParams{OrgID: s.orgID, ID: before.ID,
-			UserID: user, ReplacesUserID: pgtype.Int8{Int64: replaces, Valid: replaces != 0},
+			UserID: f.user, ReplacesUserID: pgtype.Int8{Int64: f.replaces, Valid: f.replaces != 0},
 			StartsAt: in.Start.UTC(), EndsAt: in.End.UTC(), Now: now}); err != nil {
 			return fmt.Errorf("update the override %s: %w", before.PublicID, err)
 		}
@@ -344,13 +402,26 @@ func (s *Service) UpdateOverride(ctx context.Context, r Requester, scheduleID, o
 }
 
 // DeleteOverride deletes the Override overrideID of the Schedule scheduleID; a non-nil version must be its current
-// one. An Override that has ended is ErrOverrideEnded, so that the past Result stays as it was.
+// one. An Override that has ended is ErrOverrideEnded, so that the past Result stays as it was. One that has begun is
+// ended now instead: its end becomes the business clock's now, and its past part stays in the Result; the Audit log
+// records the deletion with that change of the end.
 func (s *Service) DeleteOverride(ctx context.Context, r Requester, scheduleID, overrideID string,
 	version *int64) error {
 	return s.store.InTx(ctx, func(q Queries) error {
-		sc, before, _, err := s.lockOverride(ctx, q, r, scheduleID, overrideID, version)
+		sc, before, now, err := s.lockOverride(ctx, q, r, scheduleID, overrideID, version)
 		if err != nil {
 			return err
+		}
+		if before.Start.Before(now) {
+			if err := q.UpdateScheduleOverride(ctx, dbgen.UpdateScheduleOverrideParams{OrgID: s.orgID, ID: before.ID,
+				UserID: before.User.ID, ReplacesUserID: pgtype.Int8{Int64: before.ReplacesID,
+					Valid: before.ReplacesID != 0}, StartsAt: before.Start, EndsAt: now, Now: now}); err != nil {
+				return fmt.Errorf("end the override %s: %w", before.PublicID, err)
+			}
+			ended := before
+			ended.End = now
+			return s.recordOverride(ctx, q, r, sc, ActionOverrideDeleted, ended,
+				audit.Diff(overrideViewOf(before), overrideViewOf(ended)))
 		}
 		if err := q.DeleteScheduleOverride(ctx, dbgen.DeleteScheduleOverrideParams{OrgID: s.orgID,
 			ID: before.ID}); err != nil {
@@ -482,7 +553,7 @@ func (s *Service) result(ctx context.Context, q Queries, sc Schedule, from, to t
 		overrides[i] = overrideOf(overrideRow(r))
 		ids = append(ids, r.UserID)
 	}
-	for _, l := range sc.Layers {
+	for _, l := range sc.RotationLayers {
 		for _, u := range l.Users {
 			ids = append(ids, u.ID)
 		}
@@ -491,5 +562,5 @@ func (s *Service) result(ctx context.Context, q Queries, sc Schedule, from, to t
 	if err != nil {
 		return Result{}, err
 	}
-	return compute(loc, sc.Layers, overrides, skipped, from, to), nil
+	return compute(loc, sc.RotationLayers, overrides, skipped, from, to), nil
 }

@@ -58,6 +58,35 @@ func (q *Queries) ClearMainSchedule(ctx context.Context, arg ClearMainSchedulePa
 	return items, nil
 }
 
+const countOverlappingOverrides = `-- name: CountOverlappingOverrides :one
+SELECT count(*)::bigint
+FROM schedule_overrides
+WHERE org_id = $1 AND schedule_id = $2 AND id <> $3 AND ends_at > $4
+  AND starts_at < $5
+`
+
+type CountOverlappingOverridesParams struct {
+	OrgID      int64
+	ScheduleID int64
+	ExceptID   int64
+	SpanStart  time.Time
+	SpanEnd    time.Time
+}
+
+// CountOverlappingOverrides counts the Overrides of a Schedule other than @except_id that overlap a span.
+func (q *Queries) CountOverlappingOverrides(ctx context.Context, arg CountOverlappingOverridesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOverlappingOverrides,
+		arg.OrgID,
+		arg.ScheduleID,
+		arg.ExceptID,
+		arg.SpanStart,
+		arg.SpanEnd,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countTeamSchedules = `-- name: CountTeamSchedules :one
 SELECT count(*)::bigint
 FROM schedules

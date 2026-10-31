@@ -52,33 +52,33 @@ type fakeSchedules struct {
 }
 
 func newFakeSchedules() *fakeSchedules {
-	low := schedules.Layer{PublicID: "RY0000000000L1", Number: 1, Name: "Around the clock",
+	low := schedules.RotationLayer{PublicID: "RY0000000000L1", Number: 1, Name: "Around the clock",
 		Users: []schedules.Person{apiPetr, apiOlga}, ShiftLength: schedules.ShiftWeek, HandoverTime: "10:00",
 		HandoverDay: "monday", StartDate: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)}
-	high := schedules.Layer{PublicID: "RY0000000000H2", Number: 2, Name: "Nights", Users: []schedules.Person{apiOlga},
+	high := schedules.RotationLayer{PublicID: "RY0000000000H2", Number: 2, Name: "Nights", Users: []schedules.Person{apiOlga},
 		ShiftLength: schedules.ShiftHours, ShiftSeconds: 43200, HandoverTime: "19:00",
 		StartDate: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
 		Limits:    &schedules.Limits{Days: []string{"friday"}, Start: "19:00", End: "09:00"}}
 	sc := schedules.Schedule{ID: 1, PublicID: scheduleID, Name: "Main", TimeZone: "Europe/Berlin", Main: true,
-		Team:   schedules.TeamRef{ID: 1, PublicID: teamID, Name: "Payments", Slug: "payments"},
-		Layers: []schedules.Layer{low, high}, CreatedAt: t0, Version: 3}
+		Team:           schedules.TeamRef{ID: 1, PublicID: teamID, Name: "Payments", Slug: "payments"},
+		RotationLayers: []schedules.RotationLayer{low, high}, CreatedAt: t0, Version: 3}
 	o := schedules.Override{ID: 1, PublicID: overrideID, User: apiPetr, Replaces: &apiOlga, Start: t0,
 		End: t0.Add(time.Hour), CreatedBy: schedules.Actor{Kind: "user", PublicID: bobPublicID, Name: "Petr",
 			Login: "petr"}, CreatedAt: t0, Version: 2}
-	ref := schedules.LayerRef{PublicID: low.PublicID, Name: low.Name}
+	ref := schedules.RotationLayerRef{PublicID: low.PublicID, Name: low.Name}
 	res := schedules.Result{From: t0, To: t0.Add(3 * time.Hour),
 		Segments: []schedules.Segment{
 			{Start: t0, End: t0.Add(time.Hour), User: &apiPetr,
 				Source: &schedules.Source{Kind: schedules.SourceOverride, Override: overrideID}},
 			{Start: t0.Add(time.Hour), End: t0.Add(2 * time.Hour), User: &apiPetr,
-				Source: &schedules.Source{Kind: schedules.SourceRotationLayer, Layer: ref}},
+				Source: &schedules.Source{Kind: schedules.SourceRotationLayer, RotationLayer: ref}},
 			{Start: t0.Add(2 * time.Hour), End: t0.Add(3 * time.Hour)}},
-		Layers: []schedules.LayerShifts{{Layer: ref, Shifts: []schedules.LayerShift{
+		RotationLayers: []schedules.RotationLayerShifts{{RotationLayer: ref, Shifts: []schedules.RotationLayerShift{
 			{Shift: schedules.Shift{Start: t0, End: t0.Add(2 * time.Hour), User: apiPetr}},
 			{Shift: schedules.Shift{Start: t0.Add(2 * time.Hour), End: t0.Add(3 * time.Hour), User: apiOlga},
 				Skipped: schedules.ReasonNotInTeam}}}},
 		Overrides: []schedules.Override{o},
-		Warnings: []schedules.Warning{{Kind: schedules.ReasonNotInTeam, User: apiOlga, Layer: &ref},
+		Warnings: []schedules.Warning{{Kind: schedules.ReasonNotInTeam, User: apiOlga, RotationLayer: &ref},
 			{Kind: schedules.ReasonDisabled, User: apiOlga, Override: overrideID}}}
 	return &fakeSchedules{schedule: sc, override: o, result: res}
 }
@@ -233,11 +233,11 @@ func testSchedulesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 		t.Fatalf("create = %d %v %s", a.status, a.header, a.body)
 	}
 	in := fs.inputs[0]
-	if in.TeamID != teamID || *in.TimeZone != "Europe/Berlin" || !*in.Main || len(in.Layers) != 2 ||
-		in.Layers[0].ID != "RY0000000000L1" || in.Layers[0].HandoverDay != "monday" || in.Layers[0].Limits != nil ||
-		in.Layers[1].ShiftLength != schedules.ShiftHours || *in.Layers[1].ShiftSeconds != 43200 ||
-		in.Layers[1].Limits.Start != "19:00" || in.Layers[1].Limits.Days[0] != "friday" ||
-		in.Layers[1].StartDate.Format(time.DateOnly) != "2026-11-02" || !fs.by[0].Admin {
+	if in.TeamID != teamID || *in.TimeZone != "Europe/Berlin" || !*in.Main || len(in.RotationLayers) != 2 ||
+		in.RotationLayers[0].ID != "RY0000000000L1" || in.RotationLayers[0].HandoverDay != "monday" || in.RotationLayers[0].Limits != nil ||
+		in.RotationLayers[1].ShiftLength != schedules.ShiftHours || *in.RotationLayers[1].ShiftSeconds != 43200 ||
+		in.RotationLayers[1].Limits.Start != "19:00" || in.RotationLayers[1].Limits.Days[0] != "friday" ||
+		in.RotationLayers[1].StartDate.Format(time.DateOnly) != "2026-11-02" || !fs.by[0].Admin {
 		t.Errorf("input %+v by %+v", in, fs.by[0])
 	}
 	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/"+scheduleID, ""); a.status != http.StatusOK ||

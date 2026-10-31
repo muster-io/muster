@@ -216,6 +216,13 @@ LEFT JOIN service_accounts sa ON sa.org_id = o.org_id AND sa.id = o.created_by_s
 WHERE o.org_id = @org_id AND o.schedule_id = @schedule_id AND o.ends_at > @period_start AND o.starts_at < @period_end
 ORDER BY o.id;
 
+-- CountOverlappingOverrides counts the Overrides of a Schedule other than @except_id that overlap a span.
+-- name: CountOverlappingOverrides :one
+SELECT count(*)::bigint
+FROM schedule_overrides
+WHERE org_id = @org_id AND schedule_id = @schedule_id AND id <> @except_id AND ends_at > @span_start
+  AND starts_at < @span_end;
+
 -- GetScheduleOverride reads an Override of a Schedule.
 -- name: GetScheduleOverride :one
 SELECT o.id, o.public_id, o.user_id, o.replaces_user_id, o.starts_at, o.ends_at, o.version, o.created_at,

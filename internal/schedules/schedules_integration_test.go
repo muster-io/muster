@@ -103,9 +103,9 @@ func setup(t *testing.T, s dbtest.Server) *env {
 	return e
 }
 
-func (e *env) layers() []schedules.LayerInput {
+func (e *env) layers() []schedules.RotationLayerInput {
 	start := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
-	return []schedules.LayerInput{
+	return []schedules.RotationLayerInput{
 		{Name: "Around the clock", UserIDs: []string{e.people["petr"], e.people["sergey"], e.people["olga"]},
 			ShiftLength: schedules.ShiftWeek, HandoverTime: "10:00", HandoverDay: "monday", StartDate: start},
 		{Name: "Working hours 11-19", UserIDs: []string{e.people["olga"], e.people["petr"]},
@@ -150,11 +150,11 @@ func TestIntegrationSchedules(t *testing.T) {
 		e := setup(t, s)
 		ctx := t.Context()
 		main, err := e.svc.Create(ctx, admin, schedules.Input{TeamID: e.team.PublicID, Name: "Main",
-			TimeZone: ptr("Europe/Berlin"), Layers: e.layers()})
+			TimeZone: ptr("Europe/Berlin"), RotationLayers: e.layers()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !main.Main || len(main.Layers) != 2 || main.Layers[1].Limits == nil || main.Layers[0].Users[2].Login != "olga" {
+		if !main.Main || len(main.RotationLayers) != 2 || main.RotationLayers[1].Limits == nil || main.RotationLayers[0].Users[2].Login != "olga" {
 			t.Fatalf("main = %+v", main)
 		}
 		who := func(publicID, at string) string {
@@ -181,22 +181,22 @@ func TestIntegrationSchedules(t *testing.T) {
 		bad := e.layers()[:1]
 		bad[0].UserIDs = []string{e.people["vic"]}
 		if _, err := e.svc.Create(ctx, admin, schedules.Input{TeamID: e.team.PublicID, Name: "Bad",
-			Layers: bad}); err == nil || !strings.Contains(err.Error(), "/rotation_layers/0/user_ids/0") {
+			RotationLayers: bad}); err == nil || !strings.Contains(err.Error(), "/rotation_layers/0/user_ids/0") {
 			t.Errorf("a viewer = %v", err)
 		}
 		second, err := e.svc.Create(ctx, admin, schedules.Input{TeamID: e.team.PublicID, Name: "Second line",
-			Layers: []schedules.LayerInput{{Name: "Days", UserIDs: []string{e.people["sergey"]},
+			RotationLayers: []schedules.RotationLayerInput{{Name: "Days", UserIDs: []string{e.people["sergey"]},
 				ShiftLength: schedules.ShiftDay, HandoverTime: "09:00",
 				StartDate: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)}}})
 		if err != nil || second.Main || second.TimeZone != "UTC" {
 			t.Fatalf("second = %+v, %v", second, err)
 		}
 		in := schedules.Input{TeamID: e.team.PublicID, Name: second.Name, Main: ptr(true),
-			Layers: []schedules.LayerInput{{ID: second.Layers[0].PublicID, Name: "Days",
+			RotationLayers: []schedules.RotationLayerInput{{ID: second.RotationLayers[0].PublicID, Name: "Days",
 				UserIDs: []string{e.people["sergey"]}, ShiftLength: schedules.ShiftDay, HandoverTime: "09:00",
-				StartDate: second.Layers[0].StartDate}}}
+				StartDate: second.RotationLayers[0].StartDate}}}
 		promoted, err := e.svc.Update(ctx, admin, second.PublicID, ptr(int64(1)), in)
-		if err != nil || !promoted.Main || promoted.Layers[0].PublicID != second.Layers[0].PublicID {
+		if err != nil || !promoted.Main || promoted.RotationLayers[0].PublicID != second.RotationLayers[0].PublicID {
 			t.Fatalf("promoted = %+v, %v", promoted, err)
 		}
 		if n := e.count(t, `SELECT count(*) FROM schedules WHERE team_id = $1 AND main`, e.team.ID); n != 1 {
@@ -259,7 +259,7 @@ func TestIntegrationOverridesAndTeams(t *testing.T) {
 		e := setup(t, s)
 		ctx := t.Context()
 		sc, err := e.svc.Create(ctx, admin, schedules.Input{TeamID: e.team.PublicID, Name: "Main",
-			TimeZone: ptr("Europe/Berlin"), Layers: e.layers()})
+			TimeZone: ptr("Europe/Berlin"), RotationLayers: e.layers()})
 		if err != nil {
 			t.Fatal(err)
 		}

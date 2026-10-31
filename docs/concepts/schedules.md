@@ -26,14 +26,17 @@ change is recorded in the Audit log, and the metric `muster_schedule_info` has o
 
 ## Rotation layers
 
-A Rotation layer has a name and the people who take Shifts in turn, in order. A Shift lasts:
+A Schedule has at most 20 Rotation layers. A Rotation layer has a name and the people who take Shifts in turn, in
+order, at most 100. A Shift lasts:
 
 - a **day**, handed over every day at the handover time;
 - a **week**, handed over on a day of the week at the handover time;
 - a number of **whole hours**, given as `shift_seconds`, a multiple of 3600 such as 43200 for 12 hours, up to 28 days.
 
-The first Shift starts on the start date at the handover time, with the first person of the list. Times are wall-clock
-times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 when the clocks change.
+The first Shift starts on the start date, a day from 2000-01-01 to 2100-12-31, at the handover time, with the first
+person of the list. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 when
+the clocks change. A time that the clocks skip when they move forward, such as 02:30 on the night of the change, is
+the moment they move; a time that happens twice when they move back is its first occurrence.
 
 A Rotation layer may be **limited** to some days of the week and, optionally, a time of day, such as Monday to Friday
 11:00–19:00. Outside the limits it has no Shift. A time of day whose end is earlier than its start crosses midnight,
@@ -76,8 +79,15 @@ Who may make them
     `not_pageable` at `user_id`; the person whose Shift it takes may be anyone.
 
 When
-:   An Override may not end in the past, and its end is after its start. Once it has ended, it can be neither changed
-    nor deleted (`409` `override_ended`), so the past stays as it was.
+:   An Override may be planned any time ahead, but it may not rewrite the past. It starts at most 5 minutes before now
+    (`422` `out_of_range` at `start`), ends after its start and after now, and lasts at most 31 days (`422`
+    `out_of_range` at `end`). A span that would overlap 1000 other Overrides of the Schedule is refused the same way.
+
+Changing and deleting
+:   Before an Override begins, everything in it may change, and deleting it removes it. Once it has begun, only its end
+    may change — another start or person is refused with `422` `unsupported` — and deleting it ends it now: the part
+    that has passed stays in the Schedule. Once it has ended, it can be neither changed nor deleted (`409`
+    `override_ended`), so the past stays as it was.
 
 No messages
 :   Overrides need no approval and send no message, and neither do Shifts: who is On-call is shown by Muster and its

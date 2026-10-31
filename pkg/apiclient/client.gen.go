@@ -6710,7 +6710,7 @@ type RotationLayer struct {
 	Users []UserRef `json:"users"`
 }
 
-// RotationLayerInput A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks.
+// RotationLayerInput A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first person first. Times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant they move; one that happens twice when they move back is its first occurrence (RFC 5545).
 type RotationLayerInput struct {
 	// HandoverDay The day of the handover of weekly Shifts; required with `week` and refused with the others.
 	HandoverDay  *Weekday `json:"handover_day,omitempty"`
@@ -6732,7 +6732,7 @@ type RotationLayerInput struct {
 	// StartDate The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to 2100-12-31, else `422` `out_of_range`.
 	StartDate openapi_types.Date `json:"start_date"`
 
-	// UserIds The people who take Shifts in turn, in order.
+	// UserIds The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.
 	UserIds []PublicId `json:"user_ids"`
 }
 
@@ -6969,7 +6969,7 @@ type ScheduleInput struct {
 	// Name Unique in the Team, ignoring case.
 	Name string `json:"name"`
 
-	// RotationLayers From the lowest to the highest.
+	// RotationLayers From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
 	RotationLayers []RotationLayerInput `json:"rotation_layers"`
 
 	// TeamId The Team of the Schedule, set on creation; a different one on an update is refused with `422` `unsupported`.
@@ -7029,12 +7029,14 @@ type ScheduleOverride struct {
 
 // ScheduleOverrideInput defines model for ScheduleOverrideInput.
 type ScheduleOverrideInput struct {
-	// End After `start` and not before the business clock's now (P-91).
+	// End After `start` and after the business clock's now (P-91), at most 31 days after `start`.
 	End time.Time `json:"end"`
 
 	// ReplacesUserId The person whose Shift it takes, which the Schedule shows and which changes nothing in the On-call; anyone, or null.
 	ReplacesUserId nullable.Nullable[NullablePublicId] `json:"replaces_user_id,omitempty"`
-	Start          time.Time                           `json:"start"`
+
+	// Start At most 5 minutes before the business clock's now; fixed once the Override has begun.
+	Start time.Time `json:"start"`
 
 	// UserId The person who takes the Shift.
 	UserId PublicId `json:"user_id"`
@@ -13307,7 +13309,7 @@ type ClientInterface interface {
 
 	// GetScheduleOnCall Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 	GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -13321,7 +13323,7 @@ type ClientInterface interface {
 
 	// CreateScheduleOverrideWithBody Create an Override
 	//
-	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -13330,7 +13332,7 @@ type ClientInterface interface {
 
 	// CreateScheduleOverride Create an Override
 	//
-	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -13339,14 +13341,14 @@ type ClientInterface interface {
 
 	// DeleteScheduleOverride Delete an Override
 	//
-	// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+	// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
 	//
 	// Corresponds with DELETE /schedules/{schedule_id}/overrides/{override_id} (the `DeleteScheduleOverride` operationId).
 	DeleteScheduleOverride(ctx context.Context, scheduleId ScheduleId, overrideId OverrideId, params *DeleteScheduleOverrideParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UpdateScheduleOverrideWithBody Update an Override
 	//
-	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -13355,7 +13357,7 @@ type ClientInterface interface {
 
 	// UpdateScheduleOverride Update an Override
 	//
-	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -16960,7 +16962,7 @@ func (c *Client) UpdateSchedule(ctx context.Context, scheduleId ScheduleId, para
 
 // GetScheduleOnCall Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 func (c *Client) GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -16994,7 +16996,7 @@ func (c *Client) ListScheduleOverrides(ctx context.Context, scheduleId ScheduleI
 
 // CreateScheduleOverrideWithBody Create an Override
 //
-// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 //
 // Takes any type of body and a specified content type.
 //
@@ -17013,7 +17015,7 @@ func (c *Client) CreateScheduleOverrideWithBody(ctx context.Context, scheduleId 
 
 // CreateScheduleOverride Create an Override
 //
-// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 //
 // Takes a body of the `application/json` content type.
 //
@@ -17032,7 +17034,7 @@ func (c *Client) CreateScheduleOverride(ctx context.Context, scheduleId Schedule
 
 // DeleteScheduleOverride Delete an Override
 //
-// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock”s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
 //
 // Corresponds with DELETE /schedules/{schedule_id}/overrides/{override_id} (the `DeleteScheduleOverride` operationId).
 func (c *Client) DeleteScheduleOverride(ctx context.Context, scheduleId ScheduleId, overrideId OverrideId, params *DeleteScheduleOverrideParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -17049,7 +17051,7 @@ func (c *Client) DeleteScheduleOverride(ctx context.Context, scheduleId Schedule
 
 // UpdateScheduleOverrideWithBody Update an Override
 //
-// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 //
 // Takes any type of body and a specified content type.
 //
@@ -17068,7 +17070,7 @@ func (c *Client) UpdateScheduleOverrideWithBody(ctx context.Context, scheduleId 
 
 // UpdateScheduleOverride Update an Override
 //
-// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -28460,7 +28462,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -28478,7 +28480,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateScheduleOverrideWithBodyWithResponse Create an Override
 	//
-	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28487,7 +28489,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateScheduleOverrideWithResponse Create an Override
 	//
-	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+	// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28496,7 +28498,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteScheduleOverrideWithResponse Delete an Override
 	//
-	// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+	// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -28505,7 +28507,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateScheduleOverrideWithBodyWithResponse Update an Override
 	//
-	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28514,7 +28516,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateScheduleOverrideWithResponse Update an Override
 	//
-	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+	// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -46429,7 +46431,7 @@ func (c *ClientWithResponses) UpdateScheduleWithResponse(ctx context.Context, sc
 
 // GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -46459,7 +46461,7 @@ func (c *ClientWithResponses) ListScheduleOverridesWithResponse(ctx context.Cont
 
 // CreateScheduleOverrideWithBodyWithResponse Create an Override
 //
-// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -46474,7 +46476,7 @@ func (c *ClientWithResponses) CreateScheduleOverrideWithBodyWithResponse(ctx con
 
 // CreateScheduleOverrideWithResponse Create an Override
 //
-// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An end that is not after the start, or not after the business clock's now (P-91), is refused with `422` `out_of_range` at `/end`. Needs no approval and sends no message (C-27.FR-11).
+// From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides overlap, the one created last wins (P-65). The caller is in the Schedule's Team or is an Admin, else `409` `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422` `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes before the business clock's now is refused with `422` `out_of_range` at `/start`; an `end` that is not after the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead. Needs no approval and sends no message (C-27.FR-11).
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -46489,7 +46491,7 @@ func (c *ClientWithResponses) CreateScheduleOverrideWithResponse(ctx context.Con
 
 // DeleteScheduleOverrideWithResponse Delete an Override
 //
-// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was.
+// With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409` `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of removed — its `end` becomes the business clock”s now and its past part stays in the Result — and the Audit log records `schedule_override.deleted` with that change of the end.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -46504,7 +46506,7 @@ func (c *ClientWithResponses) DeleteScheduleOverrideWithResponse(ctx context.Con
 
 // UpdateScheduleOverrideWithBodyWithResponse Update an Override
 //
-// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -46519,7 +46521,7 @@ func (c *ClientWithResponses) UpdateScheduleOverrideWithBodyWithResponse(ctx con
 
 // UpdateScheduleOverrideWithResponse Update an Override
 //
-// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+// Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`. Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`. Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`, `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps the version.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
