@@ -123,6 +123,7 @@ nav:
       - concepts/statuses-and-commands.md
       - concepts/broken-destinations.md
       - concepts/teams.md
+      - concepts/schedules.md
   - Operations:
       - operations/backup-and-restore.md
       - operations/upgrades.md

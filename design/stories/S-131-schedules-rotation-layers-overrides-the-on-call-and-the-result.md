@@ -9,15 +9,20 @@ covers: [C-27.FR-1, C-27.FR-2, C-27.FR-3, C-27.FR-4, C-27.FR-5, C-27.FR-6, C-27.
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0029_schedules.up.sql
-  - internal/db/migrations/0029_schedules.down.sql
+  - internal/db/migrations/0025_schedules.up.sql
+  - internal/db/migrations/0025_schedules.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/publicid/publicid.go
+  - internal/publicid/publicid_test.go
+  - sqlc.yaml
   - internal/schedules/schedules.go
   - internal/schedules/rotation.go
   - internal/schedules/rotation_test.go
+  - internal/schedules/rotation_oracle_test.go
+  - internal/schedules/race_on_test.go
+  - internal/schedules/race_off_test.go
   - internal/schedules/result.go
   - internal/schedules/result_test.go
   - internal/schedules/overrides.go
@@ -29,15 +34,23 @@ files_touched:
   - internal/api/schedules_test.go
   - internal/api/problem.go
   - internal/api/server.go
+  - internal/api/server_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/teams/teams.go
   - internal/teams/query.sql
   - internal/teams/teams_test.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
+  - internal/tools/refgen/main.go
   - internal/auth/auth_integration_test.go
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
   - design/prd/L2.md
+  - design/prd/l2/C-25-teams.md
+  - design/prd/l2/C-27-schedules.md
+  - docs/install/versions.md
   - test/e2e/schedules_test.go
   - docs/concepts/schedules.md
   - mkdocs.yml
@@ -94,7 +107,8 @@ issue: 420
     /schedules`, `schedules:write`), `getSchedule`, `updateSchedule` (`PUT` with `If-Match`), `deleteSchedule`
     (optional `If-Match`) on `/schedules/{schedule_id}`; `getScheduleOnCall` (`GET /schedules/{schedule_id}/on-call`,
     `schedules:read`; `from` and `to`, RFC 3339, by default the business clock's now and `schedule.gap_view` after it,
-    at most the length of `ical.window` apart, `422` `out_of_range` otherwise); `listScheduleOverrides` (`GET
+    each at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and at most the length
+    of `ical.window` apart, `422` `out_of_range` at `/query/to` otherwise); `listScheduleOverrides` (`GET
     /schedules/{schedule_id}/overrides`, `schedules:read`; `from`, `to`, `cursor`, `limit`), `createScheduleOverride`
     (`POST`, `schedule-overrides:write`), `updateScheduleOverride` (`PUT` with `If-Match`) and `deleteScheduleOverride`
     (`DELETE` with optional `If-Match`) on `/schedules/{schedule_id}/overrides/{override_id}`. Session or token,
@@ -131,13 +145,13 @@ issue: 420
     optional property of `Problem`: `{type, id, name}[]`, the kind of each object that holds the resource (`schedule`
     here, `escalation_chain` from S-154), its `public_id` and its name; `team_in_use` (declared
     in S-115) raised for a Team with Schedules, naming them in `in_use_by`; `name_taken`; `out_of_range` at `/end`,
-    `/to`, `/rotation_layers/{i}/shift_seconds` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
+    `/query/to`, `/rotation_layers/{i}/shift_seconds` and `/rotation_layers/{i}/limits/end`; `override_ended` (`409`
     `conflict`) for a change or a deletion of an Override that has ended.
   - `internal/api/problem.go`: `problemFor` maps the errors of `schedules` — not found, `name_taken`, a stale version,
     `not_in_team`, `override_ended`, `schedule_in_use` and `team_in_use` with `in_use_by` — and `Problem` gains the
     member `InUseBy` that `writeProblem` writes as `in_use_by`; the L1 `inUseProblem` of Lookup tables generalizes to
     it, its `LinkRules` staying as they are; the error item of `not_pageable` gains `reason` through `gen.ProblemError`.
-- **Schema** (migration `0029_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
+- **Schema** (migration `0025_schedules`, expand only; `schema.md` §2, a new §4.16 Schedules, §4.15):
   - `schedules`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^SC[0-9A-HJKMNP-TV-Z]{12}$')`), `team_id` (FK
     `teams`), `name`, `time_zone`, `main boolean NOT NULL DEFAULT false`, `version`, `created_at`, `updated_at`;
     unique `(team_id, lower(name))`; unique partial index `(team_id) WHERE main` — one main Schedule per Team.
@@ -162,18 +176,37 @@ issue: 420
     wall-clock time; times are wall-clock times in the Schedule's time zone, so a handover at 10:00 stays at 10:00
     across a change of the clocks; the limits cut each Shift to their days and time of day: a window whose end is
     earlier than its start runs until the end on the next day, and with days of the week each window belongs to the day
-    it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00 (C-27.FR-2).
+    it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00 (C-27.FR-2). A wall-clock time that
+    the clocks skip when they move forward is the instant they move, and one that happens twice when they move back is
+    its first occurrence (RFC 5545), in every zone. The arithmetic is in whole seconds and calendar days, and every
+    loop is bounded by the length of the period.
   - `result.go` — `OnCallAt(schedule, t)` and `Result(schedule, from, to)`: the Override of the moment, the one
     created last where they overlap (P-65), when its person may be Paged; otherwise the highest Rotation layer with a
     Shift whose person may be Paged; else nobody (a gap). "May be Paged" is read once per call from the current state:
-    the User is active, not a Viewer and in the Team (`team_users`). Adjacent segments of the same person and source
-    are joined. The business clock (`clock.Business`) is the only time it reads (C-02).
+    the User is active, not a Viewer and in the Team (`team_users`); a deleted User is `not_in_team`, whatever their
+    Role was. Adjacent segments of the same person and source are joined. The Override of each segment comes from a
+    sweep over the boundaries with a heap ordered by id, O((S+N) log N) for S segments and N Overrides. The business
+    clock (`clock.Business`) is the only time it reads (C-02).
   - `overrides.go` — the precondition, checked after the Permission: the caller is in the Team or is an Admin, else
-    `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`; the end is after the start and not
-    before the business clock's now (P-91), checked on create and change; an Override that has ended can be neither
-    changed nor deleted, `409` `override_ended` (settled 3).
+    `not_in_team`; the person who takes the Shift may be Paged, else `not_pageable`; the person whose Shift it takes
+    may be anyone, a deleted User included, and on a change a person the input names as stored stays as stored,
+    deleted since or not. An Override may not rewrite the
+    past (maintainer's decision on PR #489): a `start` more than 5 minutes before the business clock's now is `422`
+    `out_of_range` at `/start`; the end is after the start and after now (P-91) and at most 31 days after the start,
+    else `422` `out_of_range` at `/end`, while the start may be any time ahead; checked on create and change. Of an
+    Override that has begun only the end may change: another `start`, `user_id` or `replaces_user_id` is `422`
+    `unsupported` at it. Deleting an Override that has begun ends it at now — its past part stays in the Result —
+    and records `schedule_override.deleted` with the change of `/end`; one that has not begun is removed. An Override
+    that has ended can be neither changed nor deleted, `409` `override_ended` (settled 3). A span that would overlap
+    1000 other Overrides of the Schedule is `422` `out_of_range` at `/end`. A change that changes nothing writes
+    nothing and keeps the version.
   - `schedules.go` — the people of a Rotation layer are validated against the stored version (settled 6, C-27.FR-2):
-    the people a save adds must be able to be Paged, those it keeps need not;
+    the people a save adds must exist, not be deleted and be able to be Paged; those it keeps need not, deleted ones
+    included. A Schedule has at most 20 Rotation layers (`/rotation_layers`) and a Rotation layer at most 100 people
+    (`/rotation_layers/{i}/user_ids`); `start_date` is from 2000-01-01 to 2100-12-31 and `shift_seconds` at most
+    2419200, 28 days — each `422` `out_of_range` at its pointer, and CHECKs in the migration for the last two. The
+    spec states these bounds in descriptions: a `maximum` or `maxItems` would make the request validation answer `400`
+    before the domain's `422`;
   - `schedules.go` — the main Schedule: the first Schedule of a Team is created main (P-90); `main` true on another
     clears it on the previous one in the same transaction, each with its Audit log entry; deleting the main Schedule
     leaves the Team without one (P-66); `Referrers(schedule)` lists what names it — empty until S-154 adds the
@@ -186,8 +219,8 @@ issue: 420
 - **Shared tables**: reference.md moves `schedules:read`, `schedules:write` and `schedule-overrides:write` from
   "Permissions added in L2" into the main table and the `Permission` schema; defaults.md marks `schedule.time_zone`
   decided; L2.md §5.3 moves P-64, P-65, P-66, P-77, P-90 and P-91 to "Decided since they were first listed".
-- **Settings**: `schedule.time_zone` (P-77), `schedule.gap_view`, `organization.time_zone`, `ical.window` (the longest
-  period of `getScheduleOnCall`).
+- **Settings**: `schedule.time_zone` (P-77), `schedule.gap_view`, `organization.time_zone`, `ical.window` (P-81, the
+  longest period of `getScheduleOnCall`, `ICalWindowBack` plus `ICalWindowAhead`).
 - **Log events**: none new; the Audit log records every change.
 - **Documentation**: the new page `docs/concepts/schedules.md` — "What a Schedule is", "Rotation layers", "Several
   Schedules" and "Overrides" (who may make them, that they send no message) — under Concepts in `mkdocs.yml`.
@@ -312,11 +345,28 @@ None open. Settled:
 - Suggested commit: `feat(schedules): add schedules with rotation layers, overrides and the on-call`.
 - Migration numbers follow the story map: 0029 to 0035 for S-131, S-133, S-164, S-134, S-139, S-140 and S-165. A story
   merged out of that order renumbers its migration to the next free number in its own pull request, with its tests and
-  `schema.md`, as S-092 did.
-- The maintainer confirms provisional values with this story (operator attention): P-64, deleting a Team with Schedules
-  is refused (the rest of P-64 was implemented by S-115 and S-118); P-65, the Override created last wins; P-66,
-  deleting the main Schedule leaves the Team without one; P-77, a Schedule's time zone defaults to the Organization's,
-  stored at creation; P-90, a Team's first Schedule is its main one; P-91, an Override may not end in the past.
+  `schema.md`, as S-092 did. S-131 is merged first of them and takes `0025_schedules`, the number after
+  `0024_team_label_and_matchers` of S-118 on `master` (journal D585).
+- Corrected with the implementation: `files_touched` names the migration `0025_schedules`, and adds the files that
+  carry what the Contracts ask for — `sqlc.yaml` (the new package's generated queries), `internal/publicid/publicid_test.go`
+  (the new prefixes), `internal/api/server_test.go` (the Permission enum of 36 values), `internal/runtime/runtime_test.go`
+  (the fake database's Schedules store), and `internal/metrics/metrics.go`, `metrics_test.go` and
+  `internal/tools/refgen/main.go` (the entity label `schedule` joins the label policy of ADR-0014 with the first metric
+  that carries it). The refusal of a period of `getScheduleOnCall` is at `/query/to`, the pointer of a query parameter
+  (`api/README.md`), not `/to`. `C-25-teams.md` and `C-27-schedules.md` drop the marks _provisional_ of the values this
+  story confirms, and `docs/install/versions.md` lists migration 0025 among the changes of 0.2.0.
+- The bounds of the Contracts — `from` and `to` within 10 years, `start_date` from 2000 to 2100, `shift_seconds` up
+  to 28 days, the caps of 20 Rotation layers, 100 people and 1000 overlapping Overrides, and the rules of Overrides
+  about the past — were added in review and confirmed by the maintainer, so that every computation of Shifts ends and
+  no read of a Schedule grows without bound. Overrides that overlap are ordered by id, which every replica takes from
+  one sequence, not by `created_at` (P-65). `rotation_oracle_test.go` checks the Shifts against plain wall-clock
+  arithmetic and the Result against its definition at random, with a fixed seed.
+- Confirmed by the maintainer with this story: P-64, deleting a Team with Schedules is refused (the rest of P-64 was
+  implemented by S-115 and S-118); P-65, the Override created last wins; P-66, deleting the main Schedule leaves the
+  Team without one; P-77, a Schedule's time zone defaults to the Organization's, stored at creation; P-90, a Team's
+  first Schedule is its main one; P-91, an Override may not end in the past.
+- The live hint `schedule` is not added to `resyncTypes` in `internal/live/hub.go`; that is left for the story of the
+  Schedule pages (S-135), which first holds Schedules in a client.
 - "May be Paged" is the current state of the person, not their state at the time of a past segment: the Result of a
   week after someone was disabled shows the Rotation layer below for the whole week, which is what the warnings say.
 - The only check that looks at a Team (C-25.FR-1) is the precondition of Overrides; every other check is the Role's.

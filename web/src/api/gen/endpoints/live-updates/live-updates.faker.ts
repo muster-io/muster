@@ -11,5 +11,5 @@ import type {
 } from '../../model';
 
 
-export const getStreamLiveUpdatesResponseMock = (overrideResponse: Partial<Extract<HintEvent, object>> = {}): HintEvent => ({type: faker.helpers.arrayElement(['alert-group','alert-groups','integration','route','connection','destination','team','organization','system-notices','system-status','account-links'] as const), id: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), null]), ...overrideResponse})
+export const getStreamLiveUpdatesResponseMock = (overrideResponse: Partial<Extract<HintEvent, object>> = {}): HintEvent => ({type: faker.helpers.arrayElement(['alert-group','alert-groups','integration','route','connection','destination','team','schedule','organization','system-notices','system-status','account-links'] as const), id: faker.helpers.arrayElement([faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), null]), ...overrideResponse})
 

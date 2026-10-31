@@ -11,8 +11,8 @@ change goes only into a new minor version, with the next layer.
 ## How the spec is organised
 
 - **One file.** `paths` are grouped by tag, one tag per capability area: Sessions, Profile, Users, OIDC, Audit log, API
-  tokens, Organization, Integrations, Ingest, Messenger callbacks, Routes, Teams, Alert groups, Live updates,
-  Connections, Destinations, Links, Templates, Account links, Request log, System, Health and metrics, Outgoing
+  tokens, Organization, Integrations, Ingest, Messenger callbacks, Routes, Teams, Schedules, Alert groups, Live
+  updates, Connections, Destinations, Links, Templates, Account links, Request log, System, Health and metrics, Outgoing
   webhooks.
 - **Servers and listeners.** The default server is the app listener, `{public_url}/api/v1`. Operations on the other
   listeners carry their own `servers` entry: ingestion, Heartbeat and messenger callbacks use `{ingest_url}/api/v1`; health
@@ -93,7 +93,9 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `RG` | Organization | `organizations` |
 | `RQ` | Record of the Request log | `request_log` |
 | `RT` | Route | `routes` |
+| `RY` | Rotation layer (from S-131) | `rotation_layers` |
 | `SA` | Service account | `service_accounts` |
+| `SC` | Schedule (from S-131) | `schedules` |
 | `SN` | Session | `sessions` |
 | `SR` | User | `users` |
 | `SS` | Stored Snapshot | `stored_snapshots` |
@@ -101,6 +103,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `TB` | Lookup table | `lookup_tables` |
 | `TE` | Timeline entry (lifecycle and system entries) | `timeline_entries` |
 | `TM` | Team (from S-115) | `teams` |
+| `VR` | Override (from S-131) | `schedule_overrides` |
 
 ## Security
 

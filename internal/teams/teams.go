@@ -102,10 +102,29 @@ var (
 	ErrVersionMismatch = errors.New("the team changed since it was read")
 	// ErrNotInTeam is a removal of a User who is not in the Team.
 	ErrNotInTeam = errors.New("the user is not in the team")
-	// ErrInUse is the deletion of a Team that has Schedules or owns Escalation chains, which the stories of those
-	// raise (team_in_use); nothing refuses a deletion yet.
+	// ErrInUse is the deletion of a Team that has Schedules or, from the Escalation chains on, owns chains
+	// (team_in_use, P-64); InUseError names them.
 	ErrInUse = errors.New("the team has schedules or escalation chains")
 )
+
+// Holder is an object that keeps a Team from being deleted: its kind, public_id and name.
+type Holder struct {
+	Type     string
+	PublicID string
+	Name     string
+}
+
+// HolderSchedule is the kind of a Schedule that holds its Team.
+const HolderSchedule = "schedule"
+
+// InUseError is ErrInUse with the objects that hold the Team.
+type InUseError struct {
+	Holders []Holder
+}
+
+func (e *InUseError) Error() string { return ErrInUse.Error() }
+
+func (e *InUseError) Unwrap() error { return ErrInUse }
 
 // FieldError is a field of a request that is not valid, at a JSON pointer of the request body, with a stable code of
 // the validation-failed problem.
@@ -207,6 +226,7 @@ type Queries interface {
 	UpdateTeam(ctx context.Context, arg dbgen.UpdateTeamParams) error
 	DeleteTeam(ctx context.Context, arg dbgen.DeleteTeamParams) error
 	DeleteTeamUsers(ctx context.Context, arg dbgen.DeleteTeamUsersParams) error
+	ListTeamSchedules(ctx context.Context, arg dbgen.ListTeamSchedulesParams) ([]dbgen.ListTeamSchedulesRow, error)
 	ReleaseOwnedDestinations(ctx context.Context, arg dbgen.ReleaseOwnedDestinationsParams) (
 		[]dbgen.ReleaseOwnedDestinationsRow, error)
 	ReleaseOwnedRoutes(ctx context.Context, arg dbgen.ReleaseOwnedRoutesParams) ([]dbgen.ReleaseOwnedRoutesRow, error)
@@ -674,10 +694,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return updated, nil
 }
 
-// Delete deletes the Team publicID (C-25.FR-10); a non-nil version must be its current one. The row stays, marked
-// deleted, for the names that point at it, and its name and slug are free at once; its people and Working hours are
-// removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and its
-// own Audit log entry by the system, in the same transaction.
+// Delete deletes the Team publicID (C-25.FR-10); a non-nil version must be its current one. A Team that has Schedules
+// is refused with InUseError, read under the lock that every change of its Schedules takes (P-64). The row stays,
+// marked deleted, for the names that point at it, and its name and slug are free at once; its people and Working hours
+// are removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and
+// its own Audit log entry by the system, in the same transaction.
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	var before Team
 	err := s.store.InTx(ctx, func(q Queries) error {
@@ -690,6 +711,17 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}
 		if version != nil && *version != before.Version {
 			return ErrVersionMismatch
+		}
+		schedules, err := q.ListTeamSchedules(ctx, dbgen.ListTeamSchedulesParams{OrgID: s.orgID, TeamID: before.ID})
+		if err != nil {
+			return fmt.Errorf("list the schedules of the team %s: %w", before.PublicID, err)
+		}
+		if len(schedules) > 0 {
+			holders := make([]Holder, len(schedules))
+			for i, sc := range schedules {
+				holders[i] = Holder{Type: HolderSchedule, PublicID: sc.PublicID, Name: sc.Name}
+			}
+			return &InUseError{Holders: holders}
 		}
 		now := s.clock.Now().UTC()
 		owner := pgtype.Int8{Int64: before.ID, Valid: true}

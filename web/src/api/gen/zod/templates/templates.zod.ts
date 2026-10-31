@@ -43,7 +43,8 @@ export const PreviewTemplateResponse = zod.object({
   "line": zod.int().min(1).optional().describe('Line of a template error.'),
   "column": zod.int().min(1).optional().describe('Column of a template error.'),
   "check_code": zod.union([zod.literal('token_invalid'),zod.literal('bot_not_in_channel'),zod.literal('channel_in_other_team'),zod.literal('channel_archived'),zod.literal('channel_not_found'),zod.literal('not_a_channel'),zod.literal('comments_disabled'),zod.literal('changed_since_saved'),zod.literal('bot_not_channel_admin'),zod.literal('bot_may_not_post'),zod.literal('bot_may_not_edit'),zod.literal('bot_not_group_admin'),zod.literal('channel_forbidden'),zod.literal('missing_scope'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal(null)]).nullish().describe('Set on `destination_check_failed`; the code of the failing check, as in `DestinationCheckItem`, which clients translate, with `detail` as its English text.'),
-  "missing_scopes": zod.array(zod.string()).optional().describe('Set on `destination_check_failed` with the `check_code` `missing_scope` (Slack), omitted otherwise — the scopes Slack named as needed, as in `DestinationCheckItem`, which clients name in their own words; `detail` names them in English.')
+  "missing_scopes": zod.array(zod.string()).optional().describe('Set on `destination_check_failed` with the `check_code` `missing_scope` (Slack), omitted otherwise — the scopes Slack named as needed, as in `DestinationCheckItem`, which clients name in their own words; `detail` names them in English.'),
+  "reason": zod.enum(['viewer', 'disabled', 'not_in_team']).optional().describe('Set on `not_pageable`; why the person may not be Paged.')
 }))
 })
 

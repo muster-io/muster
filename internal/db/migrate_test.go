@@ -2233,24 +2233,166 @@ func TestIntegrationTeamLabelAndMatchers(t *testing.T) {
 	})
 }
 
+// TestIntegrationSchedules runs 0025 over a database with a Team, a User and a Service account: up seeds the three
+// Permissions — 36, 15 and 10 for Admin, Responder and Viewer — and the tables take a Schedule with a Rotation layer of
+// each Shift length, its people and an Override, while the CHECKs refuse a second main Schedule of the Team, a name
+// taken ignoring case, shift_seconds without hours or not whole hours, a weekly layer without its day, limits whose
+// end equals their start or with a time and no days, an Override that ends when it starts and one made by both a User
+// and a Service account; deleting a Schedule deletes its layers and Overrides. Down drops the tables and the
+// Permissions, those of tokens included, and keeps the Team; up again works. The versions are reached by number.
+func TestIntegrationSchedules(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 24)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000AA', 'Payments', 'payments', '2026-10-31', '2026-10-31' FROM organizations`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000AA', 'petr', 'Petr', 'responder', 'local', 'active', now(), now()
+			FROM organizations`)
+		e.exec(t, `INSERT INTO service_accounts (org_id, public_id, name, role, status, created_at, updated_at)
+			SELECT id, 'SA0000000000AA', 'ci', 'admin', 'active', now(), now() FROM organizations`)
+
+		if err := e.mm.Migrate(25); err != nil {
+			t.Fatalf("up to 25: %v", err)
+		}
+		for role, want := range map[string]int{"admin": 36, "responder": 15, "viewer": 10} {
+			if got := e.count(t, `SELECT count(*) FROM role_permissions WHERE role = '`+role+`'`); got != want {
+				t.Errorf("%s has %d Permissions, want %d", role, got, want)
+			}
+		}
+		schedule := func(publicID, name string, main bool) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO schedules (org_id, public_id, team_id, name, time_zone,
+				main, created_at, updated_at)
+				SELECT o.id, $1, t.id, $2, 'Europe/Berlin', $3, now(), now() FROM organizations o, teams t`,
+				publicID, name, main)
+			return err
+		}
+		if err := schedule("SC0000000000AA", "Main", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := schedule("SC0000000000BB", "Second", true); err == nil {
+			t.Error("a second main schedule of the team was stored")
+		}
+		if err := schedule("SC0000000000CC", "MAIN", false); err == nil {
+			t.Error("a name taken ignoring case was stored")
+		}
+		if err := schedule("SC0000000000DD", "Second", false); err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		layer := func(length string, seconds *int, day *string, days *string, start, end *string) error {
+			n++
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO rotation_layers (org_id, public_id, schedule_id, position,
+				name, shift_length, shift_seconds, handover_time, handover_day, start_date, limit_days, limit_start,
+				limit_end)
+				SELECT org_id, $1, id, $2, 'layer', $3, $4, '10:00', $5, '2026-11-02', $6::text[], $7, $8
+				FROM schedules WHERE public_id = 'SC0000000000AA'`,
+				fmt.Sprintf("RY%012d", n), n, length, seconds, day, days, start, end)
+			return err
+		}
+		hours, odd, long, monday, weekdays, friday := 43200, 5400, 2422800, "monday", "{monday,friday}", "{friday}"
+		night, morning := "19:00", "09:00"
+		for name, err := range map[string]error{
+			"a day":                         layer("day", nil, nil, nil, nil, nil),
+			"a week":                        layer("week", nil, &monday, &weekdays, nil, nil),
+			"12 hours":                      layer("hours", &hours, nil, &friday, &night, &morning),
+			"a window across midnight only": layer("day", nil, nil, &friday, &night, &morning),
+		} {
+			if err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		for name, err := range map[string]error{
+			"seconds without hours":       layer("day", &hours, nil, nil, nil, nil),
+			"hours without seconds":       layer("hours", nil, nil, nil, nil, nil),
+			"seconds not whole hours":     layer("hours", &odd, nil, nil, nil, nil),
+			"more than 28 days":           layer("hours", &long, nil, nil, nil, nil),
+			"a week without its day":      layer("week", nil, nil, nil, nil, nil),
+			"a day with a handover day":   layer("day", nil, &monday, nil, nil, nil),
+			"an end equal to the start":   layer("day", nil, nil, &friday, &night, &night),
+			"a time without days":         layer("day", nil, nil, nil, &night, &morning),
+			"a start without an end":      layer("day", nil, nil, &friday, &night, nil),
+			"limits of no day":            layer("day", nil, nil, ptrTo("{}"), nil, nil),
+			"limits with a day not a day": layer("day", nil, nil, ptrTo("{funday}"), nil, nil),
+		} {
+			if err == nil {
+				t.Errorf("%s was stored", name)
+			}
+		}
+		if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO rotation_layers (org_id, public_id, schedule_id, position,
+			name, shift_length, handover_time, start_date)
+			SELECT org_id, 'RY0000000000ZZ', id, 99, 'old', 'day', '10:00', '1999-12-31' FROM schedules
+			WHERE public_id = 'SC0000000000AA'`); err == nil {
+			t.Error("a start date before 2000 was stored")
+		}
+		e.exec(t, `INSERT INTO rotation_layer_users (org_id, rotation_layer_id, position, user_id)
+			SELECT l.org_id, l.id, 1, u.id FROM rotation_layers l, users u WHERE l.position = 1`)
+		override := func(publicID, start, end string, byUser, bySA bool) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO schedule_overrides (org_id, public_id, schedule_id,
+				user_id, starts_at, ends_at, created_by_user_id, created_by_service_account_id, created_at, updated_at)
+				SELECT s.org_id, $1, s.id, u.id, $2, $3, CASE WHEN $4::boolean THEN u.id END,
+					CASE WHEN $5::boolean THEN a.id END, now(), now()
+				FROM schedules s, users u, service_accounts a WHERE s.public_id = 'SC0000000000AA'`,
+				publicID, start, end, byUser, bySA)
+			return err
+		}
+		if err := override("VR0000000000AA", "2026-11-04T10:00:00Z", "2026-11-04T20:00:00Z", true, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := override("VR0000000000BB", "2026-11-04T10:00:00Z", "2026-11-04T20:00:00Z", false, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := override("VR0000000000CC", "2026-11-04T10:00:00Z", "2026-11-04T10:00:00Z", true, false); err == nil {
+			t.Error("an override that ends when it starts was stored")
+		}
+		if err := override("VR0000000000DD", "2026-11-04T10:00:00Z", "2026-11-04T11:00:00Z", true, true); err == nil {
+			t.Error("an override made by a user and a service account was stored")
+		}
+		e.exec(t, `INSERT INTO api_tokens (org_id, public_id, kind, user_id, name, token_hash, created_at)
+			SELECT o.id, 'PT0000000000AA', 'personal', u.id, 't', sha256('t'), now() FROM organizations o, users u`)
+		e.exec(t, `INSERT INTO api_token_permissions (api_token_id, org_id, permission)
+			SELECT id, org_id, 'schedules:read' FROM api_tokens`)
+		e.exec(t, `DELETE FROM schedules WHERE public_id = 'SC0000000000AA'`)
+		if got := e.count(t, `SELECT count(*) FROM rotation_layers`) +
+			e.count(t, `SELECT count(*) FROM schedule_overrides`); got != 0 {
+			t.Errorf("deleting a schedule left %d layers and overrides", got)
+		}
+
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM permissions WHERE name LIKE 'schedule%'`) +
+			e.count(t, `SELECT count(*) FROM pg_class WHERE relname IN ('schedules', 'rotation_layers',
+				'rotation_layer_users', 'schedule_overrides')`); got != 0 {
+			t.Errorf("after down: %d Permissions or tables are left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM teams`); got != 1 {
+			t.Errorf("after down: %d teams", got)
+		}
+
+		if err := e.mm.Migrate(25); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+func ptrTo(s string) *string { return &s }
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (24)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (25)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":24`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":25`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":24`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":25`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2266,10 +2408,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (24)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (25)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":24`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":25`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

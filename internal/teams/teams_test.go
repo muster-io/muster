@@ -68,6 +68,8 @@ type fakeStore struct {
 	matchers map[int64][]dbgen.ListTeamMatchersRow
 	version  int64
 	locked   int
+	// schedules are the Schedules of each Team, by its id.
+	schedules map[int64][]dbgen.ListTeamSchedulesRow
 }
 
 func newStore() *fakeStore {
@@ -221,6 +223,14 @@ func (s *fakeStore) DeleteTeam(_ context.Context, arg dbgen.DeleteTeamParams) er
 	t := s.byID(arg.ID)
 	t.deleted, t.Version = true, t.Version+1
 	return nil
+}
+
+func (s *fakeStore) ListTeamSchedules(_ context.Context, arg dbgen.ListTeamSchedulesParams) (
+	[]dbgen.ListTeamSchedulesRow, error) {
+	if err := s.fail["ListTeamSchedules"]; err != nil {
+		return nil, err
+	}
+	return s.schedules[arg.TeamID], nil
 }
 
 func (s *fakeStore) DeleteTeamUsers(_ context.Context, arg dbgen.DeleteTeamUsersParams) error {
@@ -800,6 +810,39 @@ func TestDelete(t *testing.T) {
 	store.fail["Notify"] = errBoom
 	if err := svc.Delete(ctx, by, other.PublicID, nil); !errors.Is(err, errBoom) {
 		t.Errorf("a route's hint fails = %v", err)
+	}
+}
+
+// TestDeleteInUse is C-25.FR-10 and AC-9 with P-64: deleting a Team with Schedules is refused with team_in_use, which
+// names them in in_use_by, and changes nothing; once its Schedules are gone the Team is deleted.
+func TestDeleteInUse(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	team, err := svc.Create(ctx, by, Input{Name: "Payments", Slug: "payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.schedules = map[int64][]dbgen.ListTeamSchedulesRow{team.ID: {
+		{PublicID: "SC0000000000AA", Name: "Main"}, {PublicID: "SC0000000000BB", Name: "Nights"}}}
+	audits := len(store.audit)
+	err = svc.Delete(ctx, by, team.PublicID, nil)
+	use, ok := errors.AsType[*InUseError](err)
+	if !ok || !errors.Is(err, ErrInUse) || err.Error() != ErrInUse.Error() || len(use.Holders) != 2 ||
+		use.Holders[0] != (Holder{Type: HolderSchedule, PublicID: "SC0000000000AA", Name: "Main"}) ||
+		use.Holders[1].Name != "Nights" {
+		t.Fatalf("a team with schedules = %v %+v", err, use)
+	}
+	if len(store.audit) != audits || store.teams[0].deleted {
+		t.Errorf("the refused deletion changed something: %d entries, %+v", len(store.audit)-audits, store.teams[0])
+	}
+	store.fail["ListTeamSchedules"] = errBoom
+	if err := svc.Delete(ctx, by, team.PublicID, nil); !errors.Is(err, errBoom) {
+		t.Errorf("the schedules fail = %v", err)
+	}
+	delete(store.fail, "ListTeamSchedules")
+	store.schedules = nil
+	if err := svc.Delete(ctx, by, team.PublicID, nil); err != nil || !store.teams[0].deleted {
+		t.Errorf("without schedules = %v", err)
 	}
 }
 

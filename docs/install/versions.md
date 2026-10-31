@@ -104,6 +104,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
       label `team` records one Quiet `unknown_team_value` per value in its Timeline, and outgoing webhooks in events
       mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.
+    - Migration 0025 adds [Schedules](../concepts/schedules.md) and the Permissions `schedules:read`,
+      `schedules:write` and `schedule-overrides:write`. Roles get them at once; a Personal access token keeps the
+      Permissions it was issued with, so issue a new one to reach Schedules with a token.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -232,6 +235,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 25. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 24, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

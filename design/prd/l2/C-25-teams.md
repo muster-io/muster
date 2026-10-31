@@ -92,7 +92,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-25.FR-10** Deleting a Team that has Schedules or owns Escalation chains is refused with `409` and the code
   `team_in_use`, naming them; otherwise the Team, its people, entries, Team mentions and its list of Destinations are
   removed, the Routes, Destinations and chains it owned keep no owner, and Alert Groups that had it among their Teams
-  keep its name, marked deleted (_provisional_, P-64). Its slug becomes free.
+  keep its name, marked deleted (P-64). Its slug becomes free.
 - **C-25.FR-11** Teams use optimistic locking (`If-Match`), and every change of a Team, its people, entries, Team
   mentions and Working hours is recorded in the Audit log with a before/after diff. Each Team exports
   `muster_team_info{team,name}`; the stories register their log events and add the Teams' lifecycle events to the [L2

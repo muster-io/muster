@@ -55,6 +55,9 @@ tags:
 - name: Teams
   description: Teams, the people in them and their Working hours. A Team owns Routes and Destinations and grants no
     access of its own.
+- name: Schedules
+  description: Schedules of the Teams with their Rotation layers and Overrides, and their On-call and Result. Shifts and
+    Overrides send no message.
 - name: Alert groups
   description: Alert Groups, their Alerts, Timeline, Notes, delivery state, statistics and Commands.
 - name: Live updates
@@ -3385,7 +3388,8 @@ paths:
       summary: Delete a Team
       description: Removes the Team's people and Working hours and leaves the Routes and Destinations it owned without an
         owner, each with a new `version`; the Team stays, marked deleted, for what names it, and its slug is free at once.
-        From the Schedules and Escalation chains on, a Team that has them is refused with `409` `team_in_use`.
+        A Team that has Schedules, and from the Escalation chains on one that owns chains, is refused with `409`
+        `team_in_use`, which names them in `in_use_by`.
       x-permission: teams:write
       x-listener: app
       security:
@@ -3515,6 +3519,455 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /schedules:
+    get:
+      operationId: listSchedules
+      tags:
+      - Schedules
+      summary: List Schedules
+      description: The Schedules by name, each with its Team and its Rotation layers. Every Role reads them.
+      x-permission: schedules:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      - name: team
+        in: query
+        description: Only the Schedules of this Team (its `public_id`), or with `mine` those of the Teams of the calling
+          User — "My Teams". A Service account is in no Team, so its `mine` is refused with `422` `unsupported`. A value
+          that names no Team matches nothing.
+        schema:
+          type: string
+      - name: q
+        in: query
+        description: Case-insensitive match on the name.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: A page of Schedules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createSchedule
+      tags:
+      - Schedules
+      summary: Create a Schedule
+      description: 'A Schedule of a Team, with a name unique in the Team ignoring case (`409` `name_taken`), a time zone —
+        the Organization''s at the time of creation when omitted (`schedule.time_zone`) — and its Rotation layers. The
+        first Schedule of a Team is its main Schedule; `main` true on a later one makes it main instead of the previous
+        one. A person a Rotation layer names who is a Viewer, disabled or not in the Team is refused with `422`
+        `not_pageable` at `/rotation_layers/{i}/user_ids/{j}`, with the `reason`. Sends no message (C-27.FR-11).'
+      x-permission: schedules:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleInput'
+      responses:
+        '201':
+          description: The created Schedule.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /schedules/{schedule_id}:
+    get:
+      operationId: getSchedule
+      tags:
+      - Schedules
+      summary: Read a Schedule
+      x-permission: schedules:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      responses:
+        '200':
+          description: The Schedule.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      operationId: updateSchedule
+      tags:
+      - Schedules
+      summary: Update a Schedule
+      description: 'Replaces the writable fields and the Rotation layers. Requires `If-Match`; a stale ETag gets `412`.
+        A Rotation layer with the `id` of one of the Schedule''s keeps its identity; one without is new, and one left
+        out is deleted. Only the people a save adds to a Rotation layer must be able to be Paged; those it keeps need
+        not. An omitted `time_zone` or `main` keeps the stored value. `main` true makes the Schedule its Team''s main
+        Schedule and the previous one not main, in one transaction; `main` false on the main Schedule is refused with
+        `422` `unsupported` at `/main`, and a `team_id` other than the Schedule''s with `422` `unsupported` at
+        `/team_id`.'
+      x-permission: schedules:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleInput'
+      responses:
+        '200':
+          description: The updated Schedule.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      operationId: deleteSchedule
+      tags:
+      - Schedules
+      summary: Delete a Schedule
+      description: Deletes the Schedule with its Rotation layers and Overrides. Deleting a Team's main Schedule leaves the
+        Team without one until an Admin marks another (P-66). A Schedule that an Escalation step names is refused with
+        `409` `schedule_in_use`, which names the chains in `in_use_by`.
+      x-permission: schedules:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - $ref: '#/components/parameters/IfMatchOptional'
+      responses:
+        '204':
+          description: The Schedule was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /schedules/{schedule_id}/on-call:
+    get:
+      operationId: getScheduleOnCall
+      tags:
+      - Schedules
+      summary: Read the On-call and the Result of a Schedule
+      description: 'The Result of the Schedule over a period on the business clock: its segments, each with the person
+        On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings
+        about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and
+        Overrides are skipped. The period is from `from` to `to`, by default the business clock''s now and
+        `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
+        `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
+        else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the
+        clocks move, and one that happens twice its first occurrence.'
+      x-permission: schedules:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - name: from
+        in: query
+        description: The start of the period (RFC 3339); the business clock's now by default.
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        description: The end of the period (RFC 3339); `schedule.gap_view` after `from` by default.
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: The Result of the period.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOnCall'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /schedules/{schedule_id}/overrides:
+    get:
+      operationId: listScheduleOverrides
+      tags:
+      - Schedules
+      summary: List the Overrides of a Schedule
+      description: The Overrides that end after `from` — the business clock's now by default — and, with `to`, start
+        before it, by start.
+      x-permission: schedules:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - name: from
+        in: query
+        description: Only the Overrides that end after this time (RFC 3339); the business clock's now by default.
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        description: Only the Overrides that start before this time (RFC 3339).
+        schema:
+          type: string
+          format: date-time
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of Overrides.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverrideList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createScheduleOverride
+      tags:
+      - Schedules
+      summary: Create an Override
+      description: 'From `start` to `end` the person `user_id` is On-call on top of every Rotation layer; where Overrides
+        overlap, the one created last wins (P-65). The caller is in the Schedule''s Team or is an Admin, else `409`
+        `not_in_team`. The person who takes the Shift is in the Team, neither a Viewer nor disabled, else `422`
+        `not_pageable` at `/user_id` with the `reason`; `replaces_user_id`, the person whose Shift it takes, may be
+        anyone and changes nothing in the On-call. An Override may not rewrite the past: a `start` more than 5 minutes
+        before the business clock''s now is refused with `422` `out_of_range` at `/start`; an `end` that is not after
+        the start or not after now (P-91), more than 31 days after the start, or a span that overlaps 1000 other
+        Overrides of the Schedule, with `422` `out_of_range` at `/end`. An Override may be planned any time ahead.
+        Needs no approval and sends no message (C-27.FR-11).'
+      x-permission: schedule-overrides:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleOverrideInput'
+      responses:
+        '201':
+          description: The created Override.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverride'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /schedules/{schedule_id}/overrides/{override_id}:
+    put:
+      operationId: updateScheduleOverride
+      tags:
+      - Schedules
+      summary: Update an Override
+      description: Replaces the people and the span, with the precondition and the checks of `createScheduleOverride`.
+        Requires `If-Match`; a stale ETag gets `412`. An Override that has ended is refused with `409` `override_ended`.
+        Of an Override that has begun only `end` may change, so that the past stays as it was; a different `start`,
+        `user_id` or `replaces_user_id` is refused with `422` `unsupported` at it. A change that changes nothing keeps
+        the version.
+      x-permission: schedule-overrides:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - $ref: '#/components/parameters/OverrideId'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleOverrideInput'
+      responses:
+        '200':
+          description: The updated Override.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleOverride'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      operationId: deleteScheduleOverride
+      tags:
+      - Schedules
+      summary: Delete an Override
+      description: With the precondition of `createScheduleOverride`. An Override that has ended is refused with `409`
+        `override_ended`, so that the past Result stays as it was. An Override that has begun is ended now instead of
+        removed — its `end` becomes the business clock''s now and its past part stays in the Result — and the Audit log
+        records `schedule_override.deleted` with that change of the end.
+      x-permission: schedule-overrides:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ScheduleId'
+      - $ref: '#/components/parameters/OverrideId'
+      - $ref: '#/components/parameters/IfMatchOptional'
+      responses:
+        '204':
+          description: The Override was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
   /alert-groups:
@@ -7913,6 +8366,20 @@ components:
       description: Team `public_id`.
       schema:
         $ref: '#/components/schemas/PublicId'
+    ScheduleId:
+      name: schedule_id
+      in: path
+      required: true
+      description: Schedule `public_id`.
+      schema:
+        $ref: '#/components/schemas/PublicId'
+    OverrideId:
+      name: override_id
+      in: path
+      required: true
+      description: Override `public_id`.
+      schema:
+        $ref: '#/components/schemas/PublicId'
     OwningTeamQuery:
       name: team
       in: query
@@ -8370,6 +8837,12 @@ components:
             rules whose URL templates read the table by its name, in the order they were created.
           items:
             $ref: '#/components/schemas/EntityRef'
+        in_use_by:
+          type: array
+          description: Set on `team_in_use` and `schedule_in_use`; the objects that hold the resource, each with its kind,
+            `public_id` and name.
+          items:
+            $ref: '#/components/schemas/InUseRef'
         retry_after_seconds:
           type: integer
           description: Set on `rate-limited`; equals the `Retry-After` header.
@@ -8485,6 +8958,10 @@ components:
         - code: unsupported
           description: The value is valid but not supported here, such as `owner=me` for a Service account token, or a
             Snooze's `time_zone` without `preset`.
+        - code: not_pageable
+          description: The person may not be Paged — a Viewer, a disabled User or a User who is not in the Team, as
+            `reason` says — where a Rotation layer adds them (`/rotation_layers/{i}/user_ids/{j}`) or an Override makes
+            them take a Shift (`/user_id`).
         - code: one_of_required
           description: Exactly one of several fields must be given, such as `until`, `no_end` or `preset` of a Snooze, or
             the parameters `connection` and `destination` of `listRequestLog`, of which it takes one, or `run` alone.
@@ -8573,7 +9050,13 @@ components:
           description: Another Team that is not deleted has this slug.
         - code: team_in_use
           description: The Team has Schedules or owns Escalation chains, which must be deleted or given another Team
-            before the Team is deleted.
+            before the Team is deleted; `in_use_by` names them.
+        - code: not_in_team
+          description: An Override by someone who is neither in the Schedule's Team nor an Admin.
+        - code: schedule_in_use
+          description: An Escalation step names the Schedule; `in_use_by` names the chains.
+        - code: override_ended
+          description: The Override has ended, so it can be neither changed nor deleted.
         - code: builtin_immutable
           description: The built-in Integration or Link rule cannot be changed this way.
         - code: role_locked
@@ -8690,6 +9173,9 @@ components:
             words; `detail` names them in English.
           items:
             type: string
+        reason:
+          description: Set on `not_pageable`; why the person may not be Paged.
+          $ref: '#/components/schemas/NotPageableReason'
     SecretStatus:
       type: object
       description: What a read shows instead of a Secret. The value itself is never returned.
@@ -8844,6 +9330,9 @@ components:
         | `alert-groups:acknowledge` (also "Still on it"), `alert-groups:resolve`, `alert-groups:snooze`, `alert-groups:note` | yes | yes | no |
         | `integrations:write`, `routes:write`, `connections:write`, `destinations:write`, `destinations:test`, `link-rules:write`, `lookup-tables:write`, `templates:preview` | yes | no | no |
         | `teams:write` (Teams and the people in them) | yes | no | no |
+        | `schedules:read` (Schedules, Rotation layers, Overrides and the On-call) | yes | yes | yes |
+        | `schedules:write` (Schedules and Rotation layers, and a Team's main Schedule) | yes | no | no |
+        | `schedule-overrides:write` (Overrides, when the caller is in the Team or is an Admin) | yes | yes | no |
         | `stored-snapshots:read` | yes | no | no |
         | `users:read`, `users:write`, `oidc:read`, `oidc:write`, `service-accounts:read`, `service-accounts:write`, `organization:read`, `organization:write` | yes | no | no |
         | `audit-log:read`, `system-status:read` | yes | no | no |
@@ -8885,6 +9374,9 @@ components:
       - system-status:read
       - teams:read
       - teams:write
+      - schedules:read
+      - schedules:write
+      - schedule-overrides:write
     Transport:
       type: string
       description: How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge
@@ -11112,6 +11604,475 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamUser'
+    ShiftLength:
+      type: string
+      description: 'How long a Shift of a Rotation layer lasts: a day, a week handed over on `handover_day`, or
+        `shift_seconds` of wall-clock time.'
+      enum:
+      - day
+      - week
+      - hours
+    RotationLimits:
+      type: object
+      description: The days of the week, and optionally a time of day, to which a Rotation layer's Shifts are cut. An `end`
+        earlier than `start` crosses midnight and runs until the end on the next day, and each window belongs to the day
+        it starts on, so Friday 19:00–09:00 runs from Friday 19:00 to Saturday 09:00; an `end` equal to `start` is refused
+        with `422` `out_of_range` at the end. Without `start` and `end` the limits are whole days.
+      required:
+      - days
+      properties:
+        days:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Weekday'
+        start:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Given with `end`.
+          example: '11:00'
+        end:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Given with `start`.
+          example: '19:00'
+    RotationLayerInput:
+      type: object
+      description: 'A Rotation layer: the people who take Shifts in turn from `start_date` at `handover_time`, the first
+        person first. Times are wall-clock times in the Schedule''s time zone, so a handover at 10:00 stays at 10:00
+        across a change of the clocks. A wall-clock time that the clocks skip when they move forward is the instant
+        they move; one that happens twice when they move back is its first occurrence (RFC 5545).'
+      required:
+      - name
+      - user_ids
+      - shift_length
+      - handover_time
+      - start_date
+      properties:
+        id:
+          description: The `id` of one of the Schedule's Rotation layers, which keeps its identity; omit it for a new one.
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        user_ids:
+          type: array
+          minItems: 1
+          description: The people who take Shifts in turn, in order; at most 100, else `422` `out_of_range`.
+          items:
+            $ref: '#/components/schemas/PublicId'
+        shift_length:
+          $ref: '#/components/schemas/ShiftLength'
+        shift_seconds:
+          type: integer
+          description: The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600
+            from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others.
+          example: 43200
+        handover_time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          example: '10:00'
+        handover_day:
+          description: The day of the handover of weekly Shifts; required with `week` and refused with the others.
+          $ref: '#/components/schemas/Weekday'
+        start_date:
+          type: string
+          format: date
+          description: The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to
+            2100-12-31, else `422` `out_of_range`.
+        limits:
+          description: The days and time of day to which the Shifts are cut; null for none.
+          oneOf:
+          - $ref: '#/components/schemas/RotationLimits'
+          - type: 'null'
+    RotationLayer:
+      type: object
+      required:
+      - id
+      - number
+      - name
+      - user_ids
+      - users
+      - shift_length
+      - handover_time
+      - start_date
+      - limits
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        number:
+          type: integer
+          minimum: 1
+          description: The position of the Rotation layer, 1 for the lowest; a higher one overrides those below.
+        name:
+          type: string
+        user_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicId'
+        users:
+          type: array
+          description: The people of `user_ids`, in turn.
+          items:
+            $ref: '#/components/schemas/UserRef'
+        shift_length:
+          $ref: '#/components/schemas/ShiftLength'
+        shift_seconds:
+          type: integer
+          description: Set with `hours`.
+        handover_time:
+          type: string
+        handover_day:
+          description: Set with `week`.
+          $ref: '#/components/schemas/Weekday'
+        start_date:
+          type: string
+          format: date
+        limits:
+          oneOf:
+          - $ref: '#/components/schemas/RotationLimits'
+          - type: 'null'
+    ScheduleInput:
+      type: object
+      required:
+      - team_id
+      - name
+      - rotation_layers
+      properties:
+        team_id:
+          description: The Team of the Schedule, set on creation; a different one on an update is refused with `422`
+            `unsupported`.
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Unique in the Team, ignoring case.
+        time_zone:
+          type: string
+          description: IANA time zone of the Schedule (`schedule.time_zone`); the Organization's at the time of creation
+            when omitted, and kept on an update when omitted.
+          example: Europe/Berlin
+        main:
+          type: boolean
+          description: 'True makes the Schedule its Team''s main Schedule, whose On-call is the Team''s; the first Schedule
+            of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main
+            instead.'
+        rotation_layers:
+          type: array
+          description: From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
+          items:
+            $ref: '#/components/schemas/RotationLayerInput'
+    Schedule:
+      type: object
+      required:
+      - id
+      - team_id
+      - team
+      - name
+      - time_zone
+      - main
+      - rotation_layers
+      - created_at
+      - etag
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        team_id:
+          $ref: '#/components/schemas/PublicId'
+        team:
+          $ref: '#/components/schemas/TeamRef'
+        name:
+          type: string
+        time_zone:
+          type: string
+        main:
+          type: boolean
+        rotation_layers:
+          type: array
+          description: From the lowest to the highest.
+          items:
+            $ref: '#/components/schemas/RotationLayer'
+        created_at:
+          type: string
+          format: date-time
+        etag:
+          type: string
+          readOnly: true
+          description: The same value as the `ETag` header; send it as `If-Match` on the next update.
+    ScheduleList:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+    ScheduleRef:
+      type: object
+      description: The Schedule an object names, with its Team.
+      required:
+      - id
+      - name
+      - team
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        team:
+          $ref: '#/components/schemas/TeamRef'
+    ScheduleOverrideInput:
+      type: object
+      required:
+      - user_id
+      - start
+      - end
+      properties:
+        user_id:
+          description: The person who takes the Shift.
+          $ref: '#/components/schemas/PublicId'
+        replaces_user_id:
+          description: The person whose Shift it takes, which the Schedule shows and which changes nothing in the
+            On-call; anyone, or null.
+          $ref: '#/components/schemas/NullablePublicId'
+        start:
+          type: string
+          format: date-time
+          description: At most 5 minutes before the business clock's now; fixed once the Override has begun.
+        end:
+          type: string
+          format: date-time
+          description: After `start` and after the business clock's now (P-91), at most 31 days after `start`.
+    ScheduleOverride:
+      type: object
+      required:
+      - id
+      - user_id
+      - user
+      - replaces_user_id
+      - replaces_user
+      - start
+      - end
+      - created_by
+      - created_at
+      - etag
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        user_id:
+          $ref: '#/components/schemas/PublicId'
+        user:
+          $ref: '#/components/schemas/UserRef'
+        replaces_user_id:
+          $ref: '#/components/schemas/NullablePublicId'
+        replaces_user:
+          oneOf:
+          - $ref: '#/components/schemas/UserRef'
+          - type: 'null'
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        created_by:
+          $ref: '#/components/schemas/ActorRef'
+        created_at:
+          type: string
+          format: date-time
+        etag:
+          type: string
+          readOnly: true
+    ScheduleOverrideList:
+      type: object
+      required:
+      - items
+      - next_cursor
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleOverride'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+    NotPageableReason:
+      type: string
+      description: 'Why a person may not be Paged: a Viewer, a disabled User, or a User who is not in the Team.'
+      enum:
+      - viewer
+      - disabled
+      - not_in_team
+    OnCallSource:
+      type: object
+      description: What decides a segment of the Result.
+      required:
+      - kind
+      properties:
+        kind:
+          type: string
+          enum:
+          - override
+          - rotation_layer
+        override_id:
+          description: Set with `override`.
+          $ref: '#/components/schemas/PublicId'
+        rotation_layer:
+          description: Set with `rotation_layer`.
+          $ref: '#/components/schemas/EntityRef'
+    OnCallSegment:
+      type: object
+      description: A segment of the Result, with the person On-call in it, or nobody in a gap.
+      required:
+      - start
+      - end
+      - user
+      - source
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        user:
+          description: Null in a gap.
+          oneOf:
+          - $ref: '#/components/schemas/UserRef'
+          - type: 'null'
+        source:
+          description: Null in a gap.
+          oneOf:
+          - $ref: '#/components/schemas/OnCallSource'
+          - type: 'null'
+    RotationShift:
+      type: object
+      description: A Shift of a Rotation layer within the period, cut to its limits.
+      required:
+      - start
+      - end
+      - user
+      - skipped
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/UserRef'
+        skipped:
+          description: Why the person's Shift is skipped, or null when it is not.
+          oneOf:
+          - $ref: '#/components/schemas/NotPageableReason'
+          - type: 'null'
+    RotationLayerShifts:
+      type: object
+      required:
+      - rotation_layer
+      - shifts
+      properties:
+        rotation_layer:
+          $ref: '#/components/schemas/EntityRef'
+        shifts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RotationShift'
+    ScheduleWarningKind:
+      type: string
+      description: '`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and
+        `unreachable` come with later releases of 0.2.'
+      enum:
+      - disabled
+      - viewer
+      - not_in_team
+      - gap
+      - unreachable
+    ScheduleWarning:
+      type: object
+      required:
+      - kind
+      - user
+      - rotation_layer
+      - override_id
+      properties:
+        kind:
+          $ref: '#/components/schemas/ScheduleWarningKind'
+        user:
+          oneOf:
+          - $ref: '#/components/schemas/UserRef'
+          - type: 'null'
+        rotation_layer:
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        override_id:
+          $ref: '#/components/schemas/NullablePublicId'
+    ScheduleOnCall:
+      type: object
+      description: The Result of a Schedule over a period, with what it is made of.
+      required:
+      - from
+      - to
+      - segments
+      - rotation_layers
+      - overrides
+      - warnings
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        segments:
+          type: array
+          description: The period cut into segments, adjacent segments of the same person and source joined.
+          items:
+            $ref: '#/components/schemas/OnCallSegment'
+        rotation_layers:
+          type: array
+          description: The Shifts of each Rotation layer in the period, from the lowest.
+          items:
+            $ref: '#/components/schemas/RotationLayerShifts'
+        overrides:
+          type: array
+          description: The Overrides in the period, in the order they were created.
+          items:
+            $ref: '#/components/schemas/ScheduleOverride'
+        warnings:
+          type: array
+          description: Each person of a Rotation layer or an Override in the period who may not be Paged, once per person
+            and Rotation layer, or per Override.
+          items:
+            $ref: '#/components/schemas/ScheduleWarning'
+    InUseRef:
+      type: object
+      description: An object that holds the resource a deletion refuses.
+      required:
+      - type
+      - id
+      - name
+      properties:
+        type:
+          type: string
+          enum:
+          - schedule
+          - escalation_chain
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
     TeamUserAdd:
       type: object
       required:
@@ -11175,8 +12136,9 @@ components:
         `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE`
         Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery
         event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
-        access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `SA` Service account, `SN` session,
-        `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team. Responses
+        access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service
+        account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup
+        table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses
         always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads
         as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert
         Groups by `#N`, never by `public_id`.'
@@ -12695,7 +13657,7 @@ components:
         |---|---|---|
         | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state): refresh its page and any list row. |
         | `alert-groups` | null | New Alert Groups may match the current list filters or counts: the UI announces "N new". |
-        | `integration`, `route`, `connection`, `destination`, `team` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
+        | `integration`, `route`, `connection`, `destination`, `team`, `schedule` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
         | `organization` | null | Organization settings changed. |
         | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
         | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |
@@ -12710,6 +13672,7 @@ components:
           - connection
           - destination
           - team
+          - schedule
           - organization
           - system-notices
           - system-status

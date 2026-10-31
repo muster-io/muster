@@ -146,6 +146,13 @@ sql:
         out: internal/teams/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/schedules/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/schedules/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/groups/query.sql
     gen:
       go:

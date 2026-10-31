@@ -4,6 +4,7 @@
  */
 import type { AlertGroupRef } from './alertGroupRef';
 import type { EntityRef } from './entityRef';
+import type { InUseRef } from './inUseRef';
 import type { ProblemError } from './problemError';
 
 /**
@@ -30,6 +31,8 @@ export interface Problem {
   related_alert_group?: AlertGroupRef;
   /** Set on the `in_use` refusal of a Lookup table (`updateLookupTable`, `deleteLookupTable`); the Link rules whose URL templates read the table by its name, in the order they were created. */
   link_rules?: EntityRef[];
+  /** Set on `team_in_use` and `schedule_in_use`; the objects that hold the resource, each with its kind, `public_id` and name. */
+  in_use_by?: InUseRef[];
   /** Set on `rate-limited`; equals the `Retry-After` header. */
   retry_after_seconds?: number;
   /**

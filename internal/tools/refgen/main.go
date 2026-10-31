@@ -76,10 +76,10 @@ const logEventsIntro = "# Log events\n\n" +
 const metricsIntro = "# Metrics\n\n" +
 	"Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes\n" +
 	"them; the endpoint also serves the process (`process_*`) and Go runtime (`go_*`) metrics. Configuration entities\n" +
-	"appear only by their `public_id` (`integration`, `route`, `destination`, `team`); the labels of an `*_info` metric\n" +
-	"carry what it describes, such as a name or the version; every other label takes its values from the closed set\n" +
-	"listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported only by the\n" +
-	"replica that is the Leader. The capability is the one that exports the metric.\n"
+	"appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`); the labels of an\n" +
+	"`*_info` metric carry what it describes, such as a name or the version; every other label takes its values from the\n" +
+	"closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported\n" +
+	"only by the replica that is the Leader. The capability is the one that exports the metric.\n"
 
 const internalAlertsIntro = "# Internal alerts\n\n" +
 	"Muster reports problems it can still report through its own pipeline as Internal alerts: Alerts of the built-in\n" +

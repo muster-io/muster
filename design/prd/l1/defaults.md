@@ -246,7 +246,7 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `team.slug_format` | 1 to 63 characters — lowercase letters, digits, `-`, `_` and `.` — starting with a letter or a digit; unique in the Organization among the Teams that are not deleted (P-74, confirmed by S-115) | built in | C-25 | decided |
 | `team.working_hours` | the Organization's (`organization.working_hours`); a Team's own end later than they start on the same day (P-63) | Team | C-25 | decided |
-| `schedule.time_zone` | `organization.time_zone` | Schedule | C-27 | P-77 |
+| `schedule.time_zone` | `organization.time_zone` at the Schedule's creation, stored with it: a later change of the Organization's does not move it (P-77, confirmed by S-131) | Schedule | C-27 | decided |
 | `schedule.gap_view` | the next 14 days | built in | C-27 | decided |
 | `schedule.gap_alert` | by default: on while the Schedule is its Team's main one, off otherwise; an Admin may set it on or off | Schedule | C-27 | decided |
 | `schedule.gap_alert_horizon` | 7 days: `MusterScheduleGap` is raised while there is a gap now or one that starts within it | built in | C-27 | decided |

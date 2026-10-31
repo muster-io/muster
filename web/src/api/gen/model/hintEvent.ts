@@ -12,7 +12,7 @@ import type { NullablePublicId } from './nullablePublicId';
  * |---|---|---|
  * | `alert-group` | the Alert Group `public_id` | It changed (status, Alerts, Timeline, delivery state): refresh its page and any list row. |
  * | `alert-groups` | null | New Alert Groups may match the current list filters or counts: the UI announces "N new". |
- * | `integration`, `route`, `connection`, `destination`, `team` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
+ * | `integration`, `route`, `connection`, `destination`, `team`, `schedule` | the resource `public_id`, or null for the whole collection | A configuration resource changed. |
  * | `organization` | null | Organization settings changed. |
  * | `system-notices`, `system-status` | null | The Organization-wide notices, or the System status, changed. |
  * | `account-links` | the Account link `public_id`, or null when several changed at once | An Account link of the signed-in user appeared, changed or disappeared. |

@@ -62,6 +62,8 @@ import (
 	"github.com/muster-io/muster/internal/partitions"
 	"github.com/muster-io/muster/internal/routing"
 	rdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/schedules"
+	schedulesdb "github.com/muster-io/muster/internal/schedules/dbgen"
 	"github.com/muster-io/muster/internal/server"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/systemstatus"
@@ -2020,5 +2022,14 @@ func (f *fakeDB) TeamsStore() teams.Store { return fakeTeamsStore{} }
 type fakeTeamsStore struct{ teams.Store }
 
 func (fakeTeamsStore) ListTeamInfo(context.Context, int64) ([]teamsdb.ListTeamInfoRow, error) {
+	return nil, nil
+}
+
+func (f *fakeDB) SchedulesStore() schedules.Store { return fakeSchedulesStore{} }
+
+// fakeSchedulesStore has no Schedules.
+type fakeSchedulesStore struct{ schedules.Store }
+
+func (fakeSchedulesStore) ListScheduleInfo(context.Context, int64) ([]schedulesdb.ListScheduleInfoRow, error) {
 	return nil, nil
 }
