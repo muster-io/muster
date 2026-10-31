@@ -6724,10 +6724,10 @@ type RotationLayerInput struct {
 	// ShiftLength How long a Shift of a Rotation layer lasts: a day, a week handed over on `handover_day`, or `shift_seconds` of wall-clock time.
 	ShiftLength ShiftLength `json:"shift_length"`
 
-	// ShiftSeconds The length of a Shift with `hours`, whole hours from one hour — a multiple of 3600 from 3600, else `422` `out_of_range`; required with `hours` and refused with the others.
+	// ShiftSeconds The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600 from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others.
 	ShiftSeconds *int `json:"shift_seconds,omitempty"`
 
-	// StartDate The day the first Shift starts, at `handover_time`, with the first person.
+	// StartDate The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to 2100-12-31, else `422` `out_of_range`.
 	StartDate openapi_types.Date `json:"start_date"`
 
 	// UserIds The people who take Shifts in turn, in order.

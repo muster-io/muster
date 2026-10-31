@@ -43,16 +43,16 @@ CREATE TABLE rotation_layers (
     handover_time text NOT NULL CHECK (handover_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
     handover_day  text CHECK (handover_day IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
         'sunday')),
-    start_date    date NOT NULL,
+    start_date    date NOT NULL CHECK (start_date BETWEEN '2000-01-01' AND '2100-12-31'),
     limit_days    text[],
     limit_start   text CHECK (limit_start ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
     limit_end     text CHECK (limit_end ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
     UNIQUE (org_id, public_id),
     -- A save renumbers the Rotation layers it keeps; the positions are unique once it commits.
     CONSTRAINT rotation_layers_position_key UNIQUE (schedule_id, position) DEFERRABLE INITIALLY DEFERRED,
-    -- shift_seconds is set exactly with hours: whole hours from one hour.
+    -- shift_seconds is set exactly with hours: whole hours from one hour to 28 days.
     CONSTRAINT rotation_layers_shift_seconds_check CHECK ((shift_length = 'hours') = (shift_seconds IS NOT NULL)
-        AND shift_seconds >= 3600 AND shift_seconds % 3600 = 0),
+        AND shift_seconds BETWEEN 3600 AND 2419200 AND shift_seconds % 3600 = 0),
     -- handover_day is set exactly with week.
     CONSTRAINT rotation_layers_handover_day_set_check CHECK ((shift_length = 'week') = (handover_day IS NOT NULL)),
     CONSTRAINT rotation_layers_limit_days_check CHECK (cardinality(limit_days) > 0

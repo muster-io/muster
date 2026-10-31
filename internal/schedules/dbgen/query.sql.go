@@ -545,7 +545,7 @@ LEFT JOIN users r ON r.org_id = o.org_id AND r.id = o.replaces_user_id
 LEFT JOIN users cu ON cu.org_id = o.org_id AND cu.id = o.created_by_user_id
 LEFT JOIN service_accounts sa ON sa.org_id = o.org_id AND sa.id = o.created_by_service_account_id
 WHERE o.org_id = $1 AND o.schedule_id = $2 AND o.ends_at > $3 AND o.starts_at < $4
-ORDER BY o.created_at, o.id
+ORDER BY o.id
 `
 
 type ListPeriodOverridesParams struct {
@@ -580,7 +580,8 @@ type ListPeriodOverridesRow struct {
 	ByServiceAccountStatus   pgtype.Text
 }
 
-// ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created.
+// ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created: by id,
+// which every replica takes from the same sequence, where created_at may skew between replicas (P-65).
 func (q *Queries) ListPeriodOverrides(ctx context.Context, arg ListPeriodOverridesParams) ([]ListPeriodOverridesRow, error) {
 	rows, err := q.db.Query(ctx, listPeriodOverrides,
 		arg.OrgID,

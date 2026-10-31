@@ -6726,10 +6726,10 @@ type RotationLayerInput struct {
 	// ShiftLength How long a Shift of a Rotation layer lasts: a day, a week handed over on `handover_day`, or `shift_seconds` of wall-clock time.
 	ShiftLength ShiftLength `json:"shift_length"`
 
-	// ShiftSeconds The length of a Shift with `hours`, whole hours from one hour — a multiple of 3600 from 3600, else `422` `out_of_range`; required with `hours` and refused with the others.
+	// ShiftSeconds The length of a Shift with `hours`, whole hours from one hour to 28 days — a multiple of 3600 from 3600 to 2419200, else `422` `out_of_range`; required with `hours` and refused with the others.
 	ShiftSeconds *int `json:"shift_seconds,omitempty"`
 
-	// StartDate The day the first Shift starts, at `handover_time`, with the first person.
+	// StartDate The day the first Shift starts, at `handover_time`, with the first person; from 2000-01-01 to 2100-12-31, else `422` `out_of_range`.
 	StartDate openapi_types.Date `json:"start_date"`
 
 	// UserIds The people who take Shifts in turn, in order.
@@ -13307,7 +13307,7 @@ type ClientInterface interface {
 
 	// GetScheduleOnCall Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
 	//
 	// Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 	GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -16960,7 +16960,7 @@ func (c *Client) UpdateSchedule(ctx context.Context, scheduleId ScheduleId, para
 
 // GetScheduleOnCall Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
 //
 // Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 func (c *Client) GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -28460,7 +28460,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -46429,7 +46429,7 @@ func (c *ClientWithResponses) UpdateScheduleWithResponse(ctx context.Context, sc
 
 // GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move.
 //
 // Returns a wrapper object for the known response body format(s).
 //

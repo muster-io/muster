@@ -54,6 +54,16 @@ const (
 	GapView = 14 * 24 * time.Hour
 	// MaxPeriod is the length of ical.window, from 7 days back to 60 days ahead: the longest period of the On-call.
 	MaxPeriod = 67 * 24 * time.Hour
+	// Reach is how far from the business clock's now a period of the On-call may start or end.
+	Reach = 10 * 365 * 24 * time.Hour
+	// MaxShiftSeconds is the longest Shift in hours: 28 days.
+	MaxShiftSeconds = 28 * 24 * 60 * 60
+)
+
+// The first and the last start date of a Rotation layer.
+var (
+	FirstStartDate = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	LastStartDate  = time.Date(2100, 12, 31, 0, 0, 0, 0, time.UTC)
 )
 
 // The limits of a Schedule, in characters.
@@ -505,6 +515,10 @@ func checkLayer(l LayerInput, base string) (LayerInput, error) {
 		}
 		l.UserIDs[j] = id
 	}
+	if l.StartDate.Before(FirstStartDate) || l.StartDate.After(LastStartDate) {
+		return l, &FieldError{Pointer: base + "/start_date", Code: CodeOutOfRange,
+			Detail: "The start date is from 2000-01-01 to 2100-12-31."}
+	}
 	if err := checkShift(l, base); err != nil {
 		return l, err
 	}
@@ -534,9 +548,10 @@ func checkShift(l LayerInput, base string) error {
 	case l.ShiftLength != ShiftHours && l.ShiftSeconds != nil:
 		return &FieldError{Pointer: base + "/shift_seconds", Code: CodeUnsupported,
 			Detail: "shift_seconds is given only with the Shift length hours."}
-	case l.ShiftSeconds != nil && (*l.ShiftSeconds < 3600 || *l.ShiftSeconds%3600 != 0):
+	case l.ShiftSeconds != nil && (*l.ShiftSeconds < 3600 || *l.ShiftSeconds%3600 != 0 ||
+		*l.ShiftSeconds > MaxShiftSeconds):
 		return &FieldError{Pointer: base + "/shift_seconds", Code: CodeOutOfRange,
-			Detail: "A Shift lasts whole hours from one hour: a multiple of 3600 from 3600."}
+			Detail: "A Shift lasts whole hours from one hour to 28 days: a multiple of 3600 from 3600 to 2419200."}
 	case l.ShiftLength == ShiftWeek && l.HandoverDay == "":
 		return &FieldError{Pointer: base + "/handover_day", Code: CodeRequired,
 			Detail: "Weekly Shifts need the day of the handover."}
@@ -655,30 +670,36 @@ func (s *Service) pageable(ctx context.Context, q Queries, teamID int64, ids []i
 	return out, nil
 }
 
-// resolve reads the people the Rotation layers of in name, by public_id; a User who does not exist or is deleted is
-// an unknown_id FieldError at their pointer. The people a layer adds, compared with the stored layer of the same id in
-// stored, must be able to be Paged in the Team, else not_pageable with the reason (C-27.FR-2, settled 6); a stored id
-// that the Schedule does not have is unknown_id.
+// resolve reads the people the Rotation layers of in name, by public_id. The people a layer keeps, compared with the
+// stored layer of the same id in stored, are taken as stored, deleted Users included, who stay with their warnings
+// (C-27.FR-5, settled 6). The people it adds must exist and not be deleted, else unknown_id at their pointer, and be
+// able to be Paged in the Team, else not_pageable with the reason (C-27.FR-2); a stored id that the Schedule does not
+// have is unknown_id.
 func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, stored []Layer) (
 	map[string]Person, error) {
 	var ids []string
 	for _, l := range in.Layers {
 		ids = append(ids, l.UserIDs...)
 	}
-	people := map[string]Person{}
+	found := map[string]Person{} // the Users that are not deleted
 	if len(ids) > 0 {
 		rows, err := q.LookupUsers(ctx, dbgen.LookupUsersParams{OrgID: s.orgID, PublicIds: ids})
 		if err != nil {
 			return nil, fmt.Errorf("read the people of the rotation layers: %w", err)
 		}
 		for _, r := range rows {
-			people[r.PublicID] = Person{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Login: r.Login, Role: r.Role,
+			found[r.PublicID] = Person{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Login: r.Login, Role: r.Role,
 				Status: r.Status}
 		}
 	}
+	people := map[string]Person{}
 	byID := make(map[string]Layer, len(stored))
+	storedPeople := map[string]Person{}
 	for _, l := range stored {
 		byID[l.PublicID] = l
+		for _, u := range l.Users {
+			storedPeople[u.PublicID] = u
+		}
 	}
 	var added []int64
 	addedAt := map[int64]string{}
@@ -696,16 +717,19 @@ func (s *Service) resolve(ctx context.Context, q Queries, team int64, in Input, 
 			}
 		}
 		for j, u := range l.UserIDs {
-			p, ok := people[u]
 			pointer := base + "/user_ids/" + strconv.Itoa(j)
+			if kept[u] {
+				people[u] = storedPeople[u] // deleted since, maybe
+				continue
+			}
+			p, ok := found[u]
 			if !ok {
 				return nil, &FieldError{Pointer: pointer, Code: CodeUnknownID, Detail: "No such User."}
 			}
-			if !kept[u] {
-				if _, seen := addedAt[p.ID]; !seen {
-					added = append(added, p.ID)
-					addedAt[p.ID] = pointer
-				}
+			people[u] = p
+			if _, seen := addedAt[p.ID]; !seen {
+				added = append(added, p.ID)
+				addedAt[p.ID] = pointer
 			}
 		}
 	}
@@ -888,7 +912,7 @@ type fields struct {
 func layerFields(l LayerInput) fields {
 	f := fields{start: pgtype.Date{Time: l.StartDate, Valid: true}}
 	if l.ShiftSeconds != nil {
-		f.seconds = pgtype.Int4{Int32: int32(*l.ShiftSeconds), Valid: true} //nolint:gosec // G115: validated hours
+		f.seconds = pgtype.Int4{Int32: int32(*l.ShiftSeconds), Valid: true} //nolint:gosec // G115: at most MaxShiftSeconds
 	}
 	if l.HandoverDay != "" {
 		f.day = pgtype.Text{String: l.HandoverDay, Valid: true}

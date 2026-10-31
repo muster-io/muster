@@ -30,7 +30,7 @@ A Rotation layer has a name and the people who take Shifts in turn, in order. A 
 
 - a **day**, handed over every day at the handover time;
 - a **week**, handed over on a day of the week at the handover time;
-- a number of **whole hours**, given as `shift_seconds`, a multiple of 3600 such as 43200 for 12 hours.
+- a number of **whole hours**, given as `shift_seconds`, a multiple of 3600 such as 43200 for 12 hours, up to 28 days.
 
 The first Shift starts on the start date at the handover time, with the first person of the list. Times are wall-clock
 times in the Schedule's time zone, so a handover at 10:00 stays at 10:00 when the clocks change.

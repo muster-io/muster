@@ -45,6 +45,8 @@ files_touched:
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
   - design/prd/L2.md
+  - design/prd/l2/C-25-teams.md
+  - design/prd/l2/C-27-schedules.md
   - test/e2e/schedules_test.go
   - docs/concepts/schedules.md
   - mkdocs.yml
@@ -327,7 +329,17 @@ None open. Settled:
   (the fake database's Schedules store), and `internal/metrics/metrics.go`, `metrics_test.go` and
   `internal/tools/refgen/main.go` (the entity label `schedule` joins the label policy of ADR-0014 with the first metric
   that carries it). The refusal of a period of `getScheduleOnCall` is at `/query/to`, the pointer of a query parameter
-  (`api/README.md`), not `/to`.
+  (`api/README.md`), not `/to`. `C-25-teams.md` and `C-27-schedules.md` drop the marks _provisional_ of the values this
+  story confirms.
+- Bounds added in review, so that every computation of Shifts ends: `from` and `to` of `getScheduleOnCall` are at most
+  10 years from the business clock's now (`422` `out_of_range` at `/query/from` or `/query/to`), a Rotation layer's
+  `start_date` is from 2000-01-01 to 2100-12-31 and `shift_seconds` at most 2419200, 28 days (`422` `out_of_range` at
+  their pointers, and CHECKs in the migration). The spec states them in descriptions: a `maximum` would make the request
+  validation answer `400` before the domain's `422`. A wall-clock time that a change of the clocks skips is the instant
+  the clocks move, in every zone. Overrides that overlap are ordered by id, which every replica takes from one sequence,
+  not by `created_at` (P-65).
+- Follow-up: nothing caps the number of Overrides of a Schedule in a period; a later story may set a limit if a
+  Schedule's reads grow slow.
 - The maintainer confirms provisional values with this story (operator attention): P-64, deleting a Team with Schedules
   is refused (the rest of P-64 was implemented by S-115 and S-118); P-65, the Override created last wins; P-66,
   deleting the main Schedule leaves the Team without one; P-77, a Schedule's time zone defaults to the Organization's,

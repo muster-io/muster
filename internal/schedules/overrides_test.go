@@ -310,6 +310,17 @@ func TestOnCall(t *testing.T) {
 			t.Errorf("%v to %v = %+v", c.from, c.to, f)
 		}
 	}
+	far, farther := c.Now().AddDate(374, 0, 0), c.Now().AddDate(374, 0, 1)
+	if f := fieldError(t, func() error { _, err := svc.OnCall(ctx, sc.PublicID, &far, &farther); return err }()); f.Pointer != "/query/from" || f.Code != CodeOutOfRange {
+		t.Errorf("a period in the year 2400 = %+v", f)
+	}
+	if f := fieldError(t, func() error { _, err := svc.OnCall(ctx, sc.PublicID, nil, &farther); return err }()); f.Pointer != "/query/to" || f.Code != CodeOutOfRange {
+		t.Errorf("an end in the year 2400 = %+v", f)
+	}
+	past := c.Now().AddDate(-11, 0, 0)
+	if f := fieldError(t, func() error { _, err := svc.OnCall(ctx, sc.PublicID, &past, nil); return err }()); f.Pointer != "/query/from" {
+		t.Errorf("a start 11 years ago = %+v", f)
+	}
 	if _, err := svc.OnCall(ctx, sc.PublicID, &from, ptr(from.Add(MaxPeriod))); err != nil {
 		t.Errorf("the longest period = %v", err)
 	}

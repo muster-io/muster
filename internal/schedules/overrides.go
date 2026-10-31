@@ -420,16 +420,25 @@ func overrideViewOf(o Override) overrideView {
 }
 
 // OnCall is the Result of the Schedule scheduleID from from to to: by default from the business clock's now to
-// schedule.gap_view after it. A to that is not after from, or later than the length of ical.window after it, is an
-// out_of_range FieldError at /query/to.
+// schedule.gap_view after it. A from or a to more than Reach from now is an out_of_range FieldError at /query/from or
+// /query/to; so is a to that is not after from, or later than the length of ical.window after it.
 func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.Time) (Result, error) {
-	start := s.clock.Now().UTC()
+	now := s.clock.Now().UTC()
+	start := now
 	if from != nil {
 		start = from.UTC()
 	}
 	end := start.Add(GapView)
 	if to != nil {
 		end = to.UTC()
+	}
+	if start.Before(now.Add(-Reach)) || start.After(now.Add(Reach)) {
+		return Result{}, &FieldError{Pointer: "/query/from", Code: CodeOutOfRange,
+			Detail: "The start of the period is at most 10 years from now."}
+	}
+	if end.Before(now.Add(-Reach)) || end.After(now.Add(Reach)) {
+		return Result{}, &FieldError{Pointer: "/query/to", Code: CodeOutOfRange,
+			Detail: "The end of the period is at most 10 years from now."}
 	}
 	if !end.After(start) || end.Sub(start) > MaxPeriod {
 		return Result{}, &FieldError{Pointer: "/query/to", Code: CodeOutOfRange,

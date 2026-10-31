@@ -67,7 +67,7 @@ func shiftsText(list []Shift) string {
 // only, a start date in the future, the changes of the clocks in Europe/Berlin in March and October, at which the
 // handover stays at 10:00 in Berlin, and a zone without them.
 func TestShifts(t *testing.T) {
-	berlin, tokyo := zone(t, "Europe/Berlin"), zone(t, "Asia/Tokyo")
+	berlin, tokyo, newYork := zone(t, "Europe/Berlin"), zone(t, "Asia/Tokyo"), zone(t, "America/New_York")
 	three := []Person{petr, sergey, olga}
 	for _, c := range []struct {
 		name     string
@@ -126,6 +126,37 @@ func TestShifts(t *testing.T) {
 			from: utc("2027-03-21T00:00:00Z"), to: utc("2027-03-31T00:00:00Z"),
 			want: "03-21T00:00–03-22T01:00 olga\n03-22T01:00–03-29T01:00 petr\n" +
 				"03-29T01:00–03-31T00:00 sergey\n"},
+		{name: "hours across the change of the clocks in March in Berlin: 02:00 is 03:00", loc: berlin,
+			layer: Layer{Users: three, ShiftLength: ShiftHours, ShiftSeconds: 3600, HandoverTime: "00:00",
+				StartDate: date("2027-03-01")},
+			from: utc("2027-03-28T00:00:00Z"), to: utc("2027-03-28T03:00:00Z"),
+			want: "03-28T00:00–03-28T01:00 sergey\n03-28T01:00–03-28T02:00 petr\n03-28T02:00–03-28T03:00 sergey\n"},
+		{name: "hours across the change of the clocks in March in New York: 02:00 is 03:00", loc: newYork,
+			layer: Layer{Users: three, ShiftLength: ShiftHours, ShiftSeconds: 3600, HandoverTime: "00:00",
+				StartDate: date("2027-03-01")},
+			from: utc("2027-03-14T05:00:00Z"), to: utc("2027-03-14T09:00:00Z"),
+			want: "03-14T05:00–03-14T06:00 petr\n03-14T06:00–03-14T07:00 sergey\n03-14T07:00–03-14T08:00 petr\n" +
+				"03-14T08:00–03-14T09:00 sergey\n"},
+		{name: "a daily handover at 02:30 in New York moves to 03:00 on the day of the change", loc: newYork,
+			layer: Layer{Users: three, ShiftLength: ShiftDay, HandoverTime: "02:30", StartDate: date("2027-03-01")},
+			from:  utc("2027-03-13T00:00:00Z"), to: utc("2027-03-16T00:00:00Z"),
+			want: "03-13T00:00–03-13T07:30 olga\n03-13T07:30–03-14T07:00 petr\n03-14T07:00–03-15T06:30 sergey\n" +
+				"03-15T06:30–03-16T00:00 olga\n"},
+		{name: "a window that starts in the skipped hour starts when the clocks move", loc: newYork,
+			layer: Layer{Users: []Person{olga}, ShiftLength: ShiftWeek, HandoverTime: "00:00", HandoverDay: "monday",
+				StartDate: date("2027-03-01"), Limits: &Limits{Days: []string{"sunday"}, Start: "02:30", End: "04:00"}},
+			from: utc("2027-03-14T00:00:00Z"), to: utc("2027-03-15T00:00:00Z"),
+			want: "03-14T07:00–03-14T08:00 olga\n"},
+		{name: "a far period: hours in the year 2400", loc: berlin,
+			layer: Layer{Users: three, ShiftLength: ShiftHours, ShiftSeconds: 3600, HandoverTime: "00:00",
+				StartDate: date("2027-03-01")},
+			from: utc("2400-01-01T00:00:00Z"), to: utc("2400-01-01T03:00:00Z"),
+			want: "01-01T00:00–01-01T01:00 sergey\n01-01T01:00–01-01T02:00 olga\n01-01T02:00–01-01T03:00 petr\n"},
+		{name: "an old start date: weeks from the year 1", loc: time.UTC,
+			layer: Layer{Users: three, ShiftLength: ShiftWeek, HandoverTime: "10:00", HandoverDay: "monday",
+				StartDate: date("0001-01-01")},
+			from: utc("2026-11-02T00:00:00Z"), to: utc("2026-11-10T00:00:00Z"),
+			want: "11-02T00:00–11-02T10:00 petr\n11-02T10:00–11-09T10:00 sergey\n11-09T10:00–11-10T00:00 olga\n"},
 		{name: "a start date in the future", loc: time.UTC,
 			layer: Layer{Users: three, ShiftLength: ShiftDay, HandoverTime: "09:00", StartDate: date("2026-12-01")},
 			from:  utc("2026-11-29T00:00:00Z"), to: utc("2026-12-02T12:00:00Z"),

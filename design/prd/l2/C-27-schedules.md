@@ -34,7 +34,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-27.FR-1** A Schedule belongs to one Team (C-25.FR-1) and has a name, unique in the Team, a time zone
   (`schedule.time_zone`), its Rotation layers in order and its Overrides. A Team may have several Schedules, such as a
   first and a second line; one of them is its main Schedule — the first one created, until an Admin marks another one
-  main (_provisional_, P-90) — and the Team's On-call is the On-call of its main Schedule. A Team without a main
+  main (P-90) — and the Team's On-call is the On-call of its main Schedule. A Team without a main
   Schedule has no On-call.
 - **C-27.FR-2** A Rotation layer has a name, a position — a higher Rotation layer overrides the lower ones wherever it
   has a Shift — and the people who take Shifts in turn, in order. A Shift lasts a day, a week, or a length of its own in
@@ -52,8 +52,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   which the Schedule shows, but that changes nothing in the On-call. The two modes of the form — "I take the Shift of…"
   and "I give my Shift to…" — work on the Result of the Schedule (FR-4): the person picks a segment of the Result, in
   which one person, or nobody in a gap, is On-call, and the Override covers that segment, or a part of it, and nothing
-  more. Where Overrides overlap, the one created last wins (_provisional_, P-65). An Override may not end in the past
-  (_provisional_, P-91).
+  more. Where Overrides overlap, the one created last wins (P-65). An Override may not end in the past
+  (P-91).
 - **C-27.FR-4** The On-call of a Schedule at a moment is the person of its Override then, when there is one and that
   person may be Paged; otherwise the person on Shift in the highest Rotation layer that has a Shift then with a person
   who may be Paged (FR-5). A person who may not be Paged is skipped, and the next Rotation layer below decides. The
@@ -113,7 +113,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   messenger command answers it.
 - **C-27.FR-12** Deleting a Schedule that an Escalation step names is refused with `409` and the code `schedule_in_use`,
   naming the chains. Deleting a Team's main Schedule leaves the Team without one until an Admin chooses another
-  (_provisional_, P-66).
+  (P-66).
 - **C-27.FR-13** Only Admins change Schedules and Rotation layers and mark a Team's main Schedule (`schedules:write`);
   everyone reads them (`schedules:read`). Changes use optimistic locking and are recorded in the Audit log with a
   before/after diff. Each Schedule exports `muster_schedule_info{schedule,name}`; the stories register their log events.

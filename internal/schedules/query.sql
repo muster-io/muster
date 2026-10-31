@@ -197,7 +197,8 @@ WHERE o.org_id = @org_id AND o.schedule_id = @schedule_id AND o.ends_at > @perio
 ORDER BY o.starts_at, o.id
 LIMIT @page_size;
 
--- ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created.
+-- ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created: by id,
+-- which every replica takes from the same sequence, where created_at may skew between replicas (P-65).
 -- name: ListPeriodOverrides :many
 SELECT o.id, o.public_id, o.user_id, o.starts_at, o.ends_at, o.version, o.created_at,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.status AS user_status,
@@ -213,7 +214,7 @@ LEFT JOIN users r ON r.org_id = o.org_id AND r.id = o.replaces_user_id
 LEFT JOIN users cu ON cu.org_id = o.org_id AND cu.id = o.created_by_user_id
 LEFT JOIN service_accounts sa ON sa.org_id = o.org_id AND sa.id = o.created_by_service_account_id
 WHERE o.org_id = @org_id AND o.schedule_id = @schedule_id AND o.ends_at > @period_start AND o.starts_at < @period_end
-ORDER BY o.created_at, o.id;
+ORDER BY o.id;
 
 -- GetScheduleOverride reads an Override of a Schedule.
 -- name: GetScheduleOverride :one

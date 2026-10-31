@@ -1433,9 +1433,9 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
   cascades to the Rotation layers, their people and the Overrides; the Audit log keeps the name.
 - **`rotation_layers`** — the Rotation layers of a Schedule, `position` 1 for the lowest, unique per Schedule through
   `rotation_layers_position_key`, deferred to the commit so that a save renumbers the layers it keeps. `shift_length`
-  is `day`, `week` or `hours`; `shift_seconds` is set exactly with `hours`, a multiple of 3600 from 3600
-  (`rotation_layers_shift_seconds_check`), and `handover_day` exactly with `week` (`rotation_layers_handover_day_set_check`). `handover_time` and the limits'
-  `limit_start` and `limit_end` are `HH:MM`; `limit_days` are days of the week, and a time of day needs days and both
+  is `day`, `week` or `hours`; `shift_seconds` is set exactly with `hours`, a multiple of 3600 from 3600 to 2419200,
+  28 days (`rotation_layers_shift_seconds_check`), and `handover_day` exactly with `week` (`rotation_layers_handover_day_set_check`). `handover_time` and the limits'
+  `limit_start` and `limit_end` are `HH:MM`; `start_date` is from 2000-01-01 to 2100-12-31; `limit_days` are days of the week, and a time of day needs days and both
   its ends (`rotation_layers_limit_times_check`). `limit_end <> limit_start`: an end earlier than the start crosses
   midnight, and the window belongs to the day it starts on (C-27.FR-2).
 - **`rotation_layer_users`** — the people of a Rotation layer in turn, primary key `(rotation_layer_id, position)`;
@@ -1443,7 +1443,8 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
 - **`schedule_overrides`** — an Override of a Schedule: the User who takes the Shift (`user_id`), the one whose Shift
   it takes (`replaces_user_id`, nullable), `starts_at < ends_at` (`schedule_overrides_span_check`), and its maker,
   exactly one of `created_by_user_id` and `created_by_service_account_id` (`schedule_overrides_created_by_check`).
-  `created_at` and the id order the Overrides where they overlap, the one created last winning (P-65). The index
+  The id orders the Overrides where they overlap, the one created last winning (P-65): it comes from one sequence,
+  where `created_at` may skew between replicas. The index
   `schedule_overrides_period_idx` on `(org_id, schedule_id, ends_at)` serves the reads of a period.
 
 The Permissions `schedules:read`, `schedules:write` and `schedule-overrides:write` and their allocation are reference

@@ -72,15 +72,56 @@ func clockOf(hhmm string) (int, int) {
 	return int(hhmm[0]-'0')*10 + int(hhmm[1]-'0'), int(hhmm[3]-'0')*10 + int(hhmm[4]-'0')
 }
 
+// The lengths of the Shifts in seconds of wall-clock time.
+const (
+	daySeconds  = 24 * 60 * 60
+	weekSeconds = 7 * daySeconds
+)
+
 // at is the instant of the wall-clock time hh:mm on the day y-m-d (d may overflow the month) in loc, by its rules on
-// that day.
+// that day. A wall-clock time that the clocks skip, in the hour they move forward, is the instant they move: the
+// first instant whose wall-clock time is not earlier, in every zone, where time.Date may choose either side.
 func at(loc *time.Location, y int, m time.Month, d, hh, mm int) time.Time {
-	return time.Date(y, m, d, hh, mm, 0, 0, loc)
+	t := time.Date(y, m, d, hh, mm, 0, 0, loc)
+	want := time.Date(y, m, d, hh, mm, 0, 0, time.UTC)
+	got := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
+	switch {
+	case got.Before(want):
+		// time.Date went back to the zone before the change: the change is where that zone ends.
+		if _, change := t.ZoneBounds(); !change.IsZero() {
+			return change
+		}
+	case got.After(want):
+		// time.Date went on into the zone after the change: the change is where that zone starts.
+		if change, _ := t.ZoneBounds(); !change.IsZero() {
+			return change
+		}
+	}
+	return t
+}
+
+// wallSeconds is the wall-clock time of t in loc as seconds since the Unix epoch read as UTC, so that two of them differ
+// by the wall-clock time between them, whatever the changes of the clocks.
+func wallSeconds(loc *time.Location, t time.Time) int64 {
+	w := t.In(loc)
+	return time.Date(w.Year(), w.Month(), w.Day(), w.Hour(), w.Minute(), 0, 0, time.UTC).Unix()
+}
+
+// length is the length of a Shift of the layer in seconds of wall-clock time; the first weekly Shift may be shorter.
+func (l Layer) length() int64 {
+	switch l.ShiftLength {
+	case ShiftWeek:
+		return weekSeconds
+	case ShiftHours:
+		return int64(l.ShiftSeconds)
+	default:
+		return daySeconds
+	}
 }
 
 // handover is the instant of the k-th handover of the layer in loc: the start of its k-th Shift, k from 0. Weekly
 // Shifts are handed over on HandoverDay: the first one runs from the start until the first HandoverDay after
-// StartDate. Shifts in hours last ShiftSeconds of wall-clock time.
+// StartDate. Shifts in hours last ShiftSeconds of wall-clock time. The arithmetic is in calendar days and whole seconds.
 func (l Layer) handover(loc *time.Location, k int) time.Time {
 	y, m, d := l.StartDate.Date()
 	hh, mm := clockOf(l.HandoverTime)
@@ -95,41 +136,37 @@ func (l Layer) handover(loc *time.Location, k int) time.Time {
 		}
 		return at(loc, y, m, d+first+7*(k-1), hh, mm)
 	case ShiftHours:
-		wall := time.Date(y, m, d, hh, mm, 0, 0, time.UTC).Add(time.Duration(k) * time.Duration(l.ShiftSeconds) *
-			time.Second)
+		base := time.Date(y, m, d, hh, mm, 0, 0, time.UTC).Unix()
+		wall := time.Unix(base+int64(k)*int64(l.ShiftSeconds), 0).UTC()
 		return at(loc, wall.Year(), wall.Month(), wall.Day(), wall.Hour(), wall.Minute())
 	default:
 		return at(loc, y, m, d+k, hh, mm)
 	}
 }
 
-// firstShift is the index of a Shift that starts no later than t, close before it.
+// firstShift is the index of a Shift that starts no later than t, close before it: two before the one whose wall-clock
+// start the elapsed wall-clock time points at, which a change of the clocks moves by an hour at most.
 func (l Layer) firstShift(loc *time.Location, t time.Time) int {
-	w := t.In(loc)
-	wall := time.Date(w.Year(), w.Month(), w.Day(), w.Hour(), w.Minute(), 0, 0, time.UTC)
 	y, m, d := l.StartDate.Date()
 	hh, mm := clockOf(l.HandoverTime)
-	elapsed := wall.Sub(time.Date(y, m, d, hh, mm, 0, 0, time.UTC))
-	var k int
-	switch l.ShiftLength {
-	case ShiftWeek:
-		k = int(elapsed / (7 * 24 * time.Hour))
-	case ShiftHours:
-		k = int(elapsed / (time.Duration(l.ShiftSeconds) * time.Second))
-	default:
-		k = int(elapsed / (24 * time.Hour))
+	elapsed := wallSeconds(loc, t) - time.Date(y, m, d, hh, mm, 0, 0, time.UTC).Unix()
+	if elapsed <= 0 {
+		return 0
 	}
-	return max(k-2, 0)
+	return int(max(elapsed/l.length()-2, 0))
 }
 
 // Shifts are the Shifts of the layer that overlap the period from from to to in the time zone loc, cut to its limits
-// and to the period, in order. A layer without people has none.
+// and to the period, in order. A layer without people has none. Every Shift lasts at least an hour, so the loop takes
+// at most one step per hour of the period, and a few more.
 func (l Layer) Shifts(loc *time.Location, from, to time.Time) []Shift {
-	if len(l.Users) == 0 || !to.After(from) || (l.ShiftLength == ShiftHours && l.ShiftSeconds <= 0) {
+	if len(l.Users) == 0 || !to.After(from) || (l.ShiftLength == ShiftHours && l.ShiftSeconds < 3600) {
 		return nil
 	}
 	var out []Shift
-	for k := l.firstShift(loc, from); ; k++ {
+	first := l.firstShift(loc, from)
+	steps := int((to.Unix()-from.Unix())/3600) + 8
+	for k := first; k < first+steps; k++ {
 		start, end := l.handover(loc, k), l.handover(loc, k+1)
 		if !start.Before(to) {
 			break
@@ -152,7 +189,8 @@ func (l Layer) Shifts(loc *time.Location, from, to time.Time) []Shift {
 type span struct{ Start, End time.Time }
 
 // cut is the span from start to end cut to the limits of the layer: the parts within its windows, joined where they
-// touch.
+// touch. It looks at the windows of each day from the day before start, since a window that crosses midnight starts
+// then, to the day of end.
 func (l Layer) cut(loc *time.Location, start, end time.Time) []span {
 	if l.Limits == nil {
 		return []span{{start, end}}
@@ -160,8 +198,8 @@ func (l Layer) cut(loc *time.Location, start, end time.Time) []span {
 	var out []span
 	first := start.In(loc)
 	y, m, d := first.Date()
-	// A window that crosses midnight starts on the day before.
-	for day := d - 1; ; day++ {
+	days := int((end.Unix()-start.Unix())/daySeconds) + 2
+	for day := d - 1; day <= d+days; day++ {
 		date := time.Date(y, m, day, 12, 0, 0, 0, loc)
 		ws := l.window(loc, date)
 		if !ws.Start.Before(end) {

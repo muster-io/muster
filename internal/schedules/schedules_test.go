@@ -762,6 +762,15 @@ func TestCheck(t *testing.T) {
 			"/rotation_layers/1/limits/end", CodeInvalidFormat},
 		{"a window whose end equals its start", layer(func(l *LayerInput) { l.Limits.End = "11:00" }),
 			"/rotation_layers/1/limits/end", CodeOutOfRange},
+		{"a start date before 2000", layer(func(l *LayerInput) { l.StartDate = date("1999-12-31") }),
+			"/rotation_layers/1/start_date", CodeOutOfRange},
+		{"a start date of the year 1", layer(func(l *LayerInput) { l.StartDate = date("0001-01-01") }),
+			"/rotation_layers/1/start_date", CodeOutOfRange},
+		{"a start date after 2100", layer(func(l *LayerInput) { l.StartDate = date("2101-01-01") }),
+			"/rotation_layers/1/start_date", CodeOutOfRange},
+		{"more than 28 days", layer(func(l *LayerInput) {
+			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(MaxShiftSeconds+3600)
+		}), "/rotation_layers/1/shift_seconds", CodeOutOfRange},
 		{"a layer twice", func() Input {
 			in := mainInput()
 			in.Layers[0].ID, in.Layers[1].ID = "RY0000000000AA", "ry0000000000aa"
@@ -783,10 +792,17 @@ func TestCheck(t *testing.T) {
 	if _, err := check(layer(func(l *LayerInput) { l.Limits.End = "09:00"; l.Limits.Start = "19:00" })); err != nil {
 		t.Errorf("a window across midnight = %v", err)
 	}
-	if _, err := check(layer(func(l *LayerInput) {
-		l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(43200)
-	})); err != nil {
-		t.Errorf("12 hours = %v", err)
+	for _, seconds := range []int{43200, MaxShiftSeconds} {
+		if _, err := check(layer(func(l *LayerInput) {
+			l.ShiftLength, l.HandoverDay, l.ShiftSeconds = ShiftHours, "", ptr(seconds)
+		})); err != nil {
+			t.Errorf("%d seconds = %v", seconds, err)
+		}
+	}
+	for _, d := range []string{"2000-01-01", "2100-12-31"} {
+		if _, err := check(layer(func(l *LayerInput) { l.StartDate = date(d) })); err != nil {
+			t.Errorf("the start date %s = %v", d, err)
+		}
 	}
 }
 
@@ -953,6 +969,20 @@ func TestNotPageable(t *testing.T) {
 	if f.Pointer != "/rotation_layers/2/user_ids/0" || f.Reason != ReasonDisabled {
 		t.Errorf("petr added to a new layer = %+v", f)
 	}
+	store.users[2].Status = "deleted" // olga, kept in both layers, deleted since
+	again := inputOf(renamed)
+	again.Name = "Main renamed again"
+	if got, err := svc.Update(ctx, admin, sc.PublicID, nil, again); err != nil ||
+		got.Layers[1].Users[0].Status != "deleted" {
+		t.Errorf("a rename with a person deleted since = %+v, %v", got, err)
+	}
+	added := inputOf(renamed)
+	added.Layers = append(added.Layers, LayerInput{Name: "another", UserIDs: []string{olga.PublicID},
+		ShiftLength: ShiftDay, HandoverTime: "09:00", StartDate: date("2026-11-02")})
+	if f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, sc.PublicID, nil, added); return err }()); f.Pointer != "/rotation_layers/2/user_ids/0" || f.Code != CodeUnknownID {
+		t.Errorf("a deleted person added to a new layer = %+v", f)
+	}
+	store.users[2].Status = "active"
 	foreign := inputOf(renamed)
 	foreign.Layers[0].ID = "RY00000000NONE"
 	if f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, sc.PublicID, nil, foreign); return err }()); f.Pointer != "/rotation_layers/0/id" || f.Code != CodeUnknownID {

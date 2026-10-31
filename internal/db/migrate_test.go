@@ -2290,7 +2290,7 @@ func TestIntegrationSchedules(t *testing.T) {
 				fmt.Sprintf("RY%012d", n), n, length, seconds, day, days, start, end)
 			return err
 		}
-		hours, odd, monday, weekdays, friday := 43200, 5400, "monday", "{monday,friday}", "{friday}"
+		hours, odd, long, monday, weekdays, friday := 43200, 5400, 2422800, "monday", "{monday,friday}", "{friday}"
 		night, morning := "19:00", "09:00"
 		for name, err := range map[string]error{
 			"a day":                         layer("day", nil, nil, nil, nil, nil),
@@ -2306,6 +2306,7 @@ func TestIntegrationSchedules(t *testing.T) {
 			"seconds without hours":       layer("day", &hours, nil, nil, nil, nil),
 			"hours without seconds":       layer("hours", nil, nil, nil, nil, nil),
 			"seconds not whole hours":     layer("hours", &odd, nil, nil, nil, nil),
+			"more than 28 days":           layer("hours", &long, nil, nil, nil, nil),
 			"a week without its day":      layer("week", nil, nil, nil, nil, nil),
 			"a day with a handover day":   layer("day", nil, &monday, nil, nil, nil),
 			"an end equal to the start":   layer("day", nil, nil, &friday, &night, &night),
@@ -2317,6 +2318,12 @@ func TestIntegrationSchedules(t *testing.T) {
 			if err == nil {
 				t.Errorf("%s was stored", name)
 			}
+		}
+		if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO rotation_layers (org_id, public_id, schedule_id, position,
+			name, shift_length, handover_time, start_date)
+			SELECT org_id, 'RY0000000000ZZ', id, 99, 'old', 'day', '10:00', '1999-12-31' FROM schedules
+			WHERE public_id = 'SC0000000000AA'`); err == nil {
+			t.Error("a start date before 2000 was stored")
 		}
 		e.exec(t, `INSERT INTO rotation_layer_users (org_id, rotation_layer_id, position, user_id)
 			SELECT l.org_id, l.id, 1, u.id FROM rotation_layers l, users u WHERE l.position = 1`)
