@@ -360,10 +360,11 @@ Permissions); `oidc-settings` (read, update); `oidc-settings/checks` (create →
   timeout starts over; enabling the user again leaves it firing. Deleting a user does the same with `owner_deleted` and
   "The owner was deleted — this Alert Group has no owner now."
 - **C-03.AC-28** _Added for L2 (2026-10-26)._ Against the fake OIDC server in its GitLab mode, the entries
-  `https://gitlab.org/claims/groups/owner` `example/platform/infra` → Admin and `groups` `example/platform/*` → Viewer
-  make an Owner of `example/platform/infra` an Admin and a person in `example/platform/apps` a Viewer, whether the claim
-  comes in the ID token or in userinfo; `example/platformx` matches neither, and a person whom they refuse gets a
-  `session.oidc_refused` entry with the values of both claims.
+  `https://gitlab.org/claims/groups/owner` `example/platform/*` → Admin and `groups` `example/platform/*` → Viewer make
+  an Owner of `example/platform` and an Owner of `example/platform/infra` Admins, although the role claim lists only the
+  groups where a person holds the role directly, and a person in `example/platform/apps` a Viewer. The claims are read
+  from the ID token, then from userinfo, where GitLab puts them; `example/platformx` matches neither, and a person whom
+  they refuse gets a `session.oidc_refused` entry with the values of both claims.
 
 ## Related ADRs
 

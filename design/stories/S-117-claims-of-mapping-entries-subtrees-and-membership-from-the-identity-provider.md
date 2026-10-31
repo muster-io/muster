@@ -8,8 +8,8 @@ depends_on: [S-115, S-116]
 covers: [C-25.FR-1, C-25.FR-4, C-25.FR-11, C-25.FR-12, C-25.AC-3, C-25.AC-4, C-03.FR-5, C-03.FR-6, C-03.FR-7, C-03.FR-30, C-03.AC-28]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0024_identity_provider_claims_and_team_entries.up.sql
-  - internal/db/migrations/0024_identity_provider_claims_and_team_entries.down.sql
+  - internal/db/migrations/0025_identity_provider_claims_and_team_entries.up.sql
+  - internal/db/migrations/0025_identity_provider_claims_and_team_entries.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -43,6 +43,9 @@ files_touched:
   - web/src/components/group-mapping-editor.tsx
   - web/src/components/group-mapping-editor.test.tsx
   - web/src/test/fixtures/teams.ts
+  - web/src/components/oidc-warnings.tsx
+  - web/src/components/oidc-warnings.test.tsx
+  - internal/archlint/secretleak.go
   - docs/sign-in/oidc-gitlab.md
   - docs/sign-in/oidc-keycloak.md
   - docs/concepts/teams.md
@@ -107,7 +110,7 @@ issue: 406
     in both mappings.
   - `removeTeamUser` clears the source `by_hand`; the row stays while `by_idp` is set. Its `404` is a User with no
     source `by_hand` in the Team, including a person who is in it only through the identity provider.
-- **Schema** (migration `0024_identity_provider_claims_and_team_entries`, expand only; `schema.md` §4.3 and §4.15):
+- **Schema** (migration `0025_identity_provider_claims_and_team_entries`, expand only; `schema.md` §4.3 and §4.15):
   - `oidc_settings.claims_seen jsonb NOT NULL DEFAULT '{}'` (claim → when a sign-in first carried it),
     `oidc_settings.claims_missing text[] NOT NULL DEFAULT '{}'` (claims the last check found not advertised) and
     `oidc_settings.claims_supported text[] NOT NULL DEFAULT '{}'`; `groups_claim_seen_at` and
@@ -250,8 +253,9 @@ and this pull request rewords both.
   added (C-25.FR-4).
 - A change of a Team's entries is not applied to everyone at once: membership changes at each User's next sign-in or
   re-check, as the Role mapping does (C-25.FR-4).
-- Migration `0024` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0025`: the story map gave this story `0024`, but S-118, merged first, took it with
+  `0024_team_label_and_matchers`, so this story renumbered its migration to the next free number, as S-131's Notes
+  say.
 
 ## Coverage
 

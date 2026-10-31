@@ -14,7 +14,7 @@ A Team has:
   Organization and compared exactly;
 - a **description**;
 - its **Team matchers**, which pick the Alerts that belong to it beside its slug;
-- the **people** in it, which may be nobody;
+- the **people** in it, which may be nobody, added by hand or through the groups of the identity provider;
 - its **Working hours**: its own, else the Organization's.
 
 What a Team owns
@@ -104,10 +104,56 @@ or change the Team label to a label your Alerts do not use for something else, t
 
 An Admin adds Users to a Team by hand and removes them, through the API (`addTeamUser`, `removeTeamUser`). A User may be
 in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — `by_hand` for a
-person an Admin added — and the messengers they linked.
+person an Admin added, `idp` for a person the identity provider put in it — and the messengers they linked.
 
 - Disabling a User keeps them in their Teams.
 - Deleting a User takes them out of every Team.
+
+## Membership from the identity provider
+
+A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
+OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
+
+The claim of an entry
+:   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster
+    reads it from the ID token, and from userinfo when the ID token lacks it, as for the Role mapping; GitLab, for
+    example, puts its role claims such as `https://gitlab.org/claims/groups/maintainer` in userinfo
+    ([Sign-in with GitLab](../sign-in/oidc-gitlab.md#3-map-groups-to-roles)).
+
+Exact groups and subtrees
+:   An entry `teams/payments` matches that group exactly, letter case included. A subtree `teams/payments/*` matches
+    `teams/payments` and every group below it, such as `teams/payments/oncall`, at `/` boundaries only: never
+    `teams/paymentsx`. There are no other wildcards; a `*` anywhere else is refused.
+
+Sign-in and re-checks
+:   At every OIDC sign-in, and at every successful background re-check, a person joins each Team with an entry that
+    matches them and leaves each Team they are in only through entries that no longer match. This happens whether or
+    not **Sync Role at sign-in** is on, and never changes a Role. A re-check reads only the refreshed ID token: an
+    entry whose claim it lacks keeps the person as the last sign-in left them. A refused or failed re-check changes no
+    membership.
+
+People added by hand
+:   The identity provider never takes out a person an Admin added. A person added by hand whom an entry matches has
+    both sources, `by_hand` and `idp`, and the entries that matched them. Removing such a person by hand takes away
+    only `by_hand`: they stay in the Team through the identity provider until a sign-in finds that no entry matches
+    them; removing by hand a person who is in the Team only through the identity provider is refused with `404`.
+
+Identity providers without an offline token
+:   GitLab, and any provider that grants no offline token, cannot be re-checked in the background, so its people join
+    and leave Teams only when they sign in.
+
+A change of a Team's entries changes nobody's membership at once: each person follows the new entries at their next
+sign-in or re-check. Every change the identity provider makes is recorded in the Audit log as `team.user_added` or
+`team.user_removed` by the system, with the source `idp` and the entry that matched.
+
+For example, a Team whose people are the members of the GitLab group `corp/payments` and its subgroups:
+
+```json
+"idp_entries": [{"group": "corp/payments/*"}]
+```
+
+With the groups claim `groups`, which GitLab fills with the inherited groups too, this takes in a person of
+`corp/payments/oncall` and nobody of `corp/paymentsx`.
 
 ## Working hours
 

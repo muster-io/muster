@@ -2,12 +2,12 @@
 
 This page sets up sign-in through GitLab with OpenID Connect (OIDC), on `https://gitlab.com` or on GitLab
 self-managed. GitLab is an OIDC provider for its own users: a person signs in to Muster with their GitLab account, and
-the groups they belong to in GitLab decide their Role.
+the groups they belong to in GitLab, and their role in them, decide their Role.
 
 GitLab differs from [Keycloak](oidc-keycloak.md) in two ways that matter here:
 
-- it puts group **paths** such as `platform/sre` into the groups claims, and it has two of them, `groups` and
-  `groups_direct`;
+- it puts group **paths** such as `platform/sre` into its claims: two groups claims, `groups` and `groups_direct`,
+  and one claim per GitLab role — Owner, Maintainer and Developer;
 - it does not offer the scope `offline_access`, so Muster cannot
   [re-check its users in the background](#no-offline-access).
 
@@ -68,7 +68,7 @@ Sign in to Muster as an Admin and open **Access → OIDC**, or use `PUT /api/v1/
 | Display name | the name on the button "Sign in with {name}", for example `GitLab`; by default the host of the issuer URL |
 | Scopes | `profile email`; `openid` is always added, and `offline_access` is not, because GitLab does not offer it |
 | Groups claim | `groups` or `groups_direct`, see [step 3](#3-map-groups-to-roles) |
-| Group mapping | group paths to Roles, see [step 3](#3-map-groups-to-roles) |
+| Group mapping | group paths, each of a claim, to Roles, see [step 3](#3-map-groups-to-roles) |
 
 Every scope in the list must be one of the application's scopes: GitLab refuses a sign-in that asks for any other
 scope with `invalid_scope`, so never add `offline_access` to the list for GitLab. The **Role for users without a
@@ -77,7 +77,7 @@ sync, skipping TOTP and the proxy — work as on the [Keycloak page](oidc-keyclo
 
 ## 3. Map groups to Roles
 
-GitLab names each group by its full path, such as `platform` or `platform/sre`, and offers two claims:
+GitLab names each group by its full path, such as `platform` or `platform/sre`, and offers these claims:
 
 `groups`
 :   The paths of every group the person is a member of, directly or through an ancestor group: a member of
@@ -88,9 +88,45 @@ GitLab names each group by its full path, such as `platform` or `platform/sre`, 
 :   The paths of the groups the person is a direct member of, without the subgroups they reach through an ancestor.
     GitLab puts it in the ID token.
 
-Choose `groups` when membership of a parent group should count for its subgroups, as it does in GitLab itself;
-choose `groups_direct` when a Role should follow only the groups a person was added to by name. For example, with the
-groups claim `groups`:
+`https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`
+:   The role claims: each lists the groups where the person holds that GitLab role **directly** — never the subgroups
+    they reach through an ancestor — and a person has only the claims of the roles they hold, so an Owner of
+    `platform` has the owner claim `["platform"]` and no maintainer claim. GitLab lists all three in discovery and puts
+    them in the userinfo answer, where Muster reads them.
+
+Every entry of the mapping names a group and, optionally, the claim it reads; without a claim it reads the **Groups
+claim** of the settings. A group is matched exactly, letter case included, so copy it from the group's URL, except a
+**subtree** `a/b/*`, which matches `a/b` and every group below it at `/` boundaries: `platform/*` matches `platform`
+and `platform/sre`, never `platformx`. There are no other wildcards. When the entries map a person to several Roles,
+the highest wins.
+
+Since a role claim lists only the groups where the role is held directly, map it with a subtree entry: the owner claim
+`platform/*` → Admin makes Admins of the Owners of `platform` and of the Owners of any of its subgroups, while an exact
+entry `platform/sre` does not match an Owner of `platform`, who holds that role in `platform/sre` only through its
+parent. For example, to make the Owners of the group `corp` Admins and everyone else in it a Responder:
+
+`groups` `corp/*`
+:   Responder: every member of `corp` and of its subgroups, since `groups` lists the inherited groups too.
+
+`https://gitlab.org/claims/groups/owner` `corp`
+:   Admin: the people who hold Owner on `corp` itself.
+
+A Developer of `corp/team-a` alone, whose `groups` lists `corp` and `corp/team-a`, is a Responder; a person outside
+`corp` matches no entry and is refused while **Role for users without a matching group** is **None**.
+
+The OIDC page of Muster lists the groups and Roles of the entries but shows their claims only in a later version; set
+an entry of another claim through `PUT /api/v1/oidc-settings`, and the page keeps it as it is when you save there:
+
+```json
+"group_mappings": [
+  {"group": "corp/*", "role": "responder"},
+  {"claim": "https://gitlab.org/claims/groups/owner", "group": "corp", "role": "admin"}
+]
+```
+
+With only the groups claims, choose `groups` when membership of a parent group should count for its subgroups, as it
+does in GitLab itself, and `groups_direct` when a Role should follow only the groups a person was added to by name.
+For example, with the groups claim `groups`:
 
 | IdP group | Role |
 |---|---|
@@ -100,15 +136,17 @@ groups claim `groups`:
 
 Every member of `platform` is a Viewer at least, and also a member of `platform/sre` through it, so a Responder. To keep
 `platform` members Viewers, use `groups_direct`: then only the people added to `platform/sre` itself are Responders.
-When a person's groups map to several Roles, the highest wins.
 
-A group path is matched exactly, letter case included, so copy it from the group's URL.
+Teams take their people from GitLab the same way: see
+[Membership from the identity provider](../concepts/teams.md#membership-from-the-identity-provider).
 
 ## 4. Check the connection
 
 Press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled, how long it took, the endpoints GitLab announced, the **Requested scopes** of a sign-in
-(`openid profile email` with the scopes above) and that **Offline access** is not offered. That is expected for GitLab
+(`openid profile email` with the scopes above) and that **Offline access** is not offered. It also keeps the claims
+GitLab lists, the role claims among them, and warns about each claim of the mapping that GitLab does not list, until
+a sign-in carries it. That is expected for GitLab
 and is not a problem: it only means the rules of [No offline access](#no-offline-access) apply.
 
 ## 5. Sign in
@@ -116,7 +154,7 @@ and is not a problem: it only means the rules of [No offline access](#no-offline
 Open Muster and press **Sign in with {display name}**. GitLab asks the person to authorize Muster once, unless the
 application is trusted, and the first sign-in creates their Muster user with the Role of their groups. The login is
 GitLab's username (`preferred_username`). As with any provider, Muster never merges accounts by login or email, and
-a person whose groups map to no Role is refused; the [Keycloak page](oidc-keycloak.md#5-sign-in) lists the errors of
+a person whom no entry matches is refused; the [Keycloak page](oidc-keycloak.md#5-sign-in) lists the errors of
 the sign-in page.
 
 ## No offline access
@@ -141,5 +179,7 @@ The [Keycloak page](oidc-keycloak.md#without-offline_access) describes the same 
     `offline_access` typed into that list. Remove it from the list, or add it to the application in GitLab.
 
 The Role is not the one you expect
-:   Check the groups claim: with `groups_direct`, membership through a parent group does not count. The Audit log
-    entry `session.oidc_refused` of a refused sign-in lists the groups GitLab sent.
+:   Check the claim of each entry: with `groups_direct`, membership through a parent group does not count, and a role
+    claim lists only the groups where the role is held directly, so an exact entry of a subgroup does not match an
+    Owner of its parent — use a subtree entry `parent/*`. The Audit log entry `session.oidc_refused` of a refused
+    sign-in lists the values GitLab sent for every claim the mapping read.
