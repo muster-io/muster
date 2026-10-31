@@ -1244,10 +1244,11 @@ paths:
       tags:
       - OIDC
       summary: Check the connection to the identity provider
-      description: Fetches discovery through the outbound HTTP package, with the saved proxy, and reports whether the groups
-        claim is advertised. While no sign-in has seen the claim in an ID token or userinfo since the groups claim, the
-        issuer, the client ID or the scopes last changed, a claim discovery does not list raises the warning
-        `groups_claim_missing` and a listed one clears it; once a sign-in has seen it, the check changes nothing.
+      description: Fetches discovery through the outbound HTTP package, with the saved proxy, keeps its `claims_supported`
+        for the settings, and reports, for the groups claim and every claim an entry of the mapping names, whether it is
+        advertised. While no sign-in has seen a claim in an ID token or userinfo since the groups claim, the issuer, the
+        client ID or the scopes last changed, a claim discovery does not list raises the warning `groups_claim_missing`
+        for it and a listed one clears it; once a sign-in has seen the claim, the check changes nothing for it.
       x-permission: oidc:write
       x-listener: app
       security:
@@ -3446,8 +3447,9 @@ paths:
       - Teams
       summary: Add a person to a Team
       description: Adds a User by hand (`by_hand`); a User may be in several Teams, and a disabled one may be added. A
-        person already added by hand is answered with `200` and nothing changes. A User that does not exist or is
-        deleted is refused with `422` `unknown_id` at `/user_id`.
+        person in the Team through the identity provider gets the source `by_hand` too. A person already added by hand
+        is answered with `200` and nothing changes. A User that does not exist or is deleted is refused with `422`
+        `unknown_id` at `/user_id`.
       x-permission: teams:write
       x-listener: app
       security:
@@ -3496,7 +3498,10 @@ paths:
       tags:
       - Teams
       summary: Remove a person from a Team
-      description: Takes a person added by hand out of the Team; `404` when the User is not in it.
+      description: Takes away the source `by_hand` of a person in the Team. A person also in it through the identity
+        provider stays in it with the source `idp`, until a later sign-in or re-check finds that no entry of the Team
+        matches them. `404` when the User has no source `by_hand` in the Team, including a person who is in it only
+        through the identity provider.
       x-permission: teams:write
       x-listener: app
       security:
@@ -3508,7 +3513,7 @@ paths:
       - $ref: '#/components/parameters/UserId'
       responses:
         '204':
-          description: The person was removed.
+          description: The source `by_hand` was taken away.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -9655,13 +9660,24 @@ components:
           description: The token, starting with `mstr_sat_`. Shown once.
     OidcGroupMapping:
       type: object
+      description: An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.
       required:
       - group
       - role
       properties:
+        claim:
+          type: string
+          maxLength: 200
+          description: The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or
+            empty reads `groups_claim`. GitLab's role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer`
+            and `…/developer`, and GitLab puts them in userinfo.
         group:
           type: string
-          minLength: 1
+          maxLength: 200
+          description: A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group
+            below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*`
+            anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry's `group`.
+          example: example/platform/*
         role:
           $ref: '#/components/schemas/RoleName'
     OidcUnmatchedRole:
@@ -9713,6 +9729,7 @@ components:
           type: string
         group_mappings:
           type: array
+          description: The Role mapping, at most 500 entries, each with the claim it reads.
           items:
             $ref: '#/components/schemas/OidcGroupMapping'
         unmatched_role:
@@ -9735,12 +9752,16 @@ components:
           - groups_claim_missing
           - secret_expiring
           - last_admin_kept
-          description: '`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`:
-            no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen
-            it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and
-            the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`:
-            Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them
-            to `role`.'
+          description: '`nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`,
+            one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in
+            has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in
+            an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the
+            latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role
+            sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to
+            `role`.'
+        claim:
+          type: string
+          description: For `groups_claim_missing`, the claim no sign-in has carried yet.
         expires_on:
           type:
           - string
@@ -9760,6 +9781,7 @@ components:
         - client_secret_status
         - proxy
         - warnings
+        - claims_supported
         - etag
         properties:
           client_secret_status:
@@ -9770,6 +9792,13 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/OidcWarning'
+          claims_supported:
+            type: array
+            readOnly: true
+            description: The claims that discovery listed in `claims_supported` at the last connection check, for the
+              editors to suggest; empty before a check, and after the issuer URL changed until the next one.
+            items:
+              type: string
           updated_at:
             type:
             - string
@@ -10972,6 +11001,34 @@ components:
             keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
           items:
             $ref: '#/components/schemas/Matcher'
+        idp_entries:
+          type: array
+          maxItems: 100
+          description: The groups of the identity provider whose people are in the Team, matched as the entries of the
+            Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when
+            an entry matches them and leaves it when they are in it only through entries that no longer match; a person
+            added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on
+            an update to keep the entries; a creation without it has none.
+          items:
+            $ref: '#/components/schemas/TeamIdpEntry'
+    TeamIdpEntry:
+      type: object
+      description: An identity provider entry of a Team.
+      required:
+      - group
+      properties:
+        claim:
+          type: string
+          maxLength: 200
+          description: The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted
+            or empty reads the groups claim of the OIDC settings.
+        group:
+          type: string
+          maxLength: 200
+          description: A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group
+            below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422`
+            `invalid_format` at the entry's `group`.
+          example: teams/payments/*
     Team:
       allOf:
       - $ref: '#/components/schemas/TeamInput'
@@ -10981,6 +11038,7 @@ components:
         - description
         - working_hours
         - matchers
+        - idp_entries
         - user_count
         - created_at
         - etag
@@ -11068,10 +11126,11 @@ components:
             format: date-time
     TeamUserSource:
       type: string
-      description: How a person is in a Team. `by_hand` is an Admin's addition; membership through the groups of the
-        identity provider, `idp`, comes with C-25.FR-4.
+      description: How a person is in a Team. `by_hand` is an Admin's addition; `idp` is an identity provider entry of the
+        Team that matched the person at their last OIDC sign-in or re-check. A person may have both.
       enum:
       - by_hand
+      - idp
     LinkedMessenger:
       type: object
       description: A messenger account the person linked (an Account link), through the Connection named.
@@ -11089,6 +11148,7 @@ components:
       - user
       - role
       - sources
+      - idp_entries
       - linked_messengers
       properties:
         user:
@@ -11099,6 +11159,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamUserSource'
+        idp_entries:
+          type: array
+          description: With the source `idp`, the entries of the Team that matched the person at their last OIDC sign-in
+            or re-check; empty without it.
+          items:
+            $ref: '#/components/schemas/TeamIdpEntry'
         linked_messengers:
           type: array
           items:

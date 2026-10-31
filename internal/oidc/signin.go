@@ -183,7 +183,7 @@ func failure(code string) Outcome {
 }
 
 // CompleteSignIn finishes a sign-in (C-03.FR-25, FR-28, FR-7, FR-10): it takes the request of the state once, exchanges
-// the code, verifies the ID token, reads the groups and resolves the account, then opens the session. Every outcome
+// the code, verifies the ID token, reads the claims the mappings name and resolves the account, then opens the session. Every outcome
 // is a redirect; a failure of the identity provider or of Muster itself is idp_error and is logged as
 // oidc_sign_in_failed.
 func (s *Service) CompleteSignIn(ctx context.Context, cb Callback) Outcome {
@@ -247,55 +247,49 @@ func (s *Service) complete(ctx context.Context, cb Callback) (Outcome, string, e
 	if err != nil {
 		return Outcome{}, "id token", err
 	}
-	groups, found, err := s.groups(ctx, p, d, st.GroupsClaim, idt, tokens.AccessToken)
+	id, reason, err := s.identify(ctx, st, p, d, idt, tokens)
 	if err != nil {
-		return Outcome{}, "userinfo", err
+		return Outcome{}, reason, err
 	}
-	if err := s.recordGroupsClaim(ctx, st, found); err != nil {
-		return Outcome{}, "settings", err
-	}
-	// The scopes of the start are not stored, so they are recomputed: offlineToken reads them only for an answer that
-	// names no scope (GitLab and Keycloak name one), and they differ only when the settings or discovery changed during
-	// the redirect, which can drop an offline token or, for an answer without a scope, keep a refresh token as one.
-	return s.signIn(ctx, cb, st, identityOf(d.Issuer, idt, groups, offlineToken(tokens, d.RequestedScopes(st.Scopes))),
-		req.ReturnTo.String)
+	return s.signIn(ctx, cb, st, id, req.ReturnTo.String)
 }
 
-// identity is what a verified callback says about the person: the identity, its claims, its groups and the offline
-// token the identity provider granted, if any.
+// identify reads the claims of a verified callback — every claim the Role mapping and the entries of the Teams name,
+// from the ID token and then from userinfo — records those it found, and returns the identity with its offline token.
+// The scopes of the start are not stored, so they are recomputed: offlineToken reads them only for an answer that names
+// no scope (GitLab and Keycloak name one), and they differ only when the settings or discovery changed during the
+// redirect, which can drop an offline token or, for an answer without a scope, keep a refresh token as one.
+func (s *Service) identify(ctx context.Context, st Settings, p *Provider, d Discovery, idt IDToken,
+	tokens Tokens) (identity, string, error) {
+	names, err := s.claimNames(ctx, st)
+	if err != nil {
+		return identity{}, "settings", err
+	}
+	claims, found, err := s.readClaims(ctx, p, d, idt, tokens.AccessToken, names)
+	if err != nil {
+		return identity{}, "userinfo", err
+	}
+	if err := s.recordClaims(ctx, st, found); err != nil {
+		return identity{}, "settings", err
+	}
+	return identity{issuer: d.Issuer, idt: idt, claims: claims,
+		offline: offlineToken(tokens, d.RequestedScopes(st.Scopes))}, "", nil
+}
+
+// identity is what a verified callback says about the person: the identity, its claims and the offline token the
+// identity provider granted, if any.
 type identity struct {
 	issuer  string
 	idt     IDToken
-	groups  []string
+	claims  Claims
 	offline logging.Secret
 }
 
-func identityOf(issuer string, idt IDToken, groups []string, offline logging.Secret) identity {
-	return identity{issuer: issuer, idt: idt, groups: groups, offline: offline}
-}
-
-// groups reads the groups claim from the ID token, and from userinfo when the ID token lacks it (D247); found is false
-// when neither carries it.
-func (s *Service) groups(ctx context.Context, p *Provider, d Discovery, claim string, idt IDToken,
-	access logging.Secret) ([]string, bool, error) {
-	if v, ok := idt.Claims[claim]; ok {
-		return stringList(v), true, nil
-	}
-	info, err := p.UserInfo(ctx, d, access)
-	if err != nil {
-		return nil, false, err
-	}
-	if info == nil {
-		return []string{}, false, nil
-	}
-	if sub, _ := info["sub"].(string); sub != idt.Subject {
-		return nil, false, &BackChannelError{Step: "userinfo", msg: "userinfo names another subject than the ID token"}
-	}
-	v, ok := info[claim]
-	if !ok {
-		return []string{}, false, nil
-	}
-	return stringList(v), true, nil
+// refusalClaims are the details of a refusal by the mapping (C-03.FR-7): the values of the groups claim, as L1
+// recorded them, and of every claim the Role mapping read.
+func refusalClaims(st Settings, claims Claims) map[string]any {
+	return map[string]any{"groups": auditGroups(claims[st.GroupsClaim]),
+		"claims": auditClaims(claims, mappingClaims(st))}
 }
 
 // conflict is a new account that a unique index refused: the login (users_login_key) or the identity
@@ -318,7 +312,7 @@ type refusal struct {
 // auth.session_lifetime, since the re-checks can end it, and auth.oidc_fallback_session_lifetime without one.
 func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, id identity, returnTo string) (Outcome, string,
 	error) {
-	role, mapped := MapRole(id.groups, st.GroupMappings, st.UnmatchedRole)
+	role, mapped := MapRole(id.claims, st.GroupsClaim, st.GroupMappings, st.UnmatchedRole)
 	var (
 		user dbgen.GetIdentityUserRow
 		ref  *refusal
@@ -374,11 +368,12 @@ func (s *Service) signIn(ctx context.Context, cb Callback, st Settings, id ident
 	return Outcome{Session: &sess, Redirect: returnTo}, "", nil
 }
 
-// resolve finds or creates the account of the identity inside a transaction, applies Role sync and keeps the offline
-// token. Accounts are never merged by login or email: a new identity whose login is taken is refused (C-03.FR-28).
+// resolve finds or creates the account of the identity inside a transaction, applies Role sync, keeps the offline
+// token and follows the entries of the Teams (C-25.FR-4). Accounts are never merged by login or email: a new identity
+// whose login is taken is refused (C-03.FR-28).
 func (s *Service) resolve(ctx context.Context, q Queries, st Settings, id identity, role string,
 	mapped bool) (dbgen.GetIdentityUserRow, *refusal, error) {
-	issuer, idt, groups := id.issuer, id.idt, id.groups
+	issuer, idt := id.issuer, id.idt
 	key := dbgen.GetIdentityUserParams{OrgID: s.cfg.OrgID, Issuer: optText(issuer), Subject: optText(idt.Subject)}
 	user, err := q.GetIdentityUser(ctx, key)
 	known := err == nil
@@ -390,7 +385,7 @@ func (s *Service) resolve(ctx context.Context, q Queries, st Settings, id identi
 	case known && user.Status != "active":
 		return user, &refusal{code: ErrorAccountDisabled, user: &user, details: map[string]any{}}, nil
 	case !mapped:
-		r := &refusal{code: ErrorNoAccess, details: map[string]any{"groups": auditGroups(groups)}}
+		r := &refusal{code: ErrorNoAccess, details: refusalClaims(st, id.claims)}
 		if known {
 			r.user = &user
 		}
@@ -417,10 +412,14 @@ func (s *Service) resolve(ctx context.Context, q Queries, st Settings, id identi
 	if user, err = q.GetIdentityUser(ctx, key); err != nil {
 		return user, nil, fmt.Errorf("read the account of the identity: %w", err)
 	}
+	// The update locks the row of the user, which the Membership needs.
 	if err := q.RecordContact(ctx, dbgen.RecordContactParams{OrgID: s.cfg.OrgID, ID: user.ID, Now: now}); err != nil {
 		return user, nil, fmt.Errorf("record the contact with the identity provider: %w", err)
 	}
-	return user, nil, s.keepOfflineToken(ctx, q, user.ID, id.offline, now)
+	if err := s.keepOfflineToken(ctx, q, user.ID, id.offline, now); err != nil {
+		return user, nil, err
+	}
+	return user, nil, s.syncMembership(ctx, q, user.ID, st, id.claims)
 }
 
 // create creates the account of a new identity with the mapped Role and records user.created.
@@ -538,26 +537,8 @@ func auditGroups(groups []string) []string {
 	return out
 }
 
-// roleRank orders the Roles: when groups map to several, the highest wins (C-03.FR-5).
+// roleRank orders the Roles: when the entries map a person to several, the highest wins (C-03.FR-5).
 var roleRank = map[string]int{auth.RoleViewer: 1, auth.RoleResponder: 2, auth.RoleAdmin: 3}
-
-// MapRole maps groups to a Role: the highest Role of the mappings that name one of the groups, else the Role for
-// unmatched users; ok is false when that is none.
-func MapRole(groups []string, mappings []GroupMapping, unmatched string) (string, bool) {
-	best := ""
-	for _, m := range mappings {
-		if slices.Contains(groups, m.Group) && roleRank[m.Role] > roleRank[best] {
-			best = m.Role
-		}
-	}
-	if best != "" {
-		return best, true
-	}
-	if unmatched == UnmatchedNone || roleRank[unmatched] == 0 {
-		return "", false
-	}
-	return unmatched, true
-}
 
 // assertsMFA reports whether amr (RFC 8176) asserts multi-factor authentication: mfa, or a knowledge factor with a
 // possession or inherence factor.

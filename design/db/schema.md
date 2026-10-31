@@ -52,7 +52,10 @@
   `open_group_updates`, C-28.FR-8 to FR-10) and
   [`0024_team_label_and_matchers`](../../internal/db/migrations/0024_team_label_and_matchers.up.sql)
   (the Team label, Team matchers, the Teams of Alerts and Alert Groups and the lifecycle events `team_joined` and
-  `unknown_team_value`, C-25.FR-5 to FR-7, S-118), in
+  `unknown_team_value`, C-25.FR-5 to FR-7, S-118) and
+  [`0025_identity_provider_claims_and_team_entries`](../../internal/db/migrations/0025_identity_provider_claims_and_team_entries.up.sql)
+  (the claim of every entry of the Role mapping, the claims seen, missing and listed, the Team entries of the identity
+  provider and the membership they give, C-03.FR-5 to FR-7 revised for L2, C-25.FR-4, S-117), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -148,8 +151,9 @@ writer, creates it with the first Alert Group ([4.2](#42-organization)).
 57 tables (5 of them partitioned) and 1 view; 90 explicit indexes in the migration. Later migrations add columns,
 indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `request_log` (0013), the queue of
 changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), the Teams, `teams` and
-`team_users` (0022), and the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
-`alert_group_teams` (0024), which makes 65 tables.
+`team_users` (0022), the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`,
+`alert_teams` and `alert_group_teams` (0024), and the identity provider entries of the Teams,
+`team_idp_entries` (0025), which makes 66 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -163,7 +167,7 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
-| Teams | `teams`, `team_users`, `team_matchers` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
+| Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
@@ -272,7 +276,8 @@ erDiagram
         text issuer_url
         bytea client_secret_ciphertext "Secret"
         date client_secret_expires_on
-        jsonb group_mappings
+        jsonb group_mappings "read by 0.1"
+        jsonb role_mappings "from 0.2.0"
         text unmatched_role
     }
 ```
@@ -746,6 +751,19 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   `groups_claim_seen_at` is null. Saving another groups claim, issuer, client ID or scopes clears both. The records
   carry the groups claim, issuer, client ID and scopes they read and change nothing when an Admin saved others
   meanwhile, and write no row when nothing changes.
+  From 0.2.0 (migration 0025, C-03.FR-5 to FR-7 revised for L2) every entry of the Role mapping names the claim it
+  reads, by default the groups claim, and may be a subtree `a/b/*`. `role_mappings` holds every entry
+  (`{claim, group, role}`, the claim left out for the groups claim) and is what 0.2.0 reads; the migration fills it from
+  `group_mappings`. A save writes `group_mappings` with only the entries a 0.1 replica, which reads every entry there
+  against the groups claim and exactly, reads the same way — the groups claim and a group without `*` — so that during
+  a rolling update such a replica never grants a Role through another claim or a subtree; it matches fewer people
+  instead. A read takes `group_mappings` in place of `role_mappings` when the two no longer agree, which only a save by
+  a 0.1 replica causes, until the next save. 0.3.0 drops `group_mappings`. `claims_seen` maps each claim a sign-in or a
+  link found to when it first did, `claims_missing` lists the claims the Role mapping reads that the last check found
+  not advertised, and `claims_supported` what discovery listed at that check; the warning `groups_claim_missing` of a
+  claim shows while it is missing and not seen. `groups_claim_seen_at` and `groups_claim_missing_since` are written in
+  step for the groups claim, which a 0.1 replica reads, and stay the source of its warning. Saving another groups claim,
+  issuer, client ID or scopes clears `claims_seen` and `claims_missing`, and another issuer `claims_supported`.
 
 ### 4.4 Service accounts and API tokens
 
@@ -1410,8 +1428,21 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   in the syntax of Route Matchers; a save replaces them as a whole and the deletion of the Team removes them. Each is
   enough on its own: an Alert that any one picks belongs to the Team.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
-  added (C-25.FR-3). The index `team_users_user_idx` on `(org_id, user_id)` serves "My Teams" and the deletion of a
-  user, which removes their rows in its transaction; disabling a user keeps them.
+  added (C-25.FR-3), `by_idp` (0025) a person whom an identity provider entry of the Team matched at their last OIDC
+  sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
+  (`team_users_source_check`, added `NOT VALID` and validated in a second transaction). Removing a person by hand clears
+  `by_hand` and keeps the row while `by_idp` is set; the identity provider clears `by_idp` and keeps the row while
+  `by_hand` is set. The index `team_users_user_idx` on `(org_id, user_id)` serves "My Teams", the membership a sign-in
+  follows and the deletion of a user, which removes their rows in its transaction; disabling a user keeps them.
+- **`team_idp_entries`** (0025) — the identity provider entries of each Team (C-25.FR-4): `claim`, null for the groups
+  claim of the OIDC settings, `group_name`, an exact group or a subtree `a/b/*`, and `position`, unique per Team;
+  replaced as a whole on update, like `route_matchers`, and removed when the Team is deleted. Every OIDC sign-in, link
+  and successful re-check reads the entries of the Organization's Teams (`team_idp_entries_org_idx`) and, in its own
+  transaction, which holds the row of the user locked, puts the user into the Teams whose entries match and takes them
+  out of those they are in only through entries that no longer match. A change of the entries changes nobody's
+  membership until their next sign-in or re-check. A sign-in takes no lock on the Teams, so that it never deadlocks
+  with an addition by hand, which locks the Team before the User: one that races the deletion of a Team may leave a
+  row of the deleted Team in `team_users`, so every reader of `team_users` joins the Teams that are not deleted.
 
 ## 5. Queues and claims
 

@@ -446,6 +446,9 @@ func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
 	e.business.Advance(time.Hour)
 	writes = e.store.writes
 	e.signIn(t, olga, "")
+	if e.store.writes != writes {
+		t.Errorf("a sign-in that changes nothing wrote the row %d times", e.store.writes-writes)
+	}
 	for i := range 2 {
 		if ws := check(t); slices.Contains(ws, WarningGroupsClaimMissing) {
 			t.Fatalf("check %d after the claim was seen: %v", i+1, ws)
@@ -454,8 +457,10 @@ func TestGroupsClaimSeenOutranksDiscovery(t *testing.T) {
 	e.idp.Configure(fakeoidc.Config{OmitGroupsClaim: new(false)})
 	check(t)
 	expect(t, "checks after the claim was seen", "seen=true missing=false warned=false")
+	writes = e.store.writes
+	check(t)
 	if e.store.writes != writes {
-		t.Errorf("a sign-in and checks that change nothing wrote the row %d times", e.store.writes-writes)
+		t.Errorf("a check that finds what the last one found wrote the row %d times", e.store.writes-writes)
 	}
 	e.store.mu.Lock()
 	if !e.store.settings.GroupsClaimSeenAt.Time.Equal(first) {
@@ -540,12 +545,13 @@ func TestStaleGroupsClaimRecord(t *testing.T) {
 		stale.Scopes = slices.Clone(read.Scopes)
 		tc.stale(&stale)
 		e.setClaimState(false, true)
-		if err := e.svc.recordGroupsClaim(t.Context(), stale, true); err != nil {
+		if err := e.svc.recordClaims(t.Context(), stale, []string{stale.GroupsClaim}); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := e.store.RecordGroupsClaimAdvertised(t.Context(), dbgen.RecordGroupsClaimAdvertisedParams{
+		if n, err := e.store.RecordClaimsAdvertised(t.Context(), dbgen.RecordClaimsAdvertisedParams{
 			OrgID: 1, GroupsClaim: stale.GroupsClaim, IssuerUrl: stale.IssuerURL, ClientID: stale.ClientID,
-			Scopes: stale.Scopes, Advertised: true, At: t0}); err != nil || n != 0 {
+			Scopes: stale.Scopes, GroupsAdvertised: true, Missing: []string{}, Supported: []string{}, At: t0}); err != nil ||
+			n != 0 {
 			t.Errorf("a stale %s check: %d rows, %v", tc.name, n, err)
 		}
 		if got := e.claimState(t); got != "seen=false missing=true warned=true" {
@@ -566,7 +572,7 @@ func TestStaleGroupsClaimRecord(t *testing.T) {
 		t.Errorf("a check did not repair a 0.1.0 state: %s", got)
 	}
 	e.setClaimState(true, true)
-	if err := e.svc.recordGroupsClaim(t.Context(), read, true); err != nil {
+	if err := e.svc.recordClaims(t.Context(), read, []string{read.GroupsClaim}); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.claimState(t); got != "seen=true missing=false warned=false" {
@@ -620,7 +626,8 @@ func TestMapRole(t *testing.T) {
 		{nil, UnmatchedViewer, auth.RoleViewer, true},
 		{nil, "unknown", "", false},
 	} {
-		if role, ok := MapRole(tc.groups, m, tc.unmatched); role != tc.role || ok != tc.ok {
+		if role, ok := MapRole(Claims{"groups": tc.groups}, "groups", m, tc.unmatched); role != tc.role ||
+			ok != tc.ok {
 			t.Errorf("MapRole(%v, %s) = %s %v", tc.groups, tc.unmatched, role, ok)
 		}
 	}
@@ -756,5 +763,64 @@ func TestGitLabRefusesConfiguredOfflineAccess(t *testing.T) {
 		State: back.Query().Get("state"), CookieState: start.State})
 	if out.Error != ErrorIDPError || !strings.Contains(e.log.String(), "invalid_scope") {
 		t.Errorf("outcome %+v; log %s", out, e.log)
+	}
+}
+
+// TestCorpMapping is the maintainer's own setup: groups corp/* → Responder and the owner claim corp → Admin make an
+// Owner of corp an Admin, a Developer of corp/team-a only (whose groups list the inherited corp) a Responder, and
+// refuse someone outside corp, with the claims read.
+func TestCorpMapping(t *testing.T) {
+	e := newEnv(t)
+	e.useGitLab()
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = []GroupMapping{{Group: "corp/*", Role: auth.RoleResponder},
+			{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin}}
+	})
+	e.signIn(t, fakeoidc.User{Subject: "c-1", PreferredUsername: "olga", Groups: []string{"corp", "corp/team-a"},
+		RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"corp"}}}, "")
+	e.signIn(t, fakeoidc.User{Subject: "c-2", PreferredUsername: "petr", Groups: []string{"corp", "corp/team-a"},
+		RoleClaims: map[string][]string{fakeoidc.RoleDeveloper: {"corp/team-a"}}}, "")
+	out := e.signIn(t, fakeoidc.User{Subject: "c-3", PreferredUsername: "rita", Groups: []string{"other"}}, "")
+	if e.user("olga").role != auth.RoleAdmin || e.user("petr").role != auth.RoleResponder || out.Error != ErrorNoAccess {
+		t.Errorf("olga %s, petr %s, rita %+v", e.user("olga").role, e.user("petr").role, out)
+	}
+	refused := e.store.audited(ActionSignInRefused)
+	if got := fmt.Sprint(refused[0]["details"].(map[string]any)["claims"]); got !=
+		"map[groups:[other] https://gitlab.org/claims/groups/owner:[]]" {
+		t.Errorf("the refusal's claims = %s", got)
+	}
+}
+
+// TestMembershipAtSignIn is C-25.FR-4: a sign-in reads the claims the entries of the Teams name too and calls the
+// Membership with every claim decided, after the Role; a refused sign-in calls nothing, and a failing Membership fails
+// the sign-in without opening a session.
+func TestMembershipAtSignIn(t *testing.T) {
+	e := newEnv(t)
+	e.useGitLab()
+	e.configure(t, nil)
+	m := e.withMembership("", maintainerClaim)
+	out := e.signIn(t, fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"},
+		RoleClaims: map[string][]string{fakeoidc.RoleMaintainer: {"teams/payments"}}}, "")
+	calls := m.taken()
+	if out.Session == nil || len(calls) != 1 || calls[0].userID != e.user("olga").id || calls[0].groupsClaim != "groups" {
+		t.Fatalf("outcome %+v, calls %+v", out, calls)
+	}
+	if got := fmt.Sprint(calls[0].claims); got !=
+		"map[groups:[oncall] https://gitlab.org/claims/groups/maintainer:[teams/payments]]" {
+		t.Errorf("claims = %s", got)
+	}
+	e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "nora", Groups: []string{"contractors"}}, "")
+	if calls := m.taken(); len(calls) != 0 {
+		t.Errorf("a refused sign-in followed the teams: %+v", calls)
+	}
+	m.err = errors.New("teams down")
+	out = e.signIn(t, fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}}, "")
+	if out.Session != nil || out.Error != ErrorIDPError {
+		t.Errorf("a failing Membership = %+v", out)
+	}
+	m.claims, m.err = nil, errors.New("entries down")
+	if out = e.signIn(t, fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}},
+		""); out.Error != ErrorIDPError {
+		t.Errorf("unreadable entries = %+v", out)
 	}
 }

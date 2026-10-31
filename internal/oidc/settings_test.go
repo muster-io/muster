@@ -86,6 +86,8 @@ func newMemStore() *memStore {
 
 func (s *memStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
 
+func (s *memStore) DBTX() dbgen.DBTX { return nil }
+
 func (s *memStore) GetSettings(context.Context, int64) (dbgen.OidcSetting, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,10 +119,10 @@ func (s *memStore) InsertSettings(_ context.Context, a dbgen.InsertSettingsParam
 		IssuerUrl: a.IssuerUrl, ClientID: a.ClientID, ClientSecretCiphertext: a.ClientSecretCiphertext,
 		ClientSecretKeyID: a.ClientSecretKeyID, ClientSecretUpdatedAt: a.ClientSecretUpdatedAt,
 		ClientSecretExpiresOn: a.ClientSecretExpiresOn, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
-		GroupMappings: a.GroupMappings, UnmatchedRole: a.UnmatchedRole, SyncRole: a.SyncRole,
-		SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
-		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, Version: 1,
-		UpdatedAt: a.UpdatedAt}
+		GroupMappings: a.GroupMappings, RoleMappings: a.RoleMappings, UnmatchedRole: a.UnmatchedRole,
+		SyncRole: a.SyncRole, SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy,
+		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, ClaimsSeen: []byte(`{}`), Version: 1, UpdatedAt: a.UpdatedAt}
 	return 1, nil
 }
 
@@ -131,18 +133,24 @@ func (s *memStore) UpdateSettings(_ context.Context, a dbgen.UpdateSettingsParam
 		return 0, nil
 	}
 	missing, seen := s.settings.GroupsClaimMissingSince, s.settings.GroupsClaimSeenAt
+	claimsSeen, claimsMissing, supported := s.settings.ClaimsSeen, s.settings.ClaimsMissing, s.settings.ClaimsSupported
 	if s.settings.GroupsClaim != a.GroupsClaim || s.settings.IssuerUrl != a.IssuerUrl ||
 		s.settings.ClientID != a.ClientID || !slices.Equal(s.settings.Scopes, a.Scopes) {
-		missing, seen = pgtype.Timestamptz{}, pgtype.Timestamptz{}
+		missing, seen, claimsSeen, claimsMissing = pgtype.Timestamptz{}, pgtype.Timestamptz{}, []byte(`{}`), nil
+	}
+	if s.settings.IssuerUrl != a.IssuerUrl {
+		supported = nil
 	}
 	s.settings = &dbgen.OidcSetting{OrgID: a.OrgID, Enabled: a.Enabled, DisplayName: a.DisplayName,
 		IssuerUrl: a.IssuerUrl, ClientID: a.ClientID, ClientSecretCiphertext: a.ClientSecretCiphertext,
 		ClientSecretKeyID: a.ClientSecretKeyID, ClientSecretUpdatedAt: a.ClientSecretUpdatedAt,
 		ClientSecretExpiresOn: a.ClientSecretExpiresOn, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
-		GroupMappings: a.GroupMappings, UnmatchedRole: a.UnmatchedRole, SyncRole: a.SyncRole,
-		SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy, ProxyPasswordCiphertext: a.ProxyPasswordCiphertext,
-		ProxyPasswordKeyID: a.ProxyPasswordKeyID, ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt,
-		GroupsClaimMissingSince: missing, GroupsClaimSeenAt: seen, Version: a.Version + 1, UpdatedAt: a.UpdatedAt}
+		GroupMappings: a.GroupMappings, RoleMappings: a.RoleMappings, UnmatchedRole: a.UnmatchedRole,
+		SyncRole: a.SyncRole, SkipTotpWithIdpMfa: a.SkipTotpWithIdpMfa, Proxy: a.Proxy,
+		ProxyPasswordCiphertext: a.ProxyPasswordCiphertext, ProxyPasswordKeyID: a.ProxyPasswordKeyID,
+		ProxyPasswordUpdatedAt: a.ProxyPasswordUpdatedAt, GroupsClaimMissingSince: missing, GroupsClaimSeenAt: seen,
+		ClaimsSeen: claimsSeen, ClaimsMissing: claimsMissing, ClaimsSupported: supported, Version: a.Version + 1,
+		UpdatedAt: a.UpdatedAt}
 	return 1, nil
 }
 
@@ -153,36 +161,66 @@ func (s *memStore) sameClaimSource(claim, issuer, clientID string, scopes []stri
 		s.settings.ClientID == clientID && slices.Equal(s.settings.Scopes, scopes)
 }
 
-func (s *memStore) RecordGroupsClaimSeen(_ context.Context, a dbgen.RecordGroupsClaimSeenParams) (int64, error) {
+// claimsSeen reads claims_seen.
+func (s *memStore) claimsSeen() map[string]any {
+	seen := map[string]any{}
+	if len(s.settings.ClaimsSeen) > 0 {
+		_ = json.Unmarshal(s.settings.ClaimsSeen, &seen)
+	}
+	return seen
+}
+
+func (s *memStore) RecordClaimsSeen(_ context.Context, a dbgen.RecordClaimsSeenParams) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.sameClaimSource(a.GroupsClaim, a.IssuerUrl, a.ClientID, a.Scopes) ||
-		s.settings.GroupsClaimSeenAt.Valid && !s.settings.GroupsClaimMissingSince.Valid {
+	if !s.sameClaimSource(a.GroupsClaim, a.IssuerUrl, a.ClientID, a.Scopes) {
+		return 0, nil
+	}
+	seen, groups := s.claimsSeen(), slices.Contains(a.Claims, s.settings.GroupsClaim)
+	changed := groups && (!s.settings.GroupsClaimSeenAt.Valid || s.settings.GroupsClaimMissingSince.Valid)
+	for _, c := range a.Claims {
+		if _, ok := seen[c]; !ok {
+			seen[c], changed = a.At, true
+		}
+		if slices.Contains(s.settings.ClaimsMissing, c) {
+			changed = true
+		}
+	}
+	if !changed {
 		return 0, nil
 	}
 	s.writes++
-	if !s.settings.GroupsClaimSeenAt.Valid {
-		s.settings.GroupsClaimSeenAt = pgtype.Timestamptz{Time: a.At, Valid: true}
+	s.settings.ClaimsSeen, _ = json.Marshal(seen)
+	s.settings.ClaimsMissing = slices.DeleteFunc(slices.Clone(s.settings.ClaimsMissing), func(c string) bool {
+		return slices.Contains(a.Claims, c)
+	})
+	if groups {
+		if !s.settings.GroupsClaimSeenAt.Valid {
+			s.settings.GroupsClaimSeenAt = pgtype.Timestamptz{Time: a.At, Valid: true}
+		}
+		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
 	}
-	s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
 	return 1, nil
 }
 
-func (s *memStore) RecordGroupsClaimAdvertised(_ context.Context, a dbgen.RecordGroupsClaimAdvertisedParams) (int64,
+func (s *memStore) RecordClaimsAdvertised(_ context.Context, a dbgen.RecordClaimsAdvertisedParams) (int64,
 	error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.sameClaimSource(a.GroupsClaim, a.IssuerUrl, a.ClientID, a.Scopes) {
 		return 0, nil
 	}
-	wantClear := a.Advertised || s.settings.GroupsClaimSeenAt.Valid
-	if s.settings.GroupsClaimMissingSince.Valid != wantClear {
+	wantClear := a.GroupsAdvertised || s.settings.GroupsClaimSeenAt.Valid
+	if s.settings.GroupsClaimMissingSince.Valid != wantClear && slices.Equal(s.settings.ClaimsMissing, a.Missing) &&
+		slices.Equal(s.settings.ClaimsSupported, a.Supported) {
 		return 0, nil
 	}
 	s.writes++
-	if wantClear {
+	s.settings.ClaimsMissing, s.settings.ClaimsSupported = a.Missing, a.Supported
+	switch {
+	case wantClear:
 		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{}
-	} else {
+	case !s.settings.GroupsClaimMissingSince.Valid:
 		s.settings.GroupsClaimMissingSince = pgtype.Timestamptz{Time: a.At, Valid: true}
 	}
 	return 1, nil
@@ -353,8 +391,8 @@ func (s *memStore) InsertDemoSettings(_ context.Context, a dbgen.InsertDemoSetti
 	s.settings = &dbgen.OidcSetting{OrgID: a.OrgID, Enabled: true, DisplayName: a.DisplayName, IssuerUrl: a.IssuerUrl,
 		ClientID: a.ClientID, ClientSecretCiphertext: a.ClientSecretCiphertext, ClientSecretKeyID: a.ClientSecretKeyID,
 		ClientSecretUpdatedAt: a.UpdatedAt, Scopes: a.Scopes, GroupsClaim: a.GroupsClaim,
-		GroupMappings: a.GroupMappings, UnmatchedRole: UnmatchedNone, SyncRole: true, Proxy: []byte(`{"enabled":false}`),
-		Version: 1, UpdatedAt: a.UpdatedAt.Time}
+		GroupMappings: a.GroupMappings, RoleMappings: a.RoleMappings, UnmatchedRole: UnmatchedNone, SyncRole: true,
+		Proxy: []byte(`{"enabled":false}`), Version: 1, UpdatedAt: a.UpdatedAt.Time}
 	return 1, nil
 }
 
@@ -845,5 +883,110 @@ func TestDemoRenamesEarlierDisplayName(t *testing.T) {
 	e.store.fail = errors.New("down")
 	if err := e.svc.EnsureDemo(t.Context(), demo); err == nil {
 		t.Error("a failed rename is not reported")
+	}
+}
+
+// TestClaimWarnings is C-03.FR-6 revised for L2: a warning groups_claim_missing per claim the Role mapping reads, the
+// groups claim included, each naming its claim; a check that finds a claim listed in discovery clears it, a sign-in
+// that carries it clears it for good; claims_supported is what the last check found.
+func TestClaimWarnings(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin},
+			GroupMapping{Claim: maintainerClaim, Group: "corp/*", Role: auth.RoleResponder})
+	})
+	if st, _ := e.svc.Get(t.Context()); len(st.ClaimsSupported) != 0 || len(st.Warnings) != 0 {
+		t.Fatalf("before a check: supported %v, warnings %v", st.ClaimsSupported, st.Warnings)
+	}
+	missing := func(ws []Warning) []string {
+		out := []string{}
+		for _, w := range ws {
+			if w.Kind == WarningGroupsClaimMissing {
+				out = append(out, w.Claim)
+			}
+		}
+		return out
+	}
+	res, err := e.svc.Check(t.Context())
+	if err != nil || !slices.Equal(missing(res.Warnings), []string{ownerClaim, maintainerClaim}) {
+		t.Fatalf("keycloak lists no role claim: %v, %v", missing(res.Warnings), err)
+	}
+	st, _ := e.svc.Get(t.Context())
+	if !slices.Contains(st.ClaimsSupported, "groups") || slices.Contains(st.ClaimsSupported, ownerClaim) {
+		t.Errorf("claims_supported = %v", st.ClaimsSupported)
+	}
+	e.signIn(t, fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"},
+		RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"x"}}}, "")
+	res, _ = e.svc.Check(t.Context())
+	if got := missing(res.Warnings); !slices.Equal(got, []string{maintainerClaim}) {
+		t.Errorf("after a sign-in with the owner claim: %v", got)
+	}
+	e.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorGitLab)})
+	if res, _ = e.svc.Check(t.Context()); len(missing(res.Warnings)) != 0 {
+		t.Errorf("gitlab lists every role claim: %v", missing(res.Warnings))
+	}
+	if st, _ = e.svc.Get(t.Context()); !slices.Contains(st.ClaimsSupported, maintainerClaim) {
+		t.Errorf("claims_supported after gitlab = %v", st.ClaimsSupported)
+	}
+	e.idp.Configure(fakeoidc.Config{Flavor: new(fakeoidc.FlavorKeycloak), OmitGroupsClaim: new(true)})
+	res, _ = e.svc.Check(t.Context())
+	if got := missing(res.Warnings); !slices.Equal(got, []string{maintainerClaim}) {
+		t.Errorf("without the groups claim, which a sign-in carried: %v", got)
+	}
+	st = e.configure(t, func(in *Input) {
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin},
+			GroupMapping{Claim: maintainerClaim, Group: "corp/*", Role: auth.RoleResponder})
+		in.IssuerURL = e.idp.URL() + "/"
+	})
+	if len(st.ClaimsSupported) != 0 || len(st.ClaimsSeen) != 0 || len(missing(st.Warnings)) != 0 {
+		t.Errorf("another issuer kept %v, %v, %v", st.ClaimsSupported, st.ClaimsSeen, missing(st.Warnings))
+	}
+}
+
+// TestSupportedClaims: what a check keeps of discovery's claims_supported is bounded.
+func TestSupportedClaims(t *testing.T) {
+	list := []string{"", "groups", "groups", strings.Repeat("c", maxClaimName+1), "\xff"}
+	for i := range maxClaimsSupported + 10 {
+		list = append(list, fmt.Sprintf("c%d", i))
+	}
+	got := supportedClaims(Discovery{ClaimsSupported: list})
+	if len(got) != maxClaimsSupported || got[0] != "groups" || got[1] != "c0" {
+		t.Errorf("supportedClaims = %d claims, %v…", len(got), got[:2])
+	}
+}
+
+// TestEntryValidation is the refusal of C-03.FR-5: an empty group, or * anywhere but a trailing /*, is invalid_format
+// at the entry's group; a claim or a group longer than 200 characters is too_long.
+func TestEntryValidation(t *testing.T) {
+	e := newEnv(t)
+	for _, tc := range []struct {
+		entry   GroupMapping
+		pointer string
+		code    string
+	}{
+		{GroupMapping{Group: " ", Role: auth.RoleViewer}, "/group_mappings/0/group", "invalid_format"},
+		{GroupMapping{Group: "*", Role: auth.RoleViewer}, "/group_mappings/0/group", "invalid_format"},
+		{GroupMapping{Group: "corp/*/a", Role: auth.RoleViewer}, "/group_mappings/0/group", "invalid_format"},
+		{GroupMapping{Group: "corp*", Role: auth.RoleViewer}, "/group_mappings/0/group", "invalid_format"},
+		{GroupMapping{Group: strings.Repeat("g", 201), Role: auth.RoleViewer}, "/group_mappings/0/group", "too_long"},
+		{GroupMapping{Claim: strings.Repeat("c", 201), Group: "g", Role: auth.RoleViewer}, "/group_mappings/0/claim",
+			"too_long"},
+	} {
+		_, err := e.svc.Update(t.Context(), admin(), nil, Input{Enabled: true, IssuerURL: e.idp.URL(), ClientID: "m",
+			GroupsClaim: "groups", UnmatchedRole: UnmatchedNone, GroupMappings: []GroupMapping{tc.entry}})
+		if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != tc.pointer || fe.Code != tc.code {
+			t.Errorf("%+v: %v", tc.entry, err)
+		}
+	}
+	st := e.configure(t, func(in *Input) {
+		in.GroupMappings = []GroupMapping{{Claim: " " + ownerClaim + " ", Group: " corp/* ", Role: auth.RoleAdmin},
+			{Claim: "groups", Group: "oncall", Role: auth.RoleResponder}}
+	})
+	if !slices.Equal(st.GroupMappings, []GroupMapping{{Claim: ownerClaim, Group: "corp/*", Role: auth.RoleAdmin},
+		{Claim: "groups", Group: "oncall", Role: auth.RoleResponder}}) {
+		t.Errorf("trimmed entries = %v", st.GroupMappings)
+	}
+	if string(e.store.settings.GroupMappings) != `[{"group":"oncall","role":"responder"}]` {
+		t.Errorf("group_mappings = %s", e.store.settings.GroupMappings)
 	}
 }
