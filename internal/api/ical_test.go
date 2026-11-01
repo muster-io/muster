@@ -133,6 +133,12 @@ func TestIcalFeedOperations(t *testing.T) {
 		http.StatusForbidden || a.code(t) != codeCSRFInvalid {
 		t.Errorf("without the CSRF token = %d %s", a.status, a.body)
 	}
+	// The feed is outside /api/v1: under it, its path is a 404 problem that does not repeat the token.
+	if a = x.call(t, http.MethodGet, "/api/v1/ical/"+icalToken+".ics", ""); a.status != http.StatusNotFound ||
+		a.header.Get("Content-Type") != contentTypeProblem || strings.Contains(string(a.body), icalToken) ||
+		a.json(t)["type"] != problemBase+typeNotFound {
+		t.Errorf("the feed under /api/v1 = %d %v %s", a.status, a.header, a.body)
+	}
 }
 
 // TestIcalHandler is C-27.FR-10 and C-27.AC-7: GET /ical/{token}.ics answers the calendar as text/calendar without

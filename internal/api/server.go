@@ -33,6 +33,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/totp"
 	"github.com/muster-io/muster/internal/users"
@@ -395,6 +396,11 @@ func New(cfg Config) (*Server, error) {
 			writeProblem(w, r, fieldProblem(http.StatusBadRequest, "", fieldInvalidFormat,
 				"A parameter is not valid."))
 		},
+	})
+	// getIcalCalendar is served outside BasePath, by IcalHandler; under it, its path is no operation, answered without
+	// an instance, which would repeat the token.
+	mux.HandleFunc(BasePath+schedules.FeedBasePath, func(w http.ResponseWriter, _ *http.Request) {
+		writeIcalProblem(w, http.StatusNotFound, typeNotFound, "No such operation.")
 	})
 	s.validated = s.preconditions(s.validator(doc)(s.permit(mux)))
 	return s, nil
