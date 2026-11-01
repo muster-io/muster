@@ -31,6 +31,7 @@ import type {
   PreconditionRequiredResponse,
   Team,
   TeamInput,
+  TeamLabelValueList,
   TeamList,
   TeamUser,
   TeamUserAdd,
@@ -61,6 +62,107 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListTeamLabelValuesUrl = () => {
+
+
+
+
+  return `/api/v1/team-label-values`
+}
+
+/**
+ * The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+ * @summary List values of the Team label without a Team
+ */
+export const listTeamLabelValues = async ( options?: Parameters<typeof apiFetch>[1]): Promise<TeamLabelValueList> => {
+
+  return apiFetch<TeamLabelValueList>(getListTeamLabelValuesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTeamLabelValuesQueryKey = () => {
+    return [
+    `/api/v1/team-label-values`
+    ] as const;
+    }
+
+
+export const getListTeamLabelValuesQueryOptions = <TData = Awaited<ReturnType<typeof listTeamLabelValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTeamLabelValuesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTeamLabelValues>>> = ({ signal }) => listTeamLabelValues({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListTeamLabelValuesQueryResult = NonNullable<Awaited<ReturnType<typeof listTeamLabelValues>>>
+export type ListTeamLabelValuesQueryError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+
+
+export function useListTeamLabelValues<TData = Awaited<ReturnType<typeof listTeamLabelValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTeamLabelValues>>,
+          TError,
+          Awaited<ReturnType<typeof listTeamLabelValues>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTeamLabelValues<TData = Awaited<ReturnType<typeof listTeamLabelValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTeamLabelValues>>,
+          TError,
+          Awaited<ReturnType<typeof listTeamLabelValues>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTeamLabelValues<TData = Awaited<ReturnType<typeof listTeamLabelValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List values of the Team label without a Team
+ */
+
+export function useListTeamLabelValues<TData = Awaited<ReturnType<typeof listTeamLabelValues>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTeamLabelValues>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListTeamLabelValuesQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
 
 export const getListTeamsUrl = (params?: ListTeamsParams,) => {
   const normalizedParams = new URLSearchParams();

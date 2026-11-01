@@ -63,8 +63,9 @@ By Team matchers
 Muster decides the Teams of an Alert when it starts firing — its first firing, and each firing after it resolved —
 and records them on the Alert with the rule that matched: `label`, or `matcher` with the matcher's text. The Alerts
 view of an Integration shows them as `teams`: the Teams of the Alert's latest firing, which replace those of an earlier
-one. A Continuation is not a new firing and decides nothing; a Team created or
-changed later reaches the Alerts that fire from then on.
+one. A Continuation is not a new firing and decides nothing. Saving a Team or the Team label also evaluates the Alerts
+that are firing in open Alert Groups again, and only adds Teams to them
+([Values without a Team](#values-without-a-team)).
 
 The Teams of an Alert Group are those of every Alert that ever joined it. They only grow: a Team stays among them
 after its Alerts resolve. Each Team that joins records the Quiet lifecycle event `team_joined` in the Timeline, naming
@@ -95,6 +96,25 @@ records the Quiet lifecycle event `unknown_team_value` with the value, once per 
 webhooks in events mode receive it. Create a Team with that value as its slug, or add a Team matcher that picks those
 Alerts, and the Alerts that start firing from then on belong to it. A value that is not a valid slug, such as
 `Payments`, reaches a Team only through a Team matcher.
+
+The values of the Team label seen without a Team in the last 14 days (`organization.team_values_window`) are listed by
+`listTeamLabelValues` (`GET /api/v1/team-label-values`, Permission `teams:read`), the most recently seen first, each
+with when it was last seen, how many Alerts carried it and `valid_slug`, false for a value that is not a valid slug.
+
+Saving a Team — creating one, or changing its slug or its Team matchers — or saving a new Team label evaluates the
+Alerts that are firing in open Alert Groups again, and only adds:
+
+- An Alert that the save now brings to a Team records that Team, and the Team joins the Alert's Alert Group with a
+  Quiet `team_joined`. The Root messages are updated Quietly, with no new message and no Mention, and no Escalation
+  chain starts.
+- A Team that an Alert no longer belongs to stays where it is, on the Alert and in its Alert Group.
+- Saving the name, the description, the people or the Working hours of a Team evaluates nothing.
+
+So "Create Team" for a value without a Team brings the Team the open Alert Groups of that value at once: with an open,
+firing Alert Group of `team="checkout"` and no such Team, creating the Team with the slug `checkout` adds it to the
+Alert Group, and `checkout` leaves the list of values without a Team. The evaluation runs on any replica shortly after
+the save; a replica that stops during it leaves the rest to another one, which goes on where it stopped. It records no
+`unknown_team_value` and leaves an Alert Group that gets no new Team as it is.
 
 With the default Team label `team` and no Teams defined yet, every Alert that carries a `team` label records
 `unknown_team_value` in its Alert Group's Timeline and sends it to outgoing webhooks in events mode. Create the Teams,

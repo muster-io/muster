@@ -7767,6 +7767,28 @@ type TeamInput struct {
 	WorkingHours *WorkingHours `json:"working_hours,omitempty"`
 }
 
+// TeamLabelValue defines model for TeamLabelValue.
+type TeamLabelValue struct {
+	// AlertCount How many Alerts last seen within the window carry the value.
+	AlertCount int `json:"alert_count"`
+
+	// LastSeenAt When an Alert that carries the value was last seen.
+	LastSeenAt time.Time `json:"last_seen_at"`
+
+	// ValidSlug False when the value is not a valid slug (`team.slug_format`), so that no Team can take it as its slug.
+	ValidSlug bool   `json:"valid_slug"`
+	Value     string `json:"value"`
+}
+
+// TeamLabelValueList defines model for TeamLabelValueList.
+type TeamLabelValueList struct {
+	Items []TeamLabelValue `json:"items"`
+
+	// Label The Team label of the Organization (`organization.team_label`).
+	Label      string `json:"label"`
+	WindowDays int    `json:"window_days"`
+}
+
 // TeamList defines model for TeamList.
 type TeamList struct {
 	Items      []Team                    `json:"items"`
@@ -12323,6 +12345,9 @@ type ServerInterface interface {
 	// GetSystemStatus Read the System status
 	// (GET /system-status)
 	GetSystemStatus(w http.ResponseWriter, r *http.Request)
+	// ListTeamLabelValues List values of the Team label without a Team
+	// (GET /team-label-values)
+	ListTeamLabelValues(w http.ResponseWriter, r *http.Request)
 	// ListTeams List Teams
 	// (GET /teams)
 	ListTeams(w http.ResponseWriter, r *http.Request, params ListTeamsParams)
@@ -18099,6 +18124,20 @@ func (siw *ServerInterfaceWrapper) GetSystemStatus(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListTeamLabelValues operation middleware
+func (siw *ServerInterfaceWrapper) ListTeamLabelValues(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTeamLabelValues(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTeams operation middleware
 func (siw *ServerInterfaceWrapper) ListTeams(w http.ResponseWriter, r *http.Request) {
 
@@ -19108,6 +19147,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/route-suggestions", wrapper.ListRouteSuggestions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/route-suggestions/{suggestion_id}/accept", wrapper.AcceptRouteSuggestion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/route-suggestions/{suggestion_id}/dismiss", wrapper.DismissRouteSuggestion)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/team-label-values", wrapper.ListTeamLabelValues)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/teams", wrapper.ListTeams)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/teams", wrapper.CreateTeam)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/teams/{team_id}", wrapper.DeleteTeam)
@@ -36077,6 +36117,78 @@ func (response GetSystemStatus429ApplicationProblemPlusJSONResponse) VisitGetSys
 	return err
 }
 
+type ListTeamLabelValuesRequestObject struct {
+}
+
+type ListTeamLabelValuesResponseObject interface {
+	VisitListTeamLabelValuesResponse(w http.ResponseWriter) error
+}
+
+type ListTeamLabelValues200JSONResponse TeamLabelValueList
+
+func (response ListTeamLabelValues200JSONResponse) VisitListTeamLabelValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTeamLabelValues401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListTeamLabelValues401ApplicationProblemPlusJSONResponse) VisitListTeamLabelValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTeamLabelValues403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListTeamLabelValues403ApplicationProblemPlusJSONResponse) VisitListTeamLabelValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTeamLabelValues429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListTeamLabelValues429ApplicationProblemPlusJSONResponse) VisitListTeamLabelValuesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListTeamsRequestObject struct {
 	Params ListTeamsParams
 }
@@ -38985,6 +39097,9 @@ type StrictServerInterface interface {
 	// GetSystemStatus Read the System status
 	// (GET /system-status)
 	GetSystemStatus(ctx context.Context, request GetSystemStatusRequestObject) (GetSystemStatusResponseObject, error)
+	// ListTeamLabelValues List values of the Team label without a Team
+	// (GET /team-label-values)
+	ListTeamLabelValues(ctx context.Context, request ListTeamLabelValuesRequestObject) (ListTeamLabelValuesResponseObject, error)
 	// ListTeams List Teams
 	// (GET /teams)
 	ListTeams(ctx context.Context, request ListTeamsRequestObject) (ListTeamsResponseObject, error)
@@ -43552,6 +43667,30 @@ func (sh *strictHandler) GetSystemStatus(w http.ResponseWriter, r *http.Request)
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetSystemStatusResponseObject); ok {
 		if err := validResponse.VisitGetSystemStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTeamLabelValues operation middleware
+func (sh *strictHandler) ListTeamLabelValues(w http.ResponseWriter, r *http.Request) {
+	var request ListTeamLabelValuesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTeamLabelValues(ctx, request.(ListTeamLabelValuesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTeamLabelValues")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTeamLabelValuesResponseObject); ok {
+		if err := validResponse.VisitListTeamLabelValuesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

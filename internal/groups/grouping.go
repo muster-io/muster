@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/teams"
 )
 
 // maxRediscoveries bounds how often one transaction finds the Alert Group of a key again because a concurrent change
@@ -66,12 +67,17 @@ type Service struct {
 	queries func(dbgen.DBTX) Queries
 	d       *dispatcher
 	links   Linker
+	// classifier classifies the firing Alerts of the open Alert Groups by their Teams when a Team or the Team label is
+	// saved (C-25.FR-13), cached per replica as the Router's is, and classify gives it its queries in a transaction.
+	classifier *teams.Classifier
+	classify   func(Queries) teams.ClassifyQueries
 }
 
 // New returns the Service of the Organization in cfg.
 func New(cfg Config) *Service {
 	s := &Service{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, log: cfg.Log,
-		restamp: cfg.Restamp, queries: newQueries}
+		restamp: cfg.Restamp, queries: newQueries, classifier: teams.NewClassifier(cfg.OrgID),
+		classify: classifyQueries}
 	s.d = &dispatcher{orgID: cfg.OrgID, clock: cfg.Business, log: cfg.Log, audit: cfg.Audit,
 		routeIDs: s.routePublicID}
 	return s

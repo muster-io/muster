@@ -372,21 +372,32 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 	return i, err
 }
 
-const insertOrganizationButtonsUpdate = `-- name: InsertOrganizationButtonsUpdate :exec
+const insertOrganizationUpdate = `-- name: InsertOrganizationUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = 'team_evaluation' AND u.leased_by IS NULL AND $2::text = 'team_evaluation'
+    FOR UPDATE
+)
 INSERT INTO open_group_updates (org_id, kind, requested_at)
-VALUES ($1, $2, $3::timestamptz)
+SELECT $1, $2::text, $3::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
 `
 
-type InsertOrganizationButtonsUpdateParams struct {
+type InsertOrganizationUpdateParams struct {
 	OrgID       int64
 	Kind        string
 	RequestedAt time.Time
 }
 
-// InsertOrganizationButtonsUpdate requests that a change of the Organization's button set reach the open Root messages
-// of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
-func (q *Queries) InsertOrganizationButtonsUpdate(ctx context.Context, arg InsertOrganizationButtonsUpdateParams) error {
-	_, err := q.db.Exec(ctx, insertOrganizationButtonsUpdate, arg.OrgID, arg.Kind, arg.RequestedAt)
+// InsertOrganizationUpdate requests that a change of the Organization reach its open Alert Groups, with a row of
+// @kind without a scope: organization_buttons for the open Root messages of the Destinations that follow the
+// Organization's button set (C-28.FR-9), team_evaluation for the Teams of the open Alert Groups after a new Team label
+// (C-25.FR-13). The open_group_updates worker of any replica claims the row. A row team_evaluation that no worker has
+// claimed yet already covers the change, since its run classifies with the Teams as they are then: it is locked, so
+// that no worker claims it before this transaction commits, and no second one is inserted.
+func (q *Queries) InsertOrganizationUpdate(ctx context.Context, arg InsertOrganizationUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertOrganizationUpdate, arg.OrgID, arg.Kind, arg.RequestedAt)
 	return err
 }
 
@@ -614,8 +625,8 @@ type UpdateSettingsParams struct {
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 // URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
-// null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the stamp of the classification that
-// every replica caches (C-25.FR-5).
+// null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the
+// stamp of the classification that every replica caches (C-25.FR-5).
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,
 		arg.Name,

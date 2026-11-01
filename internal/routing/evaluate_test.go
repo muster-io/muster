@@ -10,12 +10,23 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/routing/dbgen"
 	"github.com/muster-io/muster/internal/teams"
 	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
+
+func (s *fakeStore) ShareTeamEvaluation(_ context.Context, arg dbgen.ShareTeamEvaluationParams) error {
+	if err := s.call("ShareTeamEvaluation"); err != nil {
+		return err
+	}
+	if arg.LockClass != db.TeamEvaluationLockClass || arg.OrgID != orgID {
+		return fmt.Errorf("the lock of the evaluation of the teams %+v", arg)
+	}
+	return nil
+}
 
 func (s *fakeStore) GetRoutingStamp(_ context.Context, org int64) (dbgen.GetRoutingStampRow, error) {
 	if err := s.call("GetRoutingStamp"); err != nil || org != orgID {

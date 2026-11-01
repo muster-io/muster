@@ -23,12 +23,15 @@ import (
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
+	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 // fakeUpdate is an open_group_updates row.
 type fakeUpdate struct {
 	id, routeID, after int64
 	destinationID      int64
+	teamID             int64
 	kind               string
 	requested          time.Time
 	leasedBy           string
@@ -67,7 +70,9 @@ func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGrou
 		return []dbgen.ClaimOpenGroupUpdateRow{{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
 			Valid: u.routeID != 0}, RequestedAt: u.requested, AfterAlertGroupID: u.after, RoutePublicID: route,
 			DestinationID:       pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
-			DestinationPublicID: destinationPublicID(u.destinationID)}}, nil
+			DestinationPublicID: destinationPublicID(u.destinationID),
+			TeamID:              pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0},
+			TeamPublicID:        f.teamsOf().refs[u.teamID].PublicID}}, nil
 	}
 	return nil, nil
 }
@@ -93,15 +98,20 @@ func (f *fakeDB) ListFiringLevels(_ context.Context, arg dbgen.ListFiringLevelsP
 	return out, nil
 }
 
-// TestUpdateNames: routing and organization, which insert the rows and wake the workers, and groups, which claims them,
-// name the kinds and the channel alike; destinations checks its own names against groups (write_test.go).
+// TestUpdateNames: routing, organization and teams, which insert the rows and wake the workers, and groups, which
+// claims them, name the kinds and the channel alike; destinations checks its own names against groups
+// (write_test.go).
 func TestUpdateNames(t *testing.T) {
 	if routing.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || routing.KindMinimumSeverity != KindRouteMinimumSeverity {
 		t.Error("routing and groups name the open alert group updates differently")
 	}
 	if organization.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel ||
-		organization.KindOrganizationButtons != KindOrganizationButtons {
+		organization.KindOrganizationButtons != KindOrganizationButtons ||
+		organization.KindTeamEvaluation != KindTeamEvaluation {
 		t.Error("organization and groups name the open alert group updates differently")
+	}
+	if teams.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || teams.KindTeamEvaluation != KindTeamEvaluation {
+		t.Error("teams and groups name the open alert group updates differently")
 	}
 }
 
@@ -216,6 +226,34 @@ func (f *fakeDB) ListOpenGroupsFollowingOrganizationAfter(_ context.Context,
 	return f.openDelivered(arg.OrgID, arg.AfterID, arg.Lim, func(dest int64) bool {
 		return slices.Contains(f.following, dest)
 	}), nil
+}
+
+func (f *fakeDB) ListEvaluatedGroupsAfter(_ context.Context, arg dbgen.ListEvaluatedGroupsAfterParams) ([]int64,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListEvaluatedGroupsAfter"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if (g.Status != "resolved" || g.GraceDeadline.Valid) && g.ID > arg.AfterID && arg.OrgID == orgID {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(arg.Lim))], nil
+}
+
+func (f *fakeDB) LockTeamEvaluation(_ context.Context, arg dbgen.LockTeamEvaluationParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LockTeamEvaluation"); err != nil {
+		return err
+	}
+	if arg.LockClass != db.TeamEvaluationLockClass || arg.OrgID != orgID {
+		return fmt.Errorf("the lock of the evaluation of the teams %+v", arg)
+	}
+	return nil
 }
 
 // openDelivered are the open Alert Groups after the id after with a delivery that is not being retired in a
@@ -641,4 +679,339 @@ func TestUpdateWorkerRun(t *testing.T) {
 	waitReal(t.Context(), time.Hour, wake)
 	waitReal(ctx, time.Hour, nil)
 	waitReal(t.Context(), time.Millisecond, nil)
+}
+
+// checkoutTeam is the Team "checkout" that a test creates for the value checkout of the Team label.
+const checkoutTeam int64 = 13
+
+// evaluation is the harness of the evaluation on save (C-25.FR-13): the Teams payments, search and checkout-team,
+// classified from the fake database, a worker at a manual real clock, and the re-renders the dispatcher hands over.
+type evaluation struct {
+	*harness
+	real     *clock.Manual
+	worker   *UpdateWorker
+	rendered []Rendering
+}
+
+func newEvaluation(t *testing.T) *evaluation {
+	t.Helper()
+	h := newHarness(t)
+	h.withTeams()
+	h.svc.classify = func(Queries) teams.ClassifyQueries { return h.db }
+	e := &evaluation{harness: h, real: clock.NewManual(t0.Add(-24 * time.Hour))}
+	h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		e.rendered = append(e.rendered, r)
+		return nil
+	})
+	e.worker = e.workerOf("replica-a")
+	return e
+}
+
+func (e *evaluation) workerOf(owner string) *UpdateWorker {
+	return &UpdateWorker{Service: e.svc, Log: e.svc.log, Lease: db.Lease{Owner: owner, Duration: UpdateLease,
+		Clocks: clock.Clocks{Business: e.clock, Real: e.real}}}
+}
+
+// fire fires an Alert of the Route with labels, to which routing gave no Teams, and returns it with its Alert Group.
+func (e *evaluation) fire(t *testing.T, route int64, labels map[string]string) (int64, *dbgen.LockGroupsRow) {
+	t.Helper()
+	a := e.alert(route, "warning", labels)
+	e.changes(t, ingest.ChangeFired, a)
+	return a, e.groupOf(t, a)
+}
+
+// save inserts a row team_evaluation of the Team, none for 0, as teams and organization do with a save, after a
+// change of the Teams that raises teams_version.
+func (e *evaluation) save(team int64) {
+	e.db.teamsOf().version++
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamEvaluation, teamID: team,
+		requested: e.clock.Now()})
+}
+
+func (e *evaluation) round(t *testing.T, w *UpdateWorker) {
+	t.Helper()
+	if _, err := w.Round(t.Context()); err != nil {
+		t.Fatalf("round: %v", err)
+	}
+}
+
+// TestTeamEvaluation is C-25.FR-13 and C-25.AC-13 on the worker: with an open, firing Alert Group of
+// team="checkout", whose Alert routing gave no Teams — no alert_teams row at all, as for an Alert that routing took
+// up late or that a 0.1 replica first saw fire — creating the Team "checkout" adds it to the Alert's Teams and to the
+// Alert Group with one Quiet team_joined of kind alerts by the label, as the system, and re-renders it with that event
+// alone: no unknown_team_value, no other event and no timer. Another Alert Group is not touched. The row is deleted
+// and open_group_update_done names the kind, the Team and one Alert Group; a second run adds nothing, saves nothing,
+// renders nothing and counts none.
+func TestTeamEvaluation(t *testing.T) {
+	e := newEvaluation(t)
+	if classifyQueries(e.db) == nil {
+		t.Fatal("no queries of the classification")
+	}
+	a, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "checkout"})
+	b, other := e.fire(t, 3, map[string]string{"alertname": "Latency", "cluster": "b", "team": "Payments"})
+	ts := e.db.teamsOf()
+	if len(ts.alerts[a]) != 0 || len(ts.groups[g.ID]) != 0 || len(e.teamEntries(g)) != 0 {
+		t.Fatalf("before the save: alert teams %v, group teams %v", ts.alerts[a], ts.groups[g.ID])
+	}
+	ts.refs[checkoutTeam] = dbgen.ListTeamRefsRow{ID: checkoutTeam, PublicID: "TMCHECKOUTBBBB", Name: "checkout",
+		Slug: "checkout"}
+	e.clock.Advance(time.Minute)
+	entries, saves, timers, otherEntries := len(e.db.entries), e.db.calls["SaveGroup"], e.db.calls["UpsertTimer"],
+		len(e.entriesOf(other))
+	e.rendered = nil
+	e.save(checkoutTeam)
+	e.round(t, e.worker)
+
+	if got := ts.alerts[a]; !slices.Equal(got, []fakeAlertTeam{byLabel(checkoutTeam)}) {
+		t.Errorf("teams of the alert %v", got)
+	}
+	if got := e.teamEntries(g); !slices.Equal(got, []string{"team_joined/alerts/quiet//checkout/label//"}) {
+		t.Errorf("timeline %v", got)
+	}
+	if got := e.groupTeamSlugs(t, g); !slices.Equal(got, []string{"checkout:label"}) {
+		t.Errorf("teams of the alert group %v", got)
+	}
+	last := e.last(t, g)
+	if len(e.db.entries) != entries+1 || last.ActorKind != "system" || last.Transport != "system" ||
+		!last.At.Equal(e.clock.Now()) || e.db.calls["SaveGroup"] != saves+1 || e.db.calls["UpsertTimer"] != timers {
+		t.Errorf("%d entries, %d saves, %d timers, last %+v", len(e.db.entries)-entries,
+			e.db.calls["SaveGroup"]-saves, e.db.calls["UpsertTimer"]-timers, last.InsertTimelineEntryParams)
+	}
+	if len(e.rendered) != 1 || e.rendered[0].Group.ID != g.ID || e.rendered[0].Actor != System ||
+		!e.rendered[0].Configuration ||
+		len(e.rendered[0].Events) != 1 || e.rendered[0].Events[0].Event != EventTeamJoined ||
+		e.rendered[0].Events[0].Loudness != Quiet || len(e.rendered[0].Events[0].Mentions) != 0 {
+		t.Errorf("rendered %+v", e.rendered)
+	}
+	if len(ts.alerts[b]) != 0 || len(e.entriesOf(other)) != otherEntries || len(ts.groups[other.ID]) != 0 {
+		t.Errorf("another alert group changed: %v %v", ts.alerts[b], ts.groups[other.ID])
+	}
+	if len(e.db.updates) != 0 || !strings.Contains(e.log.String(), `"event":"open_group_update_done",`+
+		`"kind":"team_evaluation","team":"TMCHECKOUTBBBB","alert_groups":1`) {
+		t.Errorf("rows %d, log %s", len(e.db.updates), e.log)
+	}
+
+	// A second run adds nothing.
+	entries, saves = len(e.db.entries), e.db.calls["SaveGroup"]
+	e.rendered = nil
+	e.save(checkoutTeam)
+	e.round(t, e.worker)
+	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.rendered) != 0 ||
+		!slices.Equal(ts.alerts[a], []fakeAlertTeam{byLabel(checkoutTeam)}) || !strings.Contains(e.log.String(),
+		`"kind":"team_evaluation","team":"TMCHECKOUTBBBB","alert_groups":0`) {
+		t.Errorf("a second run: %d entries, %d saves, rendered %d, log %s", len(e.db.entries)-entries,
+			e.db.calls["SaveGroup"]-saves, len(e.rendered), e.log)
+	}
+}
+
+// TestTeamEvaluationMatchersAndLabel is C-25.FR-13 and C-25.FR-5 for the other saves: a new Team matcher brings its
+// Team by the rule matcher with its text; removing it again takes nothing away — the Team stays on the Alert and in
+// the Alert Group, which records nothing; a new Team label brings the Teams its values name, in a run without a Team,
+// by the label even when another Alert of the Alert Group, earlier by id, brings the same Team by a matcher. Only
+// what the classification adds is written: a Team an Alert already has keeps its rule.
+func TestTeamEvaluationMatchersAndLabel(t *testing.T) {
+	e := newEvaluation(t)
+	ts := e.db.teamsOf()
+	a, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "x", "team": "Payments"})
+	ts.matchers = map[int64][]teamsdb.ListClassifiedMatchersRow{search: {{TeamID: search, Label: "cluster", Op: "=",
+		Value: "x"}}}
+	e.save(search)
+	e.round(t, e.worker)
+	matcher := `cluster="x"`
+	if got := ts.alerts[a]; !slices.Equal(got, []fakeAlertTeam{byMatcher(search, matcher)}) {
+		t.Errorf("teams of the alert %v", got)
+	}
+	if got := e.teamEntries(g); !slices.Equal(got, []string{"team_joined/alerts/quiet//search/matcher/" + matcher +
+		"/"}) {
+		t.Errorf("timeline after the matcher %v", got)
+	}
+
+	delete(ts.matchers, search)
+	entries := len(e.db.entries)
+	e.save(search)
+	e.round(t, e.worker)
+	if len(e.db.entries) != entries || !slices.Equal(ts.alerts[a], []fakeAlertTeam{byMatcher(search, matcher)}) ||
+		!slices.Equal(e.groupTeamSlugs(t, g), []string{"search:matcher"}) {
+		t.Errorf("the matcher removed: %d entries, alert %v, group %v", len(e.db.entries)-entries, ts.alerts[a],
+			e.groupTeamSlugs(t, g))
+	}
+
+	// A new Team label: c, earlier by id, is of payments by a matcher, b by the label; payments now also picks a by
+	// its matcher, while a already has payments by the label.
+	ts.matchers[payments] = []teamsdb.ListClassifiedMatchersRow{{TeamID: payments, Label: "cluster", Op: "=~",
+		Value: "x|y"}}
+	c, gb := e.fire(t, 3, map[string]string{"alertname": "Latency", "cluster": "y", "service_team": "nobody"})
+	b, _ := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "y", "service_team": "payments"})
+	if e.groupOf(t, b) != gb {
+		t.Fatal("the alerts of cluster y are in two alert groups")
+	}
+	ts.alerts[a] = append(ts.alerts[a], byLabel(payments))
+	ts.label = "service_team"
+	entries = len(e.db.entries)
+	e.save(0)
+	e.round(t, e.worker)
+	if got := e.teamEntries(gb); !slices.Equal(got, []string{"team_joined/alerts/quiet//payments/label//"}) {
+		t.Errorf("timeline after the team label %v", got)
+	}
+	if !slices.Equal(ts.alerts[b], []fakeAlertTeam{byLabel(payments)}) ||
+		!slices.Equal(ts.alerts[c], []fakeAlertTeam{byMatcher(payments, `cluster=~"x|y"`)}) {
+		t.Errorf("teams of the alerts %v %v", ts.alerts[b], ts.alerts[c])
+	}
+	// The Alert Group of a joins payments by the matcher that picks a now; a keeps the rule it had.
+	if got := e.teamEntries(g); !slices.Equal(got, []string{"team_joined/alerts/quiet//search/matcher/" + matcher +
+		"/", "team_joined/alerts/quiet//payments/matcher/" + `cluster=~"x|y"` + "/"}) {
+		t.Errorf("timeline of the first alert group %v", got)
+	}
+	if !slices.Equal(ts.alerts[a], []fakeAlertTeam{byMatcher(search, matcher), byLabel(payments)}) ||
+		len(e.db.entries) != entries+2 || !strings.Contains(e.log.String(),
+		`"event":"open_group_update_done","kind":"team_evaluation","alert_groups":2`) {
+		t.Errorf("alert %v, %d entries, log %s", ts.alerts[a], len(e.db.entries)-entries, e.log)
+	}
+}
+
+// TestTeamEvaluationLeavesAlone is C-25.FR-13 on what the evaluation does not reach: a resolved Alert of an open Alert
+// Group, a resolved Alert Group, one resolved after the batch listed it, and an Alert whose own status is resolved
+// while it still fires in its Alert Group, which a Snapshot that fires it again routes; and it is C-25.FR-13 in
+// batches: the Alert Groups are walked by id, a batch at a time, and changed in the order (Route, id).
+func TestTeamEvaluationLeavesAlone(t *testing.T) {
+	e := newEvaluation(t)
+	ts := e.db.teamsOf()
+	gone, gg := e.fire(t, 2, map[string]string{"alertname": "Gone", "cluster": "a", "team": "search"})
+	e.resolve(t, gone)
+	gg.Status, gg.ResolvedAt = "resolved", ts0()
+	kept, gk := e.fire(t, 3, map[string]string{"alertname": "Kept", "cluster": "k", "team": "payments"})
+	left, _ := e.fire(t, 3, map[string]string{"alertname": "Left", "cluster": "k", "team": "search"})
+	e.resolve(t, left)
+	refired, gr := e.fire(t, 2, map[string]string{"alertname": "Refired", "cluster": "r", "team": "search"})
+	e.db.alerts[refired].Status = "resolved"
+	late, gl := e.fire(t, 2, map[string]string{"alertname": "Late", "cluster": "l", "team": "payments"})
+	first, gf := e.fire(t, 2, map[string]string{"alertname": "First", "cluster": "f", "team": "search"})
+	e.db.before["LockGroups"] = func() {
+		e.db.before["LockGroups"] = nil
+		gl.Status, gl.ResolvedAt = "resolved", ts0()
+	}
+	e.rendered = nil
+	e.save(0)
+	e.round(t, e.worker)
+	if !slices.Equal(ts.alerts[kept], []fakeAlertTeam{byLabel(payments)}) || len(ts.alerts[left]) != 0 ||
+		len(ts.alerts[gone]) != 0 || len(ts.alerts[refired]) != 0 || len(ts.alerts[late]) != 0 ||
+		!slices.Equal(ts.alerts[first], []fakeAlertTeam{byLabel(search)}) {
+		t.Errorf("teams of the alerts: kept %v, left %v, gone %v, refired %v, late %v, first %v", ts.alerts[kept],
+			ts.alerts[left], ts.alerts[gone], ts.alerts[refired], ts.alerts[late], ts.alerts[first])
+	}
+	for name, g := range map[string]*dbgen.LockGroupsRow{"resolved": gg, "refired": gr, "resolved later": gl} {
+		if len(ts.groups[g.ID]) != 0 {
+			t.Errorf("the %s alert group got teams %v", name, ts.groups[g.ID])
+		}
+	}
+	if got := e.groupTeamSlugs(t, gk); !slices.Equal(got, []string{"payments:label"}) {
+		t.Errorf("teams of the alert group of kept %v", got)
+	}
+	// Route 2 comes before Route 3, whatever the ids.
+	var order []int64
+	for _, r := range e.rendered {
+		order = append(order, r.Group.ID)
+	}
+	if want := []int64{gf.ID, gk.ID}; !slices.Equal(order, want) || gk.ID > gf.ID {
+		t.Errorf("rendered %v, want %v", order, want)
+	}
+	if len(e.db.updates) != 0 {
+		t.Errorf("rows %d", len(e.db.updates))
+	}
+
+	// One Alert Group a batch: the three open ones, then an empty batch that deletes the row.
+	e.worker.Batch = 1
+	lists, advances := e.db.calls["ListEvaluatedGroupsAfter"], e.db.calls["AdvanceOpenGroupUpdate"]
+	e.save(0)
+	e.round(t, e.worker)
+	if e.db.calls["ListEvaluatedGroupsAfter"]-lists != 4 || e.db.calls["AdvanceOpenGroupUpdate"]-advances != 3 ||
+		len(e.db.updates) != 0 {
+		t.Errorf("batches: %d lists, %d advances", e.db.calls["ListEvaluatedGroupsAfter"]-lists,
+			e.db.calls["AdvanceOpenGroupUpdate"]-advances)
+	}
+}
+
+func ts0() pgtype.Timestamptz { return ts(t0) }
+
+// TestTeamEvaluationClaims is ADR-0007 for the evaluation: a row one worker holds is not run by another; when the
+// first worker's lease runs out before it ran, the other takes the row over and runs it, and the first, whose lease is
+// lost, changes nothing, so the Team joins once.
+func TestTeamEvaluationClaims(t *testing.T) {
+	e := newEvaluation(t)
+	_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+	b := e.workerOf("replica-b")
+	e.save(search)
+	claimed, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease)
+	if err != nil || !ok || claimed.kind != KindTeamEvaluation || claimed.teamPID != "TMSEARCHAAAAAA" {
+		t.Fatalf("claim = %+v %v %v", claimed, ok, err)
+	}
+	e.round(t, b)
+	if len(e.teamEntries(g)) != 0 || len(e.db.updates) != 1 {
+		t.Fatalf("the other worker ran a held row: %v", e.teamEntries(g))
+	}
+	e.real.Advance(UpdateLease)
+	e.round(t, b)
+	e.worker.run(t.Context(), claimed)
+	if got := e.teamEntries(g); !slices.Equal(got, []string{"team_joined/alerts/quiet//search/label//"}) ||
+		len(e.db.updates) != 0 {
+		t.Errorf("timeline %v, rows %d", got, len(e.db.updates))
+	}
+}
+
+// TestTeamEvaluationFailures: a failing read or write of a batch logs open_group_update_failed with the kind and the
+// Team, and leaves the row for any replica once its lease runs out, its Alert Groups unchanged.
+func TestTeamEvaluationFailures(t *testing.T) {
+	for _, q := range []string{"ListEvaluatedGroupsAfter", "LockTeamEvaluation", "LockGroups", "GetTeamsStamp",
+		"ListClassifiedTeams",
+		"ListClassifiedMatchers", "ListGroupFiringAlerts", "AddAlertTeams", "AddGroupTeams", "InsertTimelineEntry",
+		"SaveGroup", "labels"} {
+		e := newEvaluation(t)
+		a, _ := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+		e.db.teamsOf().matchers = map[int64][]teamsdb.ListClassifiedMatchersRow{payments: {{TeamID: payments,
+			Label: "cluster", Op: "=", Value: "a"}}}
+		if q == "labels" {
+			e.db.alerts[a].Labels = []byte(`[`)
+		}
+		e.save(search)
+		e.db.fail[q] = errBoom
+		e.round(t, e.worker)
+		if len(e.db.updates) != 1 || !strings.Contains(e.log.String(),
+			`"event":"open_group_update_failed","kind":"team_evaluation","team":"TMSEARCHAAAAAA","error":`) ||
+			strings.Contains(e.log.String(), "open_group_update_done") {
+			t.Errorf("%s failing: rows %d, log %s", q, len(e.db.updates), e.log)
+		}
+	}
+}
+
+// TestTeamEvaluationGracePeriod is C-25.FR-13 for an Alert Group a person resolved that is still in its Grace
+// period: the evaluation records the Team on its firing tail, which the end of the Grace period groups again with it,
+// and leaves the Alert Group itself as it is — no Team, no Timeline entry, no re-render; one resolved without a Grace
+// period is not read at all.
+func TestTeamEvaluationGracePeriod(t *testing.T) {
+	e := newEvaluation(t)
+	tail, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+	gone, gr := e.fire(t, 2, map[string]string{"alertname": "Gone", "cluster": "b", "team": "search"})
+	g.Status, g.ResolvedAt, g.GraceDeadline = "resolved", ts0(), ts(t0.Add(time.Hour))
+	gr.Status, gr.ResolvedAt = "resolved", ts0()
+	ts := e.db.teamsOf()
+	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
+	e.rendered = nil
+	e.save(search)
+	e.round(t, e.worker)
+	if !slices.Equal(ts.alerts[tail], []fakeAlertTeam{byLabel(search)}) || len(ts.alerts[gone]) != 0 {
+		t.Errorf("teams of the tail %v, of the alert resolved without a grace period %v", ts.alerts[tail],
+			ts.alerts[gone])
+	}
+	if len(ts.groups[g.ID]) != 0 || len(ts.groups[gr.ID]) != 0 || len(e.db.entries) != entries ||
+		e.db.calls["SaveGroup"] != saves || len(e.rendered) != 0 || !strings.Contains(e.log.String(),
+		`"kind":"team_evaluation","team":"TMSEARCHAAAAAA","alert_groups":0`) {
+		t.Errorf("the alert groups changed: teams %v %v, %d entries, log %s", ts.groups[g.ID], ts.groups[gr.ID],
+			len(e.db.entries)-entries, e.log)
+	}
+	e.db.fail["AddAlertTeams"] = errBoom
+	e.save(search)
+	e.round(t, e.worker)
+	if len(e.db.updates) != 1 || !strings.Contains(e.log.String(), `"event":"open_group_update_failed"`) {
+		t.Errorf("a failing write of the tails: rows %d, log %s", len(e.db.updates), e.log)
+	}
 }

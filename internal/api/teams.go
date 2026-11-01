@@ -25,6 +25,7 @@ type Teams interface {
 	Users(ctx context.Context, publicID string) ([]teams.Person, error)
 	AddUser(ctx context.Context, r teams.Requester, teamID, userID string) (teams.Person, bool, error)
 	RemoveUser(ctx context.Context, r teams.Requester, teamID, userID string) error
+	LabelValues(ctx context.Context) (teams.LabelValues, error)
 }
 
 // teamsCursor is the cursor of the Team list.
@@ -40,6 +41,24 @@ func teamsRequester(ctx context.Context) (teams.Requester, error) {
 		return teams.Requester{}, err
 	}
 	return teams.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}, nil
+}
+
+// ListTeamLabelValues is listTeamLabelValues: the values of the Team label seen without a Team within
+// organization.team_values_window, the most recently seen first, each with its Alerts and whether it is a valid slug
+// (C-25.FR-7, AC-1).
+func (s *Server) ListTeamLabelValues(ctx context.Context, _ gen.ListTeamLabelValuesRequestObject) (
+	gen.ListTeamLabelValuesResponseObject, error) {
+	v, err := s.teams.LabelValues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListTeamLabelValues200JSONResponse{Label: v.Label, WindowDays: v.WindowDays,
+		Items: make([]gen.TeamLabelValue, 0, len(v.Items))}
+	for _, i := range v.Items {
+		out.Items = append(out.Items, gen.TeamLabelValue{Value: i.Value, LastSeenAt: i.LastSeenAt.UTC(),
+			AlertCount: int(i.Alerts), ValidSlug: i.ValidSlug})
+	}
+	return out, nil
 }
 
 // ListTeams is listTeams: the Teams that are not deleted by name, matching q.

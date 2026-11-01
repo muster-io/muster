@@ -1038,8 +1038,8 @@ WHERE org_id = @org_id AND id = @id;
 -- by id in batches, and is deleted with its last batch.
 
 -- ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
--- the public_id of its Route or its Destination, if any, for its log lines; another claimer skips the row this one
--- locked. A row of a kind that a later version adds waits for a replica that handles it.
+-- the public_id of its Route, its Destination or its Team, if any, for its log lines; another claimer skips the row
+-- this one locked. A row of a kind that a later version adds waits for a replica that handles it.
 -- name: ClaimOpenGroupUpdate :many
 WITH due AS MATERIALIZED (
     SELECT d.id
@@ -1058,10 +1058,13 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
           coalesce((SELECT r.public_id
                     FROM routes r
                     WHERE r.org_id = @org_id AND r.id = u.route_id), '')::text AS route_public_id,
-          u.destination_id,
+          u.destination_id, u.team_id,
           coalesce((SELECT d.public_id
                     FROM destinations d
-                    WHERE d.org_id = @org_id AND d.id = u.destination_id), '')::text AS destination_public_id;
+                    WHERE d.org_id = @org_id AND d.id = u.destination_id), '')::text AS destination_public_id,
+          coalesce((SELECT t.public_id
+                    FROM teams t
+                    WHERE t.org_id = @org_id AND t.id = u.team_id), '')::text AS team_public_id;
 
 -- LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
 -- now, and reads where its run stands; no row when the lease was lost.
@@ -1139,11 +1142,50 @@ WHERE org_id = @org_id AND route_id = @route_id AND status <> 'resolved' AND id 
 ORDER BY id
 LIMIT @lim;
 
+-- LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+-- keyed by the Organization) exclusively, before a batch of the evaluation locks its Alert Groups: it waits for every
+-- Snapshot that read the stamp of the classification before, which routing takes it shared for.
+-- name: LockTeamEvaluation :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@org_id::bigint));
+
+-- ListEvaluatedGroupsAfter lists, by id after a cursor, a batch of the Alert Groups whose firing Alerts the evaluation
+-- on a save of a Team or of the Team label classifies again (C-25.FR-13): the open ones, and those a person resolved
+-- that are still in their Grace period, whose firing tails the end of the Grace period groups again.
+-- name: ListEvaluatedGroupsAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = @org_id AND (status <> 'resolved' OR grace_deadline IS NOT NULL) AND id > @after_id
+ORDER BY id
+LIMIT @lim;
+
+-- GetTeamsStamp reads the stamp of the classification by Teams: the Team label and organizations.teams_version, which
+-- every change of a Team or of the Team label raises.
+-- name: GetTeamsStamp :one
+SELECT team_label, teams_version
+FROM organizations
+WHERE id = @org_id;
+
+-- AddAlertTeams adds Teams to the Teams of firing Alerts, with the rule that decided each and the Team matcher of the
+-- rule matcher, an empty matcher being null: the evaluation on save only adds, so a Team an Alert already has keeps
+-- its rule. The rows go in the order (Alert, Team); the lock of the evaluation (LockTeamEvaluation) keeps Snapshots and
+-- other batches from writing the same rows meanwhile.
+-- name: AddAlertTeams :exec
+INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
+SELECT @org_id, t.alert_id, t.team_id, t.rule, nullif(t.matcher, '')
+FROM (SELECT unnest(@alert_ids::bigint[]) AS alert_id, unnest(@team_ids::bigint[]) AS team_id,
+             unnest(@rules::text[]) AS rule, unnest(@matchers::text[]) AS matcher) AS t
+ORDER BY t.alert_id, t.team_id
+ON CONFLICT (alert_id, team_id) DO NOTHING;
+
 -- ListAlertTeams reads, for Alerts that join an Alert Group, the Teams routing gave each when it started firing — those
--- that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, with
--- a row of team_id 0 for an Alert without a Team.
+-- that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, empty
+-- once it is the slug of a Team that is not deleted, with a row of team_id 0 for an Alert without a Team.
 -- name: ListAlertTeams :many
-SELECT a.id AS alert_id, coalesce(a.unknown_team_value, '')::text AS unknown_team_value,
+SELECT a.id AS alert_id,
+       (CASE WHEN EXISTS (SELECT 1
+                          FROM teams n
+                          WHERE n.org_id = a.org_id AND n.deleted_at IS NULL AND n.slug = a.unknown_team_value)
+             THEN '' ELSE coalesce(a.unknown_team_value, '') END)::text AS unknown_team_value,
        coalesce(t.team_id, 0)::bigint AS team_id, coalesce(t.rule, '')::text AS rule,
        coalesce(t.matcher, '')::text AS matcher
 FROM alerts a

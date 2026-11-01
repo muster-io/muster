@@ -9,8 +9,8 @@ covers: [C-25.FR-5, C-25.FR-7, C-25.FR-13, C-25.AC-1, C-25.AC-13]
 files_touched:
   - api/README.md
   - api/openapi.yaml
-  - internal/db/migrations/0026_team_evaluation.up.sql
-  - internal/db/migrations/0026_team_evaluation.down.sql
+  - internal/db/migrations/0027_team_evaluation.up.sql
+  - internal/db/migrations/0027_team_evaluation.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -18,20 +18,36 @@ files_touched:
   - internal/teams/labelvalues_test.go
   - internal/teams/teams.go
   - internal/teams/query.sql
+  - internal/teams/teams_test.go
   - internal/teams/teams_integration_test.go
   - internal/api/teams.go
   - internal/api/teams_test.go
+  - internal/api/server.go
   - internal/organization/organization.go
   - internal/organization/organization_test.go
+  - internal/organization/query.sql
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - internal/groups/teams.go
   - internal/groups/teams_test.go
+  - internal/groups/groups_integration_test.go
+  - internal/groups/dispatcher.go
+  - internal/delivery/enqueue.go
+  - internal/delivery/enqueue_test.go
+  - internal/db/checks.go
+  - internal/routing/evaluate.go
+  - internal/routing/evaluate_test.go
+  - internal/routing/query.sql
+  - internal/archlint/secretleak.go
+  - design/stories/S-120-which-alerts-belong-unknown-values-team-label-and-teams-of-alert-groups.md
   - internal/groups/query.sql
+  - internal/groups/grouping.go
+  - internal/groups/events.go
   - test/e2e/team_evaluation_test.go
   - docs/concepts/teams.md
+  - docs/install/versions.md
 acceptance:
-  - "[C-25.FR-7, C-25.AC-1] `listTeamLabelValues` (`teams:read`) lists the values of the Organization's Team label that Alerts last seen within `organization.team_values_window` carried, with their Static labels, and that name no Team that is not deleted — each with when it was last seen, how many Alerts carried it and whether it is a valid slug (`team.slug_format`); with the Team \"payments\", Alerts with `team=\"checkout\"` and `team=\"Payments\"` make it list `checkout` (a valid slug) and `Payments` (not one), not `payments` (`labelvalues_test.go`)."
+  - "[C-25.FR-7, C-25.AC-1] `listTeamLabelValues` (`teams:read`) lists the values of the Organization's Team label that Alerts last seen within `organization.team_values_window` carried, with their Static labels, and that name no Team that is not deleted — each with when it was last seen, how many Alerts carried it and whether it is a valid slug (`team.slug_format`); with the Team \"payments\", Alerts with `team=\"checkout\"` and `team=\"Payments\"` make it list `checkout` (a valid slug) and `Payments` (not one), not `payments` (`labelvalues_test.go`, and the query in `teams_integration_test.go`)."
   - "[C-25.FR-13, C-25.FR-5] Creating a Team, changing a Team's slug or matchers, and changing the Organization's Team label write, in the transaction of the save, one `open_group_updates` row of the kind `team_evaluation` (with the Team, or none for the Team label); a worker on any replica claims it with a lease and evaluates the firing Alerts of every open Alert Group again, adding to `alert_teams` the Teams they now belong to and, through the dispatcher, the Teams that join each Alert Group with `team_joined`; a crash after the save loses nothing, and a second run of the row adds nothing (`updates_test.go`, `teams_test.go`)."
   - "[C-25.FR-13, C-25.AC-13] With an open, firing Alert Group of `team=\"checkout\"` and no such Team, creating the Team \"checkout\" adds it to the Alert Group with `team_joined`, re-renders its Root messages Quietly and records no other event; the value `checkout` leaves `listTeamLabelValues`; changing a Team matcher so that it no longer picks an Alert leaves the Team in its Alert Group and in `alert_teams` (`team_evaluation_test.go`)."
   - "[C-25.FR-13] Saving a Team without a change of slug or matchers — a new name, description, people or Working hours — writes no evaluation row (`teams_test.go`)."
@@ -69,7 +85,7 @@ issue: 452
   retention periods of `api/README.md`'s exception are, and a second spelling for the same window in two sibling lists
   would be worse; this story widens that exception's wording in `api/README.md` to "retention periods and the windows
   of value lists".
-- **Schema** (migration `0026_team_evaluation`, expand only; `schema.md` §4.15 and §5): `open_group_updates.team_id`
+- **Schema** (migration `0027_team_evaluation`, expand only; `schema.md` §4.15 and §5): `open_group_updates.team_id`
   (nullable foreign key to `teams`) and `open_group_updates_kind_v3_check` with every kind of `_v2` and
   `team_evaluation`, `NOT VALID` and validated in a second transaction. The values are read from `alerts` through
   `alerts_org_last_seen_idx`, as the severity values are; no table is added for them.
@@ -147,9 +163,87 @@ None.
 - Depends on S-111 for `open_group_updates`.
 - The evaluation must also cover Alerts that S-118's Router gave no Teams: an Alert that routing took up late (a listed
   Alert without a Route), and one that first fired on a 0.1 replica during a rolling update.
-- Migration `0026` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
-  when it merges (S-131's Notes).
+- Files added to `files_touched` when the code was written: `internal/teams/teams_test.go` (the fake queries of the
+  Teams, which the evaluation row and its notification extend, and the tests of which saves write a row);
+  `internal/api/server.go` (`ListTeamLabelValues` joins the operations the build serves, else it answers `501`);
+  `internal/organization/query.sql` (the insert of the Organization's `open_group_updates` row also takes
+  `team_evaluation`, and a comment line of S-118 over 120 characters is wrapped); `internal/groups/grouping.go` (the
+  Service holds the classification of S-118 that the evaluation uses); `internal/groups/events.go` (a comment line of
+  S-118 over 120 characters is wrapped); `docs/install/versions.md` (the rolling-upgrade and recovery notes of
+  migration 0027, and the 0024 note now says that only Alerts that start firing with the label after the upgrade
+  record `unknown_team_value`, as S-118 behaves); `internal/groups/groups_integration_test.go` (its check that a row of
+  a later kind waits drops the kind CHECK by its versioned name, which 0027 moves from `_v2` to `_v3`: it now drops
+  every version, so that the next migration of the queue does not break it again).
+- The query of `team-label-values` — the window, the Static labels stored on the Alert and the slugs of the Teams
+  that are not deleted — is checked against PostgreSQL in `teams_integration_test.go` (`TestIntegrationLabelValues`),
+  as the severity values are; `labelvalues_test.go` checks the Service over the fake queries. The first acceptance
+  statement names both.
+- Decisions taken while writing the code, within C-25.FR-13 and ADR-0018:
+  - The evaluation classifies with the whole current classification, not only the saved Team: it only adds, so Teams
+    that an Alert missed — routing took it up late, or a 0.1 replica first saw it fire — join too. `team_id` names
+    the Team of the save in the log lines (`team` of `open_group_update_done`); a row without it, of a new Team label,
+    names none.
+  - `open_group_updates.team_id` references `teams` with `ON DELETE SET NULL`. Teams are deleted softly, so a deleted
+    Team keeps its row and its pending evaluation runs, adding nothing of the deleted Team (the classification leaves
+    deleted Teams out); should a Team row ever be removed, the evaluation stays valid as one without a Team instead of
+    blocking the removal.
+  - Only the Alerts of an open Alert Group that are firing there and whose own status is firing are classified, so an
+    Alert that a Snapshot fires again while the evaluation holds its Alert Group is left to that Snapshot's routing,
+    which writes its Teams in its own transaction: the two never wait for each other's `alert_teams` rows. The Alert
+    Groups of a batch are locked in id order and changed in the order (Route, id), as the re-render of a button set
+    is, because the re-render step takes the Routes' locks.
+  - The evaluation writes `alert_teams` and `alert_group_teams` with `ON CONFLICT DO NOTHING` and leaves
+    `alerts.unknown_team_value` and `alert_groups.unknown_team_values` as they are: it only adds, and records no
+    `unknown_team_value`. A Team an Alert already has keeps the rule it was recorded with.
+  - `team_joined` is recorded with the rule `label` when one of the Alert Group's firing Alerts belongs to the Team by
+    the Team label, else with the first Team matcher by Alert, as grouping records it.
+  - "Re-renders its Root messages Quietly" is the dispatcher's re-render step with the one Quiet `team_joined`
+    (`TestTeamEvaluation` in `updates_test.go` checks what it hands to delivery). Until the Root message shows the
+    field "Teams" (C-29.FR-1, S-125), the Desired state does not change, so delivery edits nothing;
+    `team_evaluation_test.go` checks that the same Root message stays live with no new post and no notification.
+  - `listTeamLabelValues` orders the values by the last time seen, newest first, then by value, and counts the Alerts
+    last seen within the window that carry each value.
+- Changes after review, each with the files it added to `files_touched`:
+  - Quiet in delivery: the dispatcher marks the rendering of `TeamsEvaluated` as a change of configuration
+    (`groups.Rendering.Configuration`, set from the change in `internal/groups/dispatcher.go`, and by the re-render of
+    a button set), and `configurationOnly` of `internal/delivery/enqueue.go` honours it before it reads the events: a
+    Not delivered Publication that was never published is published Quietly and a held Urgent Alert Group is released
+    Quietly. A field of the rendering, not a reason on the entries, because `team_joined` carries no reason in the
+    Timeline and an Alert that joins records the same event, Loudly where its Publication is Loud;
+    `TestTeamsEvaluatedIsQuiet` in `internal/delivery/enqueue_test.go`.
+  - A barrier against ingestion: `db.TeamEvaluationLockClass` (`0x6d75_0008`, `internal/db/checks.go`), keyed by
+    `hashint8` of the Organization. Routing takes it shared before a Snapshot reads the stamp of the classification
+    (`ShareTeamEvaluation`, `internal/routing/evaluate.go`, `query.sql`, the fake in `evaluate_test.go`); each batch of
+    the evaluation takes it exclusively after it locked its `open_group_updates` row and before `LockGroups`. Lock
+    order of a Snapshot: this lock shared, the Routes `FOR SHARE`, the Alert Groups, the Routes' Destinations shared
+    in delivery. Lock order of a batch: its `open_group_updates` row, this lock exclusively, the Alert Groups in id
+    order, the Routes' Destinations shared in the re-render step; the other update kinds take no part of it. A batch
+    waits only for Snapshots in flight, which hold none of its rows, and a later Snapshot waits for the batch before it
+    locks anything, so neither waits for a lock the other holds. While a batch runs, Snapshots of the Organization
+    wait for it; a batch is 50 Alert Groups. `TestIntegrationTeamEvaluationBarrier`.
+  - Accepted for 0.2: each batch holds the Organization's lock exclusively for up to 50 dispatches and their
+    re-renders, so the routing of that Organization's Snapshots pauses once per batch; and the condition
+    `OR grace_deadline IS NOT NULL` of `ListEvaluatedGroupsAfter` has no index, so the batches walk the primary key of
+    `alert_groups` from the cursor. A later story can add an index on the Alert Groups in a Grace period if either
+    shows in practice.
+  - `ListAlertTeams` leaves out an `alerts.unknown_team_value` that is now the slug of a Team that is not deleted, so
+    an Alert of such a value that joins an Alert Group later records no `unknown_team_value`; the column itself is not
+    written (`TestUnknownValueNowATeam`).
+  - An Alert Group a person resolved that is still in its Grace period: the evaluation adds the `alert_teams` rows of
+    its firing tails and leaves the Alert Group itself alone (no `alert_group_teams` row, no Timeline entry), so the
+    Alert Group that the end of the Grace period creates gets the Team (`TestTeamEvaluationGracePeriod`). The batches
+    walk the open Alert Groups and those with `grace_deadline` set (`ListEvaluatedGroupsAfter`).
+  - The values that a Team matcher covers stay in `listTeamLabelValues`; S-120 decides whether the Teams page hides
+    them, as a line in its Notes says.
+  - `InsertOrganizationButtonsUpdate` is `InsertOrganizationUpdate`, with the probe of
+    `internal/archlint/secretleak.go` renamed. A save of a Team or of the Team label inserts no second row while a
+    `team_evaluation` row of the Organization is unclaimed: it locks that row `FOR UPDATE`, so no worker claims it
+    before the save commits, and the one run classifies with every save; the `team` of its `open_group_update_done` line names
+    the Team of the save that inserted the row, none for the Team label (`TestIntegrationEvaluationCoalesced`).
+- The migration was renumbered from `0026`, its number in the story map, to `0027`, because S-134 (#496) merged
+  `0026_ical_feeds` first, as S-131's Notes ask of a story merged out of the map's order. `0026_ical_feeds` does not
+  touch `open_group_updates`, so the kind CHECK still goes from `open_group_updates_kind_v2_check` to
+  `open_group_updates_kind_v3_check`, which lists every kind on master.
 
 ## Coverage
 

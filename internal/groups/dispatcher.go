@@ -387,6 +387,8 @@ type change struct {
 	written bool
 	action  string
 	details map[string]any
+	// configuration marks a change that a change of configuration made, which publishes Quietly (Rendering).
+	configuration bool
 }
 
 func (c *change) add(e entry) { c.entries = append(c.entries, e) }
@@ -418,14 +420,18 @@ func (c committed) run(ctx context.Context) {
 // committed, never when it rolls back; Fallback reports a Route template that failed, which the dispatcher records
 // in the Timeline once the re-render step returned. Both are nil outside the dispatcher. Changed, when set, is called
 // for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
+// Configuration marks a rendering that a change of configuration made, as the evaluation of the Teams of the open
+// Alert Groups on a save (C-25.FR-13) and the re-render of a button set do: whatever its lifecycle events, it
+// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018).
 type Rendering struct {
-	Group      *Group
-	Actor      Actor
-	Events     []Recorded
-	ReceivedAt *time.Time
-	After      func(f func(ctx context.Context))
-	Fallback   func(f TemplateFailure)
-	Changed    func()
+	Group         *Group
+	Actor         Actor
+	Events        []Recorded
+	ReceivedAt    *time.Time
+	After         func(f func(ctx context.Context))
+	Fallback      func(f TemplateFailure)
+	Changed       func()
+	Configuration bool
 }
 
 // TemplateFailure is a Route template that failed while the re-render step rendered a message of the Alert Group,
@@ -555,7 +561,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
 	if d.rerender != nil {
-		failures, _, err := d.render(ctx, q, g, actor, recorded, after)
+		failures, _, err := d.render(ctx, q, g, actor, recorded, c.configuration, after)
 		if err != nil {
 			return err
 		}
@@ -579,10 +585,11 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 
 // render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
 // and returns the Route templates that failed, which the caller records (recordFallbacks), and whether it changed a
-// Desired state; after collects what runs once the transaction committed. The dispatcher calls it for every change,
-// and the re-render of a changed button set without a lifecycle event (updates.go).
+// Desired state; configuration marks a change of configuration (Rendering.Configuration); after collects what runs
+// once the transaction committed. The dispatcher calls it for every change, and the re-render of a changed button set
+// without a lifecycle event (updates.go).
 func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Actor, recorded []Recorded,
-	after *committed) ([]TemplateFailure, bool, error) {
+	configuration bool, after *committed) ([]TemplateFailure, bool, error) {
 	received, err := d.receivedAt(ctx, q)
 	if err != nil {
 		return nil, false, err
@@ -591,7 +598,7 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	changed := false
 	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
 		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
-		Changed: func() { changed = true }}); err != nil {
+		Changed: func() { changed = true }, Configuration: configuration}); err != nil {
 		return nil, false, err
 	}
 	return failures, changed, nil

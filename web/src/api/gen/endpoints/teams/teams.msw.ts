@@ -12,6 +12,7 @@ import type {
 
 import type {
   Team,
+  TeamLabelValueList,
   TeamList,
   TeamUser,
   TeamUserList
@@ -21,13 +22,26 @@ import {
   getAddTeamUserResponseMock,
   getCreateTeamResponseMock,
   getGetTeamResponseMock,
+  getListTeamLabelValuesResponseMock,
   getListTeamUsersResponseMock,
   getListTeamsResponseMock,
   getUpdateTeamResponseMock
 } from './teams.faker';
 
-export { getListTeamsResponseMock, getCreateTeamResponseMock, getGetTeamResponseMock, getUpdateTeamResponseMock, getListTeamUsersResponseMock, getAddTeamUserResponseMock } from './teams.faker';
+export { getListTeamLabelValuesResponseMock, getListTeamsResponseMock, getCreateTeamResponseMock, getGetTeamResponseMock, getUpdateTeamResponseMock, getListTeamUsersResponseMock, getAddTeamUserResponseMock } from './teams.faker';
 
+
+export const getListTeamLabelValuesMockHandler = (overrideResponse?: TeamLabelValueList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<TeamLabelValueList> | TeamLabelValueList), options?: RequestHandlerOptions) => {
+  return http.get('*/team-label-values', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListTeamLabelValuesResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 
 export const getListTeamsMockHandler = (overrideResponse?: TeamList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<TeamList> | TeamList), options?: RequestHandlerOptions) => {
   return http.get('*/teams', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
@@ -121,6 +135,7 @@ export const getRemoveTeamUserMockHandler = (overrideResponse?: void | ((info: P
   }, options)
 }
 export const getTeamsMock = () => [
+  getListTeamLabelValuesMockHandler(),
   getListTeamsMockHandler(),
   getCreateTeamMockHandler(),
   getGetTeamMockHandler(),

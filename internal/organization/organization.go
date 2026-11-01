@@ -51,10 +51,11 @@ const (
 )
 
 // KindOrganizationButtons is the kind of the open_group_updates row that a changed button set of the Organization
-// writes (C-28.FR-9), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups,
-// which claim it.
+// writes (C-28.FR-9), KindTeamEvaluation that of a changed Team label (C-25.FR-13), and OpenGroupUpdatesChannel the
+// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
 const (
 	KindOrganizationButtons = "organization_buttons"
+	KindTeamEvaluation      = "team_evaluation"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
@@ -177,7 +178,7 @@ type SettingsQueries interface {
 	LockOutboundPolicy(ctx context.Context, orgID int64) (int64, error)
 	UpdateOutboundPolicy(ctx context.Context, arg dbgen.UpdateOutboundPolicyParams) (int64, error)
 	ListSeverityValues(ctx context.Context, arg dbgen.ListSeverityValuesParams) ([]dbgen.ListSeverityValuesRow, error)
-	InsertOrganizationButtonsUpdate(ctx context.Context, arg dbgen.InsertOrganizationButtonsUpdateParams) error
+	InsertOrganizationUpdate(ctx context.Context, arg dbgen.InsertOrganizationUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 	// Notify sends a live-update hint, in the transaction when the queries run in one.
@@ -324,8 +325,9 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 // the Secrets show only that they changed, and announced to the live-updates streams with an organization hint, in
 // the transaction of the change. A changed button set also requests the re-render of the open Root messages of the
 // Destinations that follow it: an open_group_updates row organization_buttons, whose notification wakes the workers of
-// every replica once the transaction commits (C-28.FR-9). An update that changes nothing writes nothing. A new or
-// cleared URL clears the result
+// every replica once the transaction commits (C-28.FR-9); a changed Team label requests the evaluation of the Teams
+// of the open Alert Groups in the same way, with a row team_evaluation without a Team (C-25.FR-13). An update that
+// changes nothing writes nothing. A new or cleared URL clears the result
 // of the last outgoing heartbeat and also sends a system-status hint. Severity levels and Instance labels apply from
 // the next evaluation: their readers read them in their own transactions (C-20.FR-2).
 func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, addr netip.Addr, version *int64,
@@ -422,8 +424,13 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			return fmt.Errorf("change the organization: %w", err)
 		}
 		if !setsEqual(before.Buttons, after.Buttons) {
-			if err := s.requestButtonsUpdate(ctx, q, now); err != nil {
-				return err
+			if err := s.requestUpdate(ctx, q, KindOrganizationButtons, now); err != nil {
+				return fmt.Errorf("re-render the root messages of the organization's button set: %w", err)
+			}
+		}
+		if before.TeamLabel != after.TeamLabel {
+			if err := s.requestUpdate(ctx, q, KindTeamEvaluation, now); err != nil {
+				return fmt.Errorf("evaluate the teams of the open alert groups for the team label: %w", err)
 			}
 		}
 		if out, err = s.get(ctx, q); err != nil {
@@ -456,15 +463,15 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 	return out, nil
 }
 
-// requestButtonsUpdate, in the transaction of a change of the Organization's button set, asks the workers of
-// internal/groups to re-render the open Root messages of the Destinations that follow it (C-28.FR-9): one
-// open_group_updates row, requested at the business time of the change, and a notification that wakes them once the
-// transaction commits.
-func (s *Service) requestButtonsUpdate(ctx context.Context, q SettingsQueries, now time.Time) error {
-	if err := q.InsertOrganizationButtonsUpdate(ctx, dbgen.InsertOrganizationButtonsUpdateParams{OrgID: s.orgID,
-		Kind:        KindOrganizationButtons,
-		RequestedAt: now}); err != nil {
-		return fmt.Errorf("re-render the root messages of the organization's button set: %w", err)
+// requestUpdate, in the transaction of a change of the Organization, asks the workers of internal/groups to bring the
+// change to the open Alert Groups: one open_group_updates row of the kind, without a scope, requested at the business
+// time of the change, and a notification that wakes them once the transaction commits. The kind is
+// KindOrganizationButtons, which re-renders the open Root messages of the Destinations that follow the Organization's
+// button set (C-28.FR-9), or KindTeamEvaluation, which evaluates the Teams of the open Alert Groups (C-25.FR-13).
+func (s *Service) requestUpdate(ctx context.Context, q SettingsQueries, kind string, now time.Time) error {
+	if err := q.InsertOrganizationUpdate(ctx, dbgen.InsertOrganizationUpdateParams{OrgID: s.orgID,
+		Kind: kind, RequestedAt: now}); err != nil {
+		return err
 	}
 	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
 		return fmt.Errorf("wake the open alert group update workers: %w", err)

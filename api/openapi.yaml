@@ -3293,6 +3293,34 @@ paths:
           $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /team-label-values:
+    get:
+      operationId: listTeamLabelValues
+      tags:
+      - Teams
+      summary: List values of the Team label without a Team
+      description: The values of the Organization's Team label, with the Static labels of their Integrations, that
+        Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not
+        deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside
+        `team.slug_format`, which reaches a Team only through a Team matcher.
+      x-permission: teams:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      responses:
+        '200':
+          description: The values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamLabelValueList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /teams:
     get:
       operationId: listTeams
@@ -11638,6 +11666,43 @@ components:
             readOnly: true
             description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
               an item of a list without reading it again.
+    TeamLabelValue:
+      type: object
+      required:
+      - value
+      - last_seen_at
+      - alert_count
+      - valid_slug
+      properties:
+        value:
+          type: string
+        last_seen_at:
+          type: string
+          format: date-time
+          description: When an Alert that carries the value was last seen.
+        alert_count:
+          type: integer
+          description: How many Alerts last seen within the window carry the value.
+        valid_slug:
+          type: boolean
+          description: False when the value is not a valid slug (`team.slug_format`), so that no Team can take it as
+            its slug.
+    TeamLabelValueList:
+      type: object
+      required:
+      - label
+      - window_days
+      - items
+      properties:
+        label:
+          type: string
+          description: The Team label of the Organization (`organization.team_label`).
+        window_days:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamLabelValue'
     TeamList:
       type: object
       required:

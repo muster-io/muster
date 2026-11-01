@@ -30,19 +30,23 @@ import (
 // Group the change already reached is left as it is, so a row that runs twice changes nothing the second time
 // (ADR-0007). The worker is not a Leader task.
 
-// The kinds of open_group_updates rows: a changed Minimum severity of a Route, which routing writes, and a changed
-// button set of a Destination or of the Organization (C-28.FR-9), which destinations and organization write; and
-// OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
+// The kinds of open_group_updates rows: a changed Minimum severity of a Route, which routing writes, a changed button
+// set of a Destination or of the Organization (C-28.FR-9), which destinations and organization write, and the
+// evaluation of the Teams of the open Alert Groups after a save of a Team or of the Team label (C-25.FR-13), which
+// teams and organization write; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every
+// replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity = "route_minimum_severity"
 	KindDestinationButtons   = "destination_buttons"
 	KindOrganizationButtons  = "organization_buttons"
+	KindTeamEvaluation       = "team_evaluation"
 	OpenGroupUpdatesChannel  = "muster_open_group_updates"
 )
 
 // updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
 // of a kind a later version adds waits for a replica that knows it.
-var updateKinds = []string{KindRouteMinimumSeverity, KindDestinationButtons, KindOrganizationButtons}
+var updateKinds = []string{KindRouteMinimumSeverity, KindDestinationButtons, KindOrganizationButtons,
+	KindTeamEvaluation}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -69,16 +73,21 @@ type updateQueries interface {
 	ListOpenGroupsFollowingOrganizationAfter(ctx context.Context,
 		arg dbgen.ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error)
 	ListFiringLevels(ctx context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow, error)
+	ListEvaluatedGroupsAfter(ctx context.Context, arg dbgen.ListEvaluatedGroupsAfterParams) ([]int64, error)
+	LockTeamEvaluation(ctx context.Context, arg dbgen.LockTeamEvaluationParams) error
+	GetTeamsStamp(ctx context.Context, orgID int64) (dbgen.GetTeamsStampRow, error)
+	AddAlertTeams(ctx context.Context, arg dbgen.AddAlertTeamsParams) error
 }
 
-// update is a claimed open_group_updates row: its kind and the Route or the Destination its kind names, with their
-// public_ids for the log lines.
+// update is a claimed open_group_updates row: its kind and the Route, the Destination or the Team its kind names, with
+// their public_ids for the log lines.
 type update struct {
 	id             int64
 	kind           string
 	routeID        int64
 	routePID       string
 	destinationPID string
+	teamPID        string
 }
 
 // minimumSeverityChanged is the system transition of an open Alert Group whose Route's Minimum severity changed
@@ -204,7 +213,7 @@ func (s *Service) rerenderButtons(ctx context.Context, q Queries, ids []int64, a
 	now := s.d.clock.Now().UTC()
 	n := 0
 	for _, g := range open {
-		failures, changed, err := s.d.render(ctx, q, g, System, nil, after)
+		failures, changed, err := s.d.render(ctx, q, g, System, nil, true, after)
 		if err != nil {
 			return 0, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
 		}
@@ -261,7 +270,7 @@ func (s *Service) claimUpdate(ctx context.Context, l db.Lease) (update, bool, er
 	}
 	r := rows[0]
 	return update{id: r.ID, kind: r.Kind, routeID: r.RouteID.Int64, routePID: r.RoutePublicID,
-		destinationPID: r.DestinationPublicID}, true, nil
+		destinationPID: r.DestinationPublicID, teamPID: r.TeamPublicID}, true, nil
 }
 
 // batchOutcome is what one batch of a claimed row did: how many Alert Groups it changed, whether it was the last,
@@ -316,6 +325,14 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				return fmt.Errorf("list the open alert groups that follow the organization's buttons: %w", err)
 			}
 			if out.changed, err = s.rerenderButtons(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindTeamEvaluation:
+			if ids, err = q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: s.orgID,
+				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups: %w", err)
+			}
+			if out.changed, err = s.evaluateTeams(ctx, q, ids, &after); err != nil {
 				return err
 			}
 		default:
@@ -481,6 +498,9 @@ func scopeOf(u update) []logging.Field {
 	}
 	if u.destinationPID != "" {
 		out = append(out, logging.F("destination", u.destinationPID))
+	}
+	if u.teamPID != "" {
+		out = append(out, logging.F("team", u.teamPID))
 	}
 	return out
 }

@@ -118,10 +118,10 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11 and C-25, a closed list: every
-// transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of timeline_entries
-// back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of the notices it
-// stands for (ack_timeout or owner).
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11 and C-25, a closed list:
+// every transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of
+// timeline_entries back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of
+// the notices it stands for (ack_timeout or owner).
 var Table = []Row{
 	{EventCreated, VariantAny, KindStatus, Loud, []Mention{MentionNewAlertGroup}},
 	{EventAlertsAdded, VariantFiring, KindAlerts, Loud, []Mention{MentionNewAlerts}},

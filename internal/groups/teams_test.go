@@ -19,6 +19,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 // fakeAlertTeam is an alert_teams row: the Team, the rule and the Team matcher of the rule matcher.
@@ -35,14 +36,18 @@ type fakeGroupTeam struct {
 
 // fakeTeams are the Teams of the fake database: those routing recorded on each Alert with the value of its Team label
 // that named no Team, the Teams of each Alert Group with the values it recorded, the Teams by id and the Teams of
-// each User.
+// each User; and, for the classification, the Team label (team when empty), organizations.teams_version and the Team
+// matchers of each Team.
 type fakeTeams struct {
-	alerts  map[int64][]fakeAlertTeam
-	unknown map[int64]string
-	groups  map[int64][]fakeGroupTeam
-	values  map[int64][]string
-	refs    map[int64]dbgen.ListTeamRefsRow
-	users   map[int64][]int64
+	alerts   map[int64][]fakeAlertTeam
+	unknown  map[int64]string
+	groups   map[int64][]fakeGroupTeam
+	values   map[int64][]string
+	refs     map[int64]dbgen.ListTeamRefsRow
+	users    map[int64][]int64
+	label    string
+	version  int64
+	matchers map[int64][]teamsdb.ListClassifiedMatchersRow
 }
 
 func (f *fakeDB) teamsOf() *fakeTeams {
@@ -67,17 +72,23 @@ func (f *fakeDB) ListAlertTeams(_ context.Context, arg dbgen.ListAlertTeamsParam
 			continue
 		}
 		n := len(out)
+		unknown := ts.unknown[id]
+		for _, r := range ts.refs {
+			if !r.Deleted && r.Slug == unknown {
+				unknown = ""
+			}
+		}
 		for _, m := range slices.SortedFunc(slices.Values(ts.alerts[id]), func(a, b fakeAlertTeam) int {
 			return cmp.Compare(a.team, b.team)
 		}) {
 			if ts.refs[m.team].Deleted {
 				continue
 			}
-			out = append(out, dbgen.ListAlertTeamsRow{AlertID: id, UnknownTeamValue: ts.unknown[id], TeamID: m.team,
+			out = append(out, dbgen.ListAlertTeamsRow{AlertID: id, UnknownTeamValue: unknown, TeamID: m.team,
 				Rule: m.rule, Matcher: m.matcher})
 		}
 		if len(out) == n {
-			out = append(out, dbgen.ListAlertTeamsRow{AlertID: id, UnknownTeamValue: ts.unknown[id]})
+			out = append(out, dbgen.ListAlertTeamsRow{AlertID: id, UnknownTeamValue: unknown})
 		}
 	}
 	return out, nil
@@ -540,5 +551,91 @@ func TestTeamsFailures(t *testing.T) {
 	h.db.before["ListGroupTeams"] = func() { h.db.fail["ListGroupTeams"] = errBoom }
 	if _, err := h.svc.List(t.Context(), ListRequest{Limit: 10}); !errors.Is(err, errBoom) {
 		t.Errorf("list: %v", err)
+	}
+}
+
+func (f *fakeDB) GetTeamsStamp(_ context.Context, org int64) (dbgen.GetTeamsStampRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetTeamsStamp"); err != nil {
+		return dbgen.GetTeamsStampRow{}, err
+	}
+	if org != orgID {
+		return dbgen.GetTeamsStampRow{}, errors.New("another organization")
+	}
+	ts := f.teamsOf()
+	return dbgen.GetTeamsStampRow{TeamLabel: cmp.Or(ts.label, "team"), TeamsVersion: ts.version}, nil
+}
+
+// ListClassifiedTeams is a query of the classification of internal/teams, which the fake database answers too.
+func (f *fakeDB) ListClassifiedTeams(_ context.Context, org int64) ([]teamsdb.ListClassifiedTeamsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListClassifiedTeams"); err != nil {
+		return nil, err
+	}
+	var out []teamsdb.ListClassifiedTeamsRow
+	for _, id := range slices.Sorted(maps.Keys(f.teamsOf().refs)) {
+		if r := f.teams.refs[id]; !r.Deleted && org == orgID {
+			out = append(out, teamsdb.ListClassifiedTeamsRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
+				Slug: r.Slug})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListClassifiedMatchers(_ context.Context, org int64) ([]teamsdb.ListClassifiedMatchersRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListClassifiedMatchers"); err != nil {
+		return nil, err
+	}
+	var out []teamsdb.ListClassifiedMatchersRow
+	for _, id := range slices.Sorted(maps.Keys(f.teamsOf().matchers)) {
+		if !f.teams.refs[id].Deleted && org == orgID {
+			out = append(out, f.teams.matchers[id]...)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) AddAlertTeams(_ context.Context, arg dbgen.AddAlertTeamsParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("AddAlertTeams"); err != nil {
+		return err
+	}
+	ts := f.teamsOf()
+	for i, id := range arg.AlertIds {
+		if arg.OrgID != orgID || slices.ContainsFunc(ts.alerts[id], func(m fakeAlertTeam) bool {
+			return m.team == arg.TeamIds[i]
+		}) {
+			continue
+		}
+		ts.alerts[id] = append(ts.alerts[id], fakeAlertTeam{team: arg.TeamIds[i], rule: arg.Rules[i],
+			matcher: arg.Matchers[i]})
+	}
+	return nil
+}
+
+// TestUnknownValueNowATeam is C-25.FR-7 after a save: a value of the Team label that routing recorded as naming no
+// Team, and that is the slug of a Team that is not deleted by the time its Alert joins an Alert Group, records no
+// unknown_team_value; one whose Team is deleted again records it.
+func TestUnknownValueNowATeam(t *testing.T) {
+	h := newHarness(t)
+	h.withTeams()
+	a := h.teamAlert("x", "search")
+	h.changes(t, ingest.ChangeFired, a)
+	if got := h.teamEntries(h.groupOf(t, a)); len(got) != 0 {
+		t.Errorf("a value that is a team's slug recorded %v", got)
+	}
+	ref := h.db.teamsOf().refs[search]
+	ref.Deleted = true
+	h.db.teamsOf().refs[search] = ref
+	b := h.teamAlert("y", "search")
+	h.changes(t, ingest.ChangeFired, b)
+	if got := h.teamEntries(h.groupOf(t, b)); !slices.Equal(got,
+		[]string{"unknown_team_value/system/quiet/unknown_team_value////search"}) {
+		t.Errorf("a value of a deleted team recorded %v", got)
 	}
 }

@@ -228,7 +228,7 @@ type fakeSettings struct {
 	values    []dbgen.ListSeverityValuesRow
 	valueArgs []dbgen.ListSeverityValuesParams
 	// buttonUpdates are the open_group_updates rows organization_buttons, and woken the notifications on their channel.
-	buttonUpdates []dbgen.InsertOrganizationButtonsUpdateParams
+	buttonUpdates []dbgen.InsertOrganizationUpdateParams
 	woken         []string
 	fail          map[string]error
 }
@@ -351,9 +351,9 @@ func (s *fakeSettings) ListSeverityValues(_ context.Context, arg dbgen.ListSever
 	return s.values, s.fail["ListSeverityValues"]
 }
 
-func (s *fakeSettings) InsertOrganizationButtonsUpdate(_ context.Context,
-	arg dbgen.InsertOrganizationButtonsUpdateParams) error {
-	if err := s.fail["InsertOrganizationButtonsUpdate"]; err != nil {
+func (s *fakeSettings) InsertOrganizationUpdate(_ context.Context,
+	arg dbgen.InsertOrganizationUpdateParams) error {
+	if err := s.fail["InsertOrganizationUpdate"]; err != nil {
 		return err
 	}
 	s.buttonUpdates = append(s.buttonUpdates, arg)
@@ -800,7 +800,7 @@ func TestButtonSet(t *testing.T) {
 	if len(s.hints) != 1 || s.hints[0] != (db.Hint{OrgID: 7, Type: HintOrganization}) {
 		t.Errorf("hints = %+v", s.hints)
 	}
-	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationButtonsUpdateParams{OrgID: 7,
+	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationUpdateParams{OrgID: 7,
 		Kind: "organization_buttons", RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
 		t.Errorf("re-render requested %+v, woken %v", s.buttonUpdates, s.woken)
 	}
@@ -854,7 +854,7 @@ func TestButtonSet(t *testing.T) {
 		}
 	}
 
-	for _, method := range []string{"InsertOrganizationButtonsUpdate", "NotifyOpenGroupUpdates"} {
+	for _, method := range []string{"InsertOrganizationUpdate", "NotifyOpenGroupUpdates"} {
 		s.fail = map[string]error{method: errors.New("no")}
 		in.Buttons = &ButtonSetInput{Items: []buttons.ItemInput{{Button: buttons.ItemResolve}}}
 		if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil ||
@@ -1187,12 +1187,27 @@ func TestTeamLabel(t *testing.T) {
 		`[{"pointer":"/team_label","before":"team","after":"owner_team"}]` {
 		t.Errorf("audit = %+v", s.audit)
 	}
+	// C-25.FR-13: the new Team label requests the evaluation of the Teams of the open Alert Groups, without a Team.
+	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationUpdateParams{OrgID: 7,
+		Kind: KindTeamEvaluation, RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
+		t.Errorf("evaluation requested %+v, woken %v", s.buttonUpdates, s.woken)
+	}
 	in = inputOf(got)
 	in.Name = "Ops"
 	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
-		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel.String != "owner_team" {
-		t.Errorf("an update that omits it = %q, %v", kept.TeamLabel, err)
+		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel.String != "owner_team" || len(s.buttonUpdates) != 1 {
+		t.Errorf("an update that omits it = %q, %v, rows %+v", kept.TeamLabel, err, s.buttonUpdates)
 	}
+	for _, method := range []string{"InsertOrganizationUpdate", "NotifyOpenGroupUpdates"} {
+		s.fail = map[string]error{method: errors.New("no")}
+		in = inputOf(got)
+		in.TeamLabel = new("service_team")
+		if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil ||
+			!strings.Contains(err.Error(), "evaluate the teams of the open alert groups") {
+			t.Errorf("%s fails: %v", method, err)
+		}
+	}
+	s.fail = map[string]error{}
 	reserved := internalalerts.ReservedLabels()
 	if !slices.IsSorted(reserved) || !slices.Contains(reserved, "team_id") || slices.Contains(reserved, "team") {
 		t.Errorf("reserved labels %v", reserved)

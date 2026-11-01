@@ -237,6 +237,20 @@ func (q *Queries) GetTeam(ctx context.Context, arg GetTeamParams) (GetTeamRow, e
 	return i, err
 }
 
+const getTeamLabel = `-- name: GetTeamLabel :one
+SELECT team_label
+FROM organizations
+WHERE id = $1
+`
+
+// GetTeamLabel reads the Team label of the Organization (organization.team_label).
+func (q *Queries) GetTeamLabel(ctx context.Context, orgID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getTeamLabel, orgID)
+	var team_label string
+	err := row.Scan(&team_label)
+	return team_label, err
+}
+
 const getTeamUser = `-- name: GetTeamUser :one
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand
 FROM team_users tu
@@ -321,6 +335,39 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertTeamEvaluation = `-- name: InsertTeamEvaluation :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = $2 AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
+SELECT $1, $2::text, $3, $4::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertTeamEvaluationParams struct {
+	OrgID       int64
+	Kind        string
+	TeamID      pgtype.Int8
+	RequestedAt time.Time
+}
+
+// InsertTeamEvaluation requests, in the transaction of a save of the Team @team_id, the evaluation of the Teams of the
+// open Alert Groups (C-25.FR-13): the open_group_updates worker of any replica claims the row. A row of @kind that no
+// worker has claimed yet already covers the save, since its run classifies with the Teams as they are then: it is
+// locked, so that no worker claims it before this transaction commits, and no second one is inserted.
+func (q *Queries) InsertTeamEvaluation(ctx context.Context, arg InsertTeamEvaluationParams) error {
+	_, err := q.db.Exec(ctx, insertTeamEvaluation,
+		arg.OrgID,
+		arg.Kind,
+		arg.TeamID,
+		arg.RequestedAt,
+	)
+	return err
 }
 
 const insertTeamMatchers = `-- name: InsertTeamMatchers :exec
@@ -529,6 +576,61 @@ func (q *Queries) ListTeamInfo(ctx context.Context, orgID int64) ([]ListTeamInfo
 	for rows.Next() {
 		var i ListTeamInfoRow
 		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamLabelValues = `-- name: ListTeamLabelValues :many
+SELECT (a.labels ->> $1::text)::text AS value, max(a.last_seen_at)::timestamptz AS last_seen_at,
+       count(*)::bigint AS alerts
+FROM alerts a
+WHERE a.org_id = $2 AND a.last_seen_at >= $3::timestamptz AND a.labels ->> $1::text <> ''
+  AND NOT EXISTS (SELECT 1
+                  FROM teams t
+                  WHERE t.org_id = $2 AND t.deleted_at IS NULL AND t.slug = a.labels ->> $1::text)
+GROUP BY 1
+ORDER BY 2 DESC, 1
+LIMIT $4
+`
+
+type ListTeamLabelValuesParams struct {
+	Label     string
+	OrgID     int64
+	Since     time.Time
+	MaxValues int32
+}
+
+type ListTeamLabelValuesRow struct {
+	Value      string
+	LastSeenAt time.Time
+	Alerts     int64
+}
+
+// ListTeamLabelValues lists the values of the label @label, with the Static labels applied, of the Alerts last seen at
+// @since or later, leaving out empty values and the slugs of the Teams that are not deleted: each with when an Alert
+// that carries it was last seen and how many such Alerts there are, the most recently seen first. At most @max_values
+// values; the index alerts_org_last_seen_idx serves the window.
+func (q *Queries) ListTeamLabelValues(ctx context.Context, arg ListTeamLabelValuesParams) ([]ListTeamLabelValuesRow, error) {
+	rows, err := q.db.Query(ctx, listTeamLabelValues,
+		arg.Label,
+		arg.OrgID,
+		arg.Since,
+		arg.MaxValues,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamLabelValuesRow{}
+	for rows.Next() {
+		var i ListTeamLabelValuesRow
+		if err := rows.Scan(&i.Value, &i.LastSeenAt, &i.Alerts); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -837,6 +939,16 @@ func (q *Queries) LockTeamsVersion(ctx context.Context, orgID int64) (int64, err
 	var teams_version int64
 	err := row.Scan(&teams_version)
 	return teams_version, err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const releaseOwnedDestinations = `-- name: ReleaseOwnedDestinations :many

@@ -95,8 +95,8 @@ WHERE id = @org_id;
 
 -- UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 -- URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
--- null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the stamp of the classification that
--- every replica caches (C-25.FR-5).
+-- null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the
+-- stamp of the classification that every replica caches (C-25.FR-5).
 -- name: UpdateSettings :execrows
 UPDATE organizations
 SET name                                         = @name,
@@ -166,11 +166,22 @@ FROM (
 WHERE o.id = p.id AND o.outgoing_heartbeat_last_attempt_at = @attempt_at::timestamptz
 RETURNING p.previous;
 
--- InsertOrganizationButtonsUpdate requests that a change of the Organization's button set reach the open Root messages
--- of the Destinations that follow it (C-28.FR-9): the open_group_updates worker of any replica claims the row.
--- name: InsertOrganizationButtonsUpdate :exec
+-- InsertOrganizationUpdate requests that a change of the Organization reach its open Alert Groups, with a row of
+-- @kind without a scope: organization_buttons for the open Root messages of the Destinations that follow the
+-- Organization's button set (C-28.FR-9), team_evaluation for the Teams of the open Alert Groups after a new Team label
+-- (C-25.FR-13). The open_group_updates worker of any replica claims the row. A row team_evaluation that no worker has
+-- claimed yet already covers the change, since its run classifies with the Teams as they are then: it is locked, so
+-- that no worker claims it before this transaction commits, and no second one is inserted.
+-- name: InsertOrganizationUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind = 'team_evaluation' AND u.leased_by IS NULL AND @kind::text = 'team_evaluation'
+    FOR UPDATE
+)
 INSERT INTO open_group_updates (org_id, kind, requested_at)
-VALUES (@org_id, @kind, @requested_at::timestamptz);
+SELECT @org_id, @kind::text, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
 
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec

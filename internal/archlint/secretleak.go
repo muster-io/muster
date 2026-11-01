@@ -4608,8 +4608,8 @@ func (s *probeOrgSettings) ListSeverityValues(context.Context, orgdb.ListSeverit
 
 func (s *probeOrgSettings) NotifyOutboundPolicy(context.Context, int64) error { return nil }
 
-func (s *probeOrgSettings) InsertOrganizationButtonsUpdate(context.Context,
-	orgdb.InsertOrganizationButtonsUpdateParams) error {
+func (s *probeOrgSettings) InsertOrganizationUpdate(context.Context,
+	orgdb.InsertOrganizationUpdateParams) error {
 	return errors.New("not used by the probe")
 }
 

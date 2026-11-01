@@ -194,3 +194,61 @@ func TestEnqueue(t *testing.T) {
 		delete(e.db.fail, q)
 	}
 }
+
+// TestTeamsEvaluatedIsQuiet is C-25.FR-13 and ADR-0018 in delivery: a rendering of the evaluation of the Teams on a
+// save, marked as a change of configuration and carrying its Quiet team_joined, that changes the Desired state of a
+// Not delivered Publication which was never published publishes it Quietly — the same rendering unmarked, as an Alert
+// that joins brings it, keeps the Loud Publication — and releases an Urgent Alert Group that a Storm holds Quietly.
+func TestTeamsEvaluatedIsQuiet(t *testing.T) {
+	joined := groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Variant: groups.VariantAny,
+		Loudness: groups.Quiet}
+	for _, c := range []struct {
+		name          string
+		configuration bool
+		want          groups.Loudness
+	}{{"the teams evaluated", true, groups.Quiet}, {"a team an alert brings", false, groups.Loud}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+			d := e.only(t)
+			d.state, d.publishedAt = "not_delivered", nil
+			if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring,
+				"disk full on two hosts"), Actor: groups.System, Events: []groups.Recorded{joined},
+				Configuration: c.configuration}); err != nil {
+				t.Fatal(err)
+			}
+			if d := e.only(t); d.state != "pending" || d.loud.Bool != (c.want == groups.Loud) {
+				t.Fatalf("the delivery is %s, loud %+v", d.state, d.loud)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != c.want {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+
+	e := stormEnv(t)
+	r := e.db.routes[routeID]
+	r.threshold = 2
+	e.db.routes[routeID] = r
+	id := int64(5000)
+	for range 4 {
+		id++
+		e.addGroup(t, id, false)
+	}
+	e.onlyStorm(t)
+	e.round(t)
+	e.rec.Reset()
+	g := e.view(id, groups.StatusFiring)
+	g.Urgent = true
+	e.db.groups[id].urgent = true
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Events: []groups.Recorded{joined}, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.round(t)
+	if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet ||
+		!strings.HasPrefix(textOf(p[0]), fmt.Sprintf("#%d ", id)) {
+		t.Errorf("released by the teams evaluated %+v", p)
+	}
+}
