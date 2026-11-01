@@ -201,7 +201,10 @@ None.
   existed. Each entry's resource is the User; none carries the token.
 - Decided with the implementation: the answer of the feed has `Cache-Control: no-store`; a `404` (and a `500`) is a
   problem without `instance` and with nothing about the token, its User or the Organization; methods other than `GET`
-  and `HEAD` get `405`. A malformed token is answered `404` without a lookup.
+  and `HEAD` get `405`. A malformed token is answered `404` without a lookup. Under `/api/v1`, where the spec's path
+  of the feed is no operation, `/api/v1/ical/…` answers the API's `404` `not-found` problem, without the `instance`
+  that would repeat the token. The SPA's generated client (orval) keeps `getIcalCalendar` under its base `/api/v1`,
+  as it does the operations of the ingest and internal listeners; nothing calls it.
 - The maintainer confirms one provisional value with this story (operator attention): P-82, the prefix `mstr_cal_`, 32
   random bytes, stored as a hash, shown once, one per User. P-81, the window of 7 days back and 60 ahead, is confirmed
   by the test environment and stays provisional.
