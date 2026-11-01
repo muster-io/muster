@@ -252,7 +252,7 @@ Other lifecycle values:
 | `schedule.gap_alert_horizon` | 7 days: `MusterScheduleGap` is raised while there is a gap now or one that starts within it | built in | C-27 | decided |
 | `schedule.gap_scan_interval` | 5 min, the Leader's scan for gaps | built in | C-27 | P-80 |
 | `ical.window` | the segments of the Result in which the User is On-call, from 7 days back to 60 days ahead | built in | C-27 | P-81 |
-| `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | P-82 |
+| `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | decided |
 | `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | P-85 |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |

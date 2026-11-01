@@ -54,7 +54,9 @@
   (the Team label, Team matchers, the Teams of Alerts and Alert Groups and the lifecycle events `team_joined` and
   `unknown_team_value`, C-25.FR-5 to FR-7, S-118) and
   [`0025_schedules`](../../internal/db/migrations/0025_schedules.up.sql)
-  (Schedules, their Rotation layers with their people, and Overrides, C-27, S-131), in
+  (Schedules, their Rotation layers with their people, and Overrides, C-27, S-131) and
+  [`0026_ical_feeds`](../../internal/db/migrations/0026_ical_feeds.up.sql)
+  (the personal iCal feeds, C-27.FR-10, S-134), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -93,10 +95,11 @@ org-scoped queries lead with `org_id`. Installation-level tables have no `org_id
 `role_permissions` (reference data), `keyring_state`, `replicas`, `runtime_state` and `downtime_periods` (one Muster
 installation, one Keyring, one Leader). Authentication lookups cannot start from an Organization, because the request
 carries only a secret or an id from a path: session cookies, API tokens, Integration tokens, password setup and Telegram
-link tokens are found by their hash alone (each hash column is globally unique), and messenger callbacks by the
-Connection in their path; these queries yield the Organization and are the lint's allow-list. Background work is not
-on that list: worker claims, Leader scans, retention deletes and pruning run per Organization — they iterate over the
-Organizations (one in L1) and pass `org_id` to every query, as the claims of [section 5](#5-queues-and-claims) show.
+link tokens and the tokens of iCal feeds are found by their hash alone (each hash column is globally unique), and
+messenger callbacks by the Connection in their path; these queries yield the Organization and are the lint's
+allow-list. Background work is not on that list: worker claims, Leader scans, retention deletes and pruning run per
+Organization — they iterate over the Organizations (one in L1) and pass `org_id` to every query, as the claims of
+[section 5](#5-queues-and-claims) show.
 
 **Time.** Every timestamp is `timestamptz` and is passed from Go, so tests drive windows and timers with a virtual clock
 ([ADR-0006](../adr/0006-postgresql-only-storage-and-queues.md)). No business column has a `now()` default. The single
@@ -113,9 +116,9 @@ CI compares them with the `CHECK` lists.
 field is a triple `<name>_ciphertext bytea` (AES-256-GCM), `<name>_key_id text` (the Keyring key that encrypted it) and
 `<name>_updated_at` (for the API's "set, and when it last changed"); a `CHECK` keeps ciphertext and key id together. The
 view [`encrypted_values`](#414-encrypted_values-view) lists every encrypted value with its key id. Tokens Muster issues
-(`mstr_pat_`, `mstr_sat_`, `mstr_int_`, session cookies, password setup links, link tokens and codes) are stored only as
-32-byte SHA-256 hashes; they are high-entropy and only ever verified. TOTP recovery codes are short, so they are hashed
-with argon2id (PHC string) instead.
+(`mstr_pat_`, `mstr_sat_`, `mstr_int_`, `mstr_cal_`, session cookies, password setup links, link tokens and codes) are
+stored only as 32-byte SHA-256 hashes; they are high-entropy and only ever verified. TOTP recovery codes are short, so
+they are hashed with argon2id (PHC string) instead.
 
 **Optimistic locking.** Configuration rows carry `version bigint` (default 1). The ETag is derived from it; an update is
 `... SET version = version + 1 WHERE id = $1 AND version = $2`, and zero updated rows is a `412`
@@ -152,7 +155,7 @@ indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `r
 changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), the Teams, `teams` and
 `team_users` (0022), the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
 `alert_group_teams` (0024), and the Schedules, `schedules`, `rotation_layers`, `rotation_layer_users` and
-`schedule_overrides` (0025), which makes 69 tables.
+`schedule_overrides` (0025), and the personal iCal feeds, `ical_feeds` (0026), which makes 70 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -167,7 +170,7 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
-| Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides` | schedules | deleted with their Schedule |
+| Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
 | Delivery | `deliveries`, `thread_replies`, `webhook_events`, **`delivery_events`**, `telegram_post_copies`, `rate_limit_buckets` | delivery | events 90 days, monthly partitions |
@@ -692,7 +695,7 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
 
 ### 4.3 Users, sign-in and sessions
 
-Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi-and-api-conventions.md),
+Serves C-03 (FR-3–FR-27), C-18.FR-8, C-27.FR-10; [ADR-0008](../adr/0008-spec-first-openapi-and-api-conventions.md),
 [ADR-0010](../adr/0010-configuration-only-through-the-api.md), [ADR-0011](../adr/0011-application-level-secret-encryption.md).
 
 - **`users`** — local, OIDC and bootstrap users. `login` is stored as entered; uniqueness (`lower(login)`) and sign-in
@@ -750,6 +753,14 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8; [ADR-0008](../adr/0008-spec-first-openapi
   `groups_claim_seen_at` is null. Saving another groups claim, issuer, client ID or scopes clears both. The records
   carry the groups claim, issuer, client ID and scopes they read and change nothing when an Admin saved others
   meanwhile, and write no row when nothing changes.
+
+- **`ical_feeds`** (migration 0026, C-27.FR-10) — the personal iCal feed of a User, at most one: primary key
+  `user_id`, the SHA-256 of its token (`ical.token`: `mstr_cal_` and 32 random bytes) in `token_hash`, 32 bytes and
+  unique, and `issued_at` on the business clock. Issuing a feed again is one `INSERT ... ON CONFLICT (user_id) DO
+  UPDATE`, so the previous token stops working in the same statement; revoking deletes the row. The feed's path
+  carries only the token, so `FindIcalFeed` looks it up by its hash alone (`-- archlint:org-exempt`) and yields the
+  Organization and the User's status; a disabled or deleted User's token answers `404`. Disabling a User keeps the
+  row; deleting them deletes it in the transaction of the deletion, through the Schedules, which own the table.
 
 ### 4.4 Service accounts and API tokens
 

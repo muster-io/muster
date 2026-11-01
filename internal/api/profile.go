@@ -12,6 +12,7 @@ import (
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/oidc"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/users"
 )
 
@@ -185,4 +186,63 @@ func (s *Server) CompleteOidcLink(ctx context.Context, req gen.CompleteOidcLinkR
 		Address: clientAddress(ctx), UserAgent: infoFrom(ctx).userAgent,
 	})
 	return redirect{location: out.Redirect}, nil
+}
+
+// GetMyIcalFeed is getMyIcalFeed: whether the caller has an iCal feed and when it was issued, never its token.
+func (s *Server) GetMyIcalFeed(ctx context.Context, _ gen.GetMyIcalFeedRequestObject) (
+	gen.GetMyIcalFeedResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	feed, err := s.icalFeeds.Get(ctx, id.Session.User.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.IcalFeed{Exists: feed.IssuedAt != nil}
+	if feed.IssuedAt != nil {
+		out.IssuedAt.Set(*feed.IssuedAt)
+	} else {
+		out.IssuedAt.SetNull()
+	}
+	return gen.GetMyIcalFeed200JSONResponse(out), nil
+}
+
+// IssueMyIcalFeed is issueMyIcalFeed: a new link of the caller's iCal feed, shown once, which revokes the previous
+// one.
+func (s *Server) IssueMyIcalFeed(ctx context.Context, _ gen.IssueMyIcalFeedRequestObject) (
+	gen.IssueMyIcalFeedResponseObject, error) {
+	r, u, err := s.feedCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	issued, err := s.icalFeeds.Issue(ctx, r, u)
+	if err != nil {
+		return nil, err
+	}
+	return gen.IssueMyIcalFeed201JSONResponse(gen.IcalFeedIssued{Url: issued.URL, IssuedAt: issued.IssuedAt}), nil
+}
+
+// RevokeMyIcalFeed is revokeMyIcalFeed: the caller's iCal feed stops working at once.
+func (s *Server) RevokeMyIcalFeed(ctx context.Context, _ gen.RevokeMyIcalFeedRequestObject) (
+	gen.RevokeMyIcalFeedResponseObject, error) {
+	r, u, err := s.feedCaller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.icalFeeds.Revoke(ctx, r, u); err != nil {
+		return nil, err
+	}
+	return gen.RevokeMyIcalFeed204Response{}, nil
+}
+
+// feedCaller is the caller of an operation on their own iCal feed, which only the web session reaches.
+func (s *Server) feedCaller(ctx context.Context) (schedules.Requester, schedules.FeedUser, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return schedules.Requester{}, schedules.FeedUser{}, err
+	}
+	user := id.Session.User
+	return schedules.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)},
+		schedules.FeedUser{ID: user.ID, PublicID: user.PublicID}, nil
 }

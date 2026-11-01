@@ -5080,6 +5080,23 @@ type HintEventType string
 // HttpHeaders HTTP headers by name, each with its values, masked. Untrusted text.
 type HttpHeaders map[string][]string
 
+// IcalFeed defines model for IcalFeed.
+type IcalFeed struct {
+	// Exists Whether the caller has an iCal feed.
+	Exists bool `json:"exists"`
+
+	// IssuedAt When the feed was issued; null without one.
+	IssuedAt nullable.Nullable[time.Time] `json:"issued_at"`
+}
+
+// IcalFeedIssued defines model for IcalFeedIssued.
+type IcalFeedIssued struct {
+	IssuedAt time.Time `json:"issued_at"`
+
+	// Url The link of the feed, `MUSTER_PUBLIC_URL/ical/{token}.ics`, whose token starts with `mstr_cal_`. Shown once.
+	Url string `json:"url"`
+}
+
 // InUseRef An object that holds the resource a deletion refuses.
 type InUseRef struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
@@ -12087,6 +12104,15 @@ type ServerInterface interface {
 	// DeleteMyAccountLink Unlink an own messenger account
 	// (DELETE /me/account-links/{account_link_id})
 	DeleteMyAccountLink(w http.ResponseWriter, r *http.Request, accountLinkId AccountLinkId)
+	// RevokeMyIcalFeed Revoke the caller's iCal feed
+	// (DELETE /me/ical-feed)
+	RevokeMyIcalFeed(w http.ResponseWriter, r *http.Request)
+	// GetMyIcalFeed Read whether the caller has an iCal feed
+	// (GET /me/ical-feed)
+	GetMyIcalFeed(w http.ResponseWriter, r *http.Request)
+	// IssueMyIcalFeed Issue the caller's iCal feed
+	// (POST /me/ical-feed)
+	IssueMyIcalFeed(w http.ResponseWriter, r *http.Request)
 	// StartOidcLink Start linking an OIDC identity
 	// (POST /me/oidc-identity)
 	StartOidcLink(w http.ResponseWriter, r *http.Request)
@@ -15864,6 +15890,48 @@ func (siw *ServerInterfaceWrapper) DeleteMyAccountLink(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeMyIcalFeed operation middleware
+func (siw *ServerInterfaceWrapper) RevokeMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeMyIcalFeed(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMyIcalFeed operation middleware
+func (siw *ServerInterfaceWrapper) GetMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyIcalFeed(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueMyIcalFeed operation middleware
+func (siw *ServerInterfaceWrapper) IssueMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueMyIcalFeed(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartOidcLink operation middleware
 func (siw *ServerInterfaceWrapper) StartOidcLink(w http.ResponseWriter, r *http.Request) {
 
@@ -18967,6 +19035,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/totp/removal", wrapper.RemoveTotp)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/totp/confirmation", wrapper.ConfirmTotpEnrolment)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/totp/recovery-codes", wrapper.RegenerateTotpRecoveryCodes)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/ical-feed", wrapper.RevokeMyIcalFeed)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/ical-feed", wrapper.GetMyIcalFeed)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/ical-feed", wrapper.IssueMyIcalFeed)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/system-notices", wrapper.ListSystemNotices)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users", wrapper.ListUsers)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users", wrapper.CreateUser)
@@ -28688,6 +28759,216 @@ type DeleteMyAccountLink429ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response DeleteMyAccountLink429ApplicationProblemPlusJSONResponse) VisitDeleteMyAccountLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyIcalFeedRequestObject struct {
+}
+
+type RevokeMyIcalFeedResponseObject interface {
+	VisitRevokeMyIcalFeedResponse(w http.ResponseWriter) error
+}
+
+type RevokeMyIcalFeed204Response struct {
+}
+
+func (response RevokeMyIcalFeed204Response) VisitRevokeMyIcalFeedResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeMyIcalFeed401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeMyIcalFeed401ApplicationProblemPlusJSONResponse) VisitRevokeMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyIcalFeed403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeMyIcalFeed403ApplicationProblemPlusJSONResponse) VisitRevokeMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeMyIcalFeed429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeMyIcalFeed429ApplicationProblemPlusJSONResponse) VisitRevokeMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyIcalFeedRequestObject struct {
+}
+
+type GetMyIcalFeedResponseObject interface {
+	VisitGetMyIcalFeedResponse(w http.ResponseWriter) error
+}
+
+type GetMyIcalFeed200JSONResponse IcalFeed
+
+func (response GetMyIcalFeed200JSONResponse) VisitGetMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyIcalFeed401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyIcalFeed401ApplicationProblemPlusJSONResponse) VisitGetMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyIcalFeed403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyIcalFeed403ApplicationProblemPlusJSONResponse) VisitGetMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyIcalFeed429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyIcalFeed429ApplicationProblemPlusJSONResponse) VisitGetMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueMyIcalFeedRequestObject struct {
+}
+
+type IssueMyIcalFeedResponseObject interface {
+	VisitIssueMyIcalFeedResponse(w http.ResponseWriter) error
+}
+
+type IssueMyIcalFeed201JSONResponse IcalFeedIssued
+
+func (response IssueMyIcalFeed201JSONResponse) VisitIssueMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueMyIcalFeed401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response IssueMyIcalFeed401ApplicationProblemPlusJSONResponse) VisitIssueMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueMyIcalFeed403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response IssueMyIcalFeed403ApplicationProblemPlusJSONResponse) VisitIssueMyIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type IssueMyIcalFeed429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response IssueMyIcalFeed429ApplicationProblemPlusJSONResponse) VisitIssueMyIcalFeedResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -38485,6 +38766,15 @@ type StrictServerInterface interface {
 	// DeleteMyAccountLink Unlink an own messenger account
 	// (DELETE /me/account-links/{account_link_id})
 	DeleteMyAccountLink(ctx context.Context, request DeleteMyAccountLinkRequestObject) (DeleteMyAccountLinkResponseObject, error)
+	// RevokeMyIcalFeed Revoke the caller's iCal feed
+	// (DELETE /me/ical-feed)
+	RevokeMyIcalFeed(ctx context.Context, request RevokeMyIcalFeedRequestObject) (RevokeMyIcalFeedResponseObject, error)
+	// GetMyIcalFeed Read whether the caller has an iCal feed
+	// (GET /me/ical-feed)
+	GetMyIcalFeed(ctx context.Context, request GetMyIcalFeedRequestObject) (GetMyIcalFeedResponseObject, error)
+	// IssueMyIcalFeed Issue the caller's iCal feed
+	// (POST /me/ical-feed)
+	IssueMyIcalFeed(ctx context.Context, request IssueMyIcalFeedRequestObject) (IssueMyIcalFeedResponseObject, error)
 	// StartOidcLink Start linking an OIDC identity
 	// (POST /me/oidc-identity)
 	StartOidcLink(ctx context.Context, request StartOidcLinkRequestObject) (StartOidcLinkResponseObject, error)
@@ -41264,6 +41554,78 @@ func (sh *strictHandler) DeleteMyAccountLink(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteMyAccountLinkResponseObject); ok {
 		if err := validResponse.VisitDeleteMyAccountLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeMyIcalFeed operation middleware
+func (sh *strictHandler) RevokeMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+	var request RevokeMyIcalFeedRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeMyIcalFeed(ctx, request.(RevokeMyIcalFeedRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeMyIcalFeed")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeMyIcalFeedResponseObject); ok {
+		if err := validResponse.VisitRevokeMyIcalFeedResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMyIcalFeed operation middleware
+func (sh *strictHandler) GetMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+	var request GetMyIcalFeedRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMyIcalFeed(ctx, request.(GetMyIcalFeedRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMyIcalFeed")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMyIcalFeedResponseObject); ok {
+		if err := validResponse.VisitGetMyIcalFeedResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// IssueMyIcalFeed operation middleware
+func (sh *strictHandler) IssueMyIcalFeed(w http.ResponseWriter, r *http.Request) {
+	var request IssueMyIcalFeedRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.IssueMyIcalFeed(ctx, request.(IssueMyIcalFeedRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "IssueMyIcalFeed")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(IssueMyIcalFeedResponseObject); ok {
+		if err := validResponse.VisitIssueMyIcalFeedResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

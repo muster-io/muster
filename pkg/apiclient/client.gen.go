@@ -5082,6 +5082,23 @@ type HintEventType string
 // HttpHeaders HTTP headers by name, each with its values, masked. Untrusted text.
 type HttpHeaders map[string][]string
 
+// IcalFeed defines model for IcalFeed.
+type IcalFeed struct {
+	// Exists Whether the caller has an iCal feed.
+	Exists bool `json:"exists"`
+
+	// IssuedAt When the feed was issued; null without one.
+	IssuedAt nullable.Nullable[time.Time] `json:"issued_at"`
+}
+
+// IcalFeedIssued defines model for IcalFeedIssued.
+type IcalFeedIssued struct {
+	IssuedAt time.Time `json:"issued_at"`
+
+	// Url The link of the feed, `MUSTER_PUBLIC_URL/ical/{token}.ics`, whose token starts with `mstr_cal_`. Shown once.
+	Url string `json:"url"`
+}
+
 // InUseRef An object that holds the resource a deletion refuses.
 type InUseRef struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
@@ -12847,6 +12864,27 @@ type ClientInterface interface {
 	// Corresponds with DELETE /me/account-links/{account_link_id} (the `DeleteMyAccountLink` operationId).
 	DeleteMyAccountLink(ctx context.Context, accountLinkId AccountLinkId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RevokeMyIcalFeed Revoke the caller's iCal feed
+	//
+	// Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+	//
+	// Corresponds with DELETE /me/ical-feed (the `RevokeMyIcalFeed` operationId).
+	RevokeMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetMyIcalFeed Read whether the caller has an iCal feed
+	//
+	// Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+	//
+	// Corresponds with GET /me/ical-feed (the `GetMyIcalFeed` operationId).
+	GetMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// IssueMyIcalFeed Issue the caller's iCal feed
+	//
+	// Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+	//
+	// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
+	IssueMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// StartOidcLink Start linking an OIDC identity
 	//
 	// Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -13702,7 +13740,7 @@ type ClientInterface interface {
 
 	// DeleteUser Delete a user
 	//
-	// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+	// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
 	//
 	// Corresponds with DELETE /users/{user_id} (the `DeleteUser` operationId).
 	DeleteUser(ctx context.Context, userId UserId, params *DeleteUserParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -15920,6 +15958,57 @@ func (c *Client) DeleteMyAccountLink(ctx context.Context, accountLinkId AccountL
 	return c.Client.Do(req)
 }
 
+// RevokeMyIcalFeed Revoke the caller's iCal feed
+//
+// Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+//
+// Corresponds with DELETE /me/ical-feed (the `RevokeMyIcalFeed` operationId).
+func (c *Client) RevokeMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokeMyIcalFeedRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetMyIcalFeed Read whether the caller has an iCal feed
+//
+// Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+//
+// Corresponds with GET /me/ical-feed (the `GetMyIcalFeed` operationId).
+func (c *Client) GetMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMyIcalFeedRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// IssueMyIcalFeed Issue the caller's iCal feed
+//
+// Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+//
+// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
+func (c *Client) IssueMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewIssueMyIcalFeedRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // StartOidcLink Start linking an OIDC identity
 //
 // Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -17865,7 +17954,7 @@ func (c *Client) CreateUser(ctx context.Context, body CreateUserJSONRequestBody,
 
 // DeleteUser Delete a user
 //
-// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
 //
 // Corresponds with DELETE /users/{user_id} (the `DeleteUser` operationId).
 func (c *Client) DeleteUser(ctx context.Context, userId UserId, params *DeleteUserParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -22677,6 +22766,87 @@ func NewDeleteMyAccountLinkRequest(server string, accountLinkId AccountLinkId) (
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRevokeMyIcalFeedRequest constructs an http.Request for the RevokeMyIcalFeed method
+func NewRevokeMyIcalFeedRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/ical-feed")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetMyIcalFeedRequest constructs an http.Request for the GetMyIcalFeed method
+func NewGetMyIcalFeedRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/ical-feed")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewIssueMyIcalFeedRequest constructs an http.Request for the IssueMyIcalFeed method
+func NewIssueMyIcalFeedRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/ical-feed")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -27944,6 +28114,33 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with DELETE /me/account-links/{account_link_id} (the `DeleteMyAccountLink` operationId).
 	DeleteMyAccountLinkWithResponse(ctx context.Context, accountLinkId AccountLinkId, reqEditors ...RequestEditorFn) (*DeleteMyAccountLinkResponse, error)
 
+	// RevokeMyIcalFeedWithResponse Revoke the caller's iCal feed
+	//
+	// Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /me/ical-feed (the `RevokeMyIcalFeed` operationId).
+	RevokeMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RevokeMyIcalFeedResponse, error)
+
+	// GetMyIcalFeedWithResponse Read whether the caller has an iCal feed
+	//
+	// Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /me/ical-feed (the `GetMyIcalFeed` operationId).
+	GetMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyIcalFeedResponse, error)
+
+	// IssueMyIcalFeedWithResponse Issue the caller's iCal feed
+	//
+	// Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
+	IssueMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*IssueMyIcalFeedResponse, error)
+
 	// StartOidcLinkWithResponse Start linking an OIDC identity
 	//
 	// Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -28909,7 +29106,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteUserWithResponse Delete a user
 	//
-	// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+	// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -36243,6 +36440,206 @@ func (r DeleteMyAccountLinkResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r DeleteMyAccountLinkResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// RevokeMyIcalFeedResponse429Headers the declared response headers of an HTTP 429 response for RevokeMyIcalFeed
+type RevokeMyIcalFeedResponse429Headers struct {
+	RetryAfter *int
+}
+
+type RevokeMyIcalFeedResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *RevokeMyIcalFeedResponse429Headers
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r RevokeMyIcalFeedResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r RevokeMyIcalFeedResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r RevokeMyIcalFeedResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r RevokeMyIcalFeedResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokeMyIcalFeedResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokeMyIcalFeedResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevokeMyIcalFeedResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetMyIcalFeedResponse429Headers the declared response headers of an HTTP 429 response for GetMyIcalFeed
+type GetMyIcalFeedResponse429Headers struct {
+	RetryAfter *int
+}
+
+type GetMyIcalFeedResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *IcalFeed
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetMyIcalFeedResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetMyIcalFeedResponse) GetJSON200() *IcalFeed {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetMyIcalFeedResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r GetMyIcalFeedResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r GetMyIcalFeedResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMyIcalFeedResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMyIcalFeedResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMyIcalFeedResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMyIcalFeedResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// IssueMyIcalFeedResponse429Headers the declared response headers of an HTTP 429 response for IssueMyIcalFeed
+type IssueMyIcalFeedResponse429Headers struct {
+	RetryAfter *int
+}
+
+type IssueMyIcalFeedResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *IcalFeedIssued
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *IssueMyIcalFeedResponse429Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r IssueMyIcalFeedResponse) GetJSON201() *IcalFeedIssued {
+	return r.JSON201
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r IssueMyIcalFeedResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r IssueMyIcalFeedResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r IssueMyIcalFeedResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r IssueMyIcalFeedResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r IssueMyIcalFeedResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r IssueMyIcalFeedResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r IssueMyIcalFeedResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -45565,6 +45962,51 @@ func (c *ClientWithResponses) DeleteMyAccountLinkWithResponse(ctx context.Contex
 	return ParseDeleteMyAccountLinkResponse(rsp)
 }
 
+// RevokeMyIcalFeedWithResponse Revoke the caller's iCal feed
+//
+// Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /me/ical-feed (the `RevokeMyIcalFeed` operationId).
+func (c *ClientWithResponses) RevokeMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RevokeMyIcalFeedResponse, error) {
+	rsp, err := c.RevokeMyIcalFeed(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokeMyIcalFeedResponse(rsp)
+}
+
+// GetMyIcalFeedWithResponse Read whether the caller has an iCal feed
+//
+// Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /me/ical-feed (the `GetMyIcalFeed` operationId).
+func (c *ClientWithResponses) GetMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyIcalFeedResponse, error) {
+	rsp, err := c.GetMyIcalFeed(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMyIcalFeedResponse(rsp)
+}
+
+// IssueMyIcalFeedWithResponse Issue the caller's iCal feed
+//
+// Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
+func (c *ClientWithResponses) IssueMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*IssueMyIcalFeedResponse, error) {
+	rsp, err := c.IssueMyIcalFeed(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseIssueMyIcalFeedResponse(rsp)
+}
+
 // StartOidcLinkWithResponse Start linking an OIDC identity
 //
 // Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -47184,7 +47626,7 @@ func (c *ClientWithResponses) CreateUserWithResponse(ctx context.Context, body C
 
 // DeleteUserWithResponse Delete a user
 //
-// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+// Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -53916,6 +54358,182 @@ func ParseDeleteMyAccountLinkResponse(rsp *http.Response) (*DeleteMyAccountLinkR
 	switch {
 	case rsp.StatusCode == 429:
 		var headers DeleteMyAccountLinkResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseRevokeMyIcalFeedResponse parses an HTTP response from a RevokeMyIcalFeedWithResponse call
+func ParseRevokeMyIcalFeedResponse(rsp *http.Response) (*RevokeMyIcalFeedResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokeMyIcalFeedResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers RevokeMyIcalFeedResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetMyIcalFeedResponse parses an HTTP response from a GetMyIcalFeedWithResponse call
+func ParseGetMyIcalFeedResponse(rsp *http.Response) (*GetMyIcalFeedResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMyIcalFeedResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest IcalFeed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetMyIcalFeedResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseIssueMyIcalFeedResponse parses an HTTP response from a IssueMyIcalFeedWithResponse call
+func ParseIssueMyIcalFeedResponse(rsp *http.Response) (*IssueMyIcalFeedResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &IssueMyIcalFeedResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest IcalFeedIssued
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers IssueMyIcalFeedResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

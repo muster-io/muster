@@ -223,6 +223,7 @@ type Config struct {
 	RequestLog   RequestLog
 	Teams        Teams
 	Schedules    Schedules
+	IcalFeeds    IcalFeeds
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -263,6 +264,7 @@ type Server struct {
 	requestLog     RequestLog
 	teams          Teams
 	schedules      Schedules
+	icalFeeds      IcalFeeds
 	trustedProxies []netip.Prefix
 	log            *logging.Logger
 	real           clock.Clock
@@ -326,6 +328,9 @@ var implemented = map[string]bool{
 	"ListSchedules": true, "CreateSchedule": true, "GetSchedule": true, "UpdateSchedule": true, "DeleteSchedule": true,
 	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
 	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true,
+	"GetMyIcalFeed": true, "IssueMyIcalFeed": true, "RevokeMyIcalFeed": true,
+	// getIcalCalendar is outside /api/v1 and not generated: IcalHandler serves it.
+	"GetIcalCalendar": true,
 }
 
 // LoadSpec parses the embedded specification with the app listener's base path as its only server, which is how
@@ -363,7 +368,7 @@ func New(cfg Config) (*Server, error) {
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
 		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
-		schedules:      cfg.Schedules,
+		schedules: cfg.Schedules, icalFeeds: cfg.IcalFeeds,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),
 	}

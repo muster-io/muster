@@ -16,7 +16,10 @@ change goes only into a new minor version, with the next layer.
   webhooks.
 - **Servers and listeners.** The default server is the app listener, `{public_url}/api/v1`. Operations on the other
   listeners carry their own `servers` entry: ingestion, Heartbeat and messenger callbacks use `{ingest_url}/api/v1`; health
-  and metrics use the internal listener. Every operation also names its listener in `x-listener`.
+  and metrics use the internal listener. Every operation also names its listener in `x-listener`. One operation of the
+  app listener is outside `/api/v1`: the personal iCal feed, `getIcalCalendar` at `{public_url}/ical/{token}.ics`, with
+  its own `servers` entry; it is served by hand and left out of the generated server and client
+  (`exclude-operation-ids`), since a wildcard of the standard library's `ServeMux` is a whole path segment.
 - **Components.** `schemas` hold resources, `*Input` request bodies and `*List` pages; `parameters` hold pagination,
   `If-Match`, the Alert Group filters and path ids; `responses` hold the shared problem answers (`400`, `401`, `403`, `404`,
   `409`, `410`, `412`, `413`, `422`, `428`, `429`, `500`, `503`) with examples.
@@ -116,6 +119,9 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 - `apiToken`: bearer Personal access token (`mstr_pat_`) or Service account token (`mstr_sat_`).
 - `integrationToken`: bearer Integration token (`mstr_int_`), accepted only by ingestion and Heartbeat; the path-token
   variants set `security: []` and carry the token in the path.
+- The token of a personal iCal feed (`mstr_cal_`, `ical.token`) is no scheme either: `getIcalCalendar` sets
+  `security: []` and carries it in the path, which every log line masks as `/ical/[redacted].ics`. The API never
+  accepts it as a bearer token.
 - `telegramSecretToken`: the webhook secret header of the optional Telegram webhook mode. The Mattermost callback has no
   scheme: authenticity rests on the signed action id in the body.
 

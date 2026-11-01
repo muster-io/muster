@@ -92,3 +92,29 @@ Changing and deleting
 No messages
 :   Overrides need no approval and send no message, and neither do Shifts: who is On-call is shown by Muster and its
     API, and every Override is recorded in the Audit log with its people and span.
+
+## iCal feed
+
+Each User may subscribe a calendar application to a personal **iCal feed** of the times when they are On-call. The
+feed has one event for each span in which the User is On-call in a Schedule of any of their Teams, named
+"{Team} · {Schedule}", from 7 days back to 60 days ahead (`ical.window`):
+
+- It follows the Result: where a higher Rotation layer or someone else's Override has the time, it is not in the feed.
+  With the two Rotation layers above, a week in which Petr has the lower Rotation layer shows only its nights and its
+  weekend.
+- An Override that makes the User On-call is an event of its own span; adjacent spans of one Schedule are otherwise
+  one event, so a Rotation layer limited to Friday 19:00–09:00 is one event from Friday 19:00 to Saturday 09:00.
+- Times are in UTC, so a calendar application shows them in its own time zone, across the changes of the clocks too.
+
+The link
+:   `issueMyIcalFeed` (`POST /api/v1/me/ical-feed`) gives the link, `MUSTER_PUBLIC_URL/ical/{token}.ics`, from the web
+    session only. It is shown once: Muster keeps only a hash of its token (`ical.token`, starting with `mstr_cal_`), so
+    copy it at once. `getMyIcalFeed` tells whether a feed exists and when it was issued.
+
+A new link revokes the old one
+:   Each User has one feed. Issuing a new link stops the old one at once, and `revokeMyIcalFeed` stops the current one;
+    a stopped link, and the link of a disabled or deleted User, answers `404`. Deleting a User deletes their feed.
+
+Calendar applications fetch the link without signing in, so treat it as a password: anyone who has it sees the times.
+Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`. Schedules are not imported from
+iCal: the feed only shows what the Schedules say.

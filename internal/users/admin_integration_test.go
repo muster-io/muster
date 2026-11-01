@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/teams"
 	"github.com/muster-io/muster/internal/users"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
@@ -723,6 +724,95 @@ func TestIntegrationTeamsOfDeletedUsers(t *testing.T) {
 			AND diff -> 0 ->> 'pointer' = '/users/' || $2`, e.ops.ID, bob.PublicID).Scan(&removed); err != nil ||
 			removed != 2 {
 			t.Errorf("%d team.user_removed entries, %v", removed, err)
+		}
+	})
+}
+
+// failingFeeds is a FeedRemover that fails, so that the delete rolls back.
+type failingFeeds struct{}
+
+func (failingFeeds) RemoveUserFeed(context.Context, usersdb.DBTX, int64, string, audit.Actor, audit.Transport,
+	netip.Addr) (func(context.Context), error) {
+	return nil, errors.New("the feeds are unavailable")
+}
+
+// TestIntegrationIcalFeedsOfDeletedUsers is C-27.FR-10 and C-27.AC-7: disabling a user keeps their iCal feed, which
+// the lookup refuses until they are enabled again; deleting them deletes it in the transaction of the delete,
+// recorded as ical_feed.revoked with the reason user_deleted, and a failure there rolls the delete back.
+func TestIntegrationIcalFeedsOfDeletedUsers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		w := audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock)
+		store := schedules.NewStore(e.d.Pool)
+		feeds := schedules.NewFeeds(schedules.FeedsConfig{OrgID: e.orgID, Store: schedules.NewFeedStore(e.d.Pool),
+			Audit: w, Business: e.clock, PublicURL: "https://muster.example.org/",
+			Schedules: schedules.New(schedules.Config{OrgID: e.orgID, Store: store, Audit: w, Business: e.clock})})
+		bob := e.create(t, "Bob", "bob", auth.RoleResponder, "bob-password-1")
+		owner := schedules.FeedUser{ID: bob.ID, PublicID: bob.PublicID}
+		issued, err := feeds.Issue(ctx, schedules.Requester{Actor: audit.User(bob.ID, bob.PublicID),
+			Transport: audit.TransportUI}, owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value := strings.TrimSuffix(strings.TrimPrefix(issued.URL, "https://muster.example.org/ical/"), ".ics")
+		lookup := func() (schedules.FeedUser, error) {
+			t.Helper()
+			return feeds.Lookup(ctx, value)
+		}
+		if u, err := lookup(); err != nil || u != owner {
+			t.Fatalf("lookup = %+v, %v", u, err)
+		}
+		if _, err := e.admin.Disable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if u, err := lookup(); !errors.Is(err, schedules.ErrFeedNotFound) || u.PublicID != bob.PublicID {
+			t.Errorf("the feed of a disabled user = %+v, %v", u, err)
+		}
+		if _, err := e.admin.Enable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := lookup(); err != nil {
+			t.Errorf("the feed of a user enabled again: %v", err)
+		}
+		feedRows := func() int {
+			t.Helper()
+			var n int
+			if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM ical_feeds WHERE user_id = $1`, bob.ID).
+				Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+
+		e.admin.SetFeedRemover(failingFeeds{})
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err == nil {
+			t.Fatal("a delete whose feed could not be deleted succeeded")
+		}
+		if u, err := e.admin.Get(ctx, bob.PublicID); err != nil || u.Status != users.StatusActive || feedRows() != 1 {
+			t.Errorf("after a failed delete: %+v, %v, %d feeds", u, err, feedRows())
+		}
+
+		e.admin.SetFeedRemover(feeds)
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if n := feedRows(); n != 0 {
+			t.Errorf("a deleted user has %d feeds", n)
+		}
+		if _, err := lookup(); !errors.Is(err, schedules.ErrFeedNotFound) {
+			t.Errorf("the feed of a deleted user: %v", err)
+		}
+		var revoked int
+		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked'
+			AND details ->> 'reason' = 'user_deleted' AND actor_user_id = $1 AND resource_type = 'user'
+			AND resource_public_id = $2`, e.ops.ID, bob.PublicID).Scan(&revoked); err != nil || revoked != 1 {
+			t.Errorf("%d ical_feed.revoked entries, %v", revoked, err)
+		}
+		var leaked int
+		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE details::text LIKE '%mstr_cal_%'
+			OR diff::text LIKE '%mstr_cal_%'`).Scan(&leaked); err != nil || leaked != 0 {
+			t.Errorf("%d Audit log entries carry the token, %v", leaked, err)
 		}
 	})
 }

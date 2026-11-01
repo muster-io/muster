@@ -893,6 +893,20 @@ var DevClockLoadFailed = newEvent("dev_clock_load_failed", LevelWarn, "C-01",
 		"keeps its offset until the next change or the next LISTEN.",
 	"error")
 
+// IcalFeedNotFound is logged when a request for an iCal feed answers 404 (C-27.FR-10).
+var IcalFeedNotFound = newEvent("ical_feed_not_found", LevelInfo, "C-27",
+	"A request for a personal iCal feed answered 404: its token is malformed, unknown or revoked, or its User is "+
+		"disabled or deleted. path is the path with the token masked, /ical/[redacted].ics, and user the public_id of "+
+		"the User when the token names one.",
+	"path", "user")
+
+// IcalFeedFailed is logged when a request for an iCal feed fails (C-27.FR-10).
+var IcalFeedFailed = newEvent("ical_feed_failed", LevelError, "C-27",
+	"A request for a personal iCal feed answered 500: the feed or the Results of the Schedules could not be read. "+
+		"path is the path with the token masked, /ical/[redacted].ics, user the public_id of the User when it is "+
+		"known, and error what failed; calendar applications fetch the feed again later.",
+	"path", "user", "error")
+
 // Event is a registered log event. Its zero value is not registered, and the logger refuses it.
 type Event struct {
 	def *eventDef

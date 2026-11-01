@@ -242,6 +242,18 @@ WARN · fields: `integration`, `last_signal_at` · C-07
 
 No Heartbeat signal arrived for an Integration within its Heartbeat timeout, so it is Heartbeat lost and MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal.
 
+### `ical_feed_failed`
+
+ERROR · fields: `path`, `user`, `error` · C-27
+
+A request for a personal iCal feed answered 500: the feed or the Results of the Schedules could not be read. path is the path with the token masked, /ical/[redacted].ics, user the public_id of the User when it is known, and error what failed; calendar applications fetch the feed again later.
+
+### `ical_feed_not_found`
+
+INFO · fields: `path`, `user` · C-27
+
+A request for a personal iCal feed answered 404: its token is malformed, unknown or revoked, or its User is disabled or deleted. path is the path with the token masked, /ical/[redacted].ics, and user the public_id of the User when the token names one.
+
 ### `ingest_failed`
 
 ERROR · fields: `integration`, `route_pattern`, `error` · C-05

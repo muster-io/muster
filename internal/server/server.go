@@ -47,6 +47,12 @@ func IsCallbackPath(p string) bool {
 	return strings.HasPrefix(p, "/api/v1/callbacks/")
 }
 
+// IsIcalPath reports whether p is under the personal iCal feeds, /ical/, which the app listener serves before the SPA
+// (C-27.FR-10).
+func IsIcalPath(p string) bool {
+	return strings.HasPrefix(p, "/ical/")
+}
+
 // Ingest is the handler of the ingest listener: heartbeat serves the Heartbeat endpoint, callbacks the messenger
 // callbacks, and ingest everything else, ingestion first.
 func Ingest(ingest, heartbeat, callbacks http.Handler) http.Handler {

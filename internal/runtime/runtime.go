@@ -127,8 +127,9 @@ type database interface {
 	RoutingStore() routing.Store
 	// TeamsStore serves the Teams.
 	TeamsStore() teams.Store
-	// SchedulesStore serves the Schedules.
+	// SchedulesStore serves the Schedules and IcalFeedsStore their personal iCal feeds.
 	SchedulesStore() schedules.Store
+	IcalFeedsStore() schedules.FeedStore
 	// HeartbeatStore serves the Heartbeat endpoint and the Heartbeat check.
 	HeartbeatStore() heartbeat.Store
 	IngestStore() ingest.Store
@@ -215,6 +216,8 @@ func (d pgDatabase) RoutingStore() routing.Store { return routing.NewStore(d.Poo
 func (d pgDatabase) TeamsStore() teams.Store { return teams.NewStore(d.Pool) }
 
 func (d pgDatabase) SchedulesStore() schedules.Store { return schedules.NewStore(d.Pool) }
+
+func (d pgDatabase) IcalFeedsStore() schedules.FeedStore { return schedules.NewFeedStore(d.Pool) }
 
 func (d pgDatabase) HeartbeatStore() heartbeat.Store { return heartbeat.NewStore(d.Pool) }
 
@@ -538,8 +541,9 @@ type process struct {
 	router *routing.Router
 	// teams holds the Teams, which own Routes and Destinations.
 	teams *teams.Service
-	// schedules holds the Schedules of the Teams.
+	// schedules holds the Schedules of the Teams, and icalFeeds the personal iCal feeds of their On-call times.
 	schedules *schedules.Service
+	icalFeeds *schedules.Feeds
 	snapshots *ingest.Service
 	signals   *heartbeat.Service
 	worker    *ingest.Worker
@@ -717,7 +721,8 @@ func (p *process) serve(ctx context.Context) error {
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
 	}, server.Handlers{
-		App: server.App(p.api, web.Dist(), p.cfg.PublicURL.Scheme == "https"),
+		App: server.App(p.api, api.IcalHandler{Feeds: p.icalFeeds, Log: p.log}, web.Dist(),
+			p.cfg.PublicURL.Scheme == "https"),
 		Ingest: server.Ingest(ingest.NewHandler(ingest.HandlerConfig{
 			Auth: p.integrations, Snapshots: p.snapshots, Log: p.log, Real: p.clocks.Real,
 			TrustedProxies: p.cfg.TrustedProxies,
@@ -950,6 +955,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	p.teams = teams.New(teams.Config{OrgID: orgID, Store: p.db.TeamsStore(), Audit: w, Business: p.clocks.Business})
 	p.schedules = schedules.New(schedules.Config{OrgID: orgID, Store: p.db.SchedulesStore(), Audit: w,
 		Business: p.clocks.Business})
+	p.icalFeeds = schedules.NewFeeds(schedules.FeedsConfig{OrgID: orgID, Store: p.db.IcalFeedsStore(), Audit: w,
+		Business: p.clocks.Business, Schedules: p.schedules, PublicURL: p.cfg.PublicURL.String()})
 	p.groups = groups.New(groups.Config{OrgID: orgID, Store: p.db.GroupsStore(), Audit: w,
 		Business: p.clocks.Business, Log: p.log,
 		Restamp: func(ctx context.Context, tx groups.DBTX, alertIDs []int64, routeID int64) error {
@@ -1108,6 +1115,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	admin.SetOwnerReleaser(p.groups)
 	admin.SetLinkRemover(p.links)
 	admin.SetTeamRemover(p.teams)
+	admin.SetFeedRemover(p.icalFeeds)
 	// A change of the outbound address policy applies on this replica as soon as it commits.
 	settings := organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring).
 		WithLog(p.log).WithOutboundPolicyChanged(p.policies.Invalidate)
@@ -1147,6 +1155,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		RequestLog:     requestlog.NewReader(orgID, p.db.MessagesDB(), p.clocks.Business),
 		Teams:          p.teams,
 		Schedules:      p.schedules,
+		IcalFeeds:      p.icalFeeds,
 		TrustedProxies: p.cfg.TrustedProxies,
 		Log:            p.log,
 		Real:           p.clocks.Real,
