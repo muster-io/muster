@@ -28,7 +28,7 @@ const (
 	repoVersions  = "../../internalalerts/testdata/runbook_versions.json"
 	testBaseURL   = "https://docs.example.org/muster/"
 	dashboardCM   = "m-muster-dashboard"
-	successPrefix = "chart rules and dashboard match reference.md and the metric catalogue: 12 rules, "
+	successPrefix = "chart rules and dashboard match reference.md and the metric catalogue: 13 rules, "
 )
 
 // fixture is a rendered chart that passes every check until a test changes it.
@@ -575,7 +575,7 @@ func TestRunbookVersionOfTheAppVersion(t *testing.T) {
 			want := "chart rule MusterDown: runbook_url https://docs.example.org/muster/" + tc.segment +
 				"/operations/runbooks/MusterDown/ is not https://docs.example.org/muster/" + tc.want +
 				"/operations/runbooks/MusterDown/"
-			if code != 1 || first != want || strings.Count(stdout, "\n") != 12 {
+			if code != 1 || first != want || strings.Count(stdout, "\n") != 13 {
 				t.Errorf("run = %d:\n%s", code, stdout)
 			}
 		})
@@ -667,7 +667,7 @@ func TestReadReference(t *testing.T) {
 		t.Error("readReference of a missing file succeeded")
 	}
 	ref, err := readReference(repoReference)
-	if err != nil || len(ref) != 12 {
+	if err != nil || len(ref) != 13 {
 		t.Errorf("readReference(%s) = %d rules, %v", repoReference, len(ref), err)
 	}
 }
@@ -677,7 +677,7 @@ func TestExtract(t *testing.T) {
 	manifest := f.write()
 	out := filepath.Join(t.TempDir(), "rules.yaml")
 	code, stdout, stderr := runWith(t, "-manifest", manifest, "-extract-rules", out, "-tests", repoTests)
-	if code != 0 || stdout != "chart rules extracted: 12, each with its unit test\n" {
+	if code != 0 || stdout != "chart rules extracted: 13, each with its unit test\n" {
 		t.Fatalf("run = %d: %s%s", code, stdout, stderr)
 	}
 	data, err := os.ReadFile(out)
@@ -689,7 +689,7 @@ func TestExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := spec.rules()
-	if len(spec.Groups) != 1 || spec.Groups[0].Name != "muster" || len(rules) != 12 {
+	if len(spec.Groups) != 1 || spec.Groups[0].Name != "muster" || len(rules) != 13 {
 		t.Fatalf("extracted %d groups and %d rules:\n%s", len(spec.Groups), len(rules), data)
 	}
 	if r := rules[1]; r.Alert != "MusterNoLeader" || r.For != "2m" || r.Labels["severity"] != "critical" ||
@@ -698,7 +698,7 @@ func TestExtract(t *testing.T) {
 	}
 
 	if code, stdout, _ := runWith(t, "-manifest", manifest, "-extract-rules", out); code != 0 ||
-		stdout != "chart rules extracted: 12\n" {
+		stdout != "chart rules extracted: 13\n" {
 		t.Errorf("without -tests: run = %d: %s", code, stdout)
 	}
 }

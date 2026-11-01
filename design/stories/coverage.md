@@ -1017,7 +1017,7 @@ S-150, S-154, S-172
 | C-27.FR-4 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-5 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
-| C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 and P-88 stay provisional until the test environment confirms them |
+| C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 until the test environment; P-88 with S-149 |
 | C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
 | C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |

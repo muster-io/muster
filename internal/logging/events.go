@@ -1083,3 +1083,17 @@ var OutgoingHeartbeatFailed = newEvent("outgoing_heartbeat_failed", LevelWarn, "
 // OutgoingHeartbeatRecovered is logged when the outgoing heartbeat succeeded after a failed send (C-19.FR-7).
 var OutgoingHeartbeatRecovered = newEvent("outgoing_heartbeat_recovered", LevelInfo, "C-19",
 	"A send of the outgoing heartbeat succeeded after a failed one.")
+
+// ScheduleGapDetected is logged when the Leader's gap scan raises MusterScheduleGap for a Schedule (C-27.FR-7).
+var ScheduleGapDetected = newEvent("schedule_gap_detected", LevelWarn, "C-27",
+	"A Schedule whose gap alert is active has a gap now or one that starts within schedule.gap_alert_horizon, so the "+
+		"Leader's gap scan raises MusterScheduleGap: schedule is the public_id of the Schedule, team that of its Team "+
+		"and gap_start when the nearest gap starts. Logged once per raise.",
+	"schedule", "team", "gap_start")
+
+// ScheduleGapCleared is logged when the Leader's gap scan resolves MusterScheduleGap of a Schedule (C-27.FR-7).
+var ScheduleGapCleared = newEvent("schedule_gap_cleared", LevelInfo, "C-27",
+	"MusterScheduleGap of a Schedule resolves: no gap of it is current or starts within schedule.gap_alert_horizon, "+
+		"its gap alert is no longer active, or it was deleted. schedule is the public_id of the Schedule and team that "+
+		"of its Team. Logged once per resolve.",
+	"schedule", "team")

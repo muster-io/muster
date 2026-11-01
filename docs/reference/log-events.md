@@ -512,6 +512,18 @@ WARN · fields: `direction`, `operation`, `owner`, `error` · C-23
 
 A record of the Request log could not be written — the database refused it, or its write ran past its 2 s timeout — and was dropped; the request it records went on unchanged. direction and operation are the record's, owner the public_id of its Connection or outgoing webhook Destination, empty without one, and error the database error. The headers and bodies of the record are never logged; muster_request_log_write_failures_total counts the dropped records.
 
+### `schedule_gap_cleared`
+
+INFO · fields: `schedule`, `team` · C-27
+
+MusterScheduleGap of a Schedule resolves: no gap of it is current or starts within schedule.gap_alert_horizon, its gap alert is no longer active, or it was deleted. schedule is the public_id of the Schedule and team that of its Team. Logged once per resolve.
+
+### `schedule_gap_detected`
+
+WARN · fields: `schedule`, `team`, `gap_start` · C-27
+
+A Schedule whose gap alert is active has a gap now or one that starts within schedule.gap_alert_horizon, so the Leader's gap scan raises MusterScheduleGap: schedule is the public_id of the Schedule, team that of its Team and gap_start when the nearest gap starts. Logged once per raise.
+
 ### `schema_dirty`
 
 ERROR · fields: `database_version` · C-02

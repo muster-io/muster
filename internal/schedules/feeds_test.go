@@ -34,7 +34,7 @@ type fakeFeed struct {
 }
 
 func (s *fakeFeedStore) InTx(_ context.Context, f func(FeedQueries) error) error {
-	feeds, audit := maps(s.feeds), len(s.audit)
+	feeds, audit := cloneFeeds(s.feeds), len(s.audit)
 	if err := f(s); err != nil {
 		s.feeds, s.audit = feeds, s.audit[:audit]
 		return err
@@ -42,7 +42,7 @@ func (s *fakeFeedStore) InTx(_ context.Context, f func(FeedQueries) error) error
 	return nil
 }
 
-func maps(m map[int64]fakeFeed) map[int64]fakeFeed {
+func cloneFeeds(m map[int64]fakeFeed) map[int64]fakeFeed {
 	out := make(map[int64]fakeFeed, len(m))
 	for k, v := range m {
 		out[k] = v

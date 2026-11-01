@@ -2521,24 +2521,65 @@ func TestIntegrationTeamEvaluation(t *testing.T) {
 	})
 }
 
+// TestIntegrationScheduleGapAlert runs 0028 over a database at 27 with a Schedule: up gives it gap_alert by_default,
+// and so it gives a Schedule created without the column, as a replica that does not know it creates them; the CHECK
+// takes on and off and refuses another value; down drops the column and keeps the Schedules; up again works.
+func TestIntegrationScheduleGapAlert(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 27)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000AA', 'Payments', 'payments', '2026-10-31', '2026-10-31' FROM organizations`)
+		schedule := func(publicID, name string) {
+			t.Helper()
+			e.exec(t, `INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, created_at, updated_at)
+				SELECT o.id, '`+publicID+`', t.id, '`+name+`', 'UTC', false, now(), now() FROM organizations o, teams t`)
+		}
+		schedule("SC0000000000AA", "Main")
+		e.step(t, 1)
+		schedule("SC0000000000BB", "Second")
+		if got := e.count(t, `SELECT count(*) FROM schedules WHERE gap_alert = 'by_default'`); got != 2 {
+			t.Errorf("%d Schedules read by_default, want 2", got)
+		}
+		for _, c := range []struct {
+			value string
+			ok    bool
+		}{{"on", true}, {"off", true}, {"by_default", true}, {"sometimes", false}, {"", false}} {
+			_, err := e.d.Pool.Exec(t.Context(), `UPDATE schedules SET gap_alert = $1 WHERE public_id = 'SC0000000000AA'`,
+				c.value)
+			if (err == nil) != c.ok {
+				t.Errorf("gap_alert %q: %v", c.value, err)
+			}
+		}
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'schedules' AND column_name = 'gap_alert'`) +
+			e.count(t, `SELECT count(*) FROM schedules`); got != 2 {
+			t.Errorf("after down: the column is left or a Schedule is lost (%d)", got)
+		}
+		if err := e.mm.Migrate(28); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (27)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (28)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":27`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":28`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":27`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":28`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2554,10 +2595,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (27)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (28)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":27`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":28`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

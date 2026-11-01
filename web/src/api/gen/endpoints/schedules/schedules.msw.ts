@@ -11,6 +11,7 @@ import type {
 } from 'msw';
 
 import type {
+  OnCallNow,
   Schedule,
   ScheduleList,
   ScheduleOnCall,
@@ -22,6 +23,7 @@ import {
   getCreateScheduleOverrideResponseMock,
   getCreateScheduleResponseMock,
   getGetIcalCalendarResponseMock,
+  getGetOnCallNowResponseMock,
   getGetScheduleOnCallResponseMock,
   getGetScheduleResponseMock,
   getListScheduleOverridesResponseMock,
@@ -30,7 +32,7 @@ import {
   getUpdateScheduleResponseMock
 } from './schedules.faker';
 
-export { getListSchedulesResponseMock, getCreateScheduleResponseMock, getGetScheduleResponseMock, getUpdateScheduleResponseMock, getGetScheduleOnCallResponseMock, getListScheduleOverridesResponseMock, getCreateScheduleOverrideResponseMock, getUpdateScheduleOverrideResponseMock, getGetIcalCalendarResponseMock } from './schedules.faker';
+export { getListSchedulesResponseMock, getCreateScheduleResponseMock, getGetScheduleResponseMock, getUpdateScheduleResponseMock, getGetScheduleOnCallResponseMock, getListScheduleOverridesResponseMock, getCreateScheduleOverrideResponseMock, getUpdateScheduleOverrideResponseMock, getGetIcalCalendarResponseMock, getGetOnCallNowResponseMock } from './schedules.faker';
 
 
 export const getListSchedulesMockHandler = (overrideResponse?: ScheduleList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<ScheduleList> | ScheduleList), options?: RequestHandlerOptions) => {
@@ -161,6 +163,18 @@ export const getGetIcalCalendarMockHandler = (overrideResponse?: string | ((info
       })
   }, options)
 }
+
+export const getGetOnCallNowMockHandler = (overrideResponse?: OnCallNow | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<OnCallNow> | OnCallNow), options?: RequestHandlerOptions) => {
+  return http.get('*/on-call-now', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetOnCallNowResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getSchedulesMock = () => [
   getListSchedulesMockHandler(),
   getCreateScheduleMockHandler(),
@@ -172,5 +186,6 @@ export const getSchedulesMock = () => [
   getCreateScheduleOverrideMockHandler(),
   getUpdateScheduleOverrideMockHandler(),
   getDeleteScheduleOverrideMockHandler(),
-  getGetIcalCalendarMockHandler()
+  getGetIcalCalendarMockHandler(),
+  getGetOnCallNowMockHandler()
 ]

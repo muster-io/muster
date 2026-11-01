@@ -876,6 +876,24 @@ string · default: `10m`
 
 The window in which failed sign-ins count.
 
+### `alerting.rules.MusterScheduleGap`
+
+object
+
+A Schedule whose gap alert is active has a gap now or within the gap alert horizon (warning).
+
+### `alerting.rules.MusterScheduleGap.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterScheduleGap.for`
+
+string · default: `0m`
+
+How long the Schedule has a gap now or within the horizon before the rule fires.
+
 ### `dashboard`
 
 object

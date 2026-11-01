@@ -1166,6 +1166,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 func (p *process) newKeeper() *leader.Keeper {
 	id := p.replica.ID()
 	authPruner := auth.NewPruner(p.db.AuthPruner())
+	gapScan := &schedules.GapScan{Store: p.db.SchedulesStore(), Business: p.clocks.Business, Log: p.log,
+		RunbookBase: p.cfg.RunbookBaseURL.String()}
 	return leader.NewKeeper(p.db.LeaderSession, p.clocks.Real, p.log, id, leader.Tasks(leader.Work{
 		Alive: leader.NewAlive(p.db.LeaderStore(), p.clocks, p.log, id).OnDowntime(
 			func(ctx context.Context, tx leaderdb.DBTX, orgID int64, d leader.Downtime) error {
@@ -1246,6 +1248,8 @@ func (p *process) newKeeper() *leader.Keeper {
 			}
 			return p.slackSockets.Run(ctx)
 		},
+		ScheduleGapScan:   gapScan.Scan,
+		ScheduleGapForget: gapScan.Forget,
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},

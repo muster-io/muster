@@ -31,6 +31,13 @@ func (s *fakeStore) ListAlertingIntegrations(_ context.Context, org int64) ([]db
 	return s.integrations, nil
 }
 
+func (s *fakeStore) ListAlertingSchedules(_ context.Context, org int64) ([]dbgen.ListAlertingSchedulesRow, error) {
+	if err := s.call("ListAlertingSchedules"); err != nil || org != orgID {
+		return nil, err
+	}
+	return s.schedules, nil
+}
+
 // ListAlertingDestinations names each Destination by its public_id.
 func (s *fakeStore) ListAlertingDestinations(_ context.Context, org int64) ([]dbgen.ListAlertingDestinationsRow,
 	error) {
@@ -317,7 +324,7 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 	if list[0].ID != SuggestionInternalAlerts || in.Name != "Muster internal alerts" ||
 		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=~", Value: "Muster.*"}}) ||
 		in.MinimumSeverity != nil ||
-		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route"}) ||
+		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route", "schedule"}) ||
 		in.DestinationIDs == nil || len(in.DestinationIDs) != 0 || !in.Policy.AckTimeout.Enabled {
 		t.Errorf("suggested %+v", in)
 	}
@@ -343,6 +350,7 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 		input("by-destination", Matcher{Label: "destination", Op: "=", Value: "DSAAAAAAAAAAA1"}),
 		input("by-route", Matcher{Label: "template", Op: "=~", Value: ".+"}),
 		input("by-name", Matcher{Label: "alertname", Op: "=", Value: "MusterOIDCSecretExpiring"}),
+		input("by-schedule", Matcher{Label: "alertname", Op: "=", Value: "MusterScheduleGap"}),
 	}
 	var ids []string
 	for _, c := range covering {
@@ -465,7 +473,7 @@ func TestAcceptInternalAlertsSuggestion(t *testing.T) {
 func TestInternalAlertsSuggestionFailures(t *testing.T) {
 	boom := errors.New("boom")
 	for _, name := range []string{"ListAlertingDestinations", "ListAlertingIntegrations", "GetRoutingStamp",
-		"ListRoutes"} {
+		"ListRoutes", "ListAlertingSchedules"} {
 		svc, store, _ := newService(t)
 		store.dests["DSAAAAAAAAAAA1"] = 51
 		store.fail[name] = boom
@@ -493,5 +501,38 @@ func TestInternalAlertsSuggestionFailures(t *testing.T) {
 	if _, err := svc.AcceptSuggestion(t.Context(), by, SuggestionInternalAlerts,
 		[]string{"DSAAAAAAAAAAA1"}); !errors.Is(err, boom) {
 		t.Errorf("placement: %v", err)
+	}
+}
+
+// TestInternalAlertsSuggestionSchedules is C-27.FR-7 on the suggestion: each Schedule is an entity of
+// MusterScheduleGap with its Team's id and name and its slug under the Team label, so a Route that delivers by the
+// Team label takes the gap alert of a Team's Schedule as it will match, and a Schedule of another Team leaves the
+// suggestion standing; the Group key has schedule, so that each Schedule's gaps make an Alert Group of their own.
+func TestInternalAlertsSuggestionSchedules(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	store.dests["DSAAAAAAAAAAA1"] = 51
+	store.schedules = []dbgen.ListAlertingSchedulesRow{{PublicID: "SCAAAAAAAAAAAA", Name: "Main",
+		TeamPublicID: "TMAAAAAAAAAAAA", TeamName: "Payments", TeamSlug: "payments", TeamLabel: "owner"}}
+	for _, c := range []Input{
+		input("others", Matcher{Label: "alertname", Op: "!=", Value: "MusterScheduleGap"}),
+		input("payments", Matcher{Label: "owner", Op: "=", Value: "payments"},
+			Matcher{Label: "team_name", Op: "=", Value: "Payments"}),
+	} {
+		if _, err := svc.Create(ctx, by, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := suggestionIDs(t, svc, nil); len(got) != 0 {
+		t.Errorf("the Team's Route takes its gap alert: %v", got)
+	}
+	store.schedules = append(store.schedules, dbgen.ListAlertingSchedulesRow{PublicID: "SCBBBBBBBBBBBB",
+		Name: "Ops", TeamPublicID: "TMBBBBBBBBBBBB", TeamName: "Ops", TeamSlug: "ops", TeamLabel: "owner"})
+	if got := suggestionIDs(t, svc, nil); !slices.Equal(got, []string{SuggestionInternalAlerts}) {
+		t.Errorf("a Schedule of another Team: %v", got)
+	}
+	list, err := svc.Suggestions(ctx, nil)
+	if err != nil || len(list) != 1 || !slices.Contains(list[0].Route.GroupKey, "schedule") {
+		t.Errorf("suggested %+v, %v", list, err)
 	}
 }

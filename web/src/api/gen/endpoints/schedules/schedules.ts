@@ -25,10 +25,12 @@ import type {
   BadRequestResponse,
   ConflictResponse,
   ForbiddenResponse,
+  GetOnCallNowParams,
   GetScheduleOnCallParams,
   ListScheduleOverridesParams,
   ListSchedulesParams,
   NotFoundResponse,
+  OnCallNow,
   PreconditionFailedResponse,
   PreconditionRequiredResponse,
   Problem,
@@ -542,7 +544,7 @@ export const useDeleteSchedule = <TError = UnauthorizedResponse | ForbiddenRespo
 }
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCall = async (scheduleId: string,
@@ -1103,6 +1105,114 @@ export function useGetIcalCalendar<TData = Awaited<ReturnType<typeof getIcalCale
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetIcalCalendarQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getGetOnCallNowUrl = (params?: GetOnCallNowParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/on-call-now?${stringifiedParams}` : `/api/v1/on-call-now`
+}
+
+/**
+ * "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+ * @summary Read who is On-call now in each Team
+ */
+export const getOnCallNow = async (params?: GetOnCallNowParams, options?: Parameters<typeof apiFetch>[1]): Promise<OnCallNow> => {
+
+  return apiFetch<OnCallNow>(getGetOnCallNowUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOnCallNowQueryKey = (params?: GetOnCallNowParams,) => {
+    return [
+    `/api/v1/on-call-now`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetOnCallNowQueryOptions = <TData = Awaited<ReturnType<typeof getOnCallNow>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: GetOnCallNowParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOnCallNowQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOnCallNow>>> = ({ signal }) => getOnCallNow(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOnCallNowQueryResult = NonNullable<Awaited<ReturnType<typeof getOnCallNow>>>
+export type GetOnCallNowQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
+
+
+export function useGetOnCallNow<TData = Awaited<ReturnType<typeof getOnCallNow>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params: undefined |  GetOnCallNowParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOnCallNow>>,
+          TError,
+          Awaited<ReturnType<typeof getOnCallNow>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOnCallNow<TData = Awaited<ReturnType<typeof getOnCallNow>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetOnCallNowParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOnCallNow>>,
+          TError,
+          Awaited<ReturnType<typeof getOnCallNow>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOnCallNow<TData = Awaited<ReturnType<typeof getOnCallNow>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetOnCallNowParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read who is On-call now in each Team
+ */
+
+export function useGetOnCallNow<TData = Awaited<ReturnType<typeof getOnCallNow>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetOnCallNowParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOnCallNow>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOnCallNowQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

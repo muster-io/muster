@@ -729,6 +729,53 @@ func (q *Queries) ListAlertingIntegrations(ctx context.Context, orgID int64) ([]
 	return items, nil
 }
 
+const listAlertingSchedules = `-- name: ListAlertingSchedules :many
+SELECT s.public_id, s.name, t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug, o.team_label
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+JOIN organizations o ON o.id = s.org_id
+WHERE s.org_id = $1
+ORDER BY s.id
+`
+
+type ListAlertingSchedulesRow struct {
+	PublicID     string
+	Name         string
+	TeamPublicID string
+	TeamName     string
+	TeamSlug     string
+	TeamLabel    string
+}
+
+// ListAlertingSchedules lists the Schedules with what MusterScheduleGap carries of them: the public_id and the name,
+// the public_id, the name and the slug of their Team, and the Organization's Team label, under which the slug goes.
+func (q *Queries) ListAlertingSchedules(ctx context.Context, orgID int64) ([]ListAlertingSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listAlertingSchedules, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertingSchedulesRow{}
+	for rows.Next() {
+		var i ListAlertingSchedulesRow
+		if err := rows.Scan(
+			&i.PublicID,
+			&i.Name,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamLabel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHeartbeatIntegrations = `-- name: ListHeartbeatIntegrations :many
 SELECT public_id, name, static_labels
 FROM integrations

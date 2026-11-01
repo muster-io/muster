@@ -194,3 +194,17 @@ groups:
             {{ .window }}. First look for the failed sign-ins and their source addresses in the Audit log.
           runbook_url: {{ $runbooks }}/MusterLoginFailures/
 {{- end }}{{ end }}
+{{- with $r.MusterScheduleGap }}{{ if .enabled }}
+      - alert: MusterScheduleGap
+        expr: max by (schedule) (muster_schedule_gap{ {{- $j }}}) == 1
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: A Schedule has a gap
+          description: >-
+            Nobody is On-call now, or within the gap alert horizon, in the Schedule in the label schedule, whose gap
+            alert is active. First read its gaps and the people whose Shifts are skipped in the warnings of its
+            On-call, then fill the gap with an Override or a change of its Rotation layers.
+          runbook_url: {{ $runbooks }}/MusterScheduleGap/
+{{- end }}{{ end }}

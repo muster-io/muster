@@ -405,6 +405,7 @@ such as `schedule` or `team_id`, and setting it to one is refused with `422` (C-
 | `MusterDestinationBroken` | critical | a Destination is Broken | `destination`, `destination_name` | C-11 |
 | `MusterTemplateError` | warning | a template of a Route or Destination keeps failing | `route` and `route_name`, or `destination` and `destination_name`; `template` | C-12, C-15 |
 | `MusterOIDCSecretExpiring` | warning | the OIDC client secret expires within `oidc.secret_expiry_lead` | — | C-19 |
+| `MusterScheduleGap` | warning | a Schedule whose gap alert is active — `schedule.gap_alert` on, or by default while it is its Team's main Schedule — has a gap now or one that starts within `schedule.gap_alert_horizon`; the annotation `gap_start` says when the nearest gap starts | `schedule`, `schedule_name`, `team_id`, `team_name`, and the Team's slug under the Organization's Team label, outside the fingerprint, so that the alert belongs to its Team (C-25.FR-5) | C-27 |
 
 ### Internal alerts added in L2
 
@@ -413,7 +414,6 @@ the story that implements it.
 
 | Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
 |---|---|---|---|---|
-| `MusterScheduleGap` | warning | a Schedule with `schedule.gap_alert` on has a gap now or one that starts within `schedule.gap_alert_horizon`; an annotation says when the nearest gap starts | `schedule`, `schedule_name`, `team_id`, `team_name`, and the Team's slug under the Organization's Team label, outside the fingerprint, so that the alert belongs to its Team (C-25.FR-5) | C-27 |
 | `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken | `connection`, `connection_name` | C-30 |
 
 ## Metrics catalogue
@@ -473,6 +473,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_request_log_pruned_total` | counter | — (records the Leader deleted past `request_log.max_records` or `request_log.max_age`, `request_log_pruning`) | C-23 |
 | `muster_team_info` | gauge | `team`, `name` | C-25 |
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
+| `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while the Schedule, whose gap alert is active, has a gap now or one that starts within `schedule.gap_alert_horizon`, 0 for every other Schedule, those whose gap alert is not active included | C-27 |
 
 ## Chart rules
 
@@ -496,15 +497,16 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | `MusterTemplateError` | warning | `sum by (route, destination, template) (increase(muster_template_errors_total{job="muster"}[15m])) > 0` | 0m | templates failed in the last 15 minutes |
 | `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2` | 5m | a replica's clock is off |
 | `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20` | 0m | a burst of failed sign-ins |
+| `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule whose gap alert is active has a gap now or within `schedule.gap_alert_horizon`; the backup for the Internal alert |
 
 ### Chart rules added in L2
 
 Each joins the table above, the chart and the rule unit tests in the story that implements it; their thresholds and
 windows are _provisional_ (P-88), as those of L1 were.
+`MusterScheduleGap` has moved into the table above with S-133; its `for` is part of P-88, which S-149 confirms.
 
 | Rule | Severity | Default expression | For | Meaning |
 |---|---|---|---|---|
-| `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule has a gap now or within the horizon; the backup for the Internal alert |
 | `MusterNotificationGatewayBroken` | critical | `max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1` | 5m | a Notification gateway is Broken |
 
 ## Metrics added in L2
@@ -516,7 +518,6 @@ holds them, outside the catalogue that the code checks. The value `gateway` join
 
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|
-| `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while there is a gap now or one that starts within `schedule.gap_alert_horizon` | C-27 |
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) | C-30 |
 | `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |

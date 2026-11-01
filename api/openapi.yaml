@@ -3839,7 +3839,8 @@ paths:
       description: 'The Result of the Schedule over a period on the business clock: its segments, each with the person
         On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings
         about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and
-        Overrides are skipped. The period is from `from` to `to`, by default the business clock''s now and
+        Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut
+        to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock''s now and
         `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
         `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
         else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the
@@ -4117,6 +4118,49 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /on-call-now:
+    get:
+      operationId: getOnCallNow
+      tags:
+      - Schedules
+      summary: Read who is On-call now in each Team
+      description: '"On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the
+        On-call of its main Schedule at the business clock''s now with the Rotation layer that decides it, until when,
+        and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule
+        has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
+      x-permission: schedules:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - name: teams
+        in: query
+        description: '`all`, the default, lists every Team; `mine` the Teams of the calling User, as "My Teams". A
+          Service account is in no Team, so its `mine` is refused with `422` `unsupported` at `/query/teams`.'
+        schema:
+          type: string
+          enum:
+          - all
+          - mine
+          default: all
+      responses:
+        '200':
+          description: The On-call of each Team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnCallNow'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /alert-groups:
     get:
       operationId: listAlertGroups
@@ -11972,6 +12016,10 @@ components:
           description: 'True makes the Schedule its Team''s main Schedule, whose On-call is the Team''s; the first Schedule
             of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main
             instead.'
+        gap_alert:
+          description: Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap`
+            (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted.
+          $ref: '#/components/schemas/ScheduleGapAlert'
         rotation_layers:
           type: array
           description: From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`.
@@ -11986,6 +12034,9 @@ components:
       - name
       - time_zone
       - main
+      - gap_alert
+      - gap_alert_active
+      - next_gap
       - rotation_layers
       - created_at
       - etag
@@ -12002,6 +12053,20 @@ components:
           type: string
         main:
           type: boolean
+        gap_alert:
+          $ref: '#/components/schemas/ScheduleGapAlert'
+        gap_alert_active:
+          type: boolean
+          readOnly: true
+          description: Whether the Leader's gap scan raises `MusterScheduleGap` for the Schedule now — true with
+            `gap_alert` `on`, and with `by_default` while the Schedule is its Team's main one.
+        next_gap:
+          description: The first gap within `schedule.gap_view` from the business clock's now, or null; a gap that has
+            begun starts now, and one that lasts beyond the view ends with it.
+          readOnly: true
+          oneOf:
+          - $ref: '#/components/schemas/ScheduleGap'
+          - type: 'null'
         rotation_layers:
           type: array
           description: From the lowest to the highest.
@@ -12014,6 +12079,29 @@ components:
           type: string
           readOnly: true
           description: The same value as the `ETag` header; send it as `If-Match` on the next update.
+    ScheduleGapAlert:
+      type: string
+      description: 'Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`,
+        C-27.FR-7): `by_default`, on while the Schedule is its Team''s main one, so that the alert follows when another
+        Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.'
+      enum:
+      - by_default
+      - 'on'
+      - 'off'
+    ScheduleGap:
+      type: object
+      description: A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may
+        be Paged.
+      required:
+      - start
+      - end
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
     ScheduleList:
       type: object
       required:
@@ -12203,8 +12291,8 @@ components:
             $ref: '#/components/schemas/RotationShift'
     ScheduleWarningKind:
       type: string
-      description: '`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and
-        `unreachable` come with later releases of 0.2.'
+      description: '`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is
+        a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.'
       enum:
       - disabled
       - viewer
@@ -12218,10 +12306,13 @@ components:
       - user
       - rotation_layer
       - override_id
+      - start
+      - end
       properties:
         kind:
           $ref: '#/components/schemas/ScheduleWarningKind'
         user:
+          description: Null for a gap.
           oneOf:
           - $ref: '#/components/schemas/UserRef'
           - type: 'null'
@@ -12231,6 +12322,18 @@ components:
           - type: 'null'
         override_id:
           $ref: '#/components/schemas/NullablePublicId'
+        start:
+          description: The start of the gap, cut to the period; null for another kind.
+          type:
+          - string
+          - 'null'
+          format: date-time
+        end:
+          description: The end of the gap, cut to the period; null for another kind.
+          type:
+          - string
+          - 'null'
+          format: date-time
     ScheduleOnCall:
       type: object
       description: The Result of a Schedule over a period, with what it is made of.
@@ -12269,6 +12372,81 @@ components:
             and Rotation layer, or per Override.
           items:
             $ref: '#/components/schemas/ScheduleWarning'
+    OnCallNow:
+      type: object
+      description: '"On call now": the On-call of each Team, by the Team''s name.'
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamOnCall'
+    TeamOnCall:
+      type: object
+      description: The On-call of a Team's main Schedule now. With `no_schedule` true, the Team has no main Schedule and
+        every other field but `team` is null.
+      required:
+      - team
+      - schedule
+      - no_schedule
+      - user
+      - rotation_layer
+      - until
+      - next
+      properties:
+        team:
+          $ref: '#/components/schemas/TeamRef'
+        schedule:
+          description: The Team's main Schedule, or null.
+          oneOf:
+          - $ref: '#/components/schemas/ScheduleRef'
+          - type: 'null'
+        no_schedule:
+          type: boolean
+          description: The Team has no main Schedule ("No Schedule").
+        user:
+          description: The On-call now; null in a gap and without a Schedule.
+          oneOf:
+          - $ref: '#/components/schemas/UserRef'
+          - type: 'null'
+        rotation_layer:
+          description: The Rotation layer whose Shift makes the person On-call; null for an Override, in a gap and
+            without a Schedule.
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        until:
+          description: The end of the current segment — the On-call's, or the gap's; null when it lasts beyond
+            `schedule.gap_view` and without a Schedule.
+          type:
+          - string
+          - 'null'
+          format: date-time
+        next:
+          description: The segment that follows within `schedule.gap_view`, or null.
+          oneOf:
+          - $ref: '#/components/schemas/OnCallNext'
+          - type: 'null'
+    OnCallNext:
+      type: object
+      description: The segment of a Schedule's Result after the current one, cut to `schedule.gap_view`.
+      required:
+      - user
+      - start
+      - end
+      properties:
+        user:
+          description: The person On-call then; null for a gap.
+          oneOf:
+          - $ref: '#/components/schemas/UserRef'
+          - type: 'null'
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
     InUseRef:
       type: object
       description: An object that holds the resource a deletion refuses.

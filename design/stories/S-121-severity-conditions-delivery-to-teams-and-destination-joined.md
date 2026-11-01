@@ -24,6 +24,8 @@ files_touched:
   - internal/api/teams.go
   - internal/routing/reach.go
   - internal/routing/reach_test.go
+  - internal/routing/suggestions.go
+  - internal/routing/suggestions_test.go
   - internal/routing/testdata/reach/**
   - internal/groups/dispatcher.go
   - internal/groups/events.go
@@ -64,6 +66,7 @@ acceptance:
   - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined`: a reached Destination without a delivery after a system transition of a change of configuration gets a Quiet Publication (`enqueue_test.go`, `routing_teams_test.go`)."
   - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined in the event's optional `destination` {`id`, `name`, `type`}, which no other event carries; `webhook_events_event_v3_check` accepts it (`body_test.go`, `db_test.go`, `routing_teams_test.go`)."
   - "[C-26.FR-13] The documentation has the page Concepts → Routing to Teams with the operations and team channels by Severity, the note that the feature is optional, one status in every channel, the Team label in the Group key for teams that want their own Alert Groups, and a Route for test clusters; the upgrade notes of 0.2.0 say that `destination_ids` is derived from `destination_entries` until 0.3.0; `make docs-check` passes."
+  - "[C-26.FR-2] The suggested Route \"Muster internal alerts\" sets `deliver_to_teams` on, so that the `MusterScheduleGap` of each Schedule, an Alert Group of its own by `schedule` with its Team's slug under the Team label (S-133), reaches its own Team's Destinations (`suggestions_test.go`)."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
 issue: 410
@@ -135,6 +138,8 @@ issue: 410
     dropped, so that events mode can store it.
   - `open_group_updates_kind_v4_check` lists every kind of `_v3` and `team_destinations` (with the Team), the kind
     whose handler S-170 writes; `NOT VALID`, then validated, the old one dropped.
+- **Suggestion** (`internal/routing/suggestions.go`): the Route of `internal_alerts` has `deliver_to_teams` true
+  (orchestrator's decision Q1 on S-133).
 - **Reach** (`internal/routing/reach.go`, a pure rule with no store): `Reach(level, route entries, deliver_to_teams,
   the entries of each Team of the Alert Group)` gives the Destinations an Alert Group reaches — its Route's entries
   whose condition its Severity level meets and, with `deliver_to_teams`, the entries of each of its Teams (C-25.FR-6)
@@ -285,6 +290,9 @@ None.
 - The review of the contracts split S-170 from this story: S-121 keeps the reach and `destination_joined`, and S-170
   takes the changes of configuration that move the reach of open Alert Groups, with their Quiet Publications and the
   final edits. The migration stays here, the kind `team_destinations` included, so that S-170 needs none.
+- The suggested Route "Muster internal alerts" (`internal/routing/suggestions.go`) turns `deliver_to_teams` on once this
+  story adds it, so that the `MusterScheduleGap` of each Schedule, which S-133 groups by `schedule` and gives its
+  Team's slug under the Team label, reaches its own Team's Destinations (orchestrator's decision Q1 on S-133).
 - Migration `0027` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present
   when it merges (S-131's Notes).

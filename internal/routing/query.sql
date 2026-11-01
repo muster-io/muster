@@ -240,6 +240,16 @@ FROM destinations
 WHERE org_id = @org_id AND deleted_at IS NULL
 ORDER BY id;
 
+-- ListAlertingSchedules lists the Schedules with what MusterScheduleGap carries of them: the public_id and the name,
+-- the public_id, the name and the slug of their Team, and the Organization's Team label, under which the slug goes.
+-- name: ListAlertingSchedules :many
+SELECT s.public_id, s.name, t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug, o.team_label
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+JOIN organizations o ON o.id = s.org_id
+WHERE s.org_id = @org_id
+ORDER BY s.id;
+
 -- ListRouteSuggestionDismissals lists the Route suggestions a User dismissed.
 -- name: ListRouteSuggestionDismissals :many
 SELECT suggestion

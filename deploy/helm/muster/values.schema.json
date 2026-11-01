@@ -747,6 +747,23 @@
                   "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
                 }
               }
+            },
+            "MusterScheduleGap": {
+              "description": "A Schedule whose gap alert is active has a gap now or within the gap alert horizon (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the Schedule has a gap now or within the horizon before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
             }
           }
         }

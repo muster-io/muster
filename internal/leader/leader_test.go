@@ -326,7 +326,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
 		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling",
-		"request_log_pruning", "slack_socket_mode"}
+		"request_log_pruning", "slack_socket_mode", "schedule_gap_scan"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -380,8 +380,13 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		t.Errorf("request log pruning without a pruning")
 	}
 	// Without the Slack sockets the task does nothing and nothing wakes it.
-	if last := tasks[len(tasks)-1]; last.Every != 10*time.Second || last.Wake != nil || last.Run(t.Context()) != nil {
+	if slack := tasks[19]; slack.Every != 10*time.Second || slack.Wake != nil || slack.Run(t.Context()) != nil {
 		t.Errorf("slack socket mode without the sockets")
+	}
+	// Without a gap scan the task does nothing, and outside development mode nothing wakes it.
+	if gaps := tasks[len(tasks)-1]; gaps.Every != ScheduleGapScanInterval || gaps.Wake != nil ||
+		gaps.Run(t.Context()) != nil {
+		t.Errorf("the gap scan without a scan")
 	}
 }
 
@@ -1317,5 +1322,82 @@ func TestLockSession(t *testing.T) {
 func TestReregisterAfterIsTheAbsenceNotice(t *testing.T) {
 	if keyring.ReregisterAfter != AbsenceNotice {
 		t.Errorf("keyring.ReregisterAfter = %v, want leader.absence_notice %v", keyring.ReregisterAfter, AbsenceNotice)
+	}
+}
+
+// TestScheduleGapScanTask covers C-27.FR-7 and ADR-0007: the gap scan of the Schedules is the last Leader task, runs
+// every schedule.gap_scan_interval per Organization, goes on past one that fails, does nothing when unwired, and in
+// development mode a move of the development clock wakes it.
+func TestScheduleGapScanTask(t *testing.T) {
+	failed := errors.New("failed")
+	var scanned []int64
+	moved := &Wakes{}
+	w := Work{
+		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
+		ScheduleGapScan: func(_ context.Context, org int64) error {
+			scanned = append(scanned, org)
+			if org == 1 {
+				return failed
+			}
+			return nil
+		},
+		ClockMoved: moved,
+	}
+	tasks := Tasks(w)()
+	last := len(tasks) - 1
+	task := tasks[last]
+	if task.Name != "schedule_gap_scan" || task.Every != 5*time.Minute || task.Wake == nil {
+		t.Fatalf("task %s every %v", task.Name, task.Every)
+	}
+	if err := task.Run(t.Context()); !errors.Is(err, failed) || !slices.Equal(scanned, []int64{1, 2}) {
+		t.Errorf("scanned %v, err %v", scanned, err)
+	}
+	moved.Wake()
+	select {
+	case <-task.Wake:
+	default:
+		t.Error("a move of the development clock did not wake the gap scan")
+	}
+	orgsErr := errors.New("down")
+	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
+	if err := Tasks(w)()[last].Run(t.Context()); !errors.Is(err, orgsErr) ||
+		err.Error() != "list the organizations for the schedule gap scan: down" {
+		t.Errorf("organizations = %v", err)
+	}
+	if task := Tasks(Work{})()[last]; task.Run(t.Context()) != nil || task.Wake != nil {
+		t.Error("an unwired gap scan did something")
+	}
+}
+
+// TestTaskStop: the Stop of a task runs once, after its last run, when the lock is lost or the process stops.
+func TestTaskStop(t *testing.T) {
+	ticks := make(chan time.Time)
+	k := NewKeeper(nil, clock.Real{}, logging.New(&bytes.Buffer{}, logging.LevelInfo), "a", nil)
+	k.every = func(time.Duration) (<-chan time.Time, func()) { return ticks, func() {} }
+	ctx, cancel := context.WithCancel(t.Context())
+	var events []string
+	done := make(chan struct{})
+	go func() {
+		k.runTask(ctx, Task{Name: "stopped", Run: func(context.Context) error {
+			events = append(events, "run")
+			return nil
+		}, Stop: func() { events = append(events, "stop") }})
+		close(done)
+	}()
+	ticks <- time.Time{}
+	cancel()
+	<-done
+	if !slices.Equal(events, []string{"run", "run", "stop"}) {
+		t.Errorf("events %v", events)
+	}
+	forgot := 0
+	tasks := Tasks(Work{ScheduleGapForget: func() { forgot++ }})()
+	if last := tasks[len(tasks)-1]; last.Name != "schedule_gap_scan" || last.Stop == nil {
+		t.Fatalf("the gap scan task %+v", last)
+	} else {
+		last.Stop()
+	}
+	if forgot != 1 {
+		t.Errorf("forgot %d times", forgot)
 	}
 }

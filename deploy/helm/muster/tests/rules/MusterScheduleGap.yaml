@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterScheduleGap fires at once while a Schedule whose gap alert is active has a gap now or within the horizon.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a Schedule with a gap fires at once, one with none stays silent
+    interval: 1m
+    input_series:
+      - series: 'muster_schedule_gap{job="muster",instance="10.0.0.1:8082",schedule="SC00000000000A"}'
+        values: '0 0 1x8'
+      - series: 'muster_schedule_gap{job="muster",instance="10.0.0.1:8082",schedule="SC00000000000B"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterScheduleGap
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: MusterScheduleGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              schedule: SC00000000000A
+            exp_annotations:
+              summary: A Schedule has a gap
+              description: >-
+                Nobody is On-call now, or within the gap alert horizon, in the Schedule in the label schedule, whose gap
+                alert is active. First read its gaps and the people whose Shifts are skipped in the warnings of its
+                On-call, then fill the gap with an Override or a change of its Rotation layers.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap/
+  - name: a closed gap, and another job's gap, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_schedule_gap{job="muster",instance="10.0.0.1:8082",schedule="SC00000000000A"}'
+        values: '1 1 0x8'
+      - series: 'muster_schedule_gap{job="other",instance="10.0.0.9:8082",schedule="SC00000000000A"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MusterScheduleGap
+        exp_alerts: []

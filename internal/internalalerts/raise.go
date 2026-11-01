@@ -116,7 +116,42 @@ func NewRaiser(orgID int64, runbookBase string) *Raiser {
 // same name.
 func (r *Raiser) Raise(ctx context.Context, q Store, now time.Time, d *Definition, e Entity,
 	extra map[string]string) error {
-	return r.raise(ctx, q, now, d, d.AlertLabels(e, extra), now)
+	return r.raise(ctx, q, now, d, d.AlertLabels(e, extra), nil, now)
+}
+
+// RaiseWith raises d about e at now like Raise, with the values of its Annotations.
+func (r *Raiser) RaiseWith(ctx context.Context, q Store, now time.Time, d *Definition, e Entity,
+	extra, values map[string]string) error {
+	return r.raise(ctx, q, now, d, d.AlertLabels(e, extra), values, now)
+}
+
+// Refresh raises the open Internal alert o of d again at now with new labels and values of its Annotations, as the
+// same firing: its startsAt is kept, so processing updates its labels and annotations in place, as a rename does. The
+// labels must name the same entity, so that the fingerprint stays.
+func (r *Raiser) Refresh(ctx context.Context, q Store, now time.Time, d *Definition, o Open, labels,
+	values map[string]string) error {
+	return r.raise(ctx, q, now, d, labels, values, o.StartsAt)
+}
+
+// Open is an Internal alert that fires, or will once its pending raise is processed: its labels, its annotations and
+// when it started firing.
+type Open struct {
+	Labels      map[string]string
+	Annotations map[string]string
+	StartsAt    time.Time
+}
+
+// Open lists the Internal alerts d that fire or whose raise waits for processing, by the id of their entity.
+func (r *Raiser) Open(ctx context.Context, q Store, d *Definition) (map[string]Open, error) {
+	open, err := r.firingAbout(ctx, q, "alertname", d.Name)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]Open, len(open))
+	for _, f := range open {
+		out[f.labels[d.Entity]] = Open{Labels: f.labels, Annotations: f.annotations, StartsAt: f.startsAt}
+	}
+	return out, nil
 }
 
 // AlertLabels are the labels the Internal alert d carries about the entity e, with its extra labels: alertname,
@@ -132,7 +167,7 @@ func (r *Raiser) RaiseFor(ctx context.Context, q Store, now time.Time, d *Defini
 	if entity != d.OrEntity || entity == "" {
 		return r.Raise(ctx, q, now, d, e, extra)
 	}
-	return r.raise(ctx, q, now, d, d.alertLabels(d.OrEntity, d.OrNameLabel, e, extra), now)
+	return r.raise(ctx, q, now, d, d.alertLabels(d.OrEntity, d.OrNameLabel, e, extra), nil, now)
 }
 
 // ResolveFor resolves the Internal alert d about the entity of the kind entity whose id is entityID, at now.
@@ -170,9 +205,9 @@ func (d *Definition) alertLabels(entity, nameLabel string, e Entity, extra map[s
 	for _, l := range d.Extra {
 		labels[l] = extra[l]
 	}
-	if d.StaticLabels {
+	if d.StaticLabels || d.TeamLabel {
 		for name, value := range extra {
-			if !d.reserved(name) {
+			if name != "" && !d.reserved(name) {
 				labels[name] = value
 			}
 		}
@@ -180,8 +215,9 @@ func (d *Definition) alertLabels(entity, nameLabel string, e Entity, extra map[s
 	return labels
 }
 
-// raise writes the synthetic Stored Snapshot of a firing Internal alert with the labels, firing since startsAt.
-func (r *Raiser) raise(ctx context.Context, q Store, now time.Time, d *Definition, labels map[string]string,
+// raise writes the synthetic Stored Snapshot of a firing Internal alert with the labels and the values of its
+// Annotations, firing since startsAt.
+func (r *Raiser) raise(ctx context.Context, q Store, now time.Time, d *Definition, labels, values map[string]string,
 	startsAt time.Time) error {
 	name, summary, description := "", d.Summary, d.Description
 	if d.NameLabel != "" {
@@ -190,10 +226,21 @@ func (r *Raiser) raise(ctx context.Context, q Store, now time.Time, d *Definitio
 	if d.OrEntity != "" && labels[d.OrEntity] != "" {
 		name, summary, description = labels[d.OrNameLabel], d.OrSummary, d.OrDescription
 	}
+	pairs := []string{"{name}", name}
+	if d.TeamLabel {
+		pairs = append(pairs, "{team}", labels[LabelTeamName])
+	}
+	for _, a := range d.Annotations {
+		pairs = append(pairs, "{"+a+"}", values[a])
+	}
+	texts := strings.NewReplacer(pairs...)
 	annotations := map[string]string{
-		"summary":     strings.ReplaceAll(summary, "{name}", name),
-		"description": strings.ReplaceAll(description, "{name}", name),
+		"summary":     texts.Replace(summary),
+		"description": texts.Replace(description),
 		"runbook_url": r.base + "/" + RunbookVersion(version()) + "/" + d.Runbook(),
+	}
+	for _, a := range d.Annotations {
+		annotations[a] = values[a]
 	}
 	builtin, err := r.builtin(ctx, q)
 	if err != nil {
@@ -237,7 +284,7 @@ func (r *Raiser) Renamed(ctx context.Context, q Store, now time.Time, entity, id
 		}
 		labels := maps.Clone(f.labels)
 		labels[nameLabel] = name
-		if err := r.raise(ctx, q, now, d, labels, f.startsAt); err != nil {
+		if err := r.raise(ctx, q, now, d, labels, f.annotations, f.startsAt); err != nil {
 			return err
 		}
 	}
@@ -278,8 +325,8 @@ func (r *Raiser) Firing(ctx context.Context, q Store, d *Definition) (bool, erro
 
 // firing is an Internal alert that fires, or will once its pending raise is processed.
 type firing struct {
-	labels   map[string]string
-	startsAt time.Time
+	labels, annotations map[string]string
+	startsAt            time.Time
 }
 
 // firingAbout finds, by fingerprint, the Internal alerts about the entity entity=id that fire, as their pending
@@ -297,11 +344,16 @@ func (r *Raiser) firingAbout(ctx context.Context, q Store, entity, id string) (m
 	}
 	open := map[string]firing{}
 	for _, row := range rows {
-		labels := map[string]string{}
+		labels, annotations := map[string]string{}, map[string]string{}
 		if err := json.Unmarshal(row.Labels, &labels); err != nil {
 			return nil, fmt.Errorf("read the labels of internal alert %s: %w", row.Fingerprint, err)
 		}
-		open[row.Fingerprint] = firing{labels: labels, startsAt: row.StartsAt}
+		if len(row.Annotations) > 0 {
+			if err := json.Unmarshal(row.Annotations, &annotations); err != nil {
+				return nil, fmt.Errorf("read the annotations of internal alert %s: %w", row.Fingerprint, err)
+			}
+		}
+		open[row.Fingerprint] = firing{labels: labels, annotations: annotations, startsAt: row.StartsAt}
 	}
 	bodies, err := q.ListPendingInternalRaises(ctx, r.orgID)
 	if err != nil {
@@ -322,7 +374,7 @@ func (r *Raiser) firingAbout(ctx context.Context, q Store, entity, id string) (m
 			case a.Status == StatusResolved:
 				delete(open, a.Fingerprint)
 			default:
-				open[a.Fingerprint] = firing{labels: a.Labels, startsAt: startsAt}
+				open[a.Fingerprint] = firing{labels: a.Labels, annotations: a.Annotations, startsAt: startsAt}
 			}
 		}
 	}

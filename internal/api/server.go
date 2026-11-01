@@ -328,7 +328,7 @@ var implemented = map[string]bool{
 	"ListTeamUsers": true, "AddTeamUser": true, "RemoveTeamUser": true, "ListTeamLabelValues": true,
 	"ListSchedules": true, "CreateSchedule": true, "GetSchedule": true, "UpdateSchedule": true, "DeleteSchedule": true,
 	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
-	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true,
+	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true, "GetOnCallNow": true,
 	"GetMyIcalFeed": true, "IssueMyIcalFeed": true, "RevokeMyIcalFeed": true,
 	// getIcalCalendar is outside /api/v1 and not generated: IcalHandler serves it.
 	"GetIcalCalendar": true,

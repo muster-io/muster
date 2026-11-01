@@ -22,6 +22,7 @@ import (
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
@@ -59,10 +60,10 @@ type teamRec struct {
 }
 
 type scheduleRec struct {
-	id, team, version  int64
-	publicID, name, tz string
-	main               bool
-	created            time.Time
+	id, team, version            int64
+	publicID, name, tz, gapAlert string
+	main                         bool
+	created                      time.Time
 }
 
 type rotationLayerRec struct {
@@ -91,6 +92,9 @@ type fakeStore struct {
 	fail      map[string]error
 	nextID    int64
 	listed    []dbgen.ListSchedulesParams
+	teamLabel string
+	alerts    *alertStore
+	alertTxs  int
 }
 
 // newStore has the Teams payments, with petr, sergey, olga, vic and dan, and ops, with bob.
@@ -99,7 +103,8 @@ func newStore() *fakeStore {
 		teams:  []teamRec{{1, teamPay, "Payments", "payments"}, {2, teamOps, "Ops", "ops"}},
 		inTeam: map[int64][]int64{1: {petr.ID, sergey.ID, olga.ID, vic.ID, dan.ID}, 2: {bob.ID}},
 		users:  []Person{petr, sergey, olga, bob, vic, dan, ann},
-		sas:    map[int64]string{9: "SA0000000000CI"}, fail: map[string]error{}, nextID: 100}
+		sas:    map[int64]string{9: "SA0000000000CI"}, fail: map[string]error{}, nextID: 100,
+		alerts: newAlertStore()}
 }
 
 func (s *fakeStore) err(name string) error { return s.fail[name] }
@@ -201,8 +206,8 @@ func (s *fakeStore) ListSchedules(_ context.Context, arg dbgen.ListSchedulesPara
 			break
 		}
 		out = append(out, dbgen.ListSchedulesRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name, TimeZone: sc.tz,
-			Main: sc.main, Version: sc.version, CreatedAt: sc.created, TeamPublicID: t.publicID, TeamName: t.name,
-			TeamSlug: t.slug, SortName: strings.ToLower(sc.name)})
+			Main: sc.main, GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, TeamID: t.id,
+			TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug, SortName: strings.ToLower(sc.name)})
 	}
 	return out, nil
 }
@@ -217,8 +222,8 @@ func (s *fakeStore) GetSchedule(_ context.Context, arg dbgen.GetScheduleParams) 
 	}
 	t := s.team(sc.team)
 	return dbgen.GetScheduleRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name, TimeZone: sc.tz, Main: sc.main,
-		Version: sc.version, CreatedAt: sc.created, TeamID: t.id, TeamPublicID: t.publicID, TeamName: t.name,
-		TeamSlug: t.slug}, nil
+		GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created, TeamID: t.id, TeamPublicID: t.publicID,
+		TeamName: t.name, TeamSlug: t.slug}, nil
 }
 
 func (s *fakeStore) FindScheduleTeam(_ context.Context, arg dbgen.FindScheduleTeamParams) (int64, error) {
@@ -250,7 +255,7 @@ func (s *fakeStore) InsertSchedule(_ context.Context, arg dbgen.InsertSchedulePa
 	}
 	id := s.id()
 	s.schedules = append(s.schedules, &scheduleRec{id: id, team: arg.TeamID, version: 1, publicID: arg.PublicID,
-		name: arg.Name, tz: arg.TimeZone, main: arg.Main, created: arg.Now})
+		name: arg.Name, tz: arg.TimeZone, main: arg.Main, gapAlert: arg.GapAlert, created: arg.Now})
 	return id, nil
 }
 
@@ -273,7 +278,8 @@ func (s *fakeStore) UpdateSchedule(_ context.Context, arg dbgen.UpdateSchedulePa
 			if err := s.unique(sc.team, arg.Name, sc.id); err != nil {
 				return err
 			}
-			sc.name, sc.tz, sc.main, sc.version = arg.Name, arg.TimeZone, arg.Main, sc.version+1
+			sc.name, sc.tz, sc.main, sc.gapAlert, sc.version = arg.Name, arg.TimeZone, arg.Main, arg.GapAlert,
+				sc.version+1
 		}
 	}
 	return nil
@@ -438,6 +444,27 @@ func (s *fakeStore) ListPageable(_ context.Context, arg dbgen.ListPageableParams
 	return out, nil
 }
 
+func (s *fakeStore) ListPageableInTeams(_ context.Context, arg dbgen.ListPageableInTeamsParams) (
+	[]dbgen.ListPageableInTeamsRow, error) {
+	if err := s.err("ListPageableInTeams"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListPageableInTeamsRow
+	for _, u := range s.users {
+		if !slices.Contains(arg.UserIds, u.ID) {
+			continue
+		}
+		r := dbgen.ListPageableInTeamsRow{ID: u.ID, Role: u.Role, Status: u.Status, TeamIds: []int64{}}
+		for _, t := range arg.TeamIds {
+			if slices.Contains(s.inTeam[t], u.ID) {
+				r.TeamIds = append(r.TeamIds, t)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 func (s *fakeStore) IsTeamUser(_ context.Context, arg dbgen.IsTeamUserParams) (bool, error) {
 	return slices.Contains(s.inTeam[arg.TeamID], arg.UserID), s.err("IsTeamUser")
 }
@@ -507,8 +534,16 @@ func (s *fakeStore) ListPeriodOverrides(_ context.Context, arg dbgen.ListPeriodO
 	}
 	var out []dbgen.ListPeriodOverridesRow
 	for _, o := range s.overrides {
-		if o.schedule == arg.ScheduleID && o.end.After(arg.PeriodStart) && o.start.Before(arg.PeriodEnd) {
-			out = append(out, dbgen.ListPeriodOverridesRow(s.overrideRow(o)))
+		if slices.Contains(arg.ScheduleIds, o.schedule) && o.end.After(arg.PeriodStart) && o.start.Before(arg.PeriodEnd) {
+			r := s.overrideRow(o)
+			out = append(out, dbgen.ListPeriodOverridesRow{ScheduleID: o.schedule, ID: r.ID, PublicID: r.PublicID,
+				UserID: r.UserID, StartsAt: r.StartsAt, EndsAt: r.EndsAt, Version: r.Version, CreatedAt: r.CreatedAt,
+				UserPublicID: r.UserPublicID, UserName: r.UserName, UserLogin: r.UserLogin, UserStatus: r.UserStatus,
+				ReplacesPublicID: r.ReplacesPublicID, ReplacesName: r.ReplacesName, ReplacesLogin: r.ReplacesLogin,
+				ReplacesStatus: r.ReplacesStatus, ByUserPublicID: r.ByUserPublicID, ByUserName: r.ByUserName,
+				ByUserLogin: r.ByUserLogin, ByUserStatus: r.ByUserStatus,
+				ByServiceAccountPublicID: r.ByServiceAccountPublicID, ByServiceAccountName: r.ByServiceAccountName,
+				ByServiceAccountStatus: r.ByServiceAccountStatus})
 		}
 	}
 	return out, nil
@@ -612,6 +647,55 @@ func (s *fakeStore) ListScheduleInfo(_ context.Context, org int64) ([]dbgen.List
 	return out, nil
 }
 
+func (s *fakeStore) ListGapScanSchedules(_ context.Context, org int64) ([]dbgen.ListGapScanSchedulesRow, error) {
+	if err := s.err("ListGapScanSchedules"); err != nil || org != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListGapScanSchedulesRow
+	for _, sc := range s.schedules {
+		t := s.team(sc.team)
+		out = append(out, dbgen.ListGapScanSchedulesRow{ID: sc.id, PublicID: sc.publicID, Name: sc.name,
+			TimeZone: sc.tz, Main: sc.main, GapAlert: sc.gapAlert, Version: sc.version, CreatedAt: sc.created,
+			TeamID: t.id, TeamPublicID: t.publicID, TeamName: t.name, TeamSlug: t.slug})
+	}
+	return out, nil
+}
+
+func (s *fakeStore) GetOrganizationTeamLabel(_ context.Context, org int64) (string, error) {
+	if org != orgID {
+		return "", pgx.ErrNoRows
+	}
+	return cmp.Or(s.teamLabel, "team"), s.err("GetOrganizationTeamLabel")
+}
+
+func (s *fakeStore) ListOnCallTeams(_ context.Context, arg dbgen.ListOnCallTeamsParams) ([]dbgen.ListOnCallTeamsRow,
+	error) {
+	if err := s.err("ListOnCallTeams"); err != nil {
+		return nil, err
+	}
+	teams := slices.Clone(s.teams)
+	slices.SortFunc(teams, func(a, b teamRec) int {
+		return cmp.Or(strings.Compare(strings.ToLower(a.name), strings.ToLower(b.name)), cmp.Compare(a.id, b.id))
+	})
+	var out []dbgen.ListOnCallTeamsRow
+	for _, t := range teams {
+		if arg.MemberID.Valid && !slices.Contains(s.inTeam[t.id], arg.MemberID.Int64) {
+			continue
+		}
+		r := dbgen.ListOnCallTeamsRow{ID: t.id, PublicID: t.publicID, Name: t.name, Slug: t.slug}
+		for _, sc := range s.schedules {
+			if sc.team == t.id && sc.main {
+				r.ScheduleID = pgtype.Int8{Int64: sc.id, Valid: true}
+				r.SchedulePublicID = pgtype.Text{String: sc.publicID, Valid: true}
+				r.ScheduleName = pgtype.Text{String: sc.name, Valid: true}
+				r.ScheduleTimeZone = pgtype.Text{String: sc.tz, Valid: true}
+			}
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 func (s *fakeStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
 	if err := s.err("InsertAuditEntry"); err != nil {
 		return err
@@ -626,6 +710,21 @@ func (s *fakeStore) Notify(_ context.Context, h db.Hint) error {
 	}
 	s.hints = append(s.hints, h)
 	return nil
+}
+
+// InAlertsTx runs f over the Internal alerts in memory and, when it fails, puts back the synthetic Snapshots as they
+// were.
+func (s *fakeStore) InAlertsTx(_ context.Context, f func(internalalerts.Store) error) error {
+	s.alertTxs++
+	if err := s.err("InAlertsTx"); err != nil {
+		return err
+	}
+	pending := slices.Clone(s.alerts.pending)
+	err := f(s.alerts)
+	if err != nil {
+		s.alerts.pending = pending
+	}
+	return err
 }
 
 // InTx runs f and, when it fails, puts back the rows as they were, as a rolled back transaction does.
@@ -1284,4 +1383,65 @@ func TestInfo(t *testing.T) {
 	svc.unexportInfo("SC0000000INFO1")
 	svc.unexportInfo("SC0000000INFO3")
 	svc.unexportInfo("SC000000000NONE")
+}
+
+// TestGapAlert is C-27.FR-7 on the setting: a new Schedule has gap_alert by_default unless the input names another,
+// active while it is its Team's main one; updateSchedule changes it, recorded in the diff of schedule.updated, and an
+// omitted gap_alert keeps it; a value that is none of the three is refused at /gap_alert.
+func TestGapAlert(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	sc, err := svc.Create(ctx, admin, mainInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := Input{TeamID: teamPay, Name: "Second line", GapAlert: ptr(GapAlertOff)}
+	other, err := svc.Create(ctx, admin, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.GapAlert != GapAlertByDefault || !sc.GapAlertActive() || other.GapAlert != GapAlertOff ||
+		other.GapAlertActive() || !strings.Contains(string(store.audit[len(store.audit)-1].Diff),
+		`{"pointer":"/gap_alert","after":"off"}`) {
+		t.Fatalf("created %s %v, %s %v, audit %s", sc.GapAlert, sc.GapAlertActive(), other.GapAlert,
+			other.GapAlertActive(), store.audit[len(store.audit)-1].Diff)
+	}
+	// In this order, so that the last one written is off, which the diff below starts from.
+	for _, c := range []struct {
+		value  string
+		active bool
+	}{{GapAlertOn, true}, {GapAlertByDefault, false}, {GapAlertOff, false}} {
+		in := inputOf(other)
+		in.GapAlert = ptr(c.value)
+		got, err := svc.Update(ctx, admin, other.PublicID, nil, in)
+		if err != nil || got.GapAlert != c.value || got.GapAlertActive() != c.active {
+			t.Errorf("gap_alert %s = %+v, %v", c.value, got, err)
+		}
+	}
+	in := inputOf(other)
+	in.GapAlert = ptr(GapAlertOn)
+	if _, err := svc.Update(ctx, admin, other.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	if e := store.audit[len(store.audit)-1]; e.Action != ActionUpdated ||
+		!strings.Contains(string(e.Diff), `{"pointer":"/gap_alert","before":"off","after":"on"}`) {
+		t.Errorf("audit %s %s", e.Action, e.Diff)
+	}
+	in.GapAlert, in.Name = nil, "Second"
+	if got, err := svc.Update(ctx, admin, other.PublicID, nil, in); err != nil || got.GapAlert != GapAlertOn {
+		t.Errorf("an omitted gap_alert = %+v, %v", got, err)
+	}
+	in.GapAlert = ptr("sometimes")
+	if f := fieldError(t, func() error { _, err := svc.Update(ctx, admin, other.PublicID, nil, in); return err }()); f.Pointer != "/gap_alert" || f.Code != CodeInvalidFormat {
+		t.Errorf("an unknown gap_alert = %+v", f)
+	}
+	// A Schedule no longer main stops reporting its gaps by default.
+	mark := inputOf(other)
+	mark.Main, mark.GapAlert = ptr(true), ptr(GapAlertByDefault)
+	if _, err := svc.Update(ctx, admin, other.PublicID, nil, mark); err != nil {
+		t.Fatal(err)
+	}
+	if was, err := svc.Get(ctx, sc.PublicID); err != nil || was.Main || was.GapAlertActive() {
+		t.Errorf("the previous main Schedule = %+v, %v", was, err)
+	}
 }
