@@ -178,6 +178,8 @@ export * from './heartbeatState';
 export * from './hintEvent';
 export * from './hintEventType';
 export * from './httpHeaders';
+export * from './icalFeed';
+export * from './icalFeedIssued';
 export * from './ifMatchOptionalParameter';
 export * from './ifMatchParameter';
 export * from './integration';

@@ -14,6 +14,8 @@ import {
   UserStatus
 } from '../../model';
 import type {
+  IcalFeed,
+  IcalFeedIssued,
   Me,
   OidcLinkStart,
   SessionInfoList,
@@ -38,4 +40,8 @@ export const getBeginTotpEnrolmentResponseMock = (overrideResponse: Partial<Extr
 export const getConfirmTotpEnrolmentResponseMock = (overrideResponse: Partial<Extract<TotpRecoveryCodes, object>> = {}): TotpRecoveryCodes => ({codes: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), ...overrideResponse})
 
 export const getRegenerateTotpRecoveryCodesResponseMock = (overrideResponse: Partial<Extract<TotpRecoveryCodes, object>> = {}): TotpRecoveryCodes => ({codes: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), ...overrideResponse})
+
+export const getGetMyIcalFeedResponseMock = (overrideResponse: Partial<Extract<IcalFeed, object>> = {}): IcalFeed => ({exists: faker.datatype.boolean(), issued_at: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getIssueMyIcalFeedResponseMock = (overrideResponse: Partial<Extract<IcalFeedIssued, object>> = {}): IcalFeedIssued => ({url: faker.internet.url(), issued_at: faker.date.past().toISOString().slice(0, 19) + 'Z', ...overrideResponse})
 

@@ -169,7 +169,7 @@ export const UpdateUserResponse = zod.object({
 })
 
 /**
- * Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+ * Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
  * @summary Delete a user
  */
 export const deleteUserPathUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

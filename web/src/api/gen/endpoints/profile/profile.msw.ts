@@ -11,6 +11,8 @@ import type {
 } from 'msw';
 
 import type {
+  IcalFeed,
+  IcalFeedIssued,
   Me,
   OidcLinkStart,
   SessionInfoList,
@@ -23,14 +25,16 @@ import {
   getBeginTotpEnrolmentResponseMock,
   getConfirmTotpEnrolmentResponseMock,
   getGetMeResponseMock,
+  getGetMyIcalFeedResponseMock,
   getGetMyTotpResponseMock,
+  getIssueMyIcalFeedResponseMock,
   getListMySessionsResponseMock,
   getRegenerateTotpRecoveryCodesResponseMock,
   getStartOidcLinkResponseMock,
   getUpdateMeResponseMock
 } from './profile.faker';
 
-export { getGetMeResponseMock, getUpdateMeResponseMock, getStartOidcLinkResponseMock, getListMySessionsResponseMock, getGetMyTotpResponseMock, getBeginTotpEnrolmentResponseMock, getConfirmTotpEnrolmentResponseMock, getRegenerateTotpRecoveryCodesResponseMock } from './profile.faker';
+export { getGetMeResponseMock, getUpdateMeResponseMock, getStartOidcLinkResponseMock, getListMySessionsResponseMock, getGetMyTotpResponseMock, getBeginTotpEnrolmentResponseMock, getConfirmTotpEnrolmentResponseMock, getRegenerateTotpRecoveryCodesResponseMock, getGetMyIcalFeedResponseMock, getIssueMyIcalFeedResponseMock } from './profile.faker';
 
 
 export const getGetMeMockHandler = (overrideResponse?: Me | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<Me> | Me), options?: RequestHandlerOptions) => {
@@ -168,6 +172,40 @@ export const getRegenerateTotpRecoveryCodesMockHandler = (overrideResponse?: Tot
       })
   }, options)
 }
+
+export const getGetMyIcalFeedMockHandler = (overrideResponse?: IcalFeed | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<IcalFeed> | IcalFeed), options?: RequestHandlerOptions) => {
+  return http.get('*/me/ical-feed', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetMyIcalFeedResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getIssueMyIcalFeedMockHandler = (overrideResponse?: IcalFeedIssued | ((info: Parameters<Parameters<typeof http.post>[1]>[0]) => Promise<IcalFeedIssued> | IcalFeedIssued), options?: RequestHandlerOptions) => {
+  return http.post('*/me/ical-feed', async (info: Parameters<Parameters<typeof http.post>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getIssueMyIcalFeedResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getRevokeMyIcalFeedMockHandler = (overrideResponse?: void | ((info: Parameters<Parameters<typeof http.delete>[1]>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete('*/me/ical-feed', async (info: Parameters<Parameters<typeof http.delete>[1]>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
 export const getProfileMock = () => [
   getGetMeMockHandler(),
   getUpdateMeMockHandler(),
@@ -180,5 +218,8 @@ export const getProfileMock = () => [
   getBeginTotpEnrolmentMockHandler(),
   getRemoveTotpMockHandler(),
   getConfirmTotpEnrolmentMockHandler(),
-  getRegenerateTotpRecoveryCodesMockHandler()
+  getRegenerateTotpRecoveryCodesMockHandler(),
+  getGetMyIcalFeedMockHandler(),
+  getIssueMyIcalFeedMockHandler(),
+  getRevokeMyIcalFeedMockHandler()
 ]
