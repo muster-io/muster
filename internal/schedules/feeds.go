@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -33,6 +34,10 @@ const (
 	FeedBasePath = "/ical/"
 	FeedSuffix   = ".ics"
 )
+
+// ICalSpan is the span the feed reads: ical.window from midnight UTC of the day ICalWindowBack before the business
+// clock's day to midnight UTC at the end of the day ICalWindowAhead after it, so a day more than MaxPeriod.
+const ICalSpan = ICalWindowBack + ICalWindowAhead + 24*time.Hour
 
 // ErrFeedNotFound is a token that names no iCal feed of an active User: malformed, unknown, revoked, or of a disabled
 // or deleted User. It never says which.
@@ -97,12 +102,18 @@ type Feeds struct {
 	clock     clock.Clock
 	schedules *Service
 	publicURL string
+	// host is the host of MUSTER_PUBLIC_URL, which ends the UIDs of the events.
+	host string
 }
 
 // NewFeeds returns the Feeds of the Organization in cfg.
 func NewFeeds(cfg FeedsConfig) *Feeds {
+	host := "muster"
+	if u, err := url.Parse(cfg.PublicURL); err == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
 	return &Feeds{orgID: cfg.OrgID, store: cfg.Store, audit: cfg.Audit, clock: cfg.Business, schedules: cfg.Schedules,
-		publicURL: strings.TrimSuffix(cfg.PublicURL, "/")}
+		publicURL: strings.TrimSuffix(cfg.PublicURL, "/"), host: host}
 }
 
 // FeedUser is the User of an iCal feed.
@@ -227,7 +238,7 @@ func (f *Feeds) Calendar(ctx context.Context, u FeedUser) ([]byte, error) {
 	// The window starts and ends at midnight UTC, so that an event it cuts keeps its start, and its UID, all day.
 	now := f.clock.Now().UTC().Truncate(time.Second)
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	from, to := day.Add(-ICalWindowBack), day.Add(ICalWindowAhead+24*time.Hour)
+	from, to := day.Add(-ICalWindowBack), day.Add(-ICalWindowBack+ICalSpan)
 	rows, err := f.store.ListUserSchedules(ctx, dbgen.ListUserSchedulesParams{OrgID: f.orgID, UserID: u.ID})
 	if err != nil {
 		return nil, fmt.Errorf("list the schedules of %s: %w", u.PublicID, err)
@@ -251,7 +262,7 @@ func (f *Feeds) Calendar(ctx context.Context, u FeedUser) ([]byte, error) {
 		events = append(events, eventsOf(sc, res, u.ID)...)
 	}
 	slices.SortStableFunc(events, func(a, b Event) int { return a.Start.Compare(b.Start) })
-	return Calendar(events, now), nil
+	return Calendar(events, u.PublicID, f.host, now), nil
 }
 
 // eventsOf are the events of the User userID in the Result of the Schedule sc: each segment in which they are

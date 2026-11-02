@@ -56,7 +56,8 @@ const (
 	// ahead.
 	ICalWindowBack  = 7 * 24 * time.Hour
 	ICalWindowAhead = 60 * 24 * time.Hour
-	// MaxPeriod is the length of ical.window: the longest period of the On-call.
+	// MaxPeriod is the longest period of getScheduleOnCall: the length of ical.window, 67 days. The iCal feed reads a
+	// day more, from midnight to midnight UTC (ICalSpan).
 	MaxPeriod = ICalWindowBack + ICalWindowAhead
 	// Reach is how far from the business clock's now a period of the On-call may start or end.
 	Reach = 10 * 365 * 24 * time.Hour

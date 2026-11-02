@@ -52,12 +52,18 @@ func parseEvents(t *testing.T, doc []byte) ([]event, map[string]string) {
 	cal := map[string]string{}
 	var events []event
 	var cur event
+	zone := false
 	for _, l := range lines[1 : len(lines)-1] {
 		name, value, ok := strings.Cut(l, ":")
 		if !ok {
 			t.Fatalf("a line without a value: %q", l)
 		}
 		switch {
+		case l == "BEGIN:VTIMEZONE":
+			zone = true
+		case l == "END:VTIMEZONE":
+			zone = false
+		case zone:
 		case l == "BEGIN:VEVENT":
 			cur = event{}
 		case l == "END:VEVENT":
@@ -81,8 +87,9 @@ func spans(events []event) []string {
 	return out
 }
 
-// TestCalendarDocument is C-27.FR-10: the VCALENDAR has PRODID, VERSION and its name, and each VEVENT its UID,
-// DTSTAMP, DTSTART and DTEND in UTC and SUMMARY "{Team} · {Schedule}"; every line ends in CRLF, the summary is
+// TestCalendarDocument is C-27.FR-10: the VCALENDAR has PRODID, VERSION, its name and a VTIMEZONE of UTC, and each
+// VEVENT its UID "{schedule}-{user}-{start}@{host}", DTSTAMP, DTSTART and DTEND in UTC, SUMMARY "{Team} · {Schedule}"
+// and TRANSP:TRANSPARENT; no time names a time zone; a calendar without events is the VTIMEZONE alone; every line ends in CRLF, the summary is
 // escaped as TEXT and long lines are folded at 75 octets without splitting the two octets of "·" or any other UTF-8
 // sequence, and read back unfolded they are the lines written.
 func TestCalendarDocument(t *testing.T) {
@@ -96,9 +103,16 @@ func TestCalendarDocument(t *testing.T) {
 	doc := Calendar([]Event{
 		{Schedule: "SC0000000000AA", Team: "payments", Name: "Main", Start: start, End: start.Add(14 * time.Hour)},
 		{Schedule: "SC0000000000BB", Team: "Payments, EU", Name: long, Start: start, End: start.Add(time.Hour)},
-	}, stamp)
-	if strings.Contains(string(doc), "VTIMEZONE") || strings.Contains(string(doc), "TZID") {
-		t.Errorf("the document names a time zone:\n%s", doc)
+	}, "SR0000000000PT", "muster.example.org", stamp)
+	const zone = "BEGIN:VTIMEZONE\r\nTZID:UTC\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0000\r\n" +
+		"TZOFFSETTO:+0000\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n"
+	if strings.Count(string(doc), zone) != 1 || strings.Contains(string(doc), "TZID=") {
+		t.Errorf("the time zone:\n%s", doc)
+	}
+	empty := string(Calendar(nil, "SR0000000000PT", "muster.example.org", stamp))
+	if empty != "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Muster//Schedules//EN\r\nX-WR-CALNAME:Muster On-call\r\n"+
+		zone+"END:VCALENDAR\r\n" {
+		t.Errorf("an empty calendar:\n%s", empty)
 	}
 	events, cal := parseEvents(t, doc)
 	if cal["VERSION"] != "2.0" || cal["PRODID"] != "-//Muster//Schedules//EN" || cal["X-WR-CALNAME"] != "Muster On-call" {
@@ -107,8 +121,9 @@ func TestCalendarDocument(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("events = %v", events)
 	}
-	want := event{"UID": "SC0000000000AA-20261106T180000Z@muster", "DTSTAMP": "20261028T110000Z",
-		"DTSTART": "20261106T180000Z", "DTEND": "20261107T080000Z", "SUMMARY": "payments · Main"}
+	want := event{"UID": "SC0000000000AA-SR0000000000PT-20261106T180000Z@muster.example.org",
+		"DTSTAMP": "20261028T110000Z", "DTSTART": "20261106T180000Z", "DTEND": "20261107T080000Z",
+		"SUMMARY": "payments · Main", "TRANSP": "TRANSPARENT"}
 	if len(events[0]) != len(want) {
 		t.Errorf("event = %v, want %v", events[0], want)
 	}

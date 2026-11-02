@@ -10,11 +10,11 @@ import (
 	"unicode/utf8"
 )
 
-// The iCal document of a feed (RFC 5545), written by hand: a VCALENDAR with one VEVENT per event.
+// The iCal document of a feed (RFC 5545), written by hand: a VCALENDAR with a VTIMEZONE of UTC, so that it has a
+// component even without events, and one VEVENT per event.
 const (
 	icalProdID   = "-//Muster//Schedules//EN"
 	icalName     = "Muster On-call"
-	icalUIDHost  = "@muster"
 	icalTime     = "20060102T150405Z"
 	icalLineMax  = 75 // octets of a content line before it is folded, without its CRLF
 	icalSummary  = " · "
@@ -30,25 +30,37 @@ type Event struct {
 	Start, End time.Time
 }
 
-// Calendar writes the events as an iCal document whose DTSTAMP is stamp: the times in UTC, with no VTIMEZONE, each
-// event named "{Team} · {Schedule}" with the UID "{schedule public_id}-{start}@muster", which stays the same while the
-// event starts at the same time; its lines end in CRLF and are folded at 75 octets.
-func Calendar(events []Event, stamp time.Time) []byte {
+// Calendar writes the events of the User user (a public_id) as an iCal document whose DTSTAMP is stamp: the times in
+// UTC, each event named "{Team} · {Schedule}", transparent — being On-call is not being busy — with the UID
+// "{schedule public_id}-{user public_id}-{start}@{host}", which stays the same while the event starts at the same
+// time and differs between the feeds of two Users; host is the host of MUSTER_PUBLIC_URL. The VTIMEZONE of UTC,
+// which no time refers to, keeps a calendar without events valid: RFC 5545 asks for one component at least. Its
+// lines end in CRLF and are folded at 75 octets.
+func Calendar(events []Event, user, host string, stamp time.Time) []byte {
 	var b bytes.Buffer
 	line := func(name, value string) { writeLine(&b, name+":"+value) }
 	line("BEGIN", "VCALENDAR")
 	line("VERSION", "2.0")
 	line("PRODID", icalProdID)
 	line("X-WR-CALNAME", escapeText(icalName))
+	line("BEGIN", "VTIMEZONE")
+	line("TZID", "UTC")
+	line("BEGIN", "STANDARD")
+	line("DTSTART", "19700101T000000")
+	line("TZOFFSETFROM", "+0000")
+	line("TZOFFSETTO", "+0000")
+	line("END", "STANDARD")
+	line("END", "VTIMEZONE")
 	dtstamp := stamp.UTC().Format(icalTime)
 	for _, e := range events {
 		start := e.Start.UTC().Format(icalTime)
 		line("BEGIN", "VEVENT")
-		line("UID", escapeText(e.Schedule+"-"+start+icalUIDHost))
+		line("UID", escapeText(e.Schedule+"-"+user+"-"+start+"@"+host))
 		line("DTSTAMP", dtstamp)
 		line("DTSTART", start)
 		line("DTEND", e.End.UTC().Format(icalTime))
 		line("SUMMARY", escapeText(e.Team+icalSummary+e.Name))
+		line("TRANSP", "TRANSPARENT")
 		line("END", "VEVENT")
 	}
 	line("END", "VCALENDAR")

@@ -418,7 +418,7 @@ func TestFeedScenario1(t *testing.T) {
 		t.Errorf("week 1 with the Overrides = %v\nwant %v", got, want)
 	}
 	for _, e := range events {
-		if e["SUMMARY"] != "Payments · Main" || e["UID"] != sc.PublicID+"-"+e["DTSTART"]+"@muster" ||
+		if e["SUMMARY"] != "Payments · Main" || e["UID"] != sc.PublicID+"-"+petr.PublicID+"-"+e["DTSTART"]+"@muster.example.org" ||
 			e["DTSTAMP"] != t0.Format(icalTime) {
 			t.Errorf("event %v", e)
 		}
@@ -565,7 +565,7 @@ func TestFeedWindow(t *testing.T) {
 	c.Set(time.Date(2026, 10, 28, 0, 0, 1, 0, time.UTC))
 	morning, events := read()
 	if len(events) != 1 || events[0]["DTSTART"] != "20261021T000000Z" || events[0]["DTEND"] != "20261228T000000Z" ||
-		!strings.HasSuffix(events[0]["UID"], "-20261021T000000Z@muster") {
+		!strings.HasSuffix(events[0]["UID"], "-"+petr.PublicID+"-20261021T000000Z@muster.example.org") {
 		t.Errorf("events = %v", events)
 	}
 	c.Set(time.Date(2026, 10, 28, 23, 59, 59, 0, time.UTC))

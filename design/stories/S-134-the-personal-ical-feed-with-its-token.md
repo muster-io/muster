@@ -21,6 +21,7 @@ files_touched:
   - internal/schedules/ical.go
   - internal/schedules/ical_test.go
   - internal/schedules/query.sql
+  - internal/schedules/schedules.go
   - internal/schedules/feeds_integration_test.go
   - internal/tokens/tokens.go
   - internal/api/profile.go
@@ -93,10 +94,11 @@ issue: 423
   token; `Revoke` deletes it; both record the Audit log without the token. `Lookup(token)` hashes it and finds an
   active User's feed, else not found.
 - **iCal document** (`internal/schedules/ical.go`): RFC 5545 written by hand — no new dependency — with `VCALENDAR`
-  (`PRODID:-//Muster//Schedules//EN`, `VERSION:2.0`, `X-WR-CALNAME:Muster On-call`) and one `VEVENT` per joined
-  segment: `UID` `{schedule public_id}-{start}@muster`, `DTSTAMP` of the business clock, `DTSTART` and `DTEND` in UTC,
-  `SUMMARY` "{Team} · {Schedule}"; lines folded at 75 octets, text escaped. The segments come from the Result (S-131)
-  of each Schedule of the Organization from `ical.window` back to its end ahead, keeping those of the User.
+  (`PRODID:-//Muster//Schedules//EN`, `VERSION:2.0`, `X-WR-CALNAME:Muster On-call`, a `VTIMEZONE` of UTC) and one
+  `VEVENT` per joined segment: `UID` `{schedule public_id}-{user public_id}-{start}@{host of MUSTER_PUBLIC_URL}`,
+  `DTSTAMP` of the business clock, `DTSTART` and `DTEND` in UTC, `SUMMARY` "{Team} · {Schedule}",
+  `TRANSP:TRANSPARENT`; lines folded at 75 octets, text escaped. The segments come from the Result (S-131) of every
+  Schedule of the User's Teams from `ical.window` back to its end ahead, keeping those of the User.
 - **Server** (`internal/server/server.go`): `IsIcalPath` routes `/ical/` on the app listener to the feed handler
   (`internal/api/ical.go`) before the SPA; the handler logs nothing on success, `ical_feed_not_found` (info, C-27) for a
   `404`, and `ical_feed_failed` (error, C-27) for a failure, both in `internal/logging/events.go`, with `path`
@@ -177,7 +179,8 @@ None.
   segment, so the hand-written handler in `internal/api/ical.go` serves it; `internal/api/server.go` (the
   `IcalFeeds` of the API's Config and the operations marked implemented); `internal/server/spa.go`, where `App`
   routes the app listener, so that `/ical/` reaches the feeds before the SPA and keeps the security headers of every
-  answer; `internal/runtime/runtime_test.go` (the fake database's iCal feeds store); and `docs/install/versions.md`.
+  answer; `internal/runtime/runtime_test.go` (the fake database's iCal feeds store); `docs/install/versions.md`; and
+  `internal/schedules/schedules.go`, whose comment of `MaxPeriod` now names the span the feed reads, `ICalSpan`.
 - Corrected with the implementation: a Service account token gets `403` `session_required`, not
   `service_account_not_allowed`, on `issueMyIcalFeed` and `revokeMyIcalFeed`, as on every operation that accepts the
   web session only (`credentialsAllowed` refuses a token on a session-only operation before it looks at the path,
@@ -193,8 +196,12 @@ None.
   (C-27.FR-5). The window runs from midnight UTC 7 days before the business clock's day to midnight UTC at the end
   of the day 60 days ahead, so that it always covers `ical.window` and an event it cuts at an end keeps its start,
   and so its `UID`, for the whole day instead of changing on every fetch (review L2); an event that crosses an end
-  of the window is cut there. `UID` is `{schedule public_id}-{DTSTART}@muster`; the calendar has
-  `PRODID`, `VERSION` and `X-WR-CALNAME` and nothing else, no `VTIMEZONE`, every time in UTC, and a wall-clock time
+  of the window is cut there. `UID` is `{schedule public_id}-{user public_id}-{DTSTART}@{host}`, the host of
+  `MUSTER_PUBLIC_URL`, so that it differs between the feeds of two Users (review L5); the calendar has `PRODID`,
+  `VERSION`, `X-WR-CALNAME` and a `VTIMEZONE` of UTC (`TZID:UTC`, one `STANDARD` from 1970-01-01 at `+0000`), which
+  no time refers to and which keeps a calendar without events valid, since RFC 5545 asks for one component at least
+  (review L3); every `DTSTART` and `DTEND` is UTC with `Z`; every event is `TRANSP:TRANSPARENT`, since being On-call is
+  not being busy; and a wall-clock time
   that happens twice is its first occurrence, as the Result computes it (`TestFeedChangeOfClocks` over the changes
   of October 2026 and March 2027 in Europe/Berlin).
 - Decided with the implementation: deleting a User records `ical_feed.revoked` with the reason `user_deleted` by the
@@ -219,16 +226,18 @@ None.
 - Kept as they are, after review: the route label `/ical/{token}.ics` of `muster_api_requests_total` comes from
   `api.PathTemplates`, which reads every path of the spec — `/health/live`, `/health/ready` and `/metrics` of the
   internal listener are there too — so dropping it would change that function and its test for every path outside
-  the API; only a link sent under `/api/v1` by mistake is counted under it (review L1). A calendar without events has
-  no `VEVENT`, which calendar applications accept although RFC 5545 asks for a component (L3). The `UID` is the
-  contracted `{schedule public_id}-{start}@muster`, unique within a feed, not across the feeds of different Users
-  (L5).
+  the API; only a link sent under `/api/v1` by mistake is counted under it (review L1).
+- Follow-ups for the backlog, not in this story: an Admin's `DELETE /users/{id}/ical-feed`, to stop a User's link
+  without deleting or disabling the User, and a metric of the fetches of the feeds. Accepted as it is: a User of OIDC
+  whom the identity provider no longer accepts keeps a working link until Muster disables them, since the feed is
+  never re-checked at the identity provider.
 - The maintainer confirms one provisional value with this story (operator attention): P-82, the prefix `mstr_cal_`, 32
   random bytes, stored as a hash, shown once, one per User. P-81, the window of 7 days back and 60 ahead, is confirmed
   by the test environment and stays provisional.
 - The token is a credential in a URL that calendar applications fetch without a session, so it is treated like the
   Heartbeat's path token: hashed, never logged, and refused for a disabled User.
-- The feed is the User's across every Schedule of every Team, not only their Teams' main Schedules (C-27.FR-10).
+- The feed is the User's across every Schedule of the User's Teams, not only their Teams' main Schedules
+  (C-27.FR-10).
 
 ## Coverage
 

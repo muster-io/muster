@@ -114,6 +114,7 @@ The link
 A new link revokes the old one
 :   Each User has one feed. Issuing a new link stops the old one at once, and `revokeMyIcalFeed` stops the current one;
     a stopped link, and the link of a disabled or deleted User, answers `404`. Deleting a User deletes their feed.
+    After a link stops, calendar applications keep showing the copy they last fetched.
 
 Calendar applications fetch the link without signing in, so treat it as a password: anyone who has it sees the times.
 Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
