@@ -3503,9 +3503,9 @@ Alert Group offers no Snooze button, and a Route without Snooze durations offers
 durations, and a bridge with a limit on buttons drops them first; see
 <a href="../../messengers/bridge/#what-muster-posts">Bridge</a>. Slack offers the durations and then the presets as the options of
 one <strong>Snooze…</strong> menu, since its web client folds the buttons beyond five in a row.</p>
-<p>The labels are part of the message. After a change of <code>organization.workday_start</code> or <code>organization.week_start</code>, each
-Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
-the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+<p>The labels are part of the message. A change of <code>organization.workday_start</code> or <code>organization.week_start</code> edits each
+open Root message once, Quietly, so that it shows the new labels, and a press on a button shown before the edit already
+ends at the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
 are <a href="#text-commands">Text commands</a>.</p>
 <h3 id="who-may">Who may<a class="headerlink" href="#who-may" title="Permanent link">&para;</a></h3>
 <p>A <strong>Responder</strong> or an <strong>Admin</strong> may acknowledge, resolve, snooze and add Notes. A <strong>Viewer</strong> may read and may not act:

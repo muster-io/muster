@@ -76,6 +76,12 @@ differ, and not at all when no Alert has it. The Route suggests labels from its 
 example value (`listRouteLabelSuggestions`). A change of the list, or of the Group key while the list is the default,
 edits the open Root messages of the Route, Quietly, to show the new labels.
 
+The open Root messages also follow the Organization's settings and the names of Teams that they show: a change of the
+[severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day of
+the week](organization.md) edits every open Root message once, Quietly, and a rename of a Team edits those of the open
+Alert Groups that have the Team. A message the change does not alter is not edited, and no change sends a new message or
+a Mention.
+
 ## What you can change, and what you cannot
 
 A Route has three templates, under **Routes → a Route → Message**. Each is **Built-in** or **Custom**.

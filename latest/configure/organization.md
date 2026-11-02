@@ -19,12 +19,15 @@ The defaults below are what a new installation has.
 **Time zone of messages** (`organization.time_zone`, `UTC`)
 :   The time zone of every time in a message in a messenger. It is `UTC` until you change it, so a new installation
     shows times such as "started 07:12" in UTC. Times in messages are absolute, never "5 minutes ago". Each User sees the
-    web UI in their own time zone, which they set in their profile.
+    web UI in their own time zone, which they set in their profile. A change edits every open Root message once, as an
+    edit that notifies nobody, so that its start time is in the new time zone: within seconds on a small installation,
+    over minutes on one with many open Alert Groups, as the messengers' rate limits allow.
 
 **Start of the working day** (`organization.workday_start`, `09:00`) and **First day of the week** (`organization.week_start`, `monday`)
 :   The Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00" end at this time of day and on this day, in the
     time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
-    See [statuses and commands](../concepts/statuses-and-commands.md).
+    The open Root messages are edited once, as edits that notify nobody, so that their preset buttons show the new
+    labels. See [statuses and commands](../concepts/statuses-and-commands.md).
 
 1. Open **Organization**; **General** opens first.
 2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
@@ -79,7 +82,11 @@ From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status. A change of **Buttons of Root messages** updates the open Root messages of the Destinations that follow the
-Organization within seconds, as edits that notify nobody.
+Organization, as edits that notify nobody. So does a change of the severity label, the Team label or the Instance labels
+for every open Root message, which shows them in its
+[key labels and Alerts](messages-and-templates.md#the-default-message): each is edited once, and one that the change
+does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
+many open Alert Groups, as the messengers' rate limits allow.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.

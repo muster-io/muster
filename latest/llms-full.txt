@@ -1093,6 +1093,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       [subtrees](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
       [identity provider entries of Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider). The Role mapping
       reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
+    - Migration 0031 lets a change of the Organization's severity label, Team label, Instance labels, time zone, start
+      of the working day or first day of the week, and a rename of a Team, reach the open Alert Groups: their Root
+      messages are edited once, Quietly, to show the new labels, start time, Snooze presets or name, instead of at each
+      Alert Group's next change.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1156,6 +1160,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     higher one, and it changes no Team membership. Do not save the OIDC settings until every replica runs 0.2.0: a save
     on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
     mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
+    Neither a 0.1 replica nor one of a development image without migration 0031 writes the re-render of the open Root
+    messages after a change of the severity label, the Team label, the Instance labels, the time zone, the start of the
+    working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
+    of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
+    this version.
 
     **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
     that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
@@ -1342,6 +1351,29 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
 
+    Migration 0031 lets a change of the Organization's message settings or a rename of a Team re-render the open
+    Root messages in three transactions: the first adds the new CHECK of the kinds of `open_group_updates`, the second
+    validates it, the third drops the CHECK of 0029. A failure leaves the schema recorded as dirty at version 31. To
+    recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v5_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 30, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v5_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v4_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
     are already running keep working on it during a rolling update. 0.1.0 refuses to start on schema 20, so going back
@@ -1495,6 +1527,12 @@ A label shows as `name=value` when every firing Alert has the same value, as `na
 differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
 example value (`listRouteLabelSuggestions`). A change of the list, or of the Group key while the list is the default,
 edits the open Root messages of the Route, Quietly, to show the new labels.
+
+The open Root messages also follow the Organization's settings and the names of Teams that they show: a change of the
+[severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day of
+the week](https://muster-io.github.io/muster/latest/configure/organization.md) edits every open Root message once, Quietly, and a rename of a Team edits those of the open
+Alert Groups that have the Team. A message the change does not alter is not edited, and no change sends a new message or
+a Mention.
 
 ## What you can change, and what you cannot
 
@@ -1727,12 +1765,15 @@ The defaults below are what a new installation has.
 **Time zone of messages** (`organization.time_zone`, `UTC`)
 :   The time zone of every time in a message in a messenger. It is `UTC` until you change it, so a new installation
     shows times such as "started 07:12" in UTC. Times in messages are absolute, never "5 minutes ago". Each User sees the
-    web UI in their own time zone, which they set in their profile.
+    web UI in their own time zone, which they set in their profile. A change edits every open Root message once, as an
+    edit that notifies nobody, so that its start time is in the new time zone: within seconds on a small installation,
+    over minutes on one with many open Alert Groups, as the messengers' rate limits allow.
 
 **Start of the working day** (`organization.workday_start`, `09:00`) and **First day of the week** (`organization.week_start`, `monday`)
 :   The Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00" end at this time of day and on this day, in the
     time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
-    See [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
+    The open Root messages are edited once, as edits that notify nobody, so that their preset buttons show the new
+    labels. See [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
 
 1. Open **Organization**; **General** opens first.
 2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
@@ -1787,7 +1828,11 @@ From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status. A change of **Buttons of Root messages** updates the open Root messages of the Destinations that follow the
-Organization within seconds, as edits that notify nobody.
+Organization, as edits that notify nobody. So does a change of the severity label, the Team label or the Instance labels
+for every open Root message, which shows them in its
+[key labels and Alerts](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-default-message): each is edited once, and one that the change
+does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
+many open Alert Groups, as the messengers' rate limits allow.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
@@ -9045,9 +9090,9 @@ durations, and a bridge with a limit on buttons drops them first; see
 [Bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts). Slack offers the durations and then the presets as the options of
 one **Snooze…** menu, since its web client folds the buttons beyond five in a row.
 
-The labels are part of the message. After a change of `organization.workday_start` or `organization.week_start`, each
-Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
-the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+The labels are part of the message. A change of `organization.workday_start` or `organization.week_start` edits each
+open Root message once, Quietly, so that it shows the new labels, and a press on a button shown before the edit already
+ends at the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
 are [Text commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#text-commands).
 
 ### Who may
@@ -9581,7 +9626,8 @@ Alerts that are firing in open Alert Groups again, and only adds:
   Quiet `team_joined`. The Root messages are updated Quietly, with no new message and no Mention, and no Escalation
   chain starts.
 - A Team that an Alert no longer belongs to stays where it is, on the Alert and in its Alert Group.
-- Saving the name, the description, the people or the Working hours of a Team evaluates nothing.
+- Saving the name, the description, the people or the Working hours of a Team evaluates nothing. A new name edits the
+  Root messages of the open Alert Groups that have the Team once, Quietly, so that their field Teams shows it.
 
 So "Create Team" for a value without a Team brings the Team the open Alert Groups of that value at once: with an open,
 firing Alert Group of `team="checkout"` and no such Team, creating the Team with the slug `checkout` adds it to the
