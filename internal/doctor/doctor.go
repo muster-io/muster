@@ -36,6 +36,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/runtime"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
@@ -60,8 +61,10 @@ const (
 	CheckKeyCanary         = "key_canary"
 	CheckKeyring           = "keyring"
 	CheckClockSkew         = "clock_skew"
-	// CheckConnections fails when the Connections and Destinations cannot be read; each one checked prints its own
-	// line, "connection <name>" or "destination <name>".
+	// CheckConnections fails when the Organizations, an Organization's outbound address policy, or its Connections and
+	// Destinations cannot be read; the policy is read for every Organization, with Connections or without, and when it
+	// fails that Organization is not checked. Each Connection and Destination checked prints its own line,
+	// "connection <name>" or "destination <name>".
 	CheckConnections = "connections"
 )
 
@@ -396,7 +399,9 @@ func (c *checks) clockSkew(ctx context.Context) {
 
 // messengers checks the Connections and the Destinations of every Organization, one line each, through the
 // Organization's outbound address policy and, under development, the routes of `muster dev`; the outbound log lines
-// are for the server, not for the doctor.
+// are for the server, not for the doctor. The policy is read once per Organization, before its checks: the doctor has
+// one connection, and a dial that reads the policy runs in the transport's own goroutine, which outlives a check that
+// timed out and would use the connection beside the doctor's next statement.
 func (c *checks) messengers(ctx context.Context) {
 	orgs, err := kdb.New(c.conns.Main).ListOrganizationIDs(ctx)
 	if err != nil {
@@ -409,11 +414,16 @@ func (c *checks) messengers(ctx context.Context) {
 	}
 	quiet := logging.New(io.Discard, logging.LevelError)
 	for _, org := range orgs {
+		policy, err := organization.NewOutboundPolicies(organization.NewStore(c.conns.Main), org, c.real).
+			OutboundPolicy(ctx)
+		if err != nil {
+			c.print(Fail, CheckConnections, err.Error())
+			continue
+		}
 		svc := connections.New(connections.Config{OrgID: org, Keyring: keys, Log: quiet, SlackRoute: c.slackRoute,
 			TelegramRoute: c.routes.telegram, MattermostRoute: c.routes.mattermost, BridgeRoute: c.routes.bridge,
-			Clocks: clock.Clocks{Business: c.real, Real: c.real},
-			Network: mattermost.Network{Policy: organization.NewOutboundPolicies(organization.NewStore(c.conns.Main),
-				org, c.real), Log: quiet, Real: c.real}})
+			Clocks:  clock.Clocks{Business: c.real, Real: c.real},
+			Network: mattermost.Network{Policy: outbound.StaticPolicy(policy), Log: quiet, Real: c.real}})
 		found, err := svc.Doctor(ctx, cdb.New(c.conns.Main), c.each)
 		if err != nil {
 			c.print(Fail, CheckConnections, err.Error())

@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,8 +81,11 @@ func (r *rows) Scan(dest ...any) error {
 // where the doctor's Slack requests go, nil for none, and routes where its Telegram, Mattermost and Bridge requests go,
 // nil for the doctor's own.
 type fakeDB struct {
-	answers    map[string]*rows
-	execs      []string
+	answers map[string]*rows
+	execs   []string
+	// reads are the queries on the main connection, in order.
+	reads      []string
+	mu         sync.Mutex
 	listen     bool
 	slackRoute slack.Route
 	routes     *routes
@@ -101,6 +106,7 @@ func newFakeDB(ssl bool) *fakeDB {
 		"pg_advisory_unlock":         {values: [][]any{{true}}},
 		"clock_timestamp":            {values: [][]any{{time.Now()}}},
 		"FROM organizations":         {values: [][]any{{int64(1)}}},
+		"GetOutboundPolicy":          {values: [][]any{{"standard", []string(nil), []string(nil)}}},
 		"FROM encrypted_values":      {values: [][]any{}},
 		"FROM replicas":              {values: [][]any{}},
 		"FROM deliveries":            {values: [][]any{}},
@@ -142,6 +148,7 @@ func (c *conn) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandT
 }
 
 func (c *conn) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	c.read(sql)
 	r := c.db.answer(sql)
 	if r.err != nil {
 		return nil, r.err
@@ -149,7 +156,20 @@ func (c *conn) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) 
 	return r, nil
 }
 
-func (c *conn) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row { return c.db.answer(sql) }
+func (c *conn) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	c.read(sql)
+	return c.db.answer(sql)
+}
+
+// read records a query on the main connection.
+func (c *conn) read(sql string) {
+	if c.name != "main" {
+		return
+	}
+	c.db.mu.Lock()
+	defer c.db.mu.Unlock()
+	c.db.reads = append(c.db.reads, sql)
+}
 
 func (c *conn) WaitForNotification(context.Context) (*pgconn.Notification, error) {
 	return &pgconn.Notification{Channel: "muster_session_check", Payload: *c.payload}, nil
@@ -653,6 +673,31 @@ func TestMessengerChecks(t *testing.T) {
 		!strings.Contains(out, "FAIL connection Example Slack: the bot token cannot be opened") ||
 		!strings.Contains(out, "FAIL destination sl-alerts: its Connection failed its check") {
 		t.Errorf("without the master keys, ok %v, output:\n%s", ok, out)
+	}
+}
+
+// TestPolicyReadBeforeTheChecks: the doctor reads the outbound address policy of an Organization once, on its one
+// connection, before the checks. A dial never reads it: the transport dials in a goroutine of its own, which outlives a
+// check that timed out, and its read would use the connection beside the doctor's next statement (pgx: conn busy).
+func TestPolicyReadBeforeTheChecks(t *testing.T) {
+	key, _ := keys('a')
+	d := messengerDB(t, key)
+	run(t, d, environ(key))
+	d.mu.Lock()
+	reads := slices.Clone(d.reads)
+	d.mu.Unlock()
+	var policy []int
+	list := -1
+	for i, q := range reads {
+		switch {
+		case strings.Contains(q, "GetOutboundPolicy"):
+			policy = append(policy, i)
+		case strings.Contains(q, "ListConnections") && list < 0:
+			list = i
+		}
+	}
+	if len(policy) != 1 || list < 0 || policy[0] > list {
+		t.Errorf("the policy was read at %v, the connections listed at %d", policy, list)
 	}
 }
 
