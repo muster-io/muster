@@ -25,6 +25,7 @@ files_touched:
   - internal/routing/routes.go
   - internal/routing/labelsuggestions.go
   - internal/routing/labelsuggestions_test.go
+  - internal/routing/labelsuggestions_integration_test.go
   - internal/routing/query.sql
   - internal/routing/routes_test.go
   - internal/api/routes.go
@@ -85,7 +86,7 @@ acceptance:
   - "[C-29.FR-3, C-29.AC-3] The Alerts are named by their distinguishing label — the first of `organization.instance_labels` whose values differ, else the first differing label by name — with up to `message.compact_alerts_listed` values, firing ones first and resolved ones struck through, then \"…and K more\": twelve Alerts list five values and \"…and 7 more\" (`default_test.go`)."
   - "[C-29.FR-6, C-29.AC-3, C-12.FR-11] Rendered with a limit of 4,096 characters and a long description and summary, the message is cut in the order description, Alerts, summary, key labels, and always keeps the title, the status, the fields, the people, the buttons and the link to Muster; an Alert Group whose Alerts have only a `description` shows it, and one with neither annotation shows no text (`shorten_test.go`)."
   - "[C-29.FR-5, C-29.AC-5, C-12.FR-2] A Route with its own Root message template keeps its body in place of items 3 to 5 under Muster's title, fields, notices, people, buttons and links; a line template renders each listed Alert on a line of its own; the Fallback template keeps every label (`render_test.go`)."
-  - "[C-29.FR-2, C-29.AC-4] Adding `cluster` to a Route's `message_labels` writes an `open_group_updates` row of the kind `route_message_labels`, whose run edits the Route's open Root messages Quietly to show it; `listRouteLabelSuggestions` (`routes:read`) offers the labels of the Route's recent Alert Groups with an example value each (`updates_test.go`, `labelsuggestions_test.go`)."
+  - "[C-29.FR-2, C-29.AC-4] Adding `cluster` to a Route's `message_labels` writes an `open_group_updates` row of the kind `route_message_labels`, whose run edits the Route's open Root messages Quietly to show it; `listRouteLabelSuggestions` (`routes:read`) offers the labels of the Route's recent Alert Groups with an example value each, reading at most 5,000 of their memberships (`updates_test.go`, `labelsuggestions_test.go`, `labelsuggestions_integration_test.go`)."
   - "[C-29.FR-7, C-16.FR-4, C-12.FR-3] The default layout replaces that of L1 for every Route from 0.2.0 on, in Root messages, test messages and `previewTemplate`, whose result for `root_message` also carries `layout`, the structured content of the message, and `length` against `messenger_limit`; Thread replies and Storm summaries keep their forms; the built-in texts of the layout exist in English and Russian; the upgrade notes of 0.2.0 say that the layout changes (`templates_test.go`)."
   - "[C-29.FR-9] The documentation page Messages and templates shows the new default message and has the section \"Labels in the message\"; `make docs-check` passes."
 verify: "make ci test-integration e2e-go e2e-web docs-check"
@@ -253,8 +254,11 @@ None.
     kind CHECK it replaces is `open_group_updates_kind_v3_check` of 0027, so the new one is `_v4`, with the scope CHECK
     `open_group_updates_route_scope_check` beside it. The migration also adds `alert_groups.description`.
   - The suggestions read at most the 200 most recent Alert Groups of the Route within the period and 5,000 of their
-    Alerts, so that the read stays bounded; the Alerts of an Alert Group are counted once by fingerprint, so an Alert
-    that fired again is one Alert.
+    memberships, one Alert Group after another, the most recent first and the newest membership first, so that the
+    read stays bounded before any label is expanded, not only the list returned; an Alert that fired again in an
+    Alert Group, one membership per Episode, counts once there. `labelsuggestions_integration_test.go` (added to
+    `files_touched`) proves the bound on PostgreSQL 14 and 17 from the executed plan: at most 5,000 Alerts reach
+    `jsonb_each_text`, and `alert_group_alerts` is read through `alert_group_alerts_group_idx`, never sequentially.
   - The suggestions come from the labels of the Alerts of the Route's recent Alert Groups, not from their common
     labels: the Verification expects `pod`, which differs per Alert and so is never a common label.
   - `files_touched` adds `internal/api/server.go` (the Routes interface and the list of implemented operations),

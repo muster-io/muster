@@ -926,22 +926,28 @@ func (q *Queries) ListRouteInfo(ctx context.Context, orgID int64) ([]ListRouteIn
 }
 
 const listRouteLabelSuggestions = `-- name: ListRouteLabelSuggestions :many
-WITH recent AS (
-    SELECT g.id
+WITH recent AS MATERIALIZED (
+    SELECT g.id, g.created_at
     FROM alert_groups g
     WHERE g.org_id = $1 AND g.route_id = $3 AND g.created_at >= $4::timestamptz
     ORDER BY g.created_at DESC, g.id DESC
     LIMIT $5::int
-), members AS (
-    SELECT m.alert_group_id, m.alert_id
-    FROM alert_group_alerts m
-    WHERE m.org_id = $1 AND m.alert_group_id IN (SELECT r.id FROM recent r)
-    ORDER BY m.id DESC
+), members AS MATERIALIZED (
+    SELECT r.id AS alert_group_id, m.alert_id
+    FROM (SELECT q.id, q.created_at FROM recent q ORDER BY q.created_at DESC, q.id DESC) r
+    CROSS JOIN LATERAL (
+        SELECT n.id, n.alert_id
+        FROM alert_group_alerts n
+        WHERE n.org_id = $1 AND n.alert_group_id = r.id
+        ORDER BY n.id DESC
+        LIMIT $6::int
+    ) m
+    ORDER BY r.created_at DESC, r.id DESC, m.id DESC
     LIMIT $6::int
 )
 SELECT l.name::text AS label, (mode() WITHIN GROUP (ORDER BY l.value))::text AS example_value,
        count(DISTINCT x.alert_group_id)::bigint AS alert_group_count
-FROM members x
+FROM (SELECT DISTINCT y.alert_group_id, y.alert_id FROM members y) x
 JOIN alerts a ON a.org_id = $1 AND a.id = x.alert_id
 CROSS JOIN LATERAL jsonb_each_text(a.labels) AS l(name, value)
 GROUP BY l.name
@@ -964,10 +970,14 @@ type ListRouteLabelSuggestionsRow struct {
 	AlertGroupCount int64
 }
 
-// ListRouteLabelSuggestions lists the labels of the Alerts of the Route's Alert Groups created since @since — the
-// @group_lim most recent of them and at most @alert_lim of their Alerts, the most recent first, so that the read stays
-// bounded — each with its most frequent value, the smallest of equally frequent ones, and the number of those Alert
-// Groups whose Alerts carry it, most frequent first, at most @lim, for "Labels in the message" (C-29.FR-2).
+// ListRouteLabelSuggestions lists the labels of the Alerts of the Route's Alert Groups created since @since, each with
+// its most frequent value, the smallest of equally frequent ones, and the number of those Alert Groups whose Alerts
+// carry it, most frequent first, at most @lim, for "Labels in the message" (C-29.FR-2). What it reads is bounded before
+// any label is expanded: the @group_lim most recent of those Alert Groups, through alert_groups_route_idx, then the
+// memberships of one Alert Group after another, the most recent Alert Group and the newest membership first, through
+// alert_group_alerts_group_idx, until @alert_lim of them are taken; the subquery r keeps the order of the Alert Groups
+// known to the planner, so that the outer LIMIT stops the nested loop instead of sorting every membership. An Alert
+// that fired again in an Alert Group, one membership per Episode, counts once there.
 func (q *Queries) ListRouteLabelSuggestions(ctx context.Context, arg ListRouteLabelSuggestionsParams) ([]ListRouteLabelSuggestionsRow, error) {
 	rows, err := q.db.Query(ctx, listRouteLabelSuggestions,
 		arg.OrgID,

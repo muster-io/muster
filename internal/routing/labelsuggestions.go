@@ -12,7 +12,7 @@ import (
 
 // MaxLabelSuggestions is the most labels listRouteLabelSuggestions offers for "Labels in the message" (C-29.FR-2);
 // suggestionGroups and suggestionAlerts bound what it reads: the most recent Alert Groups of the Route within
-// routing.group_key_preview_period and the most recent of their Alerts.
+// routing.group_key_preview_period and the newest of their memberships.
 const (
 	MaxLabelSuggestions = 50
 	suggestionGroups    = 200
@@ -29,7 +29,7 @@ type LabelSuggestion struct {
 
 // LabelSuggestions lists the labels of the Alerts of the Alert Groups of the Route publicID created within
 // routing.group_key_preview_period of the business clock — at most the 200 most recent of them and 5,000 of their
-// Alerts — most frequent first, at most MaxLabelSuggestions; a deleted or unknown Route is ErrNotFound.
+// memberships — most frequent first, at most MaxLabelSuggestions; a deleted or unknown Route is ErrNotFound.
 func (s *Service) LabelSuggestions(ctx context.Context, publicID string) ([]LabelSuggestion, error) {
 	r, err := s.Get(ctx, publicID)
 	if err != nil {

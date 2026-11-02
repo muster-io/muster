@@ -14,8 +14,8 @@ import (
 
 // TestLabelSuggestions is C-29.FR-2: the suggestions of "Labels in the message" are the labels of the Route's Alert
 // Groups of routing.group_key_preview_period, most frequent first, at most MaxLabelSuggestions, read for the Route by
-// its id in the Organization from at most its 200 most recent Alert Groups and 5,000 of their Alerts; an unknown Route
-// is ErrNotFound and a failed read is returned.
+// its id in the Organization from at most its 200 most recent Alert Groups and 5,000 of their memberships; an unknown
+// Route is ErrNotFound and a failed read is returned.
 func TestLabelSuggestions(t *testing.T) {
 	svc, store, c := newService(t)
 	r, err := svc.Create(t.Context(), by, input("infra"))
