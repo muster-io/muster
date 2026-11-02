@@ -107,6 +107,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0025 adds [Schedules](../concepts/schedules.md) and the Permissions `schedules:read`,
       `schedules:write` and `schedule-overrides:write`. Roles get them at once; a Personal access token keeps the
       Permissions it was issued with, so issue a new one to reach Schedules with a token.
+    - Migration 0026 adds the personal [iCal feeds](../concepts/schedules.md#ical-feed); no User has one after the
+      upgrade.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -141,7 +143,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
     does not know them and renders every button on the messages it touches. A 0.1 replica gives the Alerts it
     processes no Teams, and the events-mode webhook bodies it sends lack `alert_group.teams`: create Teams only after
-    every replica runs 0.2.0.
+    every replica runs 0.2.0. A 0.1 replica does not serve the iCal feeds: it answers a link of a feed with the page
+    of the web UI, and a User it deletes keeps the row of their feed, whose link then answers `404` as the feed of a
+    deleted User does. Issue iCal links only after every replica runs 0.2.0.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -239,6 +243,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
     dirty at version 25. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 24, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
+
+    Migration 0026 adds the iCal feeds in one transaction: a failure leaves nothing of it, but the schema recorded as
+    dirty at version 26. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 25, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
 
 0.1.1

@@ -2375,24 +2375,79 @@ func TestIntegrationSchedules(t *testing.T) {
 
 func ptrTo(s string) *string { return &s }
 
+// TestIntegrationIcalFeeds runs 0026 over a database with two Users: the table takes one feed per User with the
+// 32-byte hash of its token, refusing a second feed of the User, a hash another feed has and one of another length,
+// and an upsert on the User replaces the row; down drops the table and keeps the Users; up again works. The versions
+// are reached by number.
+func TestIntegrationIcalFeeds(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 25)
+		for login, id := range map[string]string{"petr": "SR0000000000PA", "olga": "SR0000000000PB"} {
+			e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+				SELECT id, '`+id+`', '`+login+`', '`+login+`', 'responder', 'local', 'active', now(), now()
+				FROM organizations`)
+		}
+		if err := e.mm.Migrate(26); err != nil {
+			t.Fatalf("up to 26: %v", err)
+		}
+		feed := func(login, token string) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
+				SELECT org_id, id, sha256($2::bytea), '2026-11-02T10:00:00Z' FROM users WHERE login = $1`,
+				login, []byte(token))
+			return err
+		}
+		if err := feed("petr", "mstr_cal_a"); err != nil {
+			t.Fatal(err)
+		}
+		if err := feed("petr", "mstr_cal_b"); err == nil {
+			t.Error("a second feed of the user was stored")
+		}
+		if err := feed("olga", "mstr_cal_a"); err == nil {
+			t.Error("a hash another feed has was stored")
+		}
+		if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
+			SELECT org_id, id, '\x00'::bytea, now() FROM users WHERE login = 'olga'`); err == nil {
+			t.Error("a hash of one byte was stored")
+		}
+		e.exec(t, `INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
+			SELECT org_id, id, sha256('mstr_cal_c'::bytea), '2026-11-03T10:00:00Z' FROM users WHERE login = 'petr'
+			ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash, issued_at = EXCLUDED.issued_at`)
+		if got := e.count(t, `SELECT count(*) FROM ical_feeds WHERE token_hash = sha256('mstr_cal_c'::bytea)
+			AND issued_at = '2026-11-03T10:00:00Z'`) + e.count(t, `SELECT count(*) FROM ical_feeds`); got != 2 {
+			t.Errorf("after the upsert: %d", got)
+		}
+
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'ical_feeds'`); got != 0 {
+			t.Error("after down: ical_feeds is left")
+		}
+		if got := e.count(t, `SELECT count(*) FROM users WHERE login IN ('petr', 'olga')`); got != 2 {
+			t.Errorf("after down: %d users", got)
+		}
+		if err := e.mm.Migrate(26); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (25)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (26)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":25`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":26`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":25`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":26`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2408,10 +2463,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (25)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (26)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":25`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":26`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

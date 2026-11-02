@@ -76,6 +76,8 @@ import (
 	"github.com/muster-io/muster/internal/proxyconf"
 	"github.com/muster-io/muster/internal/requestlog"
 	"github.com/muster-io/muster/internal/runtime"
+	"github.com/muster-io/muster/internal/schedules"
+	scdb "github.com/muster-io/muster/internal/schedules/dbgen"
 	"github.com/muster-io/muster/internal/slack"
 	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/templates"
@@ -118,6 +120,7 @@ var registry = []Probe{
 	{Name: "api_tokens", Run: probeTokens},
 	{Name: "ingestion", Run: probeIngestion},
 	{Name: "heartbeat", Run: probeHeartbeat},
+	{Name: "ical_feed", Run: probeIcalFeed},
 	{Name: "mattermost_connections", Run: probeMattermost},
 	{Name: "telegram_connections", Run: probeTelegram},
 	{Name: "bridge_connections", Run: probeBridge},
@@ -1193,6 +1196,143 @@ func probeHeartbeat(ctx context.Context, secrets []string, log io.Writer) error 
 	}
 	return out
 }
+
+// probeIcalFeed pushes known secrets through the personal iCal feeds (C-27.FR-10, L2.md NFR-6), whose token is a
+// credential in the path that calendar applications fetch: it issues a feed, fetches it with the issued token, with
+// each secret as a token, bare and with the mstr_cal_ prefix, while the User is active and while they are disabled,
+// while the lookup fails and while the Result fails, then revokes it and fetches it again. None of the answers,
+// errors or log lines may carry a token; as in probeHeartbeat, the probe looks for the issued value itself.
+func probeIcalFeed(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	business := clock.NewManual(time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC))
+	w := audit.NewWriter(logger, business)
+	store := &probeFeedStore{status: "active"}
+	const base = "https://muster.example.org"
+	feeds := schedules.NewFeeds(schedules.FeedsConfig{OrgID: 1, Store: store, Audit: w, Business: business,
+		Schedules: schedules.New(schedules.Config{OrgID: 1, Store: probeSchedulesStore{}, Audit: w,
+			Business: business}), PublicURL: base})
+	by := schedules.Requester{Actor: audit.User(1, "SRAAAAAAAAAAAA"), Transport: audit.TransportUI}
+	user := schedules.FeedUser{ID: 1, PublicID: "SRAAAAAAAAAAAA"}
+	issued, err := feeds.Issue(ctx, by, user)
+	errs := []error{err}
+	value := strings.TrimSuffix(strings.TrimPrefix(issued.URL, base+schedules.FeedBasePath), schedules.FeedSuffix)
+	h := api.IcalHandler{Feeds: feeds, Log: logger}
+	var answers []string
+	fetched := 0
+	send := func(token string) {
+		r, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			schedules.FeedBasePath+url.PathEscape(token)+schedules.FeedSuffix, nil)
+		if err != nil {
+			errs = append(errs, err)
+			return
+		}
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		if strings.HasPrefix(rec.body.String(), "BEGIN:VCALENDAR") {
+			fetched++
+		}
+		answers = append(answers, rec.body.String())
+	}
+	for _, secret := range secrets {
+		send(secret)
+		send("mstr_cal_" + secret)
+	}
+	// A link sent under /api/v1 by mistake reaches the API, whose problems name the path in instance elsewhere.
+	apiHandler, err := api.New(api.Config{IcalFeeds: feeds, Log: logger, Real: clock.Real{}})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	for _, token := range append(slices.Clone(secrets), value) {
+		escaped := url.PathEscape(token)
+		feed := api.BasePath + schedules.FeedBasePath
+		for _, req := range [][2]string{{http.MethodGet, feed + escaped + schedules.FeedSuffix},
+			{http.MethodPost, feed + escaped + schedules.FeedSuffix}, {http.MethodGet, feed + escaped},
+			{http.MethodGet, feed + escaped + schedules.FeedSuffix + "/x"},
+			{http.MethodGet, api.BasePath + "/" + feed[len(api.BasePath):] + escaped + schedules.FeedSuffix},
+			{http.MethodGet, api.BasePath + "/." + feed[len(api.BasePath):] + escaped + schedules.FeedSuffix}} {
+			r, err := http.NewRequestWithContext(ctx, req[0], req[1], nil)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			rec := &probeRecorder{header: http.Header{}}
+			apiHandler.ServeHTTP(rec, r)
+			answers = append(answers, rec.body.String())
+		}
+	}
+	send(value)
+	store.status = "disabled"
+	send(value)
+	store.status, store.fail = "active", errors.New("the database is unavailable")
+	send(value)
+	store.fail, store.listFail = nil, errors.New("the database is unavailable")
+	send(value)
+	store.listFail = nil
+	errs = append(errs, feeds.Revoke(ctx, by, user))
+	send(value)
+	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
+	out := errors.Join(errs...)
+	if value == "" || fetched != 1 {
+		return fmt.Errorf("no feed was issued or fetched (%d): %w", fetched, out)
+	}
+	lw, ok := log.(interface{ String() string })
+	if strings.Contains(out.Error(), value) || (ok && strings.Contains(lw.String(), value)) {
+		return fmt.Errorf("an issued token value leaked; reported as %s", secrets[0])
+	}
+	return out
+}
+
+// probeFeedStore is ical_feeds in memory for probeIcalFeed, with one User whose status it sets: fail fails the lookup
+// and listFail the list of the User's Schedules.
+type probeFeedStore struct {
+	hash     []byte
+	status   string
+	fail     error
+	listFail error
+}
+
+func (s *probeFeedStore) InTx(_ context.Context, f func(schedules.FeedQueries) error) error {
+	return f(s)
+}
+
+func (s *probeFeedStore) On(scdb.DBTX) schedules.FeedQueries { return s }
+
+func (s *probeFeedStore) ListUserSchedules(context.Context, scdb.ListUserSchedulesParams) (
+	[]scdb.ListUserSchedulesRow, error) {
+	return nil, s.listFail
+}
+
+func (s *probeFeedStore) ReplaceIcalFeed(_ context.Context, arg scdb.ReplaceIcalFeedParams) (bool, error) {
+	replaced := s.hash != nil
+	s.hash = arg.TokenHash
+	return replaced, nil
+}
+
+func (s *probeFeedStore) GetIcalFeed(context.Context, scdb.GetIcalFeedParams) (time.Time, error) {
+	return time.Time{}, pgx.ErrNoRows
+}
+
+func (s *probeFeedStore) DeleteIcalFeed(context.Context, scdb.DeleteIcalFeedParams) (int64, error) {
+	s.hash = nil
+	return 1, nil
+}
+
+func (s *probeFeedStore) FindIcalFeed(_ context.Context, hash []byte) (scdb.FindIcalFeedRow, error) {
+	if s.fail != nil {
+		return scdb.FindIcalFeedRow{}, s.fail
+	}
+	if s.hash == nil || !bytes.Equal(hash, s.hash) {
+		return scdb.FindIcalFeedRow{}, pgx.ErrNoRows
+	}
+	return scdb.FindIcalFeedRow{OrgID: 1, UserID: 1, UserPublicID: "SRAAAAAAAAAAAA", UserStatus: s.status}, nil
+}
+
+func (s *probeFeedStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
+}
+
+// probeSchedulesStore stands for the Schedules of probeIcalFeed, which has none, so that nothing reads it.
+type probeSchedulesStore struct{ schedules.Store }
 
 // probeSignals records Heartbeat signals until fail is set.
 type probeSignals struct {

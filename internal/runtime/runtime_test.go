@@ -2027,6 +2027,11 @@ func (fakeTeamsStore) ListTeamInfo(context.Context, int64) ([]teamsdb.ListTeamIn
 
 func (f *fakeDB) SchedulesStore() schedules.Store { return fakeSchedulesStore{} }
 
+func (f *fakeDB) IcalFeedsStore() schedules.FeedStore { return fakeIcalFeedsStore{} }
+
+// fakeIcalFeedsStore has no iCal feeds.
+type fakeIcalFeedsStore struct{ schedules.FeedStore }
+
 // fakeSchedulesStore has no Schedules.
 type fakeSchedulesStore struct{ schedules.Store }
 

@@ -282,3 +282,51 @@ WHERE org_id = @org_id AND id = @id;
 SELECT public_id, name
 FROM schedules
 WHERE org_id = @org_id;
+
+-- ListUserSchedules reads the Schedules of the Teams of a User, with their Team: the only Schedules in which the User
+-- can be On-call, since a person who is not in the Team is never Paged in its Schedules (C-27.FR-5).
+-- name: ListUserSchedules :many
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = @org_id
+  AND EXISTS (SELECT 1
+              FROM team_users tu
+              WHERE tu.org_id = @org_id AND tu.team_id = s.team_id AND tu.user_id = @user_id)
+ORDER BY s.id;
+
+-- ReplaceIcalFeed issues the iCal feed of an active User in one statement, replacing the one they had, so that its
+-- token stops working at once (C-27.FR-10); replaced says whether there was one. It reads the User FOR SHARE, which
+-- waits for a deletion or a disabling that holds the User's row and then sees its new status: a User who is not
+-- active gets no row and no feed, so a feed never outlives the deletion of its User.
+-- name: ReplaceIcalFeed :one
+INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
+SELECT u.org_id, u.id, @token_hash, @now
+FROM users u
+WHERE u.org_id = @org_id AND u.id = @user_id AND u.status = 'active'
+FOR SHARE
+ON CONFLICT (user_id) DO UPDATE
+SET token_hash = EXCLUDED.token_hash, issued_at = EXCLUDED.issued_at
+WHERE ical_feeds.org_id = EXCLUDED.org_id
+RETURNING (xmax <> 0)::boolean AS replaced;
+
+-- GetIcalFeed reads when the iCal feed of a User was issued.
+-- name: GetIcalFeed :one
+SELECT issued_at
+FROM ical_feeds
+WHERE org_id = @org_id AND user_id = @user_id;
+
+-- DeleteIcalFeed deletes the iCal feed of a User: its token stops working at once.
+-- name: DeleteIcalFeed :execrows
+DELETE FROM ical_feeds
+WHERE org_id = @org_id AND user_id = @user_id;
+
+-- FindIcalFeed finds an iCal feed by the SHA-256 of its token, with its Organization and its User's status.
+-- name: FindIcalFeed :one
+-- archlint:org-exempt by-hash lookup: the token in the path of the feed is all the request carries
+SELECT f.org_id, f.user_id, u.public_id AS user_public_id, u.status AS user_status
+FROM ical_feeds f
+JOIN users u ON u.org_id = f.org_id AND u.id = f.user_id
+WHERE f.token_hash = @token_hash;

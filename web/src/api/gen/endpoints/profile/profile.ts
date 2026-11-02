@@ -26,6 +26,8 @@ import type {
   CompleteOidcLinkParams,
   ConflictResponse,
   ForbiddenResponse,
+  IcalFeed,
+  IcalFeedIssued,
   Me,
   MeUpdate,
   NotFoundResponse,
@@ -1136,4 +1138,253 @@ export const useRegenerateTotpRecoveryCodes = <TError = BadRequestResponse | Una
         TContext
       > => {
       return useMutation(getRegenerateTotpRecoveryCodesMutationOptions(options), queryClient);
+    }
+    export const getGetMyIcalFeedUrl = () => {
+
+
+
+
+  return `/api/v1/me/ical-feed`
+}
+
+/**
+ * Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+ * @summary Read whether the caller has an iCal feed
+ */
+export const getMyIcalFeed = async ( options?: Parameters<typeof apiFetch>[1]): Promise<IcalFeed> => {
+
+  return apiFetch<IcalFeed>(getGetMyIcalFeedUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyIcalFeedQueryKey = () => {
+    return [
+    `/api/v1/me/ical-feed`
+    ] as const;
+    }
+
+
+export const getGetMyIcalFeedQueryOptions = <TData = Awaited<ReturnType<typeof getMyIcalFeed>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyIcalFeedQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyIcalFeed>>> = ({ signal }) => getMyIcalFeed({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetMyIcalFeedQueryResult = NonNullable<Awaited<ReturnType<typeof getMyIcalFeed>>>
+export type GetMyIcalFeedQueryError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+
+
+export function useGetMyIcalFeed<TData = Awaited<ReturnType<typeof getMyIcalFeed>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyIcalFeed>>,
+          TError,
+          Awaited<ReturnType<typeof getMyIcalFeed>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyIcalFeed<TData = Awaited<ReturnType<typeof getMyIcalFeed>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getMyIcalFeed>>,
+          TError,
+          Awaited<ReturnType<typeof getMyIcalFeed>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetMyIcalFeed<TData = Awaited<ReturnType<typeof getMyIcalFeed>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read whether the caller has an iCal feed
+ */
+
+export function useGetMyIcalFeed<TData = Awaited<ReturnType<typeof getMyIcalFeed>>, TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMyIcalFeed>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetMyIcalFeedQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getIssueMyIcalFeedUrl = () => {
+
+
+
+
+  return `/api/v1/me/ical-feed`
+}
+
+/**
+ * Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+ * @summary Issue the caller's iCal feed
+ */
+export const issueMyIcalFeed = async ( options?: Parameters<typeof apiFetch>[1]): Promise<IcalFeedIssued> => {
+
+  return apiFetch<IcalFeedIssued>(getIssueMyIcalFeedUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getIssueMyIcalFeedMutationKey = () => ['issueMyIcalFeed'] as const;
+
+export const getIssueMyIcalFeedMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueMyIcalFeed>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof issueMyIcalFeed>>, TError,void, TContext> => {
+
+const mutationKey = getIssueMyIcalFeedMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof issueMyIcalFeed>>, void> = () => {
+
+
+          return  issueMyIcalFeed(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IssueMyIcalFeedMutationResult = NonNullable<Awaited<ReturnType<typeof issueMyIcalFeed>>>
+
+    export type IssueMyIcalFeedMutationError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+
+
+    /**
+ * @summary Issue the caller's iCal feed
+ */
+export const useIssueMyIcalFeed = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueMyIcalFeed>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof issueMyIcalFeed>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getIssueMyIcalFeedMutationOptions(options), queryClient);
+    }
+    export const getRevokeMyIcalFeedUrl = () => {
+
+
+
+
+  return `/api/v1/me/ical-feed`
+}
+
+/**
+ * Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+ * @summary Revoke the caller's iCal feed
+ */
+export const revokeMyIcalFeed = async ( options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
+
+  return apiFetch<void>(getRevokeMyIcalFeedUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRevokeMyIcalFeedMutationKey = () => ['revokeMyIcalFeed'] as const;
+
+export const getRevokeMyIcalFeedMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMyIcalFeed>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeMyIcalFeed>>, TError,void, TContext> => {
+
+const mutationKey = getRevokeMyIcalFeedMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeMyIcalFeed>>, void> = () => {
+
+
+          return  revokeMyIcalFeed(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeMyIcalFeedMutationResult = NonNullable<Awaited<ReturnType<typeof revokeMyIcalFeed>>>
+
+    export type RevokeMyIcalFeedMutationError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse
+
+
+    /**
+ * @summary Revoke the caller's iCal feed
+ */
+export const useRevokeMyIcalFeed = <TError = UnauthorizedResponse | ForbiddenResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMyIcalFeed>>, TError,void, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof revokeMyIcalFeed>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRevokeMyIcalFeedMutationOptions(options), queryClient);
     }

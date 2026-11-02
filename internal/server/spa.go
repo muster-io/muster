@@ -21,9 +21,10 @@ const ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 
 const hstsValue = "max-age=31536000"
 
 // App is the handler of the app listener: every path under /api/ goes to api, which answers unknown API paths with a
-// problem, and every other path to the SPA in dist. Every answer carries the security headers, with
-// Strict-Transport-Security when hsts is set, which it is when MUSTER_PUBLIC_URL is https.
-func App(api http.Handler, dist fs.FS, hsts bool) http.Handler {
+// problem, every path under /ical/ to ical, the personal iCal feeds, and every other path to the SPA in dist. Every
+// answer carries the security headers, with Strict-Transport-Security when hsts is set, which it is when
+// MUSTER_PUBLIC_URL is https.
+func App(api, ical http.Handler, dist fs.FS, hsts bool) http.Handler {
 	spa := SPA(dist)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -35,11 +36,14 @@ func App(api http.Handler, dist fs.FS, hsts bool) http.Handler {
 		if hsts {
 			h.Set("Strict-Transport-Security", hstsValue)
 		}
-		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+		switch {
+		case r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/"):
 			api.ServeHTTP(w, r)
-			return
+		case IsIcalPath(r.URL.Path):
+			ical.ServeHTTP(w, r)
+		default:
+			spa.ServeHTTP(w, r)
 		}
-		spa.ServeHTTP(w, r)
 	})
 }
 

@@ -14,3 +14,5 @@ output-options:
   exclude-tags: # hand-written handlers; Outgoing webhooks are requests Muster sends
     - Outgoing webhooks
     - Health and metrics
+  exclude-operation-ids: # served by hand outside /api/v1 (internal/api/ical.go); a ServeMux wildcard is a whole segment
+    - getIcalCalendar

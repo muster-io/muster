@@ -76,6 +76,23 @@ func TestIsIngestPath(t *testing.T) {
 	}
 }
 
+// TestIsIcalPath is C-27.FR-10: the iCal feeds are the paths under /ical/, which are never ingest paths, so that a
+// merged port also serves them from the app handler.
+func TestIsIcalPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/ical/mstr_cal_x.ics":        true,
+		"/ical/":                      true,
+		"/ical":                       false,
+		"/icalendar":                  false,
+		"/api/v1/ical/mstr_cal_x.ics": false,
+		"/":                           false,
+	} {
+		if got := IsIcalPath(p); got != want || (got && IsIngestPath(p)) {
+			t.Errorf("IsIcalPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 // TestMergedListeners is C-02.AC-8 with stub handlers: with ingest and app on the same address, one port serves the
 // ingest paths from the ingest handler and every other path from the app handler.
 func TestMergedListeners(t *testing.T) {
@@ -319,20 +336,25 @@ func TestSPA(t *testing.T) {
 	}
 }
 
-// TestApp is C-03.FR-16: the app listener sends /api/ paths to the API and every other path to the SPA, and every
-// answer carries the Content Security Policy and the security headers; Strict-Transport-Security only for https.
+// TestApp is C-03.FR-16 and C-27.FR-10: the app listener sends /api/ paths to the API, /ical/ paths to the iCal
+// feeds before the SPA, and every other path to the SPA, and every answer carries the Content Security Policy and the
+// security headers; Strict-Transport-Security only for https.
 func TestApp(t *testing.T) {
 	dist := fstest.MapFS{"index.html": {Data: []byte("<html>index</html>")}}
 	for _, hsts := range []bool{false, true} {
-		h := App(stub("api"), dist, hsts)
+		h := App(stub("api"), stub("ical"), dist, hsts)
 		for path, want := range map[string]string{
-			"/":                   "<html>index</html>",
-			"/alert-groups/AG1":   "<html>index</html>",
-			"/api/v1/nothing":     "api /api/v1/nothing",
-			"/api":                "api /api",
-			"/apiary":             "<html>index</html>",
-			"/api/v1/sign-in-opt": "api /api/v1/sign-in-opt",
-			"/assets/x.js":        "404 page not found\n",
+			"/":                         "<html>index</html>",
+			"/alert-groups/AG1":         "<html>index</html>",
+			"/api/v1/nothing":           "api /api/v1/nothing",
+			"/api":                      "api /api",
+			"/apiary":                   "<html>index</html>",
+			"/api/v1/sign-in-opt":       "api /api/v1/sign-in-opt",
+			"/assets/x.js":              "404 page not found\n",
+			"/ical/mstr_cal_feed.ics":   "ical /ical/mstr_cal_feed.ics",
+			"/ical/":                    "ical /ical/",
+			"/ical":                     "<html>index</html>",
+			"/icalendar/mstr_cal_x.ics": "<html>index</html>",
 		} {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil))

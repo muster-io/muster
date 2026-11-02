@@ -662,3 +662,13 @@ export const DeleteScheduleOverrideHeader = zod.object({
 
 export const DeleteScheduleOverrideResponse = zod.void()
 
+/**
+ * The iCal calendar (RFC 5545) of the User whose feed the token in the path names, for calendar applications, without a session: one event per span of `ical.window` — from midnight UTC 7 days before the business clock's day to midnight UTC at the end of the day 60 days ahead — in which the User is On-call in a Schedule of any of their Teams, named "{Team} · {Schedule}", adjacent segments of the Result of one Schedule joined, an Override of the User its own event. Each event is transparent (`TRANSP:TRANSPARENT`: being On-call is not being busy) with the UID `{schedule public_id}-{user public_id}-{DTSTART}@{host of MUSTER_PUBLIC_URL}`. Times are UTC (`DTSTART` and `DTEND` end in `Z`); a `VTIMEZONE` of UTC, which no time refers to, keeps a feed without events valid. An unknown or revoked token, or the token of a disabled or deleted User, gets `404` with nothing else. The token never appears in a log line: the path is logged as `/ical/[redacted].ics`. Schedules are not imported from iCal.
+ * @summary The personal iCal feed of a User
+ */
+export const GetIcalCalendarParams = zod.object({
+  "token": zod.string().describe('The token of the feed, `mstr_cal_` followed by 52 characters (`ical.token`).')
+})
+
+export const GetIcalCalendarResponse = zod.unknown()
+

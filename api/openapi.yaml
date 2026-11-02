@@ -714,6 +714,79 @@ paths:
           $ref: '#/components/responses/Unprocessable'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /me/ical-feed:
+    get:
+      operationId: getMyIcalFeed
+      tags:
+      - Profile
+      summary: Read whether the caller has an iCal feed
+      description: Whether the caller's personal iCal feed exists and when it was issued; the token and the link are
+        never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      responses:
+        '200':
+          description: The caller's iCal feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IcalFeed'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: issueMyIcalFeed
+      tags:
+      - Profile
+      summary: Issue the caller's iCal feed
+      description: 'Issues a new link of the caller''s personal iCal feed (`ical.token`) and shows it once; the previous
+        link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule
+        (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      responses:
+        '201':
+          description: The link of the feed, shown once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IcalFeedIssued'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      operationId: revokeMyIcalFeed
+      tags:
+      - Profile
+      summary: Revoke the caller's iCal feed
+      description: Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as
+        `ical_feed.revoked` when a feed existed. Web session only.
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      responses:
+        '204':
+          description: The caller has no iCal feed.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /system-notices:
     get:
       operationId: listSystemNotices
@@ -919,9 +992,9 @@ paths:
       - Users
       summary: Delete a user
       description: 'Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end,
-        tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing
-        without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit
-        log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).'
+        tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the
+        user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason
+        `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).'
       x-permission: users:write
       x-listener: app
       security:
@@ -3970,6 +4043,52 @@ paths:
           $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /ical/{token}.ics:
+    get:
+      operationId: getIcalCalendar
+      tags:
+      - Schedules
+      summary: The personal iCal feed of a User
+      description: 'The iCal calendar (RFC 5545) of the User whose feed the token in the path names, for calendar
+        applications, without a session: one event per span of `ical.window` — from midnight UTC 7 days before the
+        business clock''s day to midnight UTC at the end of the day 60 days ahead — in which the User is On-call in a
+        Schedule of any of their Teams, named "{Team} · {Schedule}", adjacent segments of the Result of one Schedule
+        joined, an Override of the User its own event. Each event is transparent (`TRANSP:TRANSPARENT`: being On-call
+        is not being busy) with the UID `{schedule public_id}-{user public_id}-{DTSTART}@{host of MUSTER_PUBLIC_URL}`.
+        Times are UTC (`DTSTART` and `DTEND` end in `Z`); a `VTIMEZONE` of UTC, which no time refers to, keeps a feed
+        without events valid. An unknown or revoked token, or the token of a disabled or deleted User,
+        gets `404` with nothing else. The token never appears in a log line: the path is logged as
+        `/ical/[redacted].ics`. Schedules are not imported from iCal.'
+      x-permission: none
+      x-listener: app
+      servers:
+      - url: '{public_url}'
+        description: App listener (`MUSTER_PUBLIC_URL`), outside `/api/v1`.
+        variables:
+          public_url:
+            default: https://muster.example.org
+        x-listener: app
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        description: The token of the feed, `mstr_cal_` followed by 52 characters (`ical.token`).
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The calendar.
+          content:
+            text/calendar:
+              schema:
+                type: string
+        '404':
+          description: No such feed (`not-found`); the problem has no `instance`, since the path carries the token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /alert-groups:
     get:
       operationId: listAlertGroups
@@ -9936,6 +10055,35 @@ components:
         code:
           type: string
           description: Current TOTP code.
+    IcalFeed:
+      type: object
+      required:
+      - exists
+      - issued_at
+      properties:
+        exists:
+          type: boolean
+          description: Whether the caller has an iCal feed.
+        issued_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When the feed was issued; null without one.
+    IcalFeedIssued:
+      type: object
+      required:
+      - url
+      - issued_at
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The link of the feed, `MUSTER_PUBLIC_URL/ical/{token}.ics`, whose token starts with `mstr_cal_`.
+            Shown once.
+        issued_at:
+          type: string
+          format: date-time
     TotpRecoveryCodes:
       type: object
       description: Single-use recovery codes, shown once.

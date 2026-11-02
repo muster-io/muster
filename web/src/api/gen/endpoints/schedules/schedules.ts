@@ -31,6 +31,7 @@ import type {
   NotFoundResponse,
   PreconditionFailedResponse,
   PreconditionRequiredResponse,
+  Problem,
   Schedule,
   ScheduleInput,
   ScheduleList,
@@ -1012,3 +1013,104 @@ export const useDeleteScheduleOverride = <TError = UnauthorizedResponse | Forbid
       > => {
       return useMutation(getDeleteScheduleOverrideMutationOptions(options), queryClient);
     }
+    export const getGetIcalCalendarUrl = (token: string,) => {
+
+
+
+
+  return `/api/v1/ical/${token}.ics`
+}
+
+/**
+ * The iCal calendar (RFC 5545) of the User whose feed the token in the path names, for calendar applications, without a session: one event per span of `ical.window` — from midnight UTC 7 days before the business clock's day to midnight UTC at the end of the day 60 days ahead — in which the User is On-call in a Schedule of any of their Teams, named "{Team} · {Schedule}", adjacent segments of the Result of one Schedule joined, an Override of the User its own event. Each event is transparent (`TRANSP:TRANSPARENT`: being On-call is not being busy) with the UID `{schedule public_id}-{user public_id}-{DTSTART}@{host of MUSTER_PUBLIC_URL}`. Times are UTC (`DTSTART` and `DTEND` end in `Z`); a `VTIMEZONE` of UTC, which no time refers to, keeps a feed without events valid. An unknown or revoked token, or the token of a disabled or deleted User, gets `404` with nothing else. The token never appears in a log line: the path is logged as `/ical/[redacted].ics`. Schedules are not imported from iCal.
+ * @summary The personal iCal feed of a User
+ */
+export const getIcalCalendar = async (token: string, options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
+
+  return apiFetch<string>(getGetIcalCalendarUrl(token),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIcalCalendarQueryKey = (token: string,) => {
+    return [
+    `/api/v1/ical/${token}.ics`
+    ] as const;
+    }
+
+
+export const getGetIcalCalendarQueryOptions = <TData = Awaited<ReturnType<typeof getIcalCalendar>>, TError = Problem>(token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIcalCalendarQueryKey(token);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIcalCalendar>>> = ({ signal }) => getIcalCalendar(token, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: token !== null && token !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIcalCalendarQueryResult = NonNullable<Awaited<ReturnType<typeof getIcalCalendar>>>
+export type GetIcalCalendarQueryError = Problem
+
+
+export function useGetIcalCalendar<TData = Awaited<ReturnType<typeof getIcalCalendar>>, TError = Problem>(
+ token: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIcalCalendar>>,
+          TError,
+          Awaited<ReturnType<typeof getIcalCalendar>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIcalCalendar<TData = Awaited<ReturnType<typeof getIcalCalendar>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIcalCalendar>>,
+          TError,
+          Awaited<ReturnType<typeof getIcalCalendar>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIcalCalendar<TData = Awaited<ReturnType<typeof getIcalCalendar>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The personal iCal feed of a User
+ */
+
+export function useGetIcalCalendar<TData = Awaited<ReturnType<typeof getIcalCalendar>>, TError = Problem>(
+ token: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIcalCalendar>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIcalCalendarQueryOptions(token,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+

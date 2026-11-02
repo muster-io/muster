@@ -458,7 +458,7 @@ export const useUpdateUser = <TError = BadRequestResponse | UnauthorizedResponse
 }
 
 /**
- * Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked and Account links are removed. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
+ * Deactivates and pseudonymizes: the name becomes `deleted-user-<id>`, the email is erased, sessions end, tokens are revoked, Account links are removed and the iCal feed is deleted. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_deleted`. Audit log rows are never changed. The last active Admin cannot be deleted (`409` `last_admin`).
  * @summary Delete a user
  */
 export const deleteUser = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {

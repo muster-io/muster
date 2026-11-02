@@ -32,11 +32,13 @@ import (
 )
 
 // The prefixes of the tokens Muster issues (C-04.FR-3): the kind is readable before any lookup, and secret scanners
-// find a leaked token by it. Integration tokens (C-05) are never accepted by the API.
+// find a leaked token by it. Integration tokens (C-05) are never accepted by the API, and neither are the tokens of
+// iCal feeds (ical.token, C-27.FR-10), which only name a feed in its path.
 const (
 	PrefixPersonal       = "mstr_pat_"
 	PrefixServiceAccount = "mstr_sat_"
 	PrefixIntegration    = "mstr_int_"
+	PrefixIcal           = "mstr_cal_"
 )
 
 // The kinds of api_tokens.
@@ -116,25 +118,27 @@ func Hash(value string) []byte {
 	return h[:]
 }
 
+// WellFormed reports whether value has the shape of a token that Generate makes with prefix: the prefix and the
+// encoding of 32 random bytes.
+func WellFormed(prefix, value string) bool {
+	rest, ok := strings.CutPrefix(value, prefix)
+	if !ok || len(rest) != valueLength {
+		return false
+	}
+	_, err := encoding.DecodeString(rest)
+	return err == nil
+}
+
 // kindOf is the kind of an API token by its prefix, when value has the shape of one; an Integration token, a token
 // of another shape and anything else is not one.
 func kindOf(value string) (string, bool) {
-	var kind, rest string
 	switch {
-	case strings.HasPrefix(value, PrefixPersonal):
-		kind, rest = KindPersonal, value[len(PrefixPersonal):]
-	case strings.HasPrefix(value, PrefixServiceAccount):
-		kind, rest = KindServiceAccount, value[len(PrefixServiceAccount):]
-	default:
-		return "", false
+	case WellFormed(PrefixPersonal, value):
+		return KindPersonal, true
+	case WellFormed(PrefixServiceAccount, value):
+		return KindServiceAccount, true
 	}
-	if len(rest) != valueLength {
-		return "", false
-	}
-	if _, err := encoding.DecodeString(rest); err != nil {
-		return "", false
-	}
-	return kind, true
+	return "", false
 }
 
 // Requester is who asks for a change and how: the actor and the Transport of the Audit log entry, and the client

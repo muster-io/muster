@@ -9,8 +9,10 @@ covers: [C-27.FR-10, C-27.FR-14, C-27.AC-7]
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0032_ical_feeds.up.sql
-  - internal/db/migrations/0032_ical_feeds.down.sql
+  - api/codegen-server.yaml
+  - api/codegen-client.yaml
+  - internal/db/migrations/0026_ical_feeds.up.sql
+  - internal/db/migrations/0026_ical_feeds.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -19,14 +21,18 @@ files_touched:
   - internal/schedules/ical.go
   - internal/schedules/ical_test.go
   - internal/schedules/query.sql
+  - internal/schedules/schedules.go
   - internal/schedules/feeds_integration_test.go
   - internal/tokens/tokens.go
   - internal/api/profile.go
   - internal/api/ical.go
   - internal/api/ical_test.go
+  - internal/api/server.go
   - internal/server/server.go
+  - internal/server/spa.go
   - internal/server/server_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/users/admin.go
   - internal/users/admin_integration_test.go
   - internal/logging/events.go
@@ -35,8 +41,9 @@ files_touched:
   - design/prd/L2.md
   - test/e2e/ical_test.go
   - docs/concepts/schedules.md
+  - docs/install/versions.md
 acceptance:
-  - "[C-27.FR-10, C-27.AC-7] `issueMyIcalFeed` from the web session returns, once, `url` — `MUSTER_PUBLIC_URL/ical/{token}.ics` — whose token starts with the prefix of `ical.token` and carries 32 random bytes; the database holds only its SHA-256 hash; `getMyIcalFeed` says that a feed exists and when it was issued, never the token; a Personal access token gets `403` `session_required` on issuing and revoking, and a Service account `403` `service_account_not_allowed` on all three (`feeds_test.go`, `ical_test.go`)."
+  - "[C-27.FR-10, C-27.AC-7] `issueMyIcalFeed` from the web session returns, once, `url` — `MUSTER_PUBLIC_URL/ical/{token}.ics` — whose token starts with the prefix of `ical.token` and carries 32 random bytes; the database holds only its SHA-256 hash; `getMyIcalFeed` says that a feed exists and when it was issued, never the token; a Personal access token gets `403` `session_required` on issuing and revoking, and a Service account `403` `service_account_not_allowed` on reading and, as on every operation that changes the caller's own account, `403` `session_required` on issuing and revoking (`feeds_test.go`, `ical_test.go`)."
   - "[C-27.FR-10, C-27.AC-7] `GET /ical/{token}.ics` on the app listener, without a session, answers `200` `text/calendar` with one `VEVENT` per segment of a Schedule's Result in `ical.window` in which the User is On-call, named \"{Team} · {Schedule}\", adjacent segments of one Schedule joined; with the two Rotation layers of scenario 1, in a week when petr has the lower Rotation layer and olga the upper one, petr's feed shows that week as its nights and weekend only, and an Override of petr shows as an event of its own span; a Rotation layer limited to Friday 19:00–09:00 shows as one event from Friday 19:00 to Saturday 09:00 (`ical_test.go`, `feeds_integration_test.go`)."
   - "[C-27.FR-10, C-27.AC-7] After `issueMyIcalFeed` again the old URL answers `404` and the new one `200`; after `revokeMyIcalFeed` the new one answers `404` too; a token of a disabled User answers `404`, and deleting a User deletes their feed (`feeds_integration_test.go`, `admin_integration_test.go`, `test/e2e/ical_test.go`)."
   - "[C-27.FR-10, C-27.AC-7] No log line, error or metric carries the token: a request for an unknown, revoked or disabled User's token is logged as `ical_feed_not_found` and a failure as `ical_feed_failed`, each with `path` `/ical/[redacted].ics` and, where known, the User's `public_id`; the probe `ical_feed` of lint 5 passes the token through issuing, fetching with a good and a bad token, and revoking without it reaching a log line or an error (`make lint-arch`)."
@@ -78,7 +85,7 @@ issue: 423
     `x-listener: app`, its own `servers` entry `{public_url}` since it is outside `/api/v1`): `200` with
     `text/calendar; charset=utf-8`, `404` (`not-found`) for an unknown, revoked or disabled User's token.
   - `api/README.md`: the iCal path among the paths outside `/api/v1`, and `mstr_cal_` among the token prefixes.
-- **Schema** (migration `0032_ical_feeds`, expand only; `schema.md` §4.3 and the list of lookups by hash):
+- **Schema** (migration `0026_ical_feeds`, expand only; `schema.md` §4.3 and the list of lookups by hash):
   `ical_feeds`: `org_id`, `user_id` (primary key, FK `users`), `token_hash bytea NOT NULL UNIQUE`, `issued_at`. The
   lookup by hash is `-- archlint:org-exempt` — the token names the Organization — as the other lookups by hash
   `schema.md` names. The down migration drops it.
@@ -87,10 +94,11 @@ issue: 423
   token; `Revoke` deletes it; both record the Audit log without the token. `Lookup(token)` hashes it and finds an
   active User's feed, else not found.
 - **iCal document** (`internal/schedules/ical.go`): RFC 5545 written by hand — no new dependency — with `VCALENDAR`
-  (`PRODID:-//Muster//Schedules//EN`, `VERSION:2.0`, `X-WR-CALNAME:Muster On-call`) and one `VEVENT` per joined
-  segment: `UID` `{schedule public_id}-{start}@muster`, `DTSTAMP` of the business clock, `DTSTART` and `DTEND` in UTC,
-  `SUMMARY` "{Team} · {Schedule}"; lines folded at 75 octets, text escaped. The segments come from the Result (S-131)
-  of each Schedule of the Organization from `ical.window` back to its end ahead, keeping those of the User.
+  (`PRODID:-//Muster//Schedules//EN`, `VERSION:2.0`, `X-WR-CALNAME:Muster On-call`, a `VTIMEZONE` of UTC) and one
+  `VEVENT` per joined segment: `UID` `{schedule public_id}-{user public_id}-{start}@{host of MUSTER_PUBLIC_URL}`,
+  `DTSTAMP` of the business clock, `DTSTART` and `DTEND` in UTC, `SUMMARY` "{Team} · {Schedule}",
+  `TRANSP:TRANSPARENT`; lines folded at 75 octets, text escaped. The segments come from the Result (S-131) of every
+  Schedule of the User's Teams from `ical.window` back to its end ahead, keeping those of the User.
 - **Server** (`internal/server/server.go`): `IsIcalPath` routes `/ical/` on the app listener to the feed handler
   (`internal/api/ical.go`) before the SPA; the handler logs nothing on success, `ical_feed_not_found` (info, C-27) for a
   `404`, and `ical_feed_failed` (error, C-27) for a failure, both in `internal/logging/events.go`, with `path`
@@ -160,14 +168,76 @@ None.
 ## Notes
 
 - Suggested commit: `feat(schedules): add a personal ical feed of on-call times`.
-- Migration `0032` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0032` followed the story map; a story merged out of that order renumbers its migration to the next free
+  number in its own pull request (S-131's Notes). S-134 is merged after `0025_schedules` of S-131 and takes
+  `0026_ical_feeds`, the next free number on `master` (journal D585), with its tests, `schema.md` and the notes of
+  0.2.0 in `docs/install/versions.md` (a recovery note and a line of the rolling upgrade from 0.1).
+- Corrected with the implementation: `files_touched` names the migration `0026_ical_feeds`, and adds the files that
+  carry what the Contracts ask for — `api/codegen-server.yaml` and `api/codegen-client.yaml` leave `getIcalCalendar`
+  out of the generated server and client (`exclude-operation-ids`): the generated server mounts every operation under
+  `/api/v1`, and the standard library's `ServeMux` refuses the pattern `{token}.ics`, whose wildcard is not a whole
+  segment, so the hand-written handler in `internal/api/ical.go` serves it; `internal/api/server.go` (the
+  `IcalFeeds` of the API's Config and the operations marked implemented); `internal/server/spa.go`, where `App`
+  routes the app listener, so that `/ical/` reaches the feeds before the SPA and keeps the security headers of every
+  answer; `internal/runtime/runtime_test.go` (the fake database's iCal feeds store); `docs/install/versions.md`; and
+  `internal/schedules/schedules.go`, whose comment of `MaxPeriod` now names the span the feed reads, `ICalSpan`.
+- Corrected with the implementation: a Service account token gets `403` `session_required`, not
+  `service_account_not_allowed`, on `issueMyIcalFeed` and `revokeMyIcalFeed`, as on every operation that accepts the
+  web session only (`credentialsAllowed` refuses a token on a session-only operation before it looks at the path,
+  and `TestTokenRefusals` pins that order for the other operations under `/me`); it gets
+  `service_account_not_allowed` on `getMyIcalFeed`.
+- Decided with the implementation, within C-27.FR-10: adjacent segments of one Schedule in which the User is On-call
+  are one event whatever their Rotation layer, but the segments of an Override of the User stay an event of their own
+  — joined only with the other segments of the same Override — so that "an Override of petr shows as an event of its
+  own span" (acceptance 2) holds when the Override touches his Shifts. Time in which another person's Override or a
+  higher Rotation layer has someone else is a hole in the feed.
+- Decided with the implementation: the feed reads the Schedules of the Teams of the User only (`ListUserSchedules`),
+  which is every Schedule in which they can be On-call — a person outside a Team is never Paged in its Schedules
+  (C-27.FR-5). The window runs from midnight UTC 7 days before the business clock's day to midnight UTC at the end
+  of the day 60 days ahead, so that it always covers `ical.window` and an event it cuts at an end keeps its start,
+  and so its `UID`, for the whole day instead of changing on every fetch (review L2); an event that crosses an end
+  of the window is cut there. `UID` is `{schedule public_id}-{user public_id}-{DTSTART}@{host}`, the host of
+  `MUSTER_PUBLIC_URL`, so that it differs between the feeds of two Users (review L5); the calendar has `PRODID`,
+  `VERSION`, `X-WR-CALNAME` and a `VTIMEZONE` of UTC (`TZID:UTC`, one `STANDARD` from 1970-01-01 at `+0000`), which
+  no time refers to and which keeps a calendar without events valid, since RFC 5545 asks for one component at least
+  (review L3); every `DTSTART` and `DTEND` is UTC with `Z`; every event is `TRANSP:TRANSPARENT`, since being On-call is
+  not being busy; and a wall-clock time
+  that happens twice is its first occurrence, as the Result computes it (`TestFeedChangeOfClocks` over the changes
+  of October 2026 and March 2027 in Europe/Berlin).
+- Decided with the implementation: deleting a User records `ical_feed.revoked` with the reason `user_deleted` by the
+  actor of the deletion when the User had a feed, as the Teams record `team.user_removed`; issuing records
+  `ical_feed.issued` with `replaced`, and revoking `ical_feed.revoked` with the reason `revoked` only when a feed
+  existed. Each entry's resource is the User; none carries the token.
+- Decided with the implementation: the answer of the feed has `Cache-Control: no-store`; a `404` (and a `500`) is a
+  problem without `instance` and with nothing about the token, its User or the Organization; methods other than `GET`
+  and `HEAD` get `405`. A malformed token is answered `404` without a lookup. Under `/api/v1`, where the spec's path
+  of the feed is no operation, `/api/v1/ical/…` answers the API's `404` `not-found` problem, without the `instance`
+  that would repeat the token: `writeProblem` leaves out `instance` for every path under `/api/v1/ical/`, whatever
+  the status — the `405` of another method and the `404` of the paths around the feed's included (review H1), the
+  path compared once cleaned, so `/api/v1//ical/…` and `/api/v1/./ical/…` too, and for any path that carries
+  `mstr_cal_` — and
+  the probe `ical_feed` of lint 5 sends the secrets along these paths too. The SPA's generated client (orval) keeps
+  `getIcalCalendar` under its base `/api/v1`, as it does the operations of the ingest and internal listeners;
+  nothing calls it, and its mock stays (review L6a, accepted).
+- Decided with the implementation: `ReplaceIcalFeed` inserts from the User's row read `FOR SHARE` with the status
+  `active`, so that it waits for a deletion or a disabling that holds the row (`FOR NO KEY UPDATE`) and then issues
+  nothing; a feed can never outlive the deletion of its User (review L4). `issueMyIcalFeed` answers such a caller
+  `401`, as for a session whose User is gone.
+- Kept as they are, after review: the route label `/ical/{token}.ics` of `muster_api_requests_total` comes from
+  `api.PathTemplates`, which reads every path of the spec — `/health/live`, `/health/ready` and `/metrics` of the
+  internal listener are there too — so dropping it would change that function and its test for every path outside
+  the API; only a link sent under `/api/v1` by mistake is counted under it (review L1).
+- Follow-ups for the backlog, not in this story: an Admin's `DELETE /users/{id}/ical-feed`, to stop a User's link
+  without deleting or disabling the User, and a metric of the fetches of the feeds. Accepted as it is: a User of OIDC
+  whom the identity provider no longer accepts keeps a working link until Muster disables them, since the feed is
+  never re-checked at the identity provider.
 - The maintainer confirms one provisional value with this story (operator attention): P-82, the prefix `mstr_cal_`, 32
   random bytes, stored as a hash, shown once, one per User. P-81, the window of 7 days back and 60 ahead, is confirmed
   by the test environment and stays provisional.
 - The token is a credential in a URL that calendar applications fetch without a session, so it is treated like the
   Heartbeat's path token: hashed, never logged, and refused for a disabled User.
-- The feed is the User's across every Schedule of every Team, not only their Teams' main Schedules (C-27.FR-10).
+- The feed is the User's across every Schedule of the User's Teams, not only their Teams' main Schedules
+  (C-27.FR-10).
 
 ## Coverage
 

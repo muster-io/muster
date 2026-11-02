@@ -106,6 +106,25 @@ func (q *Queries) CountTeamSchedules(ctx context.Context, arg CountTeamSchedules
 	return column_1, err
 }
 
+const deleteIcalFeed = `-- name: DeleteIcalFeed :execrows
+DELETE FROM ical_feeds
+WHERE org_id = $1 AND user_id = $2
+`
+
+type DeleteIcalFeedParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// DeleteIcalFeed deletes the iCal feed of a User: its token stops working at once.
+func (q *Queries) DeleteIcalFeed(ctx context.Context, arg DeleteIcalFeedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIcalFeed, arg.OrgID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteRotationLayerUsers = `-- name: DeleteRotationLayerUsers :exec
 DELETE FROM rotation_layer_users
 WHERE org_id = $1 AND rotation_layer_id = $2
@@ -171,6 +190,34 @@ func (q *Queries) DeleteScheduleOverride(ctx context.Context, arg DeleteSchedule
 	return err
 }
 
+const findIcalFeed = `-- name: FindIcalFeed :one
+SELECT f.org_id, f.user_id, u.public_id AS user_public_id, u.status AS user_status
+FROM ical_feeds f
+JOIN users u ON u.org_id = f.org_id AND u.id = f.user_id
+WHERE f.token_hash = $1
+`
+
+type FindIcalFeedRow struct {
+	OrgID        int64
+	UserID       int64
+	UserPublicID string
+	UserStatus   string
+}
+
+// FindIcalFeed finds an iCal feed by the SHA-256 of its token, with its Organization and its User's status.
+// archlint:org-exempt by-hash lookup: the token in the path of the feed is all the request carries
+func (q *Queries) FindIcalFeed(ctx context.Context, tokenHash []byte) (FindIcalFeedRow, error) {
+	row := q.db.QueryRow(ctx, findIcalFeed, tokenHash)
+	var i FindIcalFeedRow
+	err := row.Scan(
+		&i.OrgID,
+		&i.UserID,
+		&i.UserPublicID,
+		&i.UserStatus,
+	)
+	return i, err
+}
+
 const findScheduleTeam = `-- name: FindScheduleTeam :one
 SELECT team_id
 FROM schedules
@@ -207,6 +254,25 @@ func (q *Queries) FindUser(ctx context.Context, arg FindUserParams) (int64, erro
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getIcalFeed = `-- name: GetIcalFeed :one
+SELECT issued_at
+FROM ical_feeds
+WHERE org_id = $1 AND user_id = $2
+`
+
+type GetIcalFeedParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+// GetIcalFeed reads when the iCal feed of a User was issued.
+func (q *Queries) GetIcalFeed(ctx context.Context, arg GetIcalFeedParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getIcalFeed, arg.OrgID, arg.UserID)
+	var issued_at time.Time
+	err := row.Scan(&issued_at)
+	return issued_at, err
 }
 
 const getOrganizationTimeZone = `-- name: GetOrganizationTimeZone :one
@@ -1023,6 +1089,74 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 	return items, nil
 }
 
+const listUserSchedules = `-- name: ListUserSchedules :many
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = $1
+  AND EXISTS (SELECT 1
+              FROM team_users tu
+              WHERE tu.org_id = $1 AND tu.team_id = s.team_id AND tu.user_id = $2)
+ORDER BY s.id
+`
+
+type ListUserSchedulesParams struct {
+	OrgID  int64
+	UserID int64
+}
+
+type ListUserSchedulesRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	TimeZone     string
+	Main         bool
+	Version      int64
+	CreatedAt    time.Time
+	TeamID       int64
+	TeamPublicID string
+	TeamName     string
+	TeamSlug     string
+	TeamDeleted  bool
+}
+
+// ListUserSchedules reads the Schedules of the Teams of a User, with their Team: the only Schedules in which the User
+// can be On-call, since a person who is not in the Team is never Paged in its Schedules (C-27.FR-5).
+func (q *Queries) ListUserSchedules(ctx context.Context, arg ListUserSchedulesParams) ([]ListUserSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listUserSchedules, arg.OrgID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserSchedulesRow{}
+	for rows.Next() {
+		var i ListUserSchedulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.TimeZone,
+			&i.Main,
+			&i.Version,
+			&i.CreatedAt,
+			&i.TeamID,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockSchedule = `-- name: LockSchedule :one
 SELECT id
 FROM schedules
@@ -1176,6 +1310,41 @@ func (q *Queries) LookupUsers(ctx context.Context, arg LookupUsersParams) ([]Loo
 		return nil, err
 	}
 	return items, nil
+}
+
+const replaceIcalFeed = `-- name: ReplaceIcalFeed :one
+INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
+SELECT u.org_id, u.id, $1, $2
+FROM users u
+WHERE u.org_id = $3 AND u.id = $4 AND u.status = 'active'
+FOR SHARE
+ON CONFLICT (user_id) DO UPDATE
+SET token_hash = EXCLUDED.token_hash, issued_at = EXCLUDED.issued_at
+WHERE ical_feeds.org_id = EXCLUDED.org_id
+RETURNING (xmax <> 0)::boolean AS replaced
+`
+
+type ReplaceIcalFeedParams struct {
+	TokenHash []byte
+	Now       time.Time
+	OrgID     int64
+	UserID    int64
+}
+
+// ReplaceIcalFeed issues the iCal feed of an active User in one statement, replacing the one they had, so that its
+// token stops working at once (C-27.FR-10); replaced says whether there was one. It reads the User FOR SHARE, which
+// waits for a deletion or a disabling that holds the User's row and then sees its new status: a User who is not
+// active gets no row and no feed, so a feed never outlives the deletion of its User.
+func (q *Queries) ReplaceIcalFeed(ctx context.Context, arg ReplaceIcalFeedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, replaceIcalFeed,
+		arg.TokenHash,
+		arg.Now,
+		arg.OrgID,
+		arg.UserID,
+	)
+	var replaced bool
+	err := row.Scan(&replaced)
+	return replaced, err
 }
 
 const updateRotationLayer = `-- name: UpdateRotationLayer :exec

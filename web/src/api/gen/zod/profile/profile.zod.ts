@@ -185,3 +185,27 @@ export const RegenerateTotpRecoveryCodesResponse = zod.object({
   "codes": zod.array(zod.string())
 }).describe('Single-use recovery codes, shown once.')
 
+/**
+ * Whether the caller's personal iCal feed exists and when it was issued; the token and the link are never shown again. Service account tokens get `403` (`service_account_not_allowed`).
+ * @summary Read whether the caller has an iCal feed
+ */
+export const GetMyIcalFeedResponse = zod.object({
+  "exists": zod.boolean().describe('Whether the caller has an iCal feed.'),
+  "issued_at": zod.iso.datetime({"offset":true}).nullable().describe('When the feed was issued; null without one.')
+})
+
+/**
+ * Issues a new link of the caller's personal iCal feed (`ical.token`) and shows it once; the previous link, if any, stops working at once. The feed lists the times when the caller is On-call in every Schedule (`getIcalCalendar`). Recorded in the Audit log as `ical_feed.issued`, without the token. Web session only.
+ * @summary Issue the caller's iCal feed
+ */
+export const IssueMyIcalFeedResponse = zod.object({
+  "url": zod.url().describe('The link of the feed, `MUSTER_PUBLIC_URL/ical/{token}.ics`, whose token starts with `mstr_cal_`. Shown once.'),
+  "issued_at": zod.iso.datetime({"offset":true})
+})
+
+/**
+ * Its link answers `404` at once; `204` also when the caller has no feed. Recorded in the Audit log as `ical_feed.revoked` when a feed existed. Web session only.
+ * @summary Revoke the caller's iCal feed
+ */
+export const RevokeMyIcalFeedResponse = zod.void()
+

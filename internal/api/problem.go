@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -310,8 +311,12 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if len(p.Errors) > 0 {
 		body.Errors = &p.Errors
 	}
-	instance := r.URL.Path
-	body.Instance = &instance
+	// A path under /api/v1/ical/, in any form, is a misdirected link of an iCal feed, which carries its token, and so
+	// is any path with the token's prefix: no instance.
+	if instance := r.URL.Path; !strings.HasPrefix(path.Clean(instance), BasePath+schedules.FeedBasePath) &&
+		!strings.Contains(instance, tokens.PrefixIcal) {
+		body.Instance = &instance
+	}
 	if p.Type == typeRouteHasOpenGroups {
 		count := int(p.OpenAlertGroupCount)
 		body.OpenAlertGroupCount = &count
