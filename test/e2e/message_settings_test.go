@@ -51,7 +51,8 @@ func messageSettingsDone(h *Harness, kind string) int {
 // TestMessageSettingsRerender is the Verification of the re-render of open Root messages after a change of what they
 // show that is not a Route's (C-29.FR-1 to FR-3), against `muster dev` and the fake Mattermost and Telegram servers:
 // changing the Organization's Severity label, Team label, Instance labels or time zone edits each open Root message
-// once, Quietly — no new post, no notification — so that it shows the new label line, Alerts line or start time; a
+// once, Quietly — no new post, no notification — so that it shows the new label line, Alerts line or start time, and
+// a Team label whose value names a Team brings the Team with the same one edit; a
 // second save of the same values writes no row and edits nothing; a rename of a Team edits the Root message of the
 // open Alert Group that has the Team once and not that of the Alert Group without it.
 func TestMessageSettingsRerender(t *testing.T) {
@@ -123,7 +124,21 @@ func TestMessageSettingsRerender(t *testing.T) {
 
 	quiet(t, "the severity label", put(func(m map[string]any) { m["severity_label"] = "priority" }),
 		both("severity=warning"), g1, g2)
-	quiet(t, "the team label", put(func(m map[string]any) { m["team_label"] = "owner" }), both("owner=ops"), g1, g2)
+	// The Team "Operations" (slug ops) has no Alerts while the Team label is team; the Team label owner, whose value
+	// ops names it, brings it to both Alert Groups: the evaluation runs before the re-render, so that each Root message
+	// is edited once, with the Team and the new label line.
+	c.api.json(http.MethodPost, "/api/v1/teams", `{"name":"Operations","slug":"ops","own_working_hours":false}`,
+		http.StatusCreated)
+	eventually(t, "the evaluation of the new team", func() bool {
+		return h.count(t, `SELECT count(*) FROM open_group_updates`) == 0 &&
+			h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`) == 0
+	})
+	quiet(t, "the team label", put(func(m map[string]any) { m["team_label"] = "owner" }),
+		func(mm, tg string) bool { return both("owner=ops")(mm, tg) && both("Operations")(mm, tg) }, g1, g2)
+	if n := h.count(t, `SELECT count(*) FROM timeline_entries WHERE event = 'team_joined'
+		AND team_id = (SELECT id FROM teams WHERE slug = 'ops')`); n != 2 {
+		t.Errorf("the team label recorded %d team_joined of Operations, want 2", n)
+	}
 	quiet(t, "the instance labels", put(func(m map[string]any) { m["instance_labels"] = []string{"host"} }),
 		both("host: node-"), g1, g2)
 	berlin := regexp.MustCompile(` CES?T\b`)
@@ -143,7 +158,7 @@ func TestMessageSettingsRerender(t *testing.T) {
 		t.Errorf("the same values edited: %+v, before %+v", after, before)
 	}
 
-	// A rename of the Team payments edits #g1, which has it, and not #g2, which has no Team.
+	// A rename of the Team payments edits #g1, which has it, and not #g2, which does not.
 	var teams struct {
 		Items []struct {
 			ID   string `json:"id"`

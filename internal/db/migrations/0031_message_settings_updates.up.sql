@@ -4,9 +4,11 @@
 -- that is not a Route's (C-29.FR-1 to FR-3): organization_message_settings, which an update of the Organization that
 -- changes its Severity label, Team label, Instance labels or time zone inserts, without a scope, and whose run walks
 -- every open Alert Group of the Organization; and team_name, which a rename of a Team inserts, with the Team in
--- team_id, and whose run walks the open Alert Groups that have the Team. Both evaluate the Teams of the Alert Groups of
--- each batch first, as team_evaluation does, so that a save that also requests that evaluation edits each Root message
--- once. The kind CHECK is replaced by open_group_updates_kind_v5_check with every kind of _v4 and the two new ones.
+-- team_id, and whose run walks the open Alert Groups that have the Team. organization_message_settings evaluates the
+-- Teams of the Alert Groups of each batch first, as team_evaluation does, so that a new Team label, which also writes
+-- that evaluation, edits each Root message once; team_name needs no evaluation, since the classification is per Team.
+-- team_name has no scope CHECK: team_id is ON DELETE SET NULL, and a row whose Team is gone is simply done. The kind
+-- CHECK is replaced by open_group_updates_kind_v5_check with every kind of _v4 and the two new ones.
 -- Expand only: a replica of 0.1, or of a development image of 0.2 without this migration, that still runs during a
 -- rolling update never writes or claims rows of the new kinds — a save it makes re-renders nothing, and its messages
 -- catch up at each Alert Group's next change — and a row a newer replica writes waits for a replica that knows its

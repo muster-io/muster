@@ -1194,9 +1194,9 @@ func TestMessageSettingsUpdate(t *testing.T) {
 
 // TestTeamNameUpdate is C-29.FR-1 on the worker: a row team_name, which a rename of a Team writes, re-renders, Quietly
 // and without a lifecycle event, the open Alert Groups that have the Team, whose field Teams shows its name, and no
-// other: not one of another Team, not one without a Team, not a resolved one. It is deleted with its last batch and
-// logged with its Team; a second run changes no Desired state; a row of a Team no open Alert Group has renders
-// nothing.
+// other: not one of another Team, not one without a Team, not a resolved one. It evaluates nothing (C-25.FR-13). It is
+// deleted with its last batch and logged with its Team; a second run changes no Desired state; a row of a Team no open
+// Alert Group has renders nothing, and one whose Team is gone is done.
 func TestTeamNameUpdate(t *testing.T) {
 	e := newEvaluation(t)
 	var r renders
@@ -1218,11 +1218,17 @@ func TestTeamNameUpdate(t *testing.T) {
 	ts.refs[search] = ref
 	r.install(t, e.svc)
 	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
+	locks, evaluated := e.db.calls["LockTeamEvaluation"], e.db.calls["ListGroupFiringAlerts"]
 	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
 		requested: e.clock.Now()})
 	e.round(t, e.worker)
 	if want := []string{fmt.Sprintf("%d:", g.ID)}; !slices.Equal(r.got, want) {
 		t.Errorf("rendered %v, want %v", r.got, want)
+	}
+	// A rename evaluates nothing (C-25.FR-13): no lock of the evaluation, no classification.
+	if e.db.calls["LockTeamEvaluation"] != locks || e.db.calls["ListGroupFiringAlerts"] != evaluated {
+		t.Errorf("the rename evaluated: %d locks, %d reads of the firing alerts",
+			e.db.calls["LockTeamEvaluation"]-locks, e.db.calls["ListGroupFiringAlerts"]-evaluated)
 	}
 	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 ||
 		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"team_name",`+
@@ -1242,7 +1248,16 @@ func TestTeamNameUpdate(t *testing.T) {
 		t.Errorf("a second run: rendered %v, rows %d, log %s", r.got, len(e.db.updates), e.log)
 	}
 
+	// A row whose Team is gone, team_id set to null by its deletion, is done without a list.
+	r.got = nil
 	e.db.fail["ListOpenGroupsOfTeamAfter"] = errBoom
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if len(r.got) != 0 || len(e.db.updates) != 0 || !strings.Contains(e.log.String(),
+		`"event":"open_group_update_done","kind":"team_name","alert_groups":0`) {
+		t.Errorf("a row without its team: rendered %v, rows %d, log %s", r.got, len(e.db.updates), e.log)
+	}
+
 	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
 		requested: e.clock.Now()})
 	e.round(t, e.worker)

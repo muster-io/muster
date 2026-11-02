@@ -1479,9 +1479,9 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   enough on its own: an Alert that any one picks belongs to the Team.
 - Creating a Team, and saving one with a changed slug or changed Team matchers, inserts in the transaction of the save a
   row `team_evaluation` of `open_group_updates` with the Team in `team_id` ([section 5](#5-queues-and-claims)); a save
-  of the name, the description, the Working hours or the people inserts none. A save with a changed name inserts a row
-  `team_name` with the Team in `team_id` (migration 0031), which re-renders the Root messages of the open Alert Groups
-  that have the Team, whose field Teams shows its name (C-29.FR-1).
+  of the name, the description, the Working hours or the people inserts no row `team_evaluation`. A save with a changed
+  name inserts a row `team_name` with the Team in `team_id` (migration 0031), which re-renders the Root messages of the
+  open Alert Groups that have the Team, whose field Teams shows its name (C-29.FR-1).
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
@@ -1651,14 +1651,15 @@ and releases a held Urgent Alert Group Quietly; it records no `unknown_team_valu
 Group without a new Team as it is, so a second run records nothing. Of an Alert Group a person resolved that is still
 in its Grace period it only adds the `alert_teams` rows of the firing tails, which the end of the Grace period groups
 again with them. The Alert Groups of a batch are changed in the order (Route, id), as those of a button set are. A
-row `organization_message_settings` walks the Alert Groups that `team_evaluation` walks, and a row `team_name` the
-open Alert Groups with an `alert_group_teams` row of its Team; each batch of either first evaluates the Teams of its
-Alert Groups as a batch of `team_evaluation` does, under the same lock, then runs the re-render step without a lifecycle
-event on the open ones, marked as a change of configuration. The evaluation goes first so that a save that also
-writes a row `team_evaluation` — a new Team label, or a new name with new Team matchers — edits each Root message
-once, whichever row runs first: a Team that joins re-renders its Alert Group with the Quiet `team_joined`, and the
-re-render that follows finds the hash unchanged. Each
-batch takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by
+row `organization_message_settings` walks the Alert Groups that `team_evaluation` walks; each of its batches first
+evaluates the Teams of its Alert Groups as a batch of `team_evaluation` does, under the same lock, then runs the
+re-render step without a lifecycle event on the open ones, marked as a change of configuration. The evaluation goes
+first so that a new Team label, which also writes a row `team_evaluation`, edits each Root message once, whichever
+row runs first: a Team that joins re-renders its Alert Group with the Quiet `team_joined`, and the re-render that
+follows finds the hash unchanged. A row `team_name` walks the open Alert Groups with an `alert_group_teams` row of its
+Team and only runs the re-render step on them: the classification is per Team, so new Team matchers saved with the
+name can bring only that Team, which those Alert Groups already have; a row whose Team is gone (`team_id` null) is
+done. Each batch of `team_evaluation` and `organization_message_settings` takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by
 `hashint8` of the Organization) exclusively before it locks its Alert Groups, and routing takes it shared before a
 Snapshot reads the stamp of the classification: a Snapshot that classified with the Teams before a save commits its
 Alert Groups before the batch reads them. A save inserts no second row while one `team_evaluation` row of the

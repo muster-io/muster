@@ -241,12 +241,13 @@ func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *c
 }
 
 // evaluateAndRerender evaluates the Teams of the Alert Groups ids again (evaluateTeams), then runs the re-render step
-// on the open ones (rerender), in the transaction of q, after a change of what the Root messages show that is not a
-// Route's: the Organization's Severity label, Team label, Instance labels or time zone, or the name of a Team
-// (C-29.FR-1 to FR-3). The evaluation comes first, so that a Team the same save brings joins before the re-render: a
-// Root message whose Desired state the Team changed is re-rendered with it, and the re-render that follows finds its
-// hash unchanged, so that each Root message is edited once, whichever of this row and a team_evaluation row of the
-// same save runs first. It returns how many Alert Groups a Team joined or had a Desired state changed; after collects
+// on the open ones (rerender), in the transaction of q, after a change of the Organization's settings that the Root
+// messages show: its Severity label, Team label, Instance labels or time zone (C-29.FR-1 to FR-3). The evaluation comes
+// first, so that a Team that a new Team label brings joins before the re-render: a Root message whose Desired state
+// the Team changed is re-rendered with it, and the re-render that follows finds its hash unchanged, so that each Root
+// message is edited once, whichever of this row and the team_evaluation row of the same save runs first. A rename of
+// a Team needs no evaluation (KindTeamName): the classification is per Team, so new Team matchers saved with the name
+// can bring only that Team, which the Alert Groups the rename walks already have. It returns how many Alert Groups a Team joined or had a Desired state changed; after collects
 // what runs once the transaction committed.
 func (s *Service) evaluateAndRerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	joined, err := s.evaluateTeams(ctx, q, ids, after)
@@ -378,11 +379,14 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				return err
 			}
 		case KindTeamName:
-			if ids, err = q.ListOpenGroupsOfTeamAfter(ctx, dbgen.ListOpenGroupsOfTeamAfterParams{OrgID: s.orgID,
-				TeamID: row.TeamID.Int64, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
-				return fmt.Errorf("list the open alert groups of team %d: %w", row.TeamID.Int64, err)
+			// A row whose Team is gone (team_id set to null by its deletion) has nothing left to render: it is done.
+			if row.TeamID.Valid {
+				if ids, err = q.ListOpenGroupsOfTeamAfter(ctx, dbgen.ListOpenGroupsOfTeamAfterParams{OrgID: s.orgID,
+					TeamID: row.TeamID.Int64, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+					return fmt.Errorf("list the open alert groups of team %d: %w", row.TeamID.Int64, err)
+				}
 			}
-			if out.changed, err = s.evaluateAndRerender(ctx, q, ids, &after); err != nil {
+			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
 				return err
 			}
 		default:
