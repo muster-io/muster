@@ -1654,19 +1654,19 @@ again with them. The Alert Groups of a batch are changed in the order (Route, id
 row `organization_message_settings` walks the Alert Groups that `team_evaluation` walks; each of its batches first
 evaluates the Teams of its Alert Groups as a batch of `team_evaluation` does, under the same lock, then runs the
 re-render step without a lifecycle event on the open ones, marked as a change of configuration. The evaluation goes
-first so that a new Team label, which also writes a row `team_evaluation`, edits each Root message once, whichever
-row runs first: a Team that joins re-renders its Alert Group with the Quiet `team_joined`, and the re-render that
-follows finds the hash unchanged. A row `team_name` walks the open Alert Groups with an `alert_group_teams` row of its
-Team and only runs the re-render step on them: the classification is per Team, so new Team matchers saved with the
-name can bring only that Team, which those Alert Groups already have; a row whose Team is gone (`team_id` null) is
-done. Each batch of `team_evaluation` and `organization_message_settings` takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by
-`hashint8` of the Organization) exclusively before it locks its Alert Groups, and routing takes it shared before a
-Snapshot reads the stamp of the classification: a Snapshot that classified with the Teams before a save commits its
-Alert Groups before the batch reads them. A save inserts no second row while one `team_evaluation` row of the
-Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so no worker claims it before
-the save commits, and its run classifies with every save before it. A row `organization_message_settings` is
-inserted the same way while one of the Organization is still unclaimed, and a row `team_name` while one of the same
-Team is: the run renders with the settings and the name as they are then.
+first so that a new Team label, which also writes a row `team_evaluation`, edits each Root message once, whichever row
+runs first: a Team that joins re-renders its Alert Group with the Quiet `team_joined`, and the re-render that follows
+finds the hash unchanged. A row `team_name` walks the open Alert Groups with an `alert_group_teams` row of its Team and
+only runs the re-render step on them: the classification is per Team, so new Team matchers saved with the name can bring
+only that Team, which those Alert Groups already have; a row whose Team is gone (`team_id` null) is done. Each batch of
+`team_evaluation` and `organization_message_settings` takes the transaction advisory lock of the class `0x6d75_0008`
+(`db.TeamEvaluationLockClass`, keyed by `hashint8` of the Organization) exclusively before it locks its Alert Groups,
+and routing takes it shared before a Snapshot reads the stamp of the classification: a Snapshot that classified with the
+Teams before a save commits its Alert Groups before the batch reads them. A save inserts no second row while one
+`team_evaluation` row of the Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so
+no worker claims it before the save commits, and its run classifies with every save before it. A row
+`organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
+`team_name` while one of the same Team is: the run renders with the settings and the name as they are then.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by
