@@ -3039,6 +3039,8 @@ critical, and a Route raises the level of its Alert Groups with its
 <li>Migration 0025 adds <a href="../../concepts/schedules/">Schedules</a> and the Permissions <code>schedules:read</code>,
   <code>schedules:write</code> and <code>schedule-overrides:write</code>. Roles get them at once; a Personal access token keeps the
   Permissions it was issued with, so issue a new one to reach Schedules with a token.</li>
+<li>Migration 0026 adds the personal <a href="../../concepts/schedules/#ical-feed">iCal feeds</a>; no User has one after the
+  upgrade.</li>
 </ul>
 <p><strong>Helm chart.</strong> <code>ingress.app.annotations</code> and <code>ingress.ingest.annotations</code> set the annotations of one Ingress, over
 the shared <code>ingress.annotations</code>, so an installation that turned the chart's Ingress off to get different annotations
@@ -3072,7 +3074,9 @@ start of the working day at or after the end fails the CHECK of migration 0022 w
 save the settings again on a 0.2.0 replica. Do not change button sets until every replica runs 0.2.0: a 0.1 replica
 does not know them and renders every button on the messages it touches. A 0.1 replica gives the Alerts it
 processes no Teams, and the events-mode webhook bodies it sends lack <code>alert_group.teams</code>: create Teams only after
-every replica runs 0.2.0.</p>
+every replica runs 0.2.0. A 0.1 replica does not serve the iCal feeds: it answers a link of a feed with the page
+of the web UI, and a User it deletes keeps the row of their feed, whose link then answers <code>404</code> as the feed of a
+deleted User does. Issue iCal links only after every replica runs 0.2.0.</p>
 <p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
 and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
 waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
@@ -3175,6 +3179,10 @@ recover, with the same database role as Muster:</p>
 <p>Migration 0025 adds the Schedules in one transaction: a failure leaves nothing of it, but the schema recorded as
 dirty at version 25. To recover, with the same database role as Muster, run
 <code>UPDATE schema_migrations SET version = 24, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>.</p>
+<p>Migration 0026 adds the iCal feeds in one transaction: a failure leaves nothing of it, but the schema recorded as
+dirty at version 26. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 25, dirty = false;</code> and start the 0.2.0 replica again, or run
 <code>muster migrate</code>.</p>
 </dd>
 <dt>0.1.1</dt>

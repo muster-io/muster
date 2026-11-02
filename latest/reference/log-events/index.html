@@ -3027,6 +3027,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ical_feed_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ical_feed_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ical_feed_not_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ical_feed_not_found</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ingest_failed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4495,6 +4517,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ical_feed_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ical_feed_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ical_feed_not_found" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>ical_feed_not_found</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ingest_failed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5486,6 +5530,12 @@ the event.</p>
 <h3 id="heartbeat_lost"><code>heartbeat_lost</code><a class="headerlink" href="#heartbeat_lost" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>integration</code>, <code>last_signal_at</code> · C-07</p>
 <p>No Heartbeat signal arrived for an Integration within its Heartbeat timeout, so it is Heartbeat lost and MusterHeartbeatLost is raised: integration is its public_id and last_signal_at the time of its last signal.</p>
+<h3 id="ical_feed_failed"><code>ical_feed_failed</code><a class="headerlink" href="#ical_feed_failed" title="Permanent link">&para;</a></h3>
+<p>ERROR · fields: <code>path</code>, <code>user</code>, <code>error</code> · C-27</p>
+<p>A request for a personal iCal feed answered 500: the feed or the Results of the Schedules could not be read. path is the path with the token masked, /ical/[redacted].ics, user the public_id of the User when it is known, and error what failed; calendar applications fetch the feed again later.</p>
+<h3 id="ical_feed_not_found"><code>ical_feed_not_found</code><a class="headerlink" href="#ical_feed_not_found" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>path</code>, <code>user</code> · C-27</p>
+<p>A request for a personal iCal feed answered 404: its token is malformed, unknown or revoked, or its User is disabled or deleted. path is the path with the token masked, /ical/[redacted].ics, and user the public_id of the User when the token names one.</p>
 <h3 id="ingest_failed"><code>ingest_failed</code><a class="headerlink" href="#ingest_failed" title="Permanent link">&para;</a></h3>
 <p>ERROR · fields: <code>integration</code>, <code>route_pattern</code>, <code>error</code> · C-05</p>
 <p>An ingestion or Heartbeat request answered 500 because the database could not look up the token, store the Stored Snapshot or record the Heartbeat signal, usually because it was unavailable; Alertmanager retries an ingestion request, and the next signal replaces a lost one. integration is the public_id of the token's Integration, or unknown when the lookup failed; route_pattern is the route it came by.</p>
