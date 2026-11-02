@@ -14,8 +14,9 @@
 // adds button presses and answerCallbackQuery with its deadline. Every other
 // method is recorded and answered 501. The control endpoints under /_fake/ change the configuration (a path prefix, an
 // HTML mode that stands for a web server that is not a Bot API, revoked tokens, the delay of copies and withholding
-// them, the answer deadline), queue updates, end a running long poll with 409, post comments, press buttons, delete
-// messages, and change and list the chats, the bot's rights, the messages, the notifications and the answers.
+// them, the answer deadline), queue updates and count those not confirmed yet, end a running long poll with 409, post
+// comments, press buttons, delete messages, and change and list the chats, the bot's rights, the messages, the
+// notifications and the answers.
 //
 // Each bot has its own identity, rights in the chats, private chats and update queues; the automatic copies of channel
 // posts, their edits and people's comments reach every admin bot of the discussion group that receives updates, while a
@@ -157,6 +158,7 @@ func New() *Fake {
 	})
 	f.HandleControl("PUT /_fake/config", f.putConfig)
 	f.HandleControl("POST /_fake/updates", f.postUpdate)
+	f.HandleControl("GET /_fake/pending", f.getPending)
 	f.HandleControl("POST /_fake/conflict", f.postConflict)
 	f.HandleControl("POST /_fake/private", f.postPrivate)
 	f.HandleControl("GET /_fake/webhooks", func(w http.ResponseWriter, _ *http.Request) {

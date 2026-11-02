@@ -176,6 +176,17 @@ func (f *Fake) Pending(token string) int {
 	return len(f.bot(token).queue)
 }
 
+// getPending answers GET /_fake/pending?token=: {"pending": n}, how many updates of the bot of token are not confirmed
+// or posted yet.
+func (f *Fake) getPending(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		fakeserver.WriteError(w, http.StatusBadRequest, "token is required")
+		return
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, map[string]int{"pending": f.Pending(token)})
+}
+
 // Webhooks are the webhooks set, by token.
 func (f *Fake) Webhooks() map[string]Webhook {
 	f.mu.Lock()
