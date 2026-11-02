@@ -119,6 +119,20 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       `by_default`: the main Schedule of each Team raises the Internal alert `MusterScheduleGap` for a gap now or within
       7 days.
 
+    - **The Root messages have a new layout** for every Route, in Mattermost, Slack, Telegram and the body of a bridge:
+      the title with the status as a word, the fields Severity, Route, Teams and Started, the summary and the
+      description, one line of [Labels in the message](../configure/messages-and-templates.md#labels-in-the-message),
+      the Alerts by the label that tells them apart, then the notices, the footer, the buttons and the links. The
+      label sections and the expandable quote of 0.1 are gone; every other label stays on the Alert Group page. An
+      open Alert Group's message changes to the new layout at its next edit. A Route with its own Root message
+      template keeps its body, now under the title, the fields and the links; its built-in source, which "Custom"
+      fills the editor with, changed too.
+    - Migration 0029 adds "Labels in the message" of a Route, `routes.message_labels`, computed by default from the
+      Group key without `alertname` and the severity label, then the Team label and `namespace`, and the description
+      of an Alert Group, `alert_groups.description`, set once like its summary. An Alert Group created before the
+      upgrade, or by a 0.1 replica during it, has none until a new Alert with a description joins it on 0.2.0, which
+      sets it; until then its Root messages show no description.
+
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
     `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule` —
@@ -167,7 +181,14 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
     replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
     Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
-    rollout. Migration 0028 adds a column with a default to the Schedules, which 0.1 replicas do not use.
+    rollout. Migration 0028 adds a column with a default to the Schedules, which 0.1 replicas do not use. A 0.1 replica
+    renders the layout of 0.1 on the messages it edits, which a 0.2.0 replica renders again at their next change; do not
+    set "Labels in the message" until every replica runs 0.2.0, since a 0.1 replica ignores them. The other way round, a
+    Root message that a 0.2.0 replica rendered and a 0.1 replica delivers shows only its title, summary, notices,
+    footer, buttons and links — no fields, key labels, description or Alerts, which 0.1 does not know — and stays so
+    until the next change of its Alert Group, since its Desired state, and so its hash, is the one 0.2.0 stored. Keep
+    the overlap of the two versions short. An Alert Group that a 0.1 replica creates during the rollout has no
+    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -299,6 +320,30 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     schema recorded as dirty at version 28. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 27, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0029 adds "Labels in the message" and the description of Alert Groups in three transactions: the first
+    adds the columns and the new CHECKs of `open_group_updates`, the second validates them, the third drops the CHECK
+    of the kinds of 0027. A failure leaves the schema recorded as dirty at version 29. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'routes' AND column_name = 'message_labels';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 28, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v4_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

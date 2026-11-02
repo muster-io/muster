@@ -3087,6 +3087,38 @@ paths:
           $ref: '#/components/responses/PreconditionRequired'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /routes/{route_id}/label-suggestions:
+    get:
+      operationId: listRouteLabelSuggestions
+      tags:
+      - Routes
+      summary: List the labels to suggest for "Labels in the message"
+      description: The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period`
+        (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups
+        whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent
+        Alert Groups of the Route".
+      x-permission: routes:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/RouteId'
+      responses:
+        '200':
+          description: The suggestions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteLabelSuggestionList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /routes/{route_id}/move-open-alert-groups:
     post:
       operationId: moveOpenAlertGroups
@@ -12516,6 +12548,27 @@ components:
             delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with
             `422` `unknown_id`.
           $ref: '#/components/schemas/NullablePublicId'
+        own_message_labels:
+          type: boolean
+          description: Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`,
+            C-29.FR-2). False, the default of a create, computes the list from the current Group key and the
+            Organization's settings and ignores `message_labels`; an update that omits it keeps it.
+        message_labels:
+          type: array
+          maxItems: 50
+          description: 'The label names of the line of key labels of the Route''s Root messages, in their order, each
+            shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and
+            not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the
+            Route already has a list of its own, which an update that omits it keeps; an empty name is refused with
+            `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A
+            change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open
+            Root messages Quietly. A read gives the effective list: the Route''s own, or while `own_message_labels` is
+            false the list computed from the Group key without `alertname` and `organization.severity_label`, then
+            `organization.team_label` and `namespace`. The computed list follows the Organization''s settings as they are
+            now, and a change of them does not change the Route''s ETag; sent back with `own_message_labels` false, it
+            is ignored.'
+          items:
+            type: string
         policy:
           $ref: '#/components/schemas/RoutePolicy'
     PublicId:
@@ -12572,6 +12625,8 @@ components:
         - storm_active
         - open_alert_group_count
         - owning_team
+        - own_message_labels
+        - message_labels
         - created_at
         - etag
         properties:
@@ -12610,6 +12665,198 @@ components:
             readOnly: true
             description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
               an item of a list without reading it again.
+    RouteLabelSuggestionList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/RouteLabelSuggestion'
+    RouteLabelSuggestion:
+      type: object
+      required:
+      - label
+      - example_value
+      - alert_group_count
+      properties:
+        label:
+          type: string
+        example_value:
+          type: string
+          description: The most frequent value of the label among the Alerts of those Alert Groups, the smallest of
+            equally frequent ones.
+        alert_group_count:
+          type: integer
+          description: How many of the Route's recent Alert Groups have an Alert with the label.
+    MessageLayout:
+      type: object
+      description: The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the
+        Bridge protocol carries next to `body`. Its values are never escaped for any markup.
+      required:
+      - number
+      - title
+      - status
+      - fields
+      - summary
+      - description
+      - labels
+      - alerts
+      - notices
+      - assignees
+      - owner
+      - links
+      properties:
+        number:
+          type: integer
+          description: The Alert Group's number alone, without `#`.
+        title:
+          type: string
+          description: The title without the number.
+        status:
+          $ref: '#/components/schemas/MessageLayoutStatus'
+        fields:
+          type: array
+          description: Severity, Route, Teams (left out when the Alert Group has none) and Started.
+          items:
+            $ref: '#/components/schemas/MessageLayoutField'
+        summary:
+          type: string
+          description: Empty when there is none.
+        description:
+          type: string
+          description: The `description` annotation of the first Alert that has one; empty when there is none.
+        labels:
+          type: array
+          description: The key labels of "Labels in the message"; the value of a label whose values differ among the
+            firing Alerts is "N values" in the Route's language.
+          items:
+            $ref: '#/components/schemas/MessageLayoutLabel'
+        alerts:
+          description: The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.
+          oneOf:
+          - $ref: '#/components/schemas/MessageLayoutAlerts'
+          - type: 'null'
+        notices:
+          type: array
+          description: The notices that apply, then the footer as a line.
+          items:
+            type: string
+        assignees:
+          type: array
+          description: The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page
+            people.
+          items:
+            $ref: '#/components/schemas/MessageLayoutPerson'
+        owner:
+          description: Who acknowledged the Alert Group, with their Team; null while the footer names them.
+          oneOf:
+          - $ref: '#/components/schemas/MessageLayoutPerson'
+          - type: 'null'
+        links:
+          type: array
+          description: The links, "Open in Muster" first.
+          items:
+            $ref: '#/components/schemas/MessageLayoutLink'
+    MessageLayoutStatus:
+      type: object
+      required:
+      - key
+      - word
+      properties:
+        key:
+          type: string
+          enum:
+          - firing
+          - acknowledged
+          - snoozed
+          - resolved
+        word:
+          type: string
+          description: The status as a word in the Route's language.
+    MessageLayoutField:
+      type: object
+      required:
+      - name
+      - value
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+    MessageLayoutLabel:
+      type: object
+      required:
+      - key
+      - value
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+    MessageLayoutAlerts:
+      type: object
+      required:
+      - label
+      - values
+      - total
+      properties:
+        label:
+          type: string
+          description: The distinguishing label.
+        values:
+          type: array
+          description: Up to `message.compact_alerts_listed` values, firing Alerts first.
+          items:
+            $ref: '#/components/schemas/MessageLayoutAlertValue'
+        total:
+          type: integer
+          description: How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.
+    MessageLayoutAlertValue:
+      type: object
+      required:
+      - value
+      - resolved
+      properties:
+        value:
+          type: string
+        resolved:
+          type: boolean
+    MessageLayoutPerson:
+      type: object
+      required:
+      - name
+      - ref
+      properties:
+        name:
+          type: string
+        ref:
+          type:
+          - string
+          - 'null'
+          description: The `ref` of the person's entry in the envelope's `mentions` where the message carries their
+            Mention, otherwise null.
+        team:
+          $ref: '#/components/schemas/MessageLayoutTeam'
+    MessageLayoutTeam:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+    MessageLayoutLink:
+      type: object
+      required:
+      - label
+      - url
+      properties:
+        label:
+          type: string
+        url:
+          type: string
     RouteStorm:
       type: object
       required:
@@ -16499,6 +16746,22 @@ components:
           - alert_group
           - example
           - null
+        layout:
+          description: For `root_message`, the content of the rendered message as structured data; null when the
+            template failed.
+          oneOf:
+          - $ref: '#/components/schemas/MessageLayout'
+          - type: 'null'
+        length:
+          type: integer
+          description: For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for
+            `html`, characters otherwise.
+        messenger_limit:
+          type:
+          - integer
+          - 'null'
+          description: For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost,
+            4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.
         errors:
           type: array
           items:

@@ -544,6 +544,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-default-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The default message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#labels-in-the-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Labels in the message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-you-can-change-and-what-you-cannot" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2913,6 +2935,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#the-default-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The default message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#labels-in-the-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Labels in the message
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-you-can-change-and-what-you-cannot" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3028,18 +3072,82 @@
 
 <h1 id="messages-and-templates">Messages and templates<a class="headerlink" href="#messages-and-templates" title="Permanent link">&para;</a></h1>
 <p>Muster shows every Alert Group as one <strong>Root message</strong> in each Destination, and edits it as the Alert Group changes.
-Without any setup the message is complete: the status, the number and title, the environment and start time, the
-labels, the summary, the Alerts, the links and the buttons. This page is for the Admin who wants to change what it
-says: the template of a Route, whom a message mentions, and the links it carries.</p>
+Without any setup the message is complete and compact, so that a phone shows what a person needs to act: the number
+and title with the status as a word, a few fields, the summary and the description, one line of key labels, the
+Alerts by the label that tells them apart, the notices, who has it, the buttons and the links. This page is for the
+Admin who wants to change what it says: <a href="#labels-in-the-message">the labels it shows</a>, the template of a Route, whom
+a message mentions, and the links it carries.</p>
+<h2 id="the-default-message">The default message<a class="headerlink" href="#the-default-message" title="Permanent link">&para;</a></h2>
+<p>From 0.2.0 every Root message has this layout, here as Telegram shows it; each messenger lays it out in its own form:</p>
+<div class="highlight"><pre><span></span><code>#1287 KubernetesContainerOOMKilled — 🟠 Acknowledged
+Severity: warning
+Route: Infrastructure
+Teams: payments
+Started: 2026-10-04 03:12 UTC
+Container killed for memory
+The container exceeded its limit.
+system=kubernetes · team=payments · namespace=checkout
+pod: checkout-api-5b2c1, checkout-api-7d9f4, checkout-worker-8e6a0
+Acknowledged by Olga
+Open in Muster · Runbook · Source
+[Unack] [Resolve] [Snooze 1 h] …
+</code></pre></div>
+<ol>
+<li><strong>The title</strong>: <code>#N</code> and the Alert Group's title, linked to its page, and the status as a word — Firing,
+   Acknowledged, Snoozed or Resolved. The status colour stays: as the colour of the message in Mattermost and Slack,
+   and as an emoji beside the word in Telegram.</li>
+<li><strong>The fields</strong>: Severity, the Alert Group's Severity level; Route; Teams, left out when the Alert Group has none;
+   and Started, absolute in the Organization's time zone.</li>
+<li><strong>The summary and the description</strong>: the <code>summary</code> and <code>description</code> annotations of the first Alert that has each,
+   as plain text, each left out when no Alert has it.</li>
+<li><strong>The key labels</strong>: the labels of the Route's <a href="#labels-in-the-message">Labels in the message</a>, on one line.</li>
+<li><strong>The Alerts</strong>, when the Alert Group has more than one: named by the label that tells them apart — the first of
+   the Organization's Instance labels whose values differ (<code>pod</code>, <code>instance</code>, <code>container</code>, <code>endpoint</code> by default),
+   otherwise the first label, by name, whose values differ — with up to five values (<code>message.compact_alerts_listed</code>),
+   firing Alerts first and resolved ones struck through, then "…and K more".</li>
+<li><strong>The notices</strong> that apply, such as "Nobody has taken this" or the Reopen count.</li>
+<li><strong>The footer</strong>: who acknowledged, snoozed or resolved the Alert Group, or why Muster resolved it.</li>
+<li><strong>The buttons</strong> of the Destination's set.</li>
+<li><strong>The links</strong>: "Open in Muster" first, then the runbook, the source and the links of Link rules.</li>
+</ol>
+<p>Every other label and annotation is on the Alert Group page, one click away through "Open in Muster".</p>
+<dl>
+<dt><strong>Mattermost</strong></dt>
+<dd>One attachment in the colour of the status: the title of item 1 as its title, the fields as short fields, items 3
+to 7 as its text with the links as its last line, and the buttons under it.</dd>
+<dt><strong>Slack</strong></dt>
+<dd>One attachment in the colour of the status: a section with the title, one section with the fields, a section with
+the summary and the description, the key labels as a context, a section with the Alerts and the notices, the
+footer as a context, a section with the links, and the buttons.</dd>
+<dt><strong>Telegram</strong></dt>
+<dd>One message: the title with the status emoji beside the word, the fields as lines <code>Severity: warning</code>, then the
+items in order, with the buttons as its inline keyboard.</dd>
+</dl>
+<p>A message longer than its messenger allows — 4,096 characters in Telegram, 3,000 in a Slack section, 16,383 in
+Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
+status, the fields, the footer, the buttons and the link to Muster always stay.</p>
+<h2 id="labels-in-the-message">Labels in the message<a class="headerlink" href="#labels-in-the-message" title="Permanent link">&para;</a></h2>
+<p>"Labels in the message" (<code>route.message_labels</code>) chooses the labels of item 4. Set it through the API: give the Route
+<code>own_message_labels: true</code> and its list as <code>message_labels</code> in <code>updateRoute</code>, or <code>own_message_labels: false</code> to go back
+to the default. The field of the Route form, <strong>Routes → a Route → Message → Labels in the message</strong>, comes in a later
+release. By default the list is the Route's Group key without <code>alertname</code> and the Organization's severity label, which
+the field Severity already shows, then the Team label and <code>namespace</code>; it follows the Group key and the
+Organization's settings until the Route has a list of its own.</p>
+<p>A label shows as <code>name=value</code> when every firing Alert has the same value, as <code>name: N values</code> when their values
+differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
+example value (<code>listRouteLabelSuggestions</code>). A change of the list, or of the Group key while the list is the default,
+edits the open Root messages of the Route, Quietly, to show the new labels.</p>
 <h2 id="what-you-can-change-and-what-you-cannot">What you can change, and what you cannot<a class="headerlink" href="#what-you-can-change-and-what-you-cannot" title="Permanent link">&para;</a></h2>
 <p>A Route has three templates, under <strong>Routes → a Route → Message</strong>. Each is <strong>Built-in</strong> or <strong>Custom</strong>.</p>
 <dl>
 <dt><strong>Root message</strong></dt>
-<dd>The body of the message: the environment, the start time, the labels, the summary and the Alerts. The status
-colour, the heading, the links, the notices, the footer and the buttons always come from Muster, so no template can
-lose the buttons or the link to the Alert Group.</dd>
+<dd>The body of the message: items 3 to 5 of <a href="#the-default-message">the default message</a>, the summary, the
+description, the key labels and the Alerts. The title with the status, the fields, the notices, the footer, the
+buttons and the links always come from Muster, so no template can lose the buttons or the link to the Alert Group.
+When a template fails, the Fallback template shows every label of the Alert Group and of each Alert instead.</dd>
 <dt><strong>Alert line</strong></dt>
-<dd>The line of each Alert in the list of Alerts. It is also called the <strong>Line template</strong>.</dd>
+<dd>The line of each listed Alert, which then stands on a line of its own instead of the value of the label that tells
+the Alerts apart. It is also called the <strong>Line template</strong>.</dd>
 <dt><strong>Ack timeout notice</strong></dt>
 <dd>The reply Muster sends when nobody acknowledges an Alert Group in time.</dd>
 </dl>
