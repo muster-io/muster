@@ -1737,6 +1737,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#gaps-and-the-internal-alert" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Gaps and the Internal alert
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-call-now" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        On call now
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2052,6 +2074,8 @@
       
         
           
+        
+      
         
       
         
@@ -2444,6 +2468,33 @@
     
   
   MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterScheduleGap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterScheduleGap
 
     
   </span>
@@ -2899,6 +2950,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#gaps-and-the-internal-alert" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Gaps and the Internal alert
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-call-now" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        On call now
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2930,7 +3003,9 @@ sends a message.</p>
 <li>a <strong>time zone</strong>, such as <code>Europe/Berlin</code>. A Schedule created without one takes the Organization's time zone of that
   moment and keeps it when the Organization's changes later (<code>schedule.time_zone</code>);</li>
 <li>its <strong>Rotation layers</strong>, from the lowest to the highest;</li>
-<li>its <strong>Overrides</strong>.</li>
+<li>its <strong>Overrides</strong>;</li>
+<li>its <strong>gap alert</strong>, whether it reports its gaps as an Internal alert (see
+  <a href="#gaps-and-the-internal-alert">Gaps and the Internal alert</a>).</li>
 </ul>
 <p>The <strong>On-call</strong> of a Schedule at a moment is the person of its Override then; otherwise the person on Shift in the
 highest Rotation layer that has a Shift then; otherwise nobody, which is a <strong>gap</strong>. <code>getScheduleOnCall</code> gives the
@@ -3022,6 +3097,39 @@ After a link stops, calendar applications keep showing the copy they last fetche
 Muster never writes it to its logs, which show the path as <code>/ical/[redacted].ics</code>; a reverse proxy or ingress in
 front of Muster records the real path in its own access log, so keep that log private or mask <code>/ical/</code> there.
 Schedules are not imported from iCal: the feed only shows what the Schedules say.</p>
+<h2 id="gaps-and-the-internal-alert">Gaps and the Internal alert<a class="headerlink" href="#gaps-and-the-internal-alert" title="Permanent link">&para;</a></h2>
+<p>A <strong>gap</strong> is a time when no Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is
+On-call. The people whose Shifts are skipped are Viewers, disabled Users and Users who are no longer in the Team — after
+the groups of the identity provider changed, for example: the Rotation layer below takes their time, or a gap does.
+<code>getScheduleOnCall</code> lists a warning <code>gap</code> with its <code>start</code> and <code>end</code> for each gap of the period, besides the warnings
+<code>disabled</code>, <code>viewer</code> and <code>not_in_team</code> about those people, and every Schedule carries <code>next_gap</code>, the first gap of the
+next 14 days (<code>schedule.gap_view</code>), or null. A Rotation layer limited to Friday 19:00–09:00 alone has its gaps from
+Saturday 09:00 to Friday 19:00; the night from Friday to Saturday is no gap.</p>
+<p>A Schedule may report its gaps as the Internal alert <code>MusterScheduleGap</code> (<code>schedule.gap_alert</code>):</p>
+<dl>
+<dt><code>by_default</code></dt>
+<dd>The default: on while the Schedule is its Team's main one, off otherwise. When an Admin makes another Schedule
+main, the alert follows it at the next scan.</dd>
+<dt><code>on</code></dt>
+<dd>On whether or not the Schedule is main.</dd>
+<dt><code>off</code></dt>
+<dd>Never.</dd>
+</dl>
+<p><code>gap_alert_active</code> says whether it is on now. Every 5 minutes (<code>schedule.gap_scan_interval</code>) the Leader looks at the
+next 7 days (<code>schedule.gap_alert_horizon</code>) of each Schedule whose gap alert is active. A gap now, or one that starts
+within those 7 days, raises <code>MusterScheduleGap</code> with the Schedule's and its Team's id and name, the Team's slug under
+the Organization's Team label, so that the alert belongs to the Team, and the start of the nearest gap in the annotation
+<code>gap_start</code>. The alert stays raised while the gap lasts and resolves at the next scan once no gap is current or within
+the 7 days — an Override or a change of the Rotation layers closed it, or it is past — and when the gap alert is turned
+off or the Schedule is deleted. Renaming the Schedule or its Team updates the open alert. The metric
+<code>muster_schedule_gap</code> is 1 for each Schedule with such a gap and 0 for the others, and the chart rule of the same name
+is the backup for the Internal alert; its <a href="../../operations/runbooks/MusterScheduleGap/">runbook</a> says how to fill a gap.</p>
+<p>A Schedule that covers only part of the day on purpose, such as a second line in working hours, has gaps every evening:
+keep its gap alert off. With <code>by_default</code> it already is, as long as it is not its Team's main Schedule.</p>
+<h2 id="on-call-now">On call now<a class="headerlink" href="#on-call-now" title="Permanent link">&para;</a></h2>
+<p><code>getOnCallNow</code> lists every Team by name — or with <code>teams=mine</code> the Teams of the caller — with the On-call of its main
+Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
+within the next 14 days. A Team without a main Schedule has <code>no_schedule</code> true.</p>
 
 
 

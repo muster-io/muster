@@ -106,16 +106,18 @@ Platform. You enable it in either or both ways, each behind its own flag:
 ## Internal alerts
 
 Muster raises its own problems as **Internal alerts**: `MusterSnapshotTruncated`, `MusterHeartbeatLost`,
-`MusterDestinationBroken`, `MusterTemplateError` and `MusterOIDCSecretExpiring`. They are Alerts of the built-in
-"Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any Alert, and they reach
-nobody until a Route sends them to a Destination. The [Internal alerts reference](../reference/internal-alerts.md) lists
-them with their labels.
+`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring` and `MusterScheduleGap`. They are Alerts
+of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
+Alert, and they reach nobody until a Route sends them to a Destination. The
+[Internal alerts reference](../reference/internal-alerts.md) lists them with their labels.
 
 Give them a Route:
 
 1. Open **Routes**. At the top of the list, Muster suggests *Send Muster's own alerts to a Destination* when no Route
    other than the Default route matches them.
-2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"`.
+2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"` and groups by
+   `alertname`, `integration`, `destination`, `route` and `schedule`: one Alert Group per Internal alert and what it is
+   about, so that the gaps of two Schedules make two Alert Groups, each with its own Team.
 
 Use a Destination that does not depend on what the alert reports: not the one that is Broken. A second messenger, or an
 [outgoing webhook](../outgoing-webhooks/events.md) to a chat of your own, serves well. When a Route for
@@ -123,9 +125,11 @@ Use a Destination that does not depend on what the alert reports: not the one th
 [runbook](runbooks/index.md), and `MUSTER_RUNBOOK_BASE_URL` (set by the chart from `alerting.runbookBaseURL`) is the base
 of its link.
 
-Two Internal alerts have a chart rule with the same name, `MusterHeartbeatLost` and `MusterDestinationBroken`. The rule is
-the backup for when Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration,
-with its Static labels, for `MusterHeartbeatLost`, and the Destination for `MusterDestinationBroken`.
+Four Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
+`MusterTemplateError` and `MusterScheduleGap`. The rule is the backup for when Muster cannot deliver; the Internal alert
+carries the labels of what it is about: the Integration, with its Static labels, for `MusterHeartbeatLost`, the
+Destination for `MusterDestinationBroken`, and the Schedule with its Team for `MusterScheduleGap`, whose Team's slug
+under the Team label makes the alert belong to the Team, so that a Route can pick it by the Team label.
 
 ## Watching that Muster is alive
 

@@ -152,6 +152,7 @@
 - [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md): A template failed to render.
 - [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md): A replica's clock differs from the database clock by more than 2 seconds.
 - [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md): A burst of failed sign-ins: more than 20 for one method within 10 minutes.
+- [MusterScheduleGap](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md): A Schedule has a **gap** now or one that starts within the next 7 days (`schedule.gap_alert_horizon`): a time when no Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is On-call.
 - [MusterSnapshotTruncated](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md): Alertmanager truncates the Snapshots of an Integration: it left Alerts out of a Snapshot because of the `max_alerts` limit of its webhook receiver, or, for Grafana, the Max alerts limit of its webhook contact point.
 - [MusterOIDCSecretExpiring](https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md): The OIDC client secret expires soon: the date entered as **Client secret expires on** in the OIDC settings is within `oidc.secret_expiry_lead` (14 days).
 
@@ -168,4 +169,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 783898 bytes, about 195974 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 795481 bytes, about 198870 tokens.

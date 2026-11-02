@@ -1072,6 +1072,17 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Team matchers, or the Team label, adds the Team to the open Alert Groups whose firing Alerts it now picks, with a
       Quiet `team_joined`. It only adds, so the Alert Groups of Alerts that fired before the upgrade get their Teams
       the first time a Team is created, its slug or Team matchers change, or the Team label changes.
+    - Migration 0028 adds the [gap alert](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert) of each Schedule,
+      `by_default`: the main Schedule of each Team raises the Internal alert `MusterScheduleGap` for a gap now or within
+      7 days.
+
+    **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
+    Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
+    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule` —
+    so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team; without
+    them, the gaps of every Schedule share one Alert Group, which collects the Teams of all of them. When the Routes
+    can deliver to the Teams of their Alert Groups, the suggestion turns that on too, so that each gap reaches its own
+    Team; turn it on for a Route accepted before.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -1113,7 +1124,7 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
     replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
     Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
-    rollout.
+    rollout. Migration 0028 adds a column with a default to the Schedules, which 0.1 replicas do not use.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -1240,6 +1251,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0028 adds the gap alert of the Schedules in one transaction: a failure leaves nothing of it, but the
+    schema recorded as dirty at version 28. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 27, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -9391,7 +9407,9 @@ A Schedule belongs to one Team and has:
 - a **time zone**, such as `Europe/Berlin`. A Schedule created without one takes the Organization's time zone of that
   moment and keeps it when the Organization's changes later (`schedule.time_zone`);
 - its **Rotation layers**, from the lowest to the highest;
-- its **Overrides**.
+- its **Overrides**;
+- its **gap alert**, whether it reports its gaps as an Internal alert (see
+  [Gaps and the Internal alert](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert)).
 
 The **On-call** of a Schedule at a moment is the person of its Override then; otherwise the person on Shift in the
 highest Rotation layer that has a Shift then; otherwise nobody, which is a **gap**. `getScheduleOnCall` gives the
@@ -9499,6 +9517,47 @@ Calendar applications fetch the link without signing in, so treat it as a passwo
 Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
 front of Muster records the real path in its own access log, so keep that log private or mask `/ical/` there.
 Schedules are not imported from iCal: the feed only shows what the Schedules say.
+
+## Gaps and the Internal alert
+
+A **gap** is a time when no Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is
+On-call. The people whose Shifts are skipped are Viewers, disabled Users and Users who are no longer in the Team — after
+the groups of the identity provider changed, for example: the Rotation layer below takes their time, or a gap does.
+`getScheduleOnCall` lists a warning `gap` with its `start` and `end` for each gap of the period, besides the warnings
+`disabled`, `viewer` and `not_in_team` about those people, and every Schedule carries `next_gap`, the first gap of the
+next 14 days (`schedule.gap_view`), or null. A Rotation layer limited to Friday 19:00–09:00 alone has its gaps from
+Saturday 09:00 to Friday 19:00; the night from Friday to Saturday is no gap.
+
+A Schedule may report its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`):
+
+`by_default`
+:   The default: on while the Schedule is its Team's main one, off otherwise. When an Admin makes another Schedule
+    main, the alert follows it at the next scan.
+
+`on`
+:   On whether or not the Schedule is main.
+
+`off`
+:   Never.
+
+`gap_alert_active` says whether it is on now. Every 5 minutes (`schedule.gap_scan_interval`) the Leader looks at the
+next 7 days (`schedule.gap_alert_horizon`) of each Schedule whose gap alert is active. A gap now, or one that starts
+within those 7 days, raises `MusterScheduleGap` with the Schedule's and its Team's id and name, the Team's slug under
+the Organization's Team label, so that the alert belongs to the Team, and the start of the nearest gap in the annotation
+`gap_start`. The alert stays raised while the gap lasts and resolves at the next scan once no gap is current or within
+the 7 days — an Override or a change of the Rotation layers closed it, or it is past — and when the gap alert is turned
+off or the Schedule is deleted. Renaming the Schedule or its Team updates the open alert. The metric
+`muster_schedule_gap` is 1 for each Schedule with such a gap and 0 for the others, and the chart rule of the same name
+is the backup for the Internal alert; its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md) says how to fill a gap.
+
+A Schedule that covers only part of the day on purpose, such as a second line in working hours, has gaps every evening:
+keep its gap alert off. With `by_default` it already is, as long as it is not its Team's main Schedule.
+
+## On call now
+
+`getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
+Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
+within the next 14 days. A Team without a main Schedule has `no_schedule` true.
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/backup-and-restore.md -->
 # Backup and restore
@@ -9982,16 +10041,18 @@ Platform. You enable it in either or both ways, each behind its own flag:
 ## Internal alerts
 
 Muster raises its own problems as **Internal alerts**: `MusterSnapshotTruncated`, `MusterHeartbeatLost`,
-`MusterDestinationBroken`, `MusterTemplateError` and `MusterOIDCSecretExpiring`. They are Alerts of the built-in
-"Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any Alert, and they reach
-nobody until a Route sends them to a Destination. The [Internal alerts reference](https://muster-io.github.io/muster/latest/reference/internal-alerts.md) lists
-them with their labels.
+`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring` and `MusterScheduleGap`. They are Alerts
+of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
+Alert, and they reach nobody until a Route sends them to a Destination. The
+[Internal alerts reference](https://muster-io.github.io/muster/latest/reference/internal-alerts.md) lists them with their labels.
 
 Give them a Route:
 
 1. Open **Routes**. At the top of the list, Muster suggests *Send Muster's own alerts to a Destination* when no Route
    other than the Default route matches them.
-2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"`.
+2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"` and groups by
+   `alertname`, `integration`, `destination`, `route` and `schedule`: one Alert Group per Internal alert and what it is
+   about, so that the gaps of two Schedules make two Alert Groups, each with its own Team.
 
 Use a Destination that does not depend on what the alert reports: not the one that is Broken. A second messenger, or an
 [outgoing webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md) to a chat of your own, serves well. When a Route for
@@ -9999,9 +10060,11 @@ Use a Destination that does not depend on what the alert reports: not the one th
 [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md), and `MUSTER_RUNBOOK_BASE_URL` (set by the chart from `alerting.runbookBaseURL`) is the base
 of its link.
 
-Two Internal alerts have a chart rule with the same name, `MusterHeartbeatLost` and `MusterDestinationBroken`. The rule is
-the backup for when Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration,
-with its Static labels, for `MusterHeartbeatLost`, and the Destination for `MusterDestinationBroken`.
+Four Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
+`MusterTemplateError` and `MusterScheduleGap`. The rule is the backup for when Muster cannot deliver; the Internal alert
+carries the labels of what it is about: the Integration, with its Static labels, for `MusterHeartbeatLost`, the
+Destination for `MusterDestinationBroken`, and the Schedule with its Team for `MusterScheduleGap`, whose Team's slug
+under the Team label makes the alert belong to the Team, so that a Route can pick it by the Team label.
 
 ## Watching that Muster is alive
 
@@ -10487,6 +10550,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md) | warning | both |
 | [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md) | warning | chart rule |
 | [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md) | warning | chart rule |
+| [MusterScheduleGap](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md) | warning | both |
 | [MusterSnapshotTruncated](https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md) | warning | Internal alert |
 | [MusterOIDCSecretExpiring](https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md) | warning | Internal alert |
 
@@ -11187,6 +11251,67 @@ the sign-in throttle refuses before evaluating them are not counted.
 - `oidc` failures: fix the identity provider, or the **OIDC settings** (`/admin/oidc`) and their **Check
   connection**; see [Sign-in with Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md). Local sign-in stays available meanwhile.
 
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md -->
+# MusterScheduleGap
+
+## Meaning
+
+A Schedule has a **gap** now or one that starts within the next 7 days (`schedule.gap_alert_horizon`): a time when no
+Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is On-call. A person may not be
+Paged when they are a Viewer, disabled, or no longer in the Schedule's Team, and their Shifts are skipped; see
+[Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md#gaps-and-the-internal-alert).
+
+Only a Schedule whose gap alert is active reports its gaps: by default (`schedule.gap_alert` `by_default`) the Team's
+main Schedule, and any Schedule an Admin set to `on`. The Leader looks for gaps every 5 minutes
+(`schedule.gap_scan_interval`).
+
+This alert has two sources with the same name, severity `warning` and this page:
+
+- The **Internal alert**, raised by Muster itself as an Alert of the built-in "Muster" Integration, with the labels
+  `schedule` (the Schedule's id), `schedule_name`, `team_id`, `team_name` and, under the Organization's Team label
+  (`team` by default), the Team's slug, so that the alert belongs to the Team: its Alert Group lists the Team, and a
+  Route can pick it by the Team label. The annotation `gap_start` says when the nearest gap starts. It stays raised
+  while the gap lasts, and resolves at the next scan once no gap is current or within the horizon, when the gap alert
+  is no longer active, or when the Schedule is deleted.
+- The **chart rule**, the backup for when Muster cannot deliver the Internal alert:
+
+    ```promql
+    max by (schedule) (muster_schedule_gap{job="muster"}) == 1
+    ```
+
+    It fires at once with the label `schedule`. `muster_schedule_gap` is set by the Leader: 1 for a Schedule whose gap
+    alert is active and that has a gap now or within the horizon, 0 for every other Schedule.
+
+## Impact
+
+- During the gap nobody is On-call in the Schedule: "On call now" shows the gap, and nobody of this Schedule can be
+  Paged for the Team's Alert Groups then.
+- Alert Groups are still created, routed and delivered to their Destinations; only the On-call is missing.
+
+## Diagnosis
+
+1. Read the labels: `schedule_name` and `team_name` name the Schedule, and `gap_start` says when the gap starts.
+2. Read the gaps of the Schedule: `GET /api/v1/schedules/<schedule>/on-call` lists a warning `gap` with its `start`
+   and `end` for each gap of the next 14 days, and the warnings `disabled`, `viewer` and `not_in_team` name the people
+   whose Shifts are skipped. `GET /api/v1/schedules/<schedule>` gives the nearest gap as `next_gap`.
+3. A gap where a person should be On-call usually means that the person was disabled, turned into a Viewer or taken
+   out of the Team, for example by the groups of the identity provider; a gap at the edge of a Rotation layer's limits
+   usually means that the limits leave hours uncovered.
+4. Find the log line `schedule_gap_detected` (`schedule`, `team`, `gap_start`) of the raise.
+
+## Fix
+
+- **Fill the gap with an Override**: any Responder of the Team, or an Admin, makes the person who takes the time
+  On-call from the start to the end of the gap with `POST /api/v1/schedules/<schedule>/overrides`. The next scan
+  resolves the alert once no other gap is within the horizon.
+- **Change the Rotation layers**: an Admin replaces a person who may no longer be Paged, adds people to a Rotation
+  layer, widens its limits or adds a Rotation layer below that covers the rest of the time.
+- **Turn the alert off** for a Schedule that is meant to cover only part of the day, such as a second line in working
+  hours: set `gap_alert` to `off` on it. A Schedule that is not its Team's main one reports its gaps only with
+  `gap_alert` `on`.
+- The Internal alert resolves and `schedule_gap_cleared` (`schedule`, `team`) is logged at the next scan; the chart
+  rule resolves when the Leader sets `muster_schedule_gap` to 0 at the same scan.
+
 <!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterSnapshotTruncated.md -->
 # MusterSnapshotTruncated
 
@@ -11374,7 +11499,7 @@ Time from the arrival of an API request on the app listener to the end of its an
 
 Buckets (`le`): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 
 ### `muster_api_requests_total`
@@ -11383,7 +11508,7 @@ counter · labels: `route_pattern`, `method`, `code` · C-03 · exported by ever
 
 Requests to the API on the app listener, by the operation's path template, the method and the status code.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 - `code`: `200`, `201`, `202`, `204`, `302`, `304`, `400`, `401`, `403`, `404`, `405`, `409`, `410`, `412`, `413`, `415`, `422`, `428`, `429`, `500`, `501`, `502`, `503`, `504` — the HTTP status code of the answer
 
@@ -11629,6 +11754,14 @@ Always 1, one series per Route that is not deleted, the Default route included; 
 
 - `route` (entity): the public_id of the route
 - `name` (info): the name of the Route
+
+### `muster_schedule_gap`
+
+gauge · labels: `schedule` · C-27 · exported by the Leader only
+
+1 while the Schedule, whose gap alert is active, has a gap now or one that starts within schedule.gap_alert_horizon, 0 otherwise, per Schedule; set by the Leader's gap scan.
+
+- `schedule` (entity): the public_id of the schedule
 
 ### `muster_schedule_info`
 
@@ -12199,6 +12332,18 @@ WARN · fields: `direction`, `operation`, `owner`, `error` · C-23
 
 A record of the Request log could not be written — the database refused it, or its write ran past its 2 s timeout — and was dropped; the request it records went on unchanged. direction and operation are the record's, owner the public_id of its Connection or outgoing webhook Destination, empty without one, and error the database error. The headers and bodies of the record are never logged; muster_request_log_write_failures_total counts the dropped records.
 
+### `schedule_gap_cleared`
+
+INFO · fields: `schedule`, `team` · C-27
+
+MusterScheduleGap of a Schedule resolves: no gap of it is current or starts within schedule.gap_alert_horizon, its gap alert is no longer active, or it was deleted. schedule is the public_id of the Schedule and team that of its Team. Logged once per resolve.
+
+### `schedule_gap_detected`
+
+WARN · fields: `schedule`, `team`, `gap_start` · C-27
+
+A Schedule whose gap alert is active has a gap now or one that starts within schedule.gap_alert_horizon, so the Leader's gap scan raises MusterScheduleGap: schedule is the public_id of the Schedule, team that of its Team and gap_start when the nearest gap starts. Logged once per raise.
+
 ### `schema_dirty`
 
 ERROR · fields: `database_version` · C-02
@@ -12413,11 +12558,13 @@ Muster reports problems it can still report through its own pipeline as Internal
 synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with
 them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or
 Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,
-`route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and
-the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every
-Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
+`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from
+`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new
+one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,
+outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,
+`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
 `major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
-joined by `/`. The capability is the one that raises it.
+joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.
 
 ### `MusterDestinationBroken`
 
@@ -12436,6 +12583,12 @@ Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived with
 warning · no labels · C-19 · runbook: [`operations/runbooks/MusterOIDCSecretExpiring/`](https://muster-io.github.io/muster/latest/operations/runbooks/MusterOIDCSecretExpiring.md)
 
 Raised while: The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in the OIDC settings. It resolves when the date moves further out or is removed.
+
+### `MusterScheduleGap`
+
+warning · labels: `schedule`, `schedule_name`, `team_id`, `team_name`, the Team's slug under the Team label · annotations: `gap_start` · C-27 · runbook: [`operations/runbooks/MusterScheduleGap/`](https://muster-io.github.io/muster/latest/operations/runbooks/MusterScheduleGap.md)
+
+Raised while: A Schedule whose gap alert is active — schedule.gap_alert on, or by default while the Schedule is its Team's main one — has a gap now or one that starts within schedule.gap_alert_horizon: a time when no Override and no Rotation layer has a Shift with a person who may be Paged. The annotation gap_start says when the nearest gap starts. It resolves when no gap is current or within the horizon, when the gap alert is no longer active or when the Schedule is deleted.
 
 ### `MusterSnapshotTruncated`
 
@@ -13472,6 +13625,24 @@ The number of failed sign-ins of one method within the window above which the ru
 string · default: `10m`
 
 The window in which failed sign-ins count.
+
+### `alerting.rules.MusterScheduleGap`
+
+object
+
+A Schedule whose gap alert is active has a gap now or within the gap alert horizon (warning).
+
+### `alerting.rules.MusterScheduleGap.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterScheduleGap.for`
+
+string · default: `0m`
+
+How long the Schedule has a gap now or within the horizon before the rule fires.
 
 ### `dashboard`
 

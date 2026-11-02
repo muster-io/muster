@@ -12,7 +12,9 @@ A Schedule belongs to one Team and has:
 - a **time zone**, such as `Europe/Berlin`. A Schedule created without one takes the Organization's time zone of that
   moment and keeps it when the Organization's changes later (`schedule.time_zone`);
 - its **Rotation layers**, from the lowest to the highest;
-- its **Overrides**.
+- its **Overrides**;
+- its **gap alert**, whether it reports its gaps as an Internal alert (see
+  [Gaps and the Internal alert](#gaps-and-the-internal-alert)).
 
 The **On-call** of a Schedule at a moment is the person of its Override then; otherwise the person on Shift in the
 highest Rotation layer that has a Shift then; otherwise nobody, which is a **gap**. `getScheduleOnCall` gives the
@@ -120,3 +122,44 @@ Calendar applications fetch the link without signing in, so treat it as a passwo
 Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
 front of Muster records the real path in its own access log, so keep that log private or mask `/ical/` there.
 Schedules are not imported from iCal: the feed only shows what the Schedules say.
+
+## Gaps and the Internal alert
+
+A **gap** is a time when no Override and no Rotation layer has a Shift with a person who may be Paged, so nobody is
+On-call. The people whose Shifts are skipped are Viewers, disabled Users and Users who are no longer in the Team — after
+the groups of the identity provider changed, for example: the Rotation layer below takes their time, or a gap does.
+`getScheduleOnCall` lists a warning `gap` with its `start` and `end` for each gap of the period, besides the warnings
+`disabled`, `viewer` and `not_in_team` about those people, and every Schedule carries `next_gap`, the first gap of the
+next 14 days (`schedule.gap_view`), or null. A Rotation layer limited to Friday 19:00–09:00 alone has its gaps from
+Saturday 09:00 to Friday 19:00; the night from Friday to Saturday is no gap.
+
+A Schedule may report its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`):
+
+`by_default`
+:   The default: on while the Schedule is its Team's main one, off otherwise. When an Admin makes another Schedule
+    main, the alert follows it at the next scan.
+
+`on`
+:   On whether or not the Schedule is main.
+
+`off`
+:   Never.
+
+`gap_alert_active` says whether it is on now. Every 5 minutes (`schedule.gap_scan_interval`) the Leader looks at the
+next 7 days (`schedule.gap_alert_horizon`) of each Schedule whose gap alert is active. A gap now, or one that starts
+within those 7 days, raises `MusterScheduleGap` with the Schedule's and its Team's id and name, the Team's slug under
+the Organization's Team label, so that the alert belongs to the Team, and the start of the nearest gap in the annotation
+`gap_start`. The alert stays raised while the gap lasts and resolves at the next scan once no gap is current or within
+the 7 days — an Override or a change of the Rotation layers closed it, or it is past — and when the gap alert is turned
+off or the Schedule is deleted. Renaming the Schedule or its Team updates the open alert. The metric
+`muster_schedule_gap` is 1 for each Schedule with such a gap and 0 for the others, and the chart rule of the same name
+is the backup for the Internal alert; its [runbook](../operations/runbooks/MusterScheduleGap.md) says how to fill a gap.
+
+A Schedule that covers only part of the day on purpose, such as a second line in working hours, has gaps every evening:
+keep its gap alert off. With `by_default` it already is, as long as it is not its Team's main Schedule.
+
+## On call now
+
+`getOnCallNow` lists every Team by name — or with `teams=mine` the Teams of the caller — with the On-call of its main
+Schedule now: the person and the Rotation layer whose Shift it is, until when, and what follows, a person or a gap,
+within the next 14 days. A Team without a main Schedule has `no_schedule` true.

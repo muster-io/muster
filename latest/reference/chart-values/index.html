@@ -1978,6 +1978,8 @@
       
         
       
+        
+      
     
     
     
@@ -2340,6 +2342,33 @@
     
   
   MusterLoginFailures
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterScheduleGap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterScheduleGap
 
     
   </span>
@@ -4274,6 +4303,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegapenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegapfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#dashboard" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6101,6 +6163,39 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegap" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegapenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusterschedulegapfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterScheduleGap.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#dashboard" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6682,6 +6777,15 @@
 <h3 id="alertingrulesmusterloginfailureswindow"><code>alerting.rules.MusterLoginFailures.window</code><a class="headerlink" href="#alertingrulesmusterloginfailureswindow" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>10m</code></p>
 <p>The window in which failed sign-ins count.</p>
+<h3 id="alertingrulesmusterschedulegap"><code>alerting.rules.MusterScheduleGap</code><a class="headerlink" href="#alertingrulesmusterschedulegap" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>A Schedule whose gap alert is active has a gap now or within the gap alert horizon (warning).</p>
+<h3 id="alertingrulesmusterschedulegapenabled"><code>alerting.rules.MusterScheduleGap.enabled</code><a class="headerlink" href="#alertingrulesmusterschedulegapenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusterschedulegapfor"><code>alerting.rules.MusterScheduleGap.for</code><a class="headerlink" href="#alertingrulesmusterschedulegapfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>0m</code></p>
+<p>How long the Schedule has a gap now or within the horizon before the rule fires.</p>
 <h3 id="dashboard"><code>dashboard</code><a class="headerlink" href="#dashboard" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>The "Muster" Grafana dashboard.</p>
