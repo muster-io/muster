@@ -2,7 +2,10 @@
 // Copyright The Muster Authors
 
 // The mapping from identity provider groups to Roles of the OIDC settings (C-03.FR-5): one row per group, added and
-// removed freely; when a user's groups map to several Roles, the highest wins.
+// removed freely; when a user's groups map to several Roles, the highest wins. Each entry also reads a claim, by
+// default the groups claim; the editor shows the claim of every entry it loads, read-only, by a short name with the
+// full one in a tooltip, and sends it back unchanged, so that an entry of another claim is never saved against the
+// groups claim and never looks like one.
 
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -15,9 +18,13 @@ import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { ROLES, roleLabel } from "./user-create-dialog";
 
-/** A row of the editor; key keeps a row's inputs in place when another row is removed. */
+/**
+ * A row of the editor; key keeps a row's inputs in place when another row is removed. claim is the claim the entry
+ * reads, kept as loaded; undefined reads the groups claim.
+ */
 export interface MappingRow {
   key: string;
+  claim?: string;
   group: string;
   role: RoleName;
 }
@@ -30,11 +37,23 @@ function newKey(): string {
 }
 
 export function mappingRows(mappings: readonly OidcGroupMapping[]): MappingRow[] {
-  return mappings.map((m) => ({ key: newKey(), group: m.group, role: m.role }));
+  return mappings.map((m) => ({ key: newKey(), claim: m.claim, group: m.group, role: m.role }));
+}
+
+/** The short name of an entry's claim: the last part of its path, such as owner for GitLab's owner claim. */
+export function claimShortName(claim: string): string {
+  const parts = claim.split("/").filter((p) => p !== "");
+  return parts.at(-1) ?? claim;
 }
 
 export function mappingsOf(rows: readonly MappingRow[]): OidcGroupMapping[] {
-  return rows.map((r) => ({ group: r.group.trim(), role: r.role }));
+  return rows.map((r) => {
+    const entry: OidcGroupMapping = { group: r.group.trim(), role: r.role };
+    if (r.claim !== undefined && r.claim !== "") {
+      entry.claim = r.claim;
+    }
+    return entry;
+  });
 }
 
 export interface GroupMappingEditorProps {
@@ -112,6 +131,22 @@ export function GroupMappingEditor({
                     aria-describedby={error === undefined ? undefined : `${groupId}-error`}
                     onChange={(e) => update(index, { group: e.target.value })}
                   />
+                  <p
+                    className="text-xs break-all text-muted-foreground"
+                    data-testid="group-mapping-claim"
+                    title={
+                      row.claim === undefined || row.claim === ""
+                        ? t("oidc.mapping.groupsClaimTitle")
+                        : t("oidc.mapping.claimTitle", { claim: row.claim })
+                    }
+                  >
+                    {t("oidc.mapping.claim", {
+                      claim:
+                        row.claim === undefined || row.claim === ""
+                          ? t("oidc.mapping.groupsClaim")
+                          : claimShortName(row.claim),
+                    })}
+                  </p>
                   {error !== undefined && (
                     <p id={`${groupId}-error`} className="text-sm text-destructive">
                       {error}

@@ -1762,8 +1762,12 @@
     "hint": "Sign-in through your identity provider.",
     "mapping": {
       "add": "Add IdP group",
+      "claim": "Claim: {{claim}}",
+      "claimTitle": "Reads the claim {{claim}}",
       "empty": "No IdP groups are mapped.",
       "group": "IdP group {{number}}",
+      "groupsClaim": "groups",
+      "groupsClaimTitle": "Reads the groups claim of these settings",
       "hint": "When a user's IdP groups map to several Roles, the highest wins.",
       "remove": "Remove IdP group {{group}}",
       "role": "Role for IdP group {{number}}",
