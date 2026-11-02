@@ -38,6 +38,9 @@ const (
 // or deleted User. It never says which.
 var ErrFeedNotFound = errors.New("no such ical feed")
 
+// ErrFeedUserInactive is an issue of a feed for a User who is not active, disabled or deleted meanwhile.
+var ErrFeedUserInactive = errors.New("the user of the ical feed is not active")
+
 // FeedQueries are the queries of the iCal feeds, with the insert of the Audit log.
 type FeedQueries interface {
 	ListUserSchedules(ctx context.Context, arg dbgen.ListUserSchedulesParams) ([]dbgen.ListUserSchedulesRow, error)
@@ -133,7 +136,8 @@ func (f *Feeds) Get(ctx context.Context, userID int64) (Feed, error) {
 }
 
 // Issue issues the iCal feed of the User u, replacing the one they had in the same statement, so that the previous
-// link stops working at once, and records ical_feed.issued without the token.
+// link stops working at once, and records ical_feed.issued without the token. A User who is not active, disabled or
+// deleted meanwhile, gets ErrFeedUserInactive and no feed.
 func (f *Feeds) Issue(ctx context.Context, r Requester, u FeedUser) (IssuedFeed, error) {
 	value, hash, err := tokens.Generate(tokens.PrefixIcal)
 	if err != nil {
@@ -143,6 +147,9 @@ func (f *Feeds) Issue(ctx context.Context, r Requester, u FeedUser) (IssuedFeed,
 	err = f.store.InTx(ctx, func(q FeedQueries) error {
 		replaced, err := q.ReplaceIcalFeed(ctx, dbgen.ReplaceIcalFeedParams{OrgID: f.orgID, UserID: u.ID,
 			TokenHash: hash, Now: now})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrFeedUserInactive
+		}
 		if err != nil {
 			return fmt.Errorf("issue the ical feed: %w", err)
 		}
@@ -213,12 +220,14 @@ func (f *Feeds) Lookup(ctx context.Context, value string) (FeedUser, error) {
 	return u, nil
 }
 
-// Calendar is the iCal document of the feed of the User u (C-27.FR-10): one event per span of ical.window, from
-// ICalWindowBack before the business clock's now to ICalWindowAhead after it, in which u is On-call in a Schedule of
-// one of their Teams — the only Schedules in which they can be — by its Result.
+// Calendar is the iCal document of the feed of the User u (C-27.FR-10): one event per span of ical.window — from
+// ICalWindowBack before the start of the business clock's day in UTC to the end of the day ICalWindowAhead after it —
+// in which u is On-call in a Schedule of one of their Teams, the only Schedules in which they can be, by its Result.
 func (f *Feeds) Calendar(ctx context.Context, u FeedUser) ([]byte, error) {
+	// The window starts and ends at midnight UTC, so that an event it cuts keeps its start, and its UID, all day.
 	now := f.clock.Now().UTC().Truncate(time.Second)
-	from, to := now.Add(-ICalWindowBack), now.Add(ICalWindowAhead)
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	from, to := day.Add(-ICalWindowBack), day.Add(ICalWindowAhead+24*time.Hour)
 	rows, err := f.store.ListUserSchedules(ctx, dbgen.ListUserSchedulesParams{OrgID: f.orgID, UserID: u.ID})
 	if err != nil {
 		return nil, fmt.Errorf("list the schedules of %s: %w", u.PublicID, err)

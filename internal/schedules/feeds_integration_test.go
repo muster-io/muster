@@ -159,6 +159,10 @@ func TestIntegrationFeeds(t *testing.T) {
 		if u, err := feeds.Lookup(ctx, token(second)); !errors.Is(err, schedules.ErrFeedNotFound) || u != petr {
 			t.Errorf("a disabled User's token: %+v, %v", u, err)
 		}
+		if _, err := feeds.Issue(ctx, by, petr); !errors.Is(err, schedules.ErrFeedUserInactive) ||
+			e.count(t, `SELECT count(*) FROM ical_feeds WHERE token_hash = sha256($1::bytea)`, []byte(token(second))) != 1 {
+			t.Errorf("issuing for a disabled User: %v", err)
+		}
 		if _, err := e.d.Pool.Exec(ctx, `UPDATE users SET status = 'active' WHERE id = $1`, petrID); err != nil {
 			t.Fatal(err)
 		}

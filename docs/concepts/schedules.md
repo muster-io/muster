@@ -97,7 +97,7 @@ No messages
 
 Each User may subscribe a calendar application to a personal **iCal feed** of the times when they are On-call. The
 feed has one event for each span in which the User is On-call in a Schedule of any of their Teams, named
-"{Team} · {Schedule}", from 7 days back to 60 days ahead (`ical.window`):
+"{Team} · {Schedule}", from 7 days back to 60 days ahead (`ical.window`), counted in whole days in UTC:
 
 - It follows the Result: where a higher Rotation layer or someone else's Override has the time, it is not in the feed.
   With the two Rotation layers above, a week in which Petr has the lower Rotation layer shows only its nights and its
@@ -116,5 +116,6 @@ A new link revokes the old one
     a stopped link, and the link of a disabled or deleted User, answers `404`. Deleting a User deletes their feed.
 
 Calendar applications fetch the link without signing in, so treat it as a password: anyone who has it sees the times.
-Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`. Schedules are not imported from
-iCal: the feed only shows what the Schedules say.
+Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
+front of Muster records the real path in its own access log, so keep that log private or mask `/ical/` there.
+Schedules are not imported from iCal: the feed only shows what the Schedules say.

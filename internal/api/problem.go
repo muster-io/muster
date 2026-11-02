@@ -310,8 +310,10 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 	if len(p.Errors) > 0 {
 		body.Errors = &p.Errors
 	}
-	instance := r.URL.Path
-	body.Instance = &instance
+	// A path under /api/v1/ical/ is a misdirected link of an iCal feed, which carries its token: no instance.
+	if instance := r.URL.Path; !strings.HasPrefix(instance, BasePath+schedules.FeedBasePath) {
+		body.Instance = &instance
+	}
 	if p.Type == typeRouteHasOpenGroups {
 		count := int(p.OpenAlertGroupCount)
 		body.OpenAlertGroupCount = &count

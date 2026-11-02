@@ -190,8 +190,10 @@ None.
   higher Rotation layer has someone else is a hole in the feed.
 - Decided with the implementation: the feed reads the Schedules of the Teams of the User only (`ListUserSchedules`),
   which is every Schedule in which they can be On-call — a person outside a Team is never Paged in its Schedules
-  (C-27.FR-5). The window is the business clock's now, to the second, from 7 days back to 60 days ahead; an event
-  that crosses an end of the window is cut there. `UID` is `{schedule public_id}-{DTSTART}@muster`; the calendar has
+  (C-27.FR-5). The window runs from midnight UTC 7 days before the business clock's day to midnight UTC at the end
+  of the day 60 days ahead, so that it always covers `ical.window` and an event it cuts at an end keeps its start,
+  and so its `UID`, for the whole day instead of changing on every fetch (review L2); an event that crosses an end
+  of the window is cut there. `UID` is `{schedule public_id}-{DTSTART}@muster`; the calendar has
   `PRODID`, `VERSION` and `X-WR-CALNAME` and nothing else, no `VTIMEZONE`, every time in UTC, and a wall-clock time
   that happens twice is its first occurrence, as the Result computes it (`TestFeedChangeOfClocks` over the changes
   of October 2026 and March 2027 in Europe/Berlin).
@@ -203,8 +205,22 @@ None.
   problem without `instance` and with nothing about the token, its User or the Organization; methods other than `GET`
   and `HEAD` get `405`. A malformed token is answered `404` without a lookup. Under `/api/v1`, where the spec's path
   of the feed is no operation, `/api/v1/ical/…` answers the API's `404` `not-found` problem, without the `instance`
-  that would repeat the token. The SPA's generated client (orval) keeps `getIcalCalendar` under its base `/api/v1`,
-  as it does the operations of the ingest and internal listeners; nothing calls it.
+  that would repeat the token: `writeProblem` leaves out `instance` for every path under `/api/v1/ical/`, whatever
+  the status — the `405` of another method and the `404` of the paths around the feed's included (review H1) — and
+  the probe `ical_feed` of lint 5 sends the secrets along these paths too. The SPA's generated client (orval) keeps
+  `getIcalCalendar` under its base `/api/v1`, as it does the operations of the ingest and internal listeners;
+  nothing calls it, and its mock stays (review L6a, accepted).
+- Decided with the implementation: `ReplaceIcalFeed` inserts from the User's row read `FOR SHARE` with the status
+  `active`, so that it waits for a deletion or a disabling that holds the row (`FOR NO KEY UPDATE`) and then issues
+  nothing; a feed can never outlive the deletion of its User (review L4). `issueMyIcalFeed` answers such a caller
+  `401`, as for a session whose User is gone.
+- Kept as they are, after review: the route label `/ical/{token}.ics` of `muster_api_requests_total` comes from
+  `api.PathTemplates`, which reads every path of the spec — `/health/live`, `/health/ready` and `/metrics` of the
+  internal listener are there too — so dropping it would change that function and its test for every path outside
+  the API; only a link sent under `/api/v1` by mistake is counted under it (review L1). A calendar without events has
+  no `VEVENT`, which calendar applications accept although RFC 5545 asks for a component (L3). The `UID` is the
+  contracted `{schedule public_id}-{start}@muster`, unique within a feed, not across the feeds of different Users
+  (L5).
 - The maintainer confirms one provisional value with this story (operator attention): P-82, the prefix `mstr_cal_`, 32
   random bytes, stored as a hash, shown once, one per User. P-81, the window of 7 days back and 60 ahead, is confirmed
   by the test environment and stays provisional.

@@ -34,6 +34,8 @@ type fakeIcalFeeds struct {
 	revoked int
 	looked  []string
 	err     error
+	// issueErr answers Issue.
+	issueErr error
 }
 
 func (f *fakeIcalFeeds) Get(_ context.Context, userID int64) (schedules.Feed, error) {
@@ -44,6 +46,9 @@ func (f *fakeIcalFeeds) Get(_ context.Context, userID int64) (schedules.Feed, er
 func (f *fakeIcalFeeds) Issue(_ context.Context, r schedules.Requester, u schedules.FeedUser) (schedules.IssuedFeed,
 	error) {
 	f.by, f.users = append(f.by, r), append(f.users, u)
+	if f.issueErr != nil {
+		return schedules.IssuedFeed{}, f.issueErr
+	}
 	at := t0
 	f.issued = &at
 	return schedules.IssuedFeed{URL: icalURL, IssuedAt: t0}, nil
@@ -109,6 +114,11 @@ func TestIcalFeedOperations(t *testing.T) {
 			t.Errorf("with a feed = %d %s", a.status, a.body)
 		}
 	}
+	f.issueErr = schedules.ErrFeedUserInactive
+	if a = x.mutate(t, adminCookie, http.MethodPost, "/api/v1/me/ical-feed", ""); a.status != http.StatusUnauthorized {
+		t.Errorf("issuing for a User who is no longer active = %d %s", a.status, a.body)
+	}
+	f.issueErr = nil
 	if a = x.mutate(t, adminCookie, http.MethodDelete, "/api/v1/me/ical-feed", ""); a.status != http.StatusNoContent ||
 		f.revoked != 1 {
 		t.Errorf("revoke = %d %s", a.status, a.body)
@@ -133,11 +143,28 @@ func TestIcalFeedOperations(t *testing.T) {
 		http.StatusForbidden || a.code(t) != codeCSRFInvalid {
 		t.Errorf("without the CSRF token = %d %s", a.status, a.body)
 	}
-	// The feed is outside /api/v1: under it, its path is a 404 problem that does not repeat the token.
-	if a = x.call(t, http.MethodGet, "/api/v1/ical/"+icalToken+".ics", ""); a.status != http.StatusNotFound ||
-		a.header.Get("Content-Type") != contentTypeProblem || strings.Contains(string(a.body), icalToken) ||
-		a.json(t)["type"] != problemBase+typeNotFound {
-		t.Errorf("the feed under /api/v1 = %d %v %s", a.status, a.header, a.body)
+	// The feed is outside /api/v1: under it, every answer is a problem without an instance, which would repeat the
+	// token — 404 for the path of the feed and the paths around it, 405 for another method.
+	for _, c := range []struct {
+		method, path string
+		status       int
+	}{
+		{http.MethodGet, "/api/v1/ical/" + icalToken + ".ics", http.StatusNotFound},
+		{http.MethodHead, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/api/v1/ical/" + icalToken, http.StatusNotFound},
+		{http.MethodGet, "/api/v1/ical/" + icalToken + ".ics/x", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
+		{http.MethodDelete, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
+	} {
+		a = x.call(t, c.method, c.path, "", "Cookie", adminCookie)
+		if a.status != c.status || a.header.Get("Content-Type") != contentTypeProblem ||
+			strings.Contains(string(a.body), icalToken) || strings.Contains(string(a.body), `"instance"`) ||
+			(c.status == http.StatusMethodNotAllowed && a.header.Get("Allow") != "GET") {
+			t.Errorf("%s %s = %d %v %s", c.method, c.path, a.status, a.header, a.body)
+		}
+	}
+	if a = x.call(t, http.MethodGet, "/api/v1/nothing", ""); a.json(t)["instance"] != "/api/v1/nothing" {
+		t.Errorf("another path loses its instance: %s", a.body)
 	}
 }
 

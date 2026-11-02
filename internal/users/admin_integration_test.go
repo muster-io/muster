@@ -803,6 +803,10 @@ func TestIntegrationIcalFeedsOfDeletedUsers(t *testing.T) {
 		if _, err := lookup(); !errors.Is(err, schedules.ErrFeedNotFound) {
 			t.Errorf("the feed of a deleted user: %v", err)
 		}
+		if _, err := feeds.Issue(ctx, schedules.Requester{Actor: audit.User(bob.ID, bob.PublicID),
+			Transport: audit.TransportUI}, owner); !errors.Is(err, schedules.ErrFeedUserInactive) || feedRows() != 0 {
+			t.Errorf("issuing for a deleted user: %v, %d feeds", err, feedRows())
+		}
 		var revoked int
 		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked'
 			AND details ->> 'reason' = 'user_deleted' AND actor_user_id = $1 AND resource_type = 'user'

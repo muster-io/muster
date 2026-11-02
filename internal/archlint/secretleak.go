@@ -1237,6 +1237,26 @@ func probeIcalFeed(ctx context.Context, secrets []string, log io.Writer) error {
 		send(secret)
 		send("mstr_cal_" + secret)
 	}
+	// A link sent under /api/v1 by mistake reaches the API, whose problems name the path in instance elsewhere.
+	apiHandler, err := api.New(api.Config{IcalFeeds: feeds, Log: logger, Real: clock.Real{}})
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	for _, token := range append(slices.Clone(secrets), value) {
+		escaped := url.PathEscape(token)
+		for _, req := range [][2]string{{http.MethodGet, escaped + schedules.FeedSuffix},
+			{http.MethodPost, escaped + schedules.FeedSuffix}, {http.MethodGet, escaped},
+			{http.MethodGet, escaped + schedules.FeedSuffix + "/x"}} {
+			r, err := http.NewRequestWithContext(ctx, req[0], api.BasePath+schedules.FeedBasePath+req[1], nil)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			rec := &probeRecorder{header: http.Header{}}
+			apiHandler.ServeHTTP(rec, r)
+			answers = append(answers, rec.body.String())
+		}
+	}
 	send(value)
 	store.status = "disabled"
 	send(value)

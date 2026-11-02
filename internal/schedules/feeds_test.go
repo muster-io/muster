@@ -74,6 +74,9 @@ func (s *fakeFeedStore) ReplaceIcalFeed(_ context.Context, arg dbgen.ReplaceIcal
 	if err := s.err("ReplaceIcalFeed"); err != nil {
 		return false, err
 	}
+	if s.user(arg.UserID).Status != "active" || arg.OrgID != orgID {
+		return false, pgx.ErrNoRows
+	}
 	_, replaced := s.feeds[arg.UserID]
 	s.feeds[arg.UserID] = fakeFeed{hash: arg.TokenHash, issued: arg.Now}
 	return replaced, nil
@@ -246,11 +249,17 @@ func TestFeedLookup(t *testing.T) {
 	if _, err := feeds.Lookup(ctx, "mstr_cal_"+strings.Repeat("a", 52)); !errors.Is(err, ErrFeedNotFound) {
 		t.Errorf("an unknown token: %v", err)
 	}
-	dans, err := feeds.Issue(ctx, admin, FeedUser{ID: dan.ID, PublicID: dan.PublicID})
+	// dan is disabled: no feed is issued for him, and the feed he had answers as not found, naming him.
+	if _, err := feeds.Issue(ctx, admin, FeedUser{ID: dan.ID, PublicID: dan.PublicID}); !errors.Is(err,
+		ErrFeedUserInactive) || len(store.feeds) != 0 || len(store.audit) != 0 {
+		t.Errorf("issuing for a disabled user: %v, %d feeds, %d entries", err, len(store.feeds), len(store.audit))
+	}
+	value, hash, err := tokens.Generate(tokens.PrefixIcal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u, err := feeds.Lookup(ctx, tokenOf(t, dans)); !errors.Is(err, ErrFeedNotFound) || u.PublicID != dan.PublicID {
+	store.feeds[dan.ID] = fakeFeed{hash: hash, issued: t0}
+	if u, err := feeds.Lookup(ctx, value); !errors.Is(err, ErrFeedNotFound) || u.PublicID != dan.PublicID {
 		t.Errorf("the feed of a disabled user = %+v, %v", u, err)
 	}
 	bobs, err := feeds.Issue(ctx, admin, FeedUser{ID: bob.ID, PublicID: bob.PublicID})
@@ -433,7 +442,8 @@ func TestFeedFridayNight(t *testing.T) {
 	for _, e := range events {
 		got = append(got, e["DTSTART"]+"/"+e["DTEND"])
 	}
-	// From 28 October, 7 days back, to 3 January, 60 days ahead: the Fridays from 30 October to 1 January.
+	// From 28 October 00:00 UTC, 7 days before the day of now, to 4 January 00:00 UTC, the end of the day 60 days
+	// ahead: the Fridays from 30 October to 1 January.
 	if len(got) != 10 || got[0] != berlinTime(t, 2026, time.October, 30, 19)+"/"+
 		berlinTime(t, 2026, time.October, 31, 9) || got[1] != berlinTime(t, 2026, time.November, 6, 19)+"/"+
 		berlinTime(t, 2026, time.November, 7, 9) || got[9] != berlinTime(t, 2027, time.January, 1, 19)+"/"+
@@ -526,5 +536,44 @@ func TestEventsOf(t *testing.T) {
 	want := []string{"0s-2h0m0s", "2h0m0s-4h0m0s", "4h0m0s-5h0m0s", "5h0m0s-6h0m0s", "8h0m0s-9h0m0s"}
 	if !slices.Equal(got, want) {
 		t.Errorf("events = %v, want %v", got, want)
+	}
+}
+
+// TestFeedWindow is ical.window (P-81): the feed reaches from midnight UTC 7 days before the business clock's day to
+// midnight UTC at the end of the day 60 days ahead, so that an event it cuts at an end keeps its start and its UID
+// through the day, and the feed fetched again later that day is the same but for DTSTAMP.
+func TestFeedWindow(t *testing.T) {
+	ctx := t.Context()
+	feeds, svc, _, c := newFeeds(t)
+	if _, err := svc.Create(ctx, admin, Input{TeamID: teamPay, Name: "Always", TimeZone: ptr("Europe/Berlin"),
+		RotationLayers: []RotationLayerInput{{Name: "Petr", UserIDs: []string{petr.PublicID}, ShiftLength: ShiftDay,
+			HandoverTime: "10:00", StartDate: date("2026-10-01")}}}); err != nil {
+		t.Fatal(err)
+	}
+	read := func() (string, []event) {
+		t.Helper()
+		doc, err := feeds.Calendar(ctx, feedOfPetr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, _ := parseEvents(t, doc)
+		if len(events) == 0 {
+			t.Fatalf("no events in %s", doc)
+		}
+		return strings.ReplaceAll(string(doc), events[0]["DTSTAMP"], "STAMP"), events
+	}
+	c.Set(time.Date(2026, 10, 28, 0, 0, 1, 0, time.UTC))
+	morning, events := read()
+	if len(events) != 1 || events[0]["DTSTART"] != "20261021T000000Z" || events[0]["DTEND"] != "20261228T000000Z" ||
+		!strings.HasSuffix(events[0]["UID"], "-20261021T000000Z@muster") {
+		t.Errorf("events = %v", events)
+	}
+	c.Set(time.Date(2026, 10, 28, 23, 59, 59, 0, time.UTC))
+	if evening, _ := read(); evening != morning {
+		t.Errorf("the feed changed within the day:\n%s\n%s", morning, evening)
+	}
+	c.Set(time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC))
+	if _, next := read(); next[0]["DTSTART"] != "20261022T000000Z" || next[0]["DTEND"] != "20261229T000000Z" {
+		t.Errorf("the next day = %v", next)
 	}
 }

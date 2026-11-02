@@ -397,10 +397,10 @@ func New(cfg Config) (*Server, error) {
 				"A parameter is not valid."))
 		},
 	})
-	// getIcalCalendar is served outside BasePath, by IcalHandler; under it, its path is no operation, answered without
-	// an instance, which would repeat the token.
-	mux.HandleFunc(BasePath+schedules.FeedBasePath, func(w http.ResponseWriter, _ *http.Request) {
-		writeIcalProblem(w, http.StatusNotFound, typeNotFound, "No such operation.")
+	// getIcalCalendar is served outside BasePath, by IcalHandler; under it, its path is no operation. writeProblem
+	// leaves out the instance there, which would repeat the token.
+	mux.HandleFunc(BasePath+schedules.FeedBasePath, func(w http.ResponseWriter, r *http.Request) {
+		writeProblem(w, r, errNotFound)
 	})
 	s.validated = s.preconditions(s.validator(doc)(s.permit(mux)))
 	return s, nil

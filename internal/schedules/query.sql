@@ -297,11 +297,16 @@ WHERE s.org_id = @org_id
               WHERE tu.org_id = @org_id AND tu.team_id = s.team_id AND tu.user_id = @user_id)
 ORDER BY s.id;
 
--- ReplaceIcalFeed issues the iCal feed of a User in one statement, replacing the one they had, so that its token stops
--- working at once (C-27.FR-10); replaced says whether there was one.
+-- ReplaceIcalFeed issues the iCal feed of an active User in one statement, replacing the one they had, so that its
+-- token stops working at once (C-27.FR-10); replaced says whether there was one. It reads the User FOR SHARE, which
+-- waits for a deletion or a disabling that holds the User's row and then sees its new status: a User who is not
+-- active gets no row and no feed, so a feed never outlives the deletion of its User.
 -- name: ReplaceIcalFeed :one
 INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
-VALUES (@org_id, @user_id, @token_hash, @now)
+SELECT u.org_id, u.id, @token_hash, @now
+FROM users u
+WHERE u.org_id = @org_id AND u.id = @user_id AND u.status = 'active'
+FOR SHARE
 ON CONFLICT (user_id) DO UPDATE
 SET token_hash = EXCLUDED.token_hash, issued_at = EXCLUDED.issued_at
 WHERE ical_feeds.org_id = EXCLUDED.org_id

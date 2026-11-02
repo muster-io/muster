@@ -1314,7 +1314,10 @@ func (q *Queries) LookupUsers(ctx context.Context, arg LookupUsersParams) ([]Loo
 
 const replaceIcalFeed = `-- name: ReplaceIcalFeed :one
 INSERT INTO ical_feeds (org_id, user_id, token_hash, issued_at)
-VALUES ($1, $2, $3, $4)
+SELECT u.org_id, u.id, $1, $2
+FROM users u
+WHERE u.org_id = $3 AND u.id = $4 AND u.status = 'active'
+FOR SHARE
 ON CONFLICT (user_id) DO UPDATE
 SET token_hash = EXCLUDED.token_hash, issued_at = EXCLUDED.issued_at
 WHERE ical_feeds.org_id = EXCLUDED.org_id
@@ -1322,20 +1325,22 @@ RETURNING (xmax <> 0)::boolean AS replaced
 `
 
 type ReplaceIcalFeedParams struct {
-	OrgID     int64
-	UserID    int64
 	TokenHash []byte
 	Now       time.Time
+	OrgID     int64
+	UserID    int64
 }
 
-// ReplaceIcalFeed issues the iCal feed of a User in one statement, replacing the one they had, so that its token stops
-// working at once (C-27.FR-10); replaced says whether there was one.
+// ReplaceIcalFeed issues the iCal feed of an active User in one statement, replacing the one they had, so that its
+// token stops working at once (C-27.FR-10); replaced says whether there was one. It reads the User FOR SHARE, which
+// waits for a deletion or a disabling that holds the User's row and then sees its new status: a User who is not
+// active gets no row and no feed, so a feed never outlives the deletion of its User.
 func (q *Queries) ReplaceIcalFeed(ctx context.Context, arg ReplaceIcalFeedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, replaceIcalFeed,
-		arg.OrgID,
-		arg.UserID,
 		arg.TokenHash,
 		arg.Now,
+		arg.OrgID,
+		arg.UserID,
 	)
 	var replaced bool
 	err := row.Scan(&replaced)

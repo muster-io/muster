@@ -217,6 +217,9 @@ func (s *Server) IssueMyIcalFeed(ctx context.Context, _ gen.IssueMyIcalFeedReque
 		return nil, err
 	}
 	issued, err := s.icalFeeds.Issue(ctx, r, u)
+	if errors.Is(err, schedules.ErrFeedUserInactive) {
+		return nil, errUnauthenticated
+	}
 	if err != nil {
 		return nil, err
 	}
