@@ -1022,7 +1022,7 @@ export const useDeleteScheduleOverride = <TError = UnauthorizedResponse | Forbid
 }
 
 /**
- * The iCal calendar (RFC 5545) of the User whose feed the token in the path names, for calendar applications, without a session: one event per span of `ical.window` — from 7 days back to 60 days ahead of the business clock — in which the User is On-call in a Schedule of any of their Teams, named "{Team} · {Schedule}", adjacent segments of the Result of one Schedule joined, an Override of the User its own event. Times are UTC (`DTSTART` and `DTEND` end in `Z`). An unknown or revoked token, or the token of a disabled or deleted User, gets `404` with nothing else. The token never appears in a log line: the path is logged as `/ical/[redacted].ics`. Schedules are not imported from iCal.
+ * The iCal calendar (RFC 5545) of the User whose feed the token in the path names, for calendar applications, without a session: one event per span of `ical.window` — from midnight UTC 7 days before the business clock's day to midnight UTC at the end of the day 60 days ahead — in which the User is On-call in a Schedule of any of their Teams, named "{Team} · {Schedule}", adjacent segments of the Result of one Schedule joined, an Override of the User its own event. Times are UTC (`DTSTART` and `DTEND` end in `Z`). An unknown or revoked token, or the token of a disabled or deleted User, gets `404` with nothing else. The token never appears in a log line: the path is logged as `/ical/[redacted].ics`. Schedules are not imported from iCal.
  * @summary The personal iCal feed of a User
  */
 export const getIcalCalendar = async (token: string, options?: Parameters<typeof apiFetch>[1]): Promise<string> => {
