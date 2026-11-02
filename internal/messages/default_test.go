@@ -41,7 +41,8 @@ func newRenderer(t *testing.T) *Renderer {
 		Real: clock.NewManual(t0), Keys: fakeKeys{}, Log: logging.New(io.Discard, logging.LevelInfo)})
 }
 
-// source is an Alert Group of Route db with n firing Alerts differing in pod, in a status.
+// source is an Alert Group of Route db with n Alerts differing in pod, all firing but the second, in a status, of the
+// Team payments, whose Route shows the labels namespace, team and cluster.
 func source(status string, n int) *Source {
 	s := &Source{ID: 9, PublicID: "AGK7M3QX9P2RTA", Number: 12, Title: "PodDown", Summary: "Pods are down",
 		Status: status, SeverityLevel: "critical", KeyLabels: []string{"alertname", "namespace"},
@@ -51,9 +52,11 @@ func source(status string, n int) *Source {
 			"team": "web"},
 		CommonAnnotations: map[string]string{"summary": "Pods are down", "description": "long text",
 			"runbook_url": "https://runbooks/x", "dashboard": "https://grafana/d"},
-		StartedAt: t0, TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday",
+		Description: "The pods of the shop do not answer.",
+		StartedAt:   t0, TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday",
+		InstanceLabels: []string{"pod", "instance", "container", "endpoint"}, Teams: []string{"payments"},
 		Route: RouteRef{ID: 3, PublicID: "RTAAAAAAAAAAA1", Name: "db", Language: "en",
-			SnoozeDurations: []int64{3600, 14400, 86400}},
+			SnoozeDurations: []int64{3600, 14400, 86400}, MessageLabels: []string{"namespace", "team", "cluster"}},
 		TotalAlerts: int64(n)}
 	for i := range n {
 		s.Alerts = append(s.Alerts, SourceAlert{Fingerprint: fmt.Sprintf("fp%d", i+1),
@@ -64,9 +67,11 @@ func source(status string, n int) *Source {
 	return s
 }
 
-// TestDefaultRootMessage is C-12.FR-1: the colour, `#N` and the title linked to the Alert Group page, the environment
-// and the absolute start time, the group labels, the common labels and annotations without the excluded ones, the
-// summary in italics, the Alerts, the links, the notices, the footer and the buttons of the status, in that order.
+// TestDefaultRootMessage is C-29.FR-1 and C-29.AC-1: the heading — #N and the title linked to the Alert Group page —
+// with the status as a word and its emoji, the fields Severity, Route, Teams and Started, the summary and the
+// description as plain text, the key labels, the Alerts by their distinguishing label with the resolved one struck
+// through, the notices, the footer, the links with "Open in Muster" first and the buttons of the status, in that order;
+// no label section of L1.
 func TestDefaultRootMessage(t *testing.T) {
 	r := newRenderer(t)
 	src := source("acknowledged", 3)
@@ -77,20 +82,18 @@ func TestDefaultRootMessage(t *testing.T) {
 	}
 	got := Layout(out.Message, MarkupMarkdown)
 	want := strings.Join([]string{
-		"🟠 [#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
-		"prod · production · Started 2026-10-04 14:05 UTC",
-		"namespace: shop",
-		"cluster: prod",
-		"owner: @\u200bchannel",
-		"team: web",
-		"dashboard: https://grafana/d",
-		"_Pods are down_",
-		"- pod: p1",
-		"- ~~pod: p2~~",
-		"- pod: p3",
-		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
+		"[#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA) — 🟠 Acknowledged",
+		"Severity: critical",
+		"Route: db",
+		"Teams: payments",
+		"Started: 2026-10-04 14:05 UTC",
+		"Pods are down",
+		"The pods of the shop do not answer.",
+		"namespace=shop · cluster=prod",
+		"pod: p1, p3, ~~p2~~",
 		"🔁 Reopened ×2",
 		"Acknowledged by Alice",
+		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
 		"[Unack] [Resolve] [Snooze 1 h] [Snooze 4 h] [Snooze 24 h] [Until tomorrow 09:00] [Until Monday 09:00]",
 	}, "\n")
 	if got != want {
@@ -103,21 +106,199 @@ func TestDefaultRootMessage(t *testing.T) {
 			t.Errorf("button %d %+v: %+v %v", i, b, a, err)
 		}
 	}
-	if len(m.Alerts.Distinct) != 1 || m.Alerts.Distinct[0].Label != "pod" {
-		t.Errorf("distinct values kept for shortening: %+v", m.Alerts.Distinct)
+	if m.Environment != "" || m.GroupLabels != nil || m.CommonLabels != nil || m.CommonAnnotations != nil ||
+		m.Alerts != nil {
+		t.Errorf("sections of L1 %+v", m)
+	}
+	if a := m.AlertsLine; a == nil || a.Label != "pod" || a.Total != 3 || a.More() != 0 ||
+		!slices.Equal(a.Values, []AlertValue{{Value: "p1"}, {Value: "p3"}, {Value: "p2", Resolved: true}}) {
+		t.Errorf("alerts line %+v", m.AlertsLine)
 	}
 	// HTML lays out the same structure with alert data escaped for it.
-	src.CommonLabels["team"] = "<web&ops>"
+	src.Route.MessageLabels = []string{"team"}
+	for i := range src.Alerts {
+		src.Alerts[i].Labels["team"] = "<web&ops>"
+	}
 	html := Layout(r.Root(src, MarkupHTML).Message, MarkupHTML)
-	if !strings.Contains(html, `🟠 <a href="https://muster.example.org/alert-groups/AGK7M3QX9P2RTA">#12 PodDown</a>`) ||
-		!strings.Contains(html, "team: &lt;web&amp;ops&gt;") || !strings.Contains(html, "<i>Pods are down</i>") ||
-		!strings.Contains(html, "• <s>pod: p2</s>") {
+	if !strings.Contains(html, `<a href="https://muster.example.org/alert-groups/AGK7M3QX9P2RTA">#12 PodDown</a> — `+
+		`🟠 Acknowledged`) || !strings.Contains(html, "\nteam=&lt;web&amp;ops&gt;\n") ||
+		!strings.Contains(html, "\nPods are down\n") || !strings.Contains(html, "pod: p1, p3, <s>p2</s>") {
 		t.Errorf("html\n%s", html)
 	}
 	if plain := r.Root(src, MarkupPlain).Message.Text(); !strings.HasPrefix(plain,
-		"🟠 #12 PodDown https://muster.example.org/alert-groups/AGK7M3QX9P2RTA\n") || !strings.Contains(plain,
-		"• pod: p2\n") {
+		"#12 PodDown https://muster.example.org/alert-groups/AGK7M3QX9P2RTA — 🟠 Acknowledged\nSeverity: critical\n") ||
+		!strings.Contains(plain, "\npod: p1, p3, p2\n") {
 		t.Errorf("plain\n%s", plain)
+	}
+	// In Russian, the words and the fields of the Route's language; an Alert Group without Teams has no field Teams.
+	src.Route.Language, src.Teams, src.Status = "ru", nil, "firing"
+	ru := r.Root(src, MarkupMarkdown).Message
+	if ru.StatusWord != "Горит" || !slices.Equal(ru.Fields, []Label{{Name: "Важность", Value: "critical"},
+		{Name: "Маршрут", Value: "db"}, {Name: "Начало", Value: "2026-10-04 14:05 UTC"}}) {
+		t.Errorf("ru %q %+v", ru.StatusWord, ru.Fields)
+	}
+	for status, word := range map[string]string{"firing": "Firing", "snoozed": "Snoozed", "resolved": "Resolved"} {
+		src.Route.Language, src.Status = "en", status
+		if m := r.Root(src, MarkupMarkdown).Message; m.StatusWord != word {
+			t.Errorf("%s: %q", status, m.StatusWord)
+		}
+	}
+	// A Desired state of an earlier version, without the word, keeps the heading of L1.
+	old := Message{Colour: ColourFiring, Heading: &Heading{Number: 3, Title: "Old", URL: "https://m/ag/3"},
+		Environment: "prod", GroupLabels: []Label{{Name: "namespace", Value: "shop"}}}
+	if got := Layout(old, MarkupMarkdown); got != "🔴 [#3 Old](https://m/ag/3)\nprod\nnamespace: shop" {
+		t.Errorf("an old state\n%s", got)
+	}
+}
+
+// TestKeyLabels is C-29.FR-2 and C-29.AC-2: a label of "Labels in the message" is `name=value` when every firing Alert
+// has the same value, "name: N values" when they differ, and absent when no Alert has it; the line follows the order
+// of the list; an Alert Group without a firing Alert reads its resolved ones, and one without Alerts its Group key and
+// common labels.
+func TestKeyLabels(t *testing.T) {
+	r := newRenderer(t)
+	src := source("firing", 3)
+	src.Route.MessageLabels = []string{"pod", "cluster", "zone", "namespace"}
+	src.Alerts[0].Labels["namespace"] = "checkout"
+	m := r.Root(src, MarkupMarkdown).Message
+	// The resolved second Alert does not count: p1 and p3, checkout and shop.
+	if got := KeyLabelsLine(m); got != "pod: 2 values · cluster=prod · namespace: 2 values" {
+		t.Errorf("line %q", got)
+	}
+	src.Route.Language = "ru"
+	if got := KeyLabelsLine(r.Root(src, MarkupMarkdown).Message); got != "pod: 2 значения · cluster=prod · "+
+		"namespace: 2 значения" {
+		t.Errorf("ru %q", got)
+	}
+	for n, want := range map[int64]string{1: "pod: 1 значение", 5: "pod: 5 значений", 22: "pod: 22 значения"} {
+		if got := (KeyLabel{Name: "pod", Count: int(n)}).Text("ru"); n > 1 && got != want {
+			t.Errorf("ru %d: %q", n, got)
+		}
+	}
+	if got := (KeyLabel{Name: "pod", Count: 5}).Text("en"); got != "pod: 5 values" {
+		t.Errorf("en %q", got)
+	}
+	resolved := source("resolved", 2)
+	for i := range resolved.Alerts {
+		resolved.Alerts[i].Firing = false
+	}
+	resolved.Route.MessageLabels = []string{"pod", "cluster"}
+	if got := KeyLabelsLine(r.Root(resolved, MarkupMarkdown).Message); got != "pod: 2 values · cluster=prod" {
+		t.Errorf("resolved %q", got)
+	}
+	none := source("firing", 0)
+	none.Route.MessageLabels = []string{"namespace", "cluster", "zone"}
+	if got := KeyLabelsLine(r.Root(none, MarkupMarkdown).Message); got != "namespace=shop · cluster=prod" {
+		t.Errorf("without alerts %q", got)
+	}
+	none.Route.MessageLabels = nil
+	if m := r.Root(none, MarkupMarkdown).Message; m.KeyLabels != nil || m.AlertsLine != nil {
+		t.Errorf("no labels %+v", m)
+	}
+}
+
+// TestAlertsLine is C-29.FR-3, C-29.AC-2 and C-29.AC-3: the Alerts are named by the first Instance label whose values
+// differ, else by the first differing label by name; up to message.compact_alerts_listed values, firing ones first in
+// natural order, the resolved ones struck through, then "…and K more"; one Alert shows no Alerts line, and neither do
+// Alerts that no label tells apart.
+func TestAlertsLine(t *testing.T) {
+	r := newRenderer(t)
+	twelve := source("firing", 12)
+	out := Layout(r.Root(twelve, MarkupMarkdown).Message, MarkupMarkdown)
+	if !strings.Contains(out, "\npod: p1, p3, p4, p5, p6 …and 7 more\n") {
+		t.Errorf("twelve\n%s", out)
+	}
+	twelve.Route.Language = "ru"
+	if out := Layout(r.Root(twelve, MarkupMarkdown).Message, MarkupMarkdown); !strings.Contains(out,
+		"\npod: p1, p3, p4, p5, p6 …и ещё 7\n") {
+		t.Errorf("ru\n%s", out)
+	}
+	// The resolved Alert comes after the firing ones, struck through.
+	five := source("firing", 5)
+	if got := AlertsLines(r.Root(five, MarkupHTML).Message, EscapeHTML, nil,
+		func(s string) string { return "<s>" + s + "</s>" }, "• "); !slices.Equal(got,
+		[]string{"pod: p1, p3, p4, p5, <s>p2</s>"}) {
+		t.Errorf("five %q", got)
+	}
+	// Instance labels first, in their order: instance before pod when both differ.
+	inst := source("firing", 3)
+	for i := range inst.Alerts {
+		inst.Alerts[i].Labels["instance"] = fmt.Sprintf("10.0.0.%d:9100", 3-i)
+		inst.Alerts[i].Labels["a"] = fmt.Sprintf("a%d", i)
+	}
+	inst.InstanceLabels = []string{"instance", "pod"}
+	if a := r.Root(inst, MarkupMarkdown).Message.AlertsLine; a.Label != "instance" || a.Values[0].Value !=
+		"10.0.0.1:9100" {
+		t.Errorf("instance %+v", a)
+	}
+	// Without Instance labels that differ, the first differing label by name.
+	inst.InstanceLabels = []string{"container"}
+	if a := r.Root(inst, MarkupMarkdown).Message.AlertsLine; a.Label != "a" {
+		t.Errorf("by name %+v", a)
+	}
+	if got := distinguishingLabel(inst.Alerts[:1], nil); got != "" {
+		t.Errorf("one alert %q", got)
+	}
+	// An Alert without the label counts in K, after the others.
+	missing := source("firing", 3)
+	delete(missing.Alerts[0].Labels, "pod")
+	if a := r.Root(missing, MarkupMarkdown).Message.AlertsLine; a.Label != "pod" || len(a.Values) != 2 ||
+		a.More() != 1 || a.Values[0].Value != "p3" {
+		t.Errorf("missing %+v", a)
+	}
+	// One Alert, and Alerts that nothing tells apart, have no Alerts line; nor has an Alert Group without Alerts.
+	if m := r.Root(source("firing", 1), MarkupMarkdown).Message; m.AlertsLine != nil ||
+		strings.Contains(Layout(m, MarkupMarkdown), "pod:") {
+		t.Errorf("one alert %+v", m.AlertsLine)
+	}
+	same := source("firing", 2)
+	same.Alerts[1].Labels = same.Alerts[0].Labels
+	if m := r.Root(same, MarkupMarkdown).Message; m.AlertsLine != nil {
+		t.Errorf("alike %+v", m.AlertsLine)
+	}
+	// An Alert that flapped is one Alert: its episodes, firing and resolved, share a fingerprint, so an Alert Group of
+	// that one Alert has no Alerts line; with a second Alert the total counts two.
+	flap := source("firing", 1)
+	ep := flap.Alerts[0]
+	ep.Firing = false
+	flap.Alerts = append(flap.Alerts, ep, ep)
+	flap.TotalAlerts = 3
+	if m := r.Root(flap, MarkupMarkdown).Message; m.AlertsLine != nil {
+		t.Errorf("a flapping alert %+v", m.AlertsLine)
+	}
+	other := source("firing", 3).Alerts[2]
+	flap.Alerts, flap.TotalAlerts = append(flap.Alerts, other), 4
+	if a := r.Root(flap, MarkupMarkdown).Message.AlertsLine; a == nil || a.Total != 2 || len(a.Values) != 2 {
+		t.Errorf("a flapping alert and another %+v", a)
+	}
+	// No listed Alert has the label: no "pod: …and K more" line.
+	bare := source("firing", 7)
+	for i := range bare.Alerts {
+		delete(bare.Alerts[i].Labels, "pod")
+		bare.Alerts[i].Firing = true
+	}
+	bare.Alerts[6].Labels["pod"], bare.Alerts[6].Firing = "late", false
+	if m := r.Root(bare, MarkupMarkdown).Message; m.AlertsLine != nil ||
+		strings.Contains(Layout(m, MarkupMarkdown), "more") {
+		t.Errorf("no listed value %+v", m.AlertsLine)
+	}
+	// More Alerts than were read: the total counts them all.
+	many := source("firing", 3)
+	many.TotalAlerts = 1500
+	if a := r.Root(many, MarkupMarkdown).Message.AlertsLine; a.Total != 1500 || a.More() != 1497 {
+		t.Errorf("total %+v", a)
+	}
+	// The summary and description: only a description shows it; neither shows no text.
+	only := source("firing", 1)
+	only.Summary = ""
+	if m := r.Root(only, MarkupMarkdown).Message; m.Summary != "" || m.Description !=
+		"The pods of the shop do not answer." {
+		t.Errorf("description only %+v", m)
+	}
+	only.Description = ""
+	if out := Layout(r.Root(only, MarkupMarkdown).Message, MarkupMarkdown); strings.Contains(out, "shop do not") ||
+		strings.Contains(out, "Pods are down") {
+		t.Errorf("no text\n%s", out)
 	}
 }
 
@@ -163,7 +344,7 @@ func TestFootersAndNotices(t *testing.T) {
 		"Europe/Moscow"
 	m := r.Root(src, MarkupMarkdown).Message
 	if m.Footer != "Закрыта автоматически: все алерты закрыты" || m.Links[0].Text != "Открыть в Muster" ||
-		m.Environment != "prod · production · Начало: 2026-10-04 17:05 MSK" || len(m.Buttons) != 0 {
+		m.Fields[len(m.Fields)-1] != (Label{Name: "Начало", Value: "2026-10-04 17:05 MSK"}) || len(m.Buttons) != 0 {
 		t.Errorf("ru %+v", m)
 	}
 	src = source("firing", 1)
@@ -176,18 +357,11 @@ func TestFootersAndNotices(t *testing.T) {
 		"До завтра 09:00", "До понедельника 09:00"}) {
 		t.Errorf("ru buttons %v", ru)
 	}
-	// A single Alert is named by its alertname; one without labels by its fingerprint.
+	// An Alert Group without Alerts has no Alerts line.
 	one := source("firing", 1)
-	if l := r.Root(one, MarkupMarkdown).Message.Alerts.Lines; len(l) != 1 || l[0].Text != "PodDown" {
-		t.Errorf("one alert %+v", l)
-	}
-	one.Alerts[0].Labels = map[string]string{}
-	if l := r.Root(one, MarkupMarkdown).Message.Alerts.Lines; l[0].Text != "fp1" {
-		t.Errorf("no labels %+v", l)
-	}
 	one.Alerts, one.TotalAlerts = nil, 0
-	if m := r.Root(one, MarkupMarkdown).Message; m.Alerts != nil {
-		t.Errorf("no alerts %+v", m.Alerts)
+	if m := r.Root(one, MarkupMarkdown).Message; m.Alerts != nil || m.AlertsLine != nil {
+		t.Errorf("no alerts %+v", m.AlertsLine)
 	}
 	// Buttons are left unsigned without a Keyring, and when signing fails.
 	r.keys = nil
@@ -314,31 +488,6 @@ func TestFooterMentions(t *testing.T) {
 	}
 }
 
-// TestManyAlerts is C-12.AC-4: 25 Alerts differing in pod show the distinct values "pod: p1, p2, … +15 more" and
-// "Full list in Muster" instead of their lines.
-func TestManyAlerts(t *testing.T) {
-	r := newRenderer(t)
-	m := r.Root(source("firing", 25), MarkupMarkdown).Message
-	out := Layout(m, MarkupMarkdown)
-	for _, want := range []string{
-		"pod: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 +15 more",
-		"[Full list in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("missing %q in\n%s", want, out)
-		}
-	}
-	if len(m.Alerts.Lines) != 0 {
-		t.Errorf("lines %+v", m.Alerts.Lines)
-	}
-	src := source("firing", 25)
-	src.Route.Language = "ru"
-	if out := Layout(r.Root(src, MarkupMarkdown).Message, MarkupMarkdown); !strings.Contains(out,
-		"pod: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 и ещё 15") || !strings.Contains(out, "[Полный список в Muster]") {
-		t.Errorf("ru\n%s", out)
-	}
-}
-
 // TestNaturalOrder sorts runs of digits as numbers.
 func TestNaturalOrder(t *testing.T) {
 	got := []string{"p10", "p2", "p1", "a", "p02", "b9", "b10", "", "p1x"}
@@ -459,8 +608,9 @@ func TestBuiltinSources(t *testing.T) {
 	}
 	src := BuiltinSource(TemplateRootMessage, "en")
 	m, err := r.previewMessage(r.example(set), TemplateRootMessage, &src, MarkupPlain)
-	if err != nil || !strings.Contains(m.Body.Text, "prod · Started 2026-10-04 13:55 UTC") ||
-		!strings.Contains(m.Body.Text, "• pod: checkout-1") || !strings.Contains(m.Body.Text, "namespace: shop") {
+	if err != nil || !strings.HasPrefix(m.Body.Text, "Error rate above 5%\n"+
+		"The checkout service answers 5% of requests with errors.\n") ||
+		!strings.Contains(m.Body.Text, "\n• pod: checkout-1 \n• pod: checkout-2 \n") {
 		t.Errorf("built-in root message %+v %v", m.Body, err)
 	}
 	if BuiltinSource(TemplateLinkRule, "en") != "" {

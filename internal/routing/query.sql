@@ -2,7 +2,8 @@
 -- Copyright The Muster Authors
 
 -- ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
--- error and their active Storm.
+-- error and their active Storm, and the Organization's severity and Team labels, from which a Route's "Labels in the
+-- message" are computed while it has no list of its own.
 -- name: ListRoutes :many
 SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
@@ -12,15 +13,16 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
        s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
        t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
 FROM routes r
+JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = @org_id AND r.deleted_at IS NULL
 ORDER BY r.is_default, r.position, r.id;
 
--- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
--- active Storm.
+-- GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error, its
+-- active Storm and the Organization's severity and Team labels, as ListRoutes does.
 -- name: GetRoute :one
 SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.minimum_severity, r.group_key,
        r.reopen_window_seconds, r.grace_period_seconds, r.urgent_rise_removes_ack, r.snooze_durations_seconds,
@@ -34,8 +36,9 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
           AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
        s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
        r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
 FROM routes r
+JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = @org_id AND r.public_id = @public_id AND r.deleted_at IS NULL;
@@ -79,7 +82,7 @@ INSERT INTO routes (
     thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-    reminders_cap_seconds, auto_unacknowledge, owning_team_id, created_at, updated_at
+    reminders_cap_seconds, auto_unacknowledge, owning_team_id, message_labels, created_at, updated_at
 )
 SELECT @org_id, @public_id, @name, @description,
        coalesce((SELECT CASE WHEN @first::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -91,7 +94,7 @@ SELECT @org_id, @public_id, @name, @description,
        sqlc.narg('template_root_message'), sqlc.narg('template_line'), sqlc.narg('template_ack_timeout_notice'),
        @ack_timeout_enabled, @ack_timeout_first_interval_seconds, @reminders_enabled,
        @reminders_first_interval_seconds, @reminders_cap_seconds, @auto_unacknowledge,
-       sqlc.narg('owning_team_id')::bigint, @now, @now
+       sqlc.narg('owning_team_id')::bigint, sqlc.narg('message_labels')::text[], @now, @now
 RETURNING id;
 
 -- EnsureDefaultRoute creates the Default route of the Organization when it has none, and returns its public_id only
@@ -128,7 +131,8 @@ SET name = @name, description = @description, minimum_severity = @minimum_severi
     ack_timeout_enabled = @ack_timeout_enabled, ack_timeout_first_interval_seconds = @ack_timeout_first_interval_seconds,
     reminders_enabled = @reminders_enabled, reminders_first_interval_seconds = @reminders_first_interval_seconds,
     reminders_cap_seconds = @reminders_cap_seconds, auto_unacknowledge = @auto_unacknowledge,
-    owning_team_id = sqlc.narg('owning_team_id')::bigint, updated_at = @now, version = version + 1
+    owning_team_id = sqlc.narg('owning_team_id')::bigint, message_labels = sqlc.narg('message_labels')::text[],
+    updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- DeleteRouteMatchers removes the Matchers of a Route before they are written again.
@@ -364,3 +368,40 @@ FROM team_users tu
 JOIN teams t ON t.org_id = tu.org_id AND t.id = tu.team_id
 WHERE tu.org_id = @org_id AND tu.user_id = @user_id AND t.deleted_at IS NULL
 ORDER BY t.id;
+
+-- ListRouteLabelSuggestions lists the labels of the Alerts of the Route's Alert Groups created since @since, each with
+-- its most frequent value, the smallest of equally frequent ones, and the number of those Alert Groups whose Alerts
+-- carry it, most frequent first, at most @lim, for "Labels in the message" (C-29.FR-2). What it reads is bounded before
+-- any label is expanded: the @group_lim most recent of those Alert Groups, through alert_groups_route_idx, then the
+-- memberships of one Alert Group after another, the most recent Alert Group and the newest membership first, through
+-- alert_group_alerts_group_idx, until @alert_lim of them are taken; the subquery r keeps the order of the Alert Groups
+-- known to the planner, so that the outer LIMIT stops the nested loop instead of sorting every membership. An Alert
+-- that fired again in an Alert Group, one membership per Episode, counts once there.
+-- name: ListRouteLabelSuggestions :many
+WITH recent AS MATERIALIZED (
+    SELECT g.id, g.created_at
+    FROM alert_groups g
+    WHERE g.org_id = @org_id AND g.route_id = @route_id AND g.created_at >= @since::timestamptz
+    ORDER BY g.created_at DESC, g.id DESC
+    LIMIT @group_lim::int
+), members AS MATERIALIZED (
+    SELECT r.id AS alert_group_id, m.alert_id
+    FROM (SELECT q.id, q.created_at FROM recent q ORDER BY q.created_at DESC, q.id DESC) r
+    CROSS JOIN LATERAL (
+        SELECT n.id, n.alert_id
+        FROM alert_group_alerts n
+        WHERE n.org_id = @org_id AND n.alert_group_id = r.id
+        ORDER BY n.id DESC
+        LIMIT @alert_lim::int
+    ) m
+    ORDER BY r.created_at DESC, r.id DESC, m.id DESC
+    LIMIT @alert_lim::int
+)
+SELECT l.name::text AS label, (mode() WITHIN GROUP (ORDER BY l.value))::text AS example_value,
+       count(DISTINCT x.alert_group_id)::bigint AS alert_group_count
+FROM (SELECT DISTINCT y.alert_group_id, y.alert_id FROM members y) x
+JOIN alerts a ON a.org_id = @org_id AND a.id = x.alert_id
+CROSS JOIN LATERAL jsonb_each_text(a.labels) AS l(name, value)
+GROUP BY l.name
+ORDER BY count(DISTINCT x.alert_group_id) DESC, l.name
+LIMIT @lim;

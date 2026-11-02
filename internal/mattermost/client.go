@@ -372,9 +372,17 @@ type attachment struct {
 	Title      string   `json:"title,omitempty"`
 	TitleLink  string   `json:"title_link,omitempty"`
 	Text       string   `json:"text,omitempty"`
+	Fields     []field  `json:"fields,omitempty"`
 	Footer     string   `json:"footer,omitempty"`
 	FooterIcon string   `json:"footer_icon,omitempty"`
 	Actions    []action `json:"actions,omitempty"`
+}
+
+// field is a field of an attachment: a short one shares its row with the next (C-13.FR-3, C-29.FR-4).
+type field struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
 }
 
 // action is a button of an attachment: Mattermost calls integration.url with integration.context when it is pressed.

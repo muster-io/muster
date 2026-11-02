@@ -87,13 +87,17 @@ func loud(ts ...mentions.Target) delivery.Call {
 
 var channel = mentions.Target{Kind: mentions.TargetEveryone, Everyone: mentions.EveryoneChannel}
 
-// root is a Root message in a status, with a label that tries to mention the channel and write HTML.
+// root is a Root message in the compact layout in a status, with a key label that tries to mention the channel and
+// write HTML.
 func root(status string) messages.Message {
 	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
-		Heading:      &messages.Heading{Number: 1, Title: "DiskFull", URL: groupPage},
-		CommonLabels: []messages.Label{{Name: "note", Value: messages.Value("@channel <b>x</b>")}},
-		Links:        []messages.Link{{Text: "Open in Muster", URL: groupPage}},
-		Footer:       "Acknowledged by bob"}
+		Heading:    &messages.Heading{Number: 1, Title: "DiskFull", URL: groupPage},
+		StatusWord: messages.T("en", "status."+status, nil),
+		Fields: []messages.Label{{Name: "Severity", Value: "warning"}, {Name: "Route", Value: "Infra"},
+			{Name: "Started", Value: "2026-10-08 12:00 UTC"}},
+		KeyLabels: []messages.KeyLabel{{Name: "note", Value: messages.Value("@channel <b>x</b>")}},
+		Links:     []messages.Link{{Text: "Open in Muster", URL: groupPage}},
+		Footer:    "Acknowledged by bob"}
 	for _, b := range buttons.ForStatus(status, 3) {
 		m.Buttons = append(m.Buttons, messages.Button{Command: b.Command, Argument: b.Argument, Label: b.Command,
 			ActionID: "action", KeyID: "k-00112233"})
@@ -151,14 +155,18 @@ func TestPublishUpdateReply(t *testing.T) {
 	first, _ := actions[0].(map[string]any)
 	integration, _ := first["integration"].(map[string]any)
 	if p.Message != "" || p.ChannelID != fakemattermost.ChannelAlerts || a["color"] != "#d32f2f" ||
-		a["title"] != "#1 DiskFull" || a["title_link"] != groupPage || a["footer"] != "Muster v1.2.3" ||
+		a["title"] != "#1 DiskFull — Firing" || a["title_link"] != groupPage || a["footer"] != "Muster v1.2.3" ||
 		a["footer_icon"] != "http://localhost:8080/muster-mark-256.png" || len(actions) != 7 ||
 		integration["url"] != "http://localhost:8081/api/v1/callbacks/mattermost/"+connectionPublicID ||
-		!strings.Contains(text, "[Open in Muster]("+groupPage+")") || !strings.HasSuffix(text, "Acknowledged by bob") {
+		!strings.HasSuffix(text, "\nAcknowledged by bob\n[Open in Muster]("+groupPage+")") {
 		t.Errorf("post = %+v\nattachment = %+v", p.Post, a)
 	}
+	if fields, _ := a["fields"].([]any); len(fields) != 3 || fmt.Sprint(fields[1]) !=
+		"map[short:true title:Route value:Infra]" {
+		t.Errorf("fields = %v", a["fields"])
+	}
 	// C-13.AC-5: the escaper of S-036 escapes < and > for Markdown, which Mattermost shows as the literal text.
-	if !strings.Contains(text, "note: @\u200bchannel \\<b\\>x\\</b\\>") || len(e.fake.Notifications()) != 0 {
+	if !strings.Contains(text, "note=@\u200bchannel \\<b\\>x\\</b\\>") || len(e.fake.Notifications()) != 0 {
 		t.Errorf("text %q, notifications %+v", text, e.fake.Notifications())
 	}
 
@@ -167,7 +175,8 @@ func TestPublishUpdateReply(t *testing.T) {
 		t.Fatalf("update = %+v", up)
 	}
 	p = postByID(t, e.fake, out.MessageID)
-	if a := attachmentOf(t, p); a["color"] != "#f57c00" || a["title"] != "#1 DiskFull" || p.Message != "" ||
+	if a := attachmentOf(t, p); a["color"] != "#f57c00" || a["title"] != "#1 DiskFull — Acknowledged" ||
+		p.Message != "" ||
 		a["fallback"] != "🟠 #1 DiskFull" ||
 		p.EditAt == 0 {
 		t.Errorf("edited = %+v, %+v", p.Post, a)

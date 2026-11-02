@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/muster-io/muster/internal/audit"
@@ -38,6 +39,16 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 		return messages.PreviewResult{}, messages.ErrUnsupportedKind
 	case "boom":
 		return messages.PreviewResult{}, errors.New("boom")
+	case "layout":
+		return messages.PreviewResult{Valid: true, Output: "#1287 KubernetesContainerOOMKilled — Firing",
+			Format: req.Format, Length: 42, MessengerLimit: messages.MessengerLimit(req.Format),
+			Layout: &messages.MessageLayout{Number: 1287, Title: "KubernetesContainerOOMKilled", Status: "firing",
+				StatusWord: "Firing", Fields: []messages.Label{{Name: "Severity", Value: "warning"},
+					{Name: "Route", Value: "Infrastructure"}}, Summary: "Container killed for memory",
+				Labels: []messages.Label{{Name: "system", Value: "kubernetes"}, {Name: "namespace", Value: "2 values"}},
+				Alerts: &messages.LayoutAlerts{Label: "pod", Values: []messages.AlertValue{{Value: "a"},
+					{Value: "b", Resolved: true}}, Total: 12}, Notices: []string{"⚠ Nobody has taken this"},
+				Links: []messages.Link{{Text: "Open in Muster", URL: "https://m/ag/1"}}}}, nil
 	}
 	return messages.PreviewResult{Valid: true, Output: "🔴 [#1 A](u)", Truncated: true, Format: req.Format,
 		Source: "built-in", Sample: messages.SampleAlertGroup}, nil
@@ -110,5 +121,46 @@ func TestPreviewTemplateAPI(t *testing.T) {
 		`{"kind":"root_message","template":"","format":"slack"}`); a.status != http.StatusBadRequest ||
 		len(fake.reqs) != n+1 {
 		t.Errorf("an unknown format = %d %s", a.status, a.body)
+	}
+}
+
+// TestPreviewTemplateLayoutAPI is C-29.FR-7 and C-16.FR-4 at the API: the preview of a Root message carries its layout
+// as structured, plain-text data — the number and the title apart, the status by key and word, the fields, the
+// labels, the Alerts with their total, the notices and the links, no Assignees and no Owner yet — and its length
+// against the limit of the messenger of its markup, null for a bridge's CommonMark; other kinds carry neither.
+func TestPreviewTemplateLayoutAPI(t *testing.T) {
+	x, ft, _, _ := newTokensAPI(t)
+	ft.idents[previewToken] = &auth.Identity{Session: ft.idents[fullToken].Session,
+		Permissions: []auth.Permission{"templates:preview"}, Transport: audit.TransportAPI,
+		Token: &auth.Token{ID: 41, Name: "preview"}}
+	x.srv.templates = &fakeTemplates{}
+	a := x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"layout","format":"html","length_limit":4096}`)
+	want := `{"errors":[],"format":"html","layout":{"alerts":{"label":"pod","total":12,"values":[` +
+		`{"resolved":false,"value":"a"},{"resolved":true,"value":"b"}]},"assignees":[],"description":"",` +
+		`"fields":[{"name":"Severity","value":"warning"},{"name":"Route","value":"Infrastructure"}],` +
+		`"labels":[{"key":"system","value":"kubernetes"},{"key":"namespace","value":"2 values"}],` +
+		`"links":[{"label":"Open in Muster","url":"https://m/ag/1"}],"notices":["⚠ Nobody has taken this"],` +
+		`"number":1287,"owner":null,"status":{"key":"firing","word":"Firing"},"summary":"Container killed for memory",` +
+		`"title":"KubernetesContainerOOMKilled"},"length":42,"messenger_limit":4096,` +
+		`"output":"#1287 KubernetesContainerOOMKilled — Firing","sample":null,"source":"","truncated":false,"valid":true}`
+	if got := strings.TrimSpace(string(a.body)); a.status != http.StatusOK || got != want {
+		t.Errorf("layout = %d\n%s\nwant\n%s", a.status, got, want)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"layout","format":"commonmark"}`)
+	if out := a.json(t); a.status != http.StatusOK || out["messenger_limit"] != nil || out["length"] != float64(42) {
+		t.Errorf("commonmark = %d %s", a.status, a.body)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"{{ env \"HOME\" }}"}`)
+	if out := a.json(t); a.status != http.StatusOK || out["layout"] != nil || strings.Contains(string(a.body),
+		`"length"`) {
+		t.Errorf("failed = %d %s", a.status, a.body)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews", `{"kind":"line","template":""}`)
+	if body := string(a.body); a.status != http.StatusOK || strings.Contains(body, `"layout"`) ||
+		strings.Contains(body, `"messenger_limit"`) || strings.Contains(body, `"length"`) {
+		t.Errorf("line = %d %s", a.status, a.body)
 	}
 }

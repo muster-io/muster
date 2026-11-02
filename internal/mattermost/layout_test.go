@@ -31,8 +31,8 @@ func testLook() look {
 		footer: "Muster v1.2.3", icon: "http://localhost:8080/muster-mark-256.png", limit: LengthLimit}
 }
 
-// rootMessage is a Root message as the renderer gives it, in a status, with an alert label that tries to mention the
-// channel and write HTML, on a Route with three Snooze durations.
+// rootMessage is a Root message in the compact layout as the renderer gives it, in a status, with a key label whose
+// value tries to mention the channel and write HTML, on a Route with three Snooze durations.
 func rootMessage(status string) messages.Message {
 	return rootMessageOf(status, 3)
 }
@@ -40,13 +40,16 @@ func rootMessage(status string) messages.Message {
 // rootMessageOf is rootMessage on a Route with the given number of Snooze durations, at most three.
 func rootMessageOf(status string, durations int) messages.Message {
 	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
-		Heading:      &messages.Heading{Number: 1, Title: "DiskFull", URL: groupURL},
-		Environment:  "a · Started 2026-10-08 12:00 UTC",
-		GroupLabels:  []messages.Label{{Name: "cluster", Value: "a"}},
-		CommonLabels: []messages.Label{{Name: "note", Value: messages.Value("@channel <b>x</b>")}},
-		Summary:      "Disk *almost* full",
-		Alerts: &messages.AlertList{Lines: []messages.AlertLine{{Text: "pod: i1"},
-			{Text: "pod: i2", Resolved: true}}},
+		Heading:    &messages.Heading{Number: 1, Title: "DiskFull", URL: groupURL},
+		StatusWord: messages.T("en", "status."+status, nil),
+		Fields: []messages.Label{{Name: "Severity", Value: "warning"}, {Name: "Route", Value: "Infra_*"},
+			{Name: "Teams", Value: "payments"}, {Name: "Started", Value: "2026-10-08 12:00 UTC"}},
+		Summary:     "Disk *almost* full",
+		Description: "The disk of a is nearly full.",
+		KeyLabels: []messages.KeyLabel{{Name: "cluster", Value: "a"},
+			{Name: "note", Value: messages.Value("@channel <b>x</b>")}, {Name: "namespace", Count: 2}},
+		AlertsLine: &messages.AlertsLine{Label: "pod", Values: []messages.AlertValue{{Value: "i1"},
+			{Value: "i2", Resolved: true}}, Total: 2},
 		Links: []messages.Link{{Text: "Open in Muster", URL: groupURL},
 			{Text: "Runbook", URL: "https://runbooks.example.org/disk"}},
 		Notices: []string{"Reopened 2 times"},
@@ -66,11 +69,12 @@ func rootMessageOf(status string, durations int) messages.Message {
 	return m
 }
 
-// TestRootPost is C-13.FR-3 and C-13.AC-13: an empty message; one attachment coloured by status, titled #N and the
-// title linked to the Alert Group page, whose text holds the sections, the links under the Alerts starting with "Open
-// in Muster", the notices and the footer of the Destination's identity space as its last line, and no Mentions line on
-// a Quiet post; the footer "Muster v<version>" with the mark; and the buttons with stable ids calling the Connection's
-// callback, the Snooze presets after the durations (C-10.FR-18, C-10.AC-23).
+// TestRootPost is C-13.FR-3, C-29.FR-4, C-29.AC-1 and C-13.AC-13: an empty message; one attachment coloured by status,
+// titled #N, the title and the status as a word linked to the Alert Group page, with the four fields as its short
+// `fields`, whose text holds the summary, the description, the key labels, the Alerts line, the notices, the footer of
+// the Destination's identity space and the links starting with "Open in Muster" as its last line, and no Mentions line
+// on a Quiet post; the footer "Muster v<version>" with the mark; and the buttons with stable ids calling the
+// Connection's callback, the Snooze presets after the durations (C-10.FR-18, C-10.AC-23).
 func TestRootPost(t *testing.T) {
 	p := rootPost(rootMessage(messages.ColourFiring), testLook(), nil)
 	if p.Message != "" || p.Props == nil || len(p.Props.Attachments) != 1 {
@@ -80,21 +84,25 @@ func TestRootPost(t *testing.T) {
 		t.Errorf("the empty message is not sent: %s %v", raw, err)
 	}
 	a := p.Props.Attachments[0]
-	if a.Color != "#d32f2f" || a.Title != "#1 DiskFull" || a.TitleLink != groupURL || a.Footer != "Muster v1.2.3" ||
-		a.FooterIcon != "http://localhost:8080/muster-mark-256.png" || a.Fallback != "🔴 #1 DiskFull" {
+	if a.Color != "#d32f2f" || a.Title != "#1 DiskFull — Firing" || a.TitleLink != groupURL ||
+		a.Footer != "Muster v1.2.3" || a.FooterIcon != "http://localhost:8080/muster-mark-256.png" ||
+		a.Fallback != "🔴 #1 DiskFull" {
 		t.Errorf("attachment = %+v", a)
+	}
+	if !slices.Equal(a.Fields, []field{{Title: "Severity", Value: "warning", Short: true},
+		{Title: "Route", Value: "Infra\\_\\*", Short: true}, {Title: "Teams", Value: "payments", Short: true},
+		{Title: "Started", Value: "2026-10-08 12:00 UTC", Short: true}}) {
+		t.Errorf("fields = %+v", a.Fields)
 	}
 	lines := strings.Split(a.Text, "\n")
 	want := []string{
-		"a · Started 2026-10-08 12:00 UTC",
-		"cluster: a",
-		"note: @\u200bchannel \\<b\\>x\\</b\\>",
-		"_Disk \\*almost\\* full_",
-		"- pod: i1",
-		"- ~~pod: i2~~",
-		"[Open in Muster](" + groupURL + ") · [Runbook](https://runbooks.example.org/disk)",
+		"Disk \\*almost\\* full",
+		"The disk of a is nearly full.",
+		"cluster=a · note=@\u200bchannel \\<b\\>x\\</b\\> · namespace: 2 values",
+		"pod: i1, ~~i2~~",
 		"Reopened 2 times",
 		"Acknowledged by bob",
+		"[Open in Muster](" + groupURL + ") · [Runbook](https://runbooks.example.org/disk)",
 	}
 	if !slices.Equal(lines, want) {
 		t.Errorf("text =\n%s\nwant\n%s", a.Text, strings.Join(want, "\n"))
@@ -143,7 +151,8 @@ func TestRootPostStatuses(t *testing.T) {
 		for _, ac := range a.Actions {
 			ids = append(ids, ac.ID)
 		}
-		if p.Message != "" || a.Title != "#1 DiskFull" || a.Color != c.colour || !slices.Equal(ids, c.ids) ||
+		if p.Message != "" || !strings.HasPrefix(a.Title, "#1 DiskFull — ") || a.Color != c.colour ||
+			!slices.Equal(ids, c.ids) ||
 			a.Fallback != c.emoji+" #1 DiskFull" {
 			t.Errorf("%s: %q %q %q %s %v", c.status, p.Message, a.Title, a.Fallback, a.Color, ids)
 		}
@@ -161,7 +170,7 @@ func TestRootPostStatuses(t *testing.T) {
 	m := rootMessage(messages.ColourFiring)
 	m.Colour = "unknown"
 	if p := rootPost(m, testLook(), nil); p.Message != "" || p.Props.Attachments[0].Color != "" ||
-		p.Props.Attachments[0].Title != "#1 DiskFull" || p.Props.Attachments[0].Fallback != "#1 DiskFull" {
+		p.Props.Attachments[0].Title != "#1 DiskFull — Firing" || p.Props.Attachments[0].Fallback != "#1 DiskFull" {
 		t.Errorf("an unknown colour = %+v", p)
 	}
 	m.Buttons = []messages.Button{{Command: buttons.CommandStillOnIt, Label: "Still on it"}}
@@ -178,14 +187,15 @@ func TestRootPostMentions(t *testing.T) {
 	p := rootPost(rootMessage(messages.ColourFiring), testLook(), []string{"@channel", "@bob"})
 	a := p.Props.Attachments[0]
 	line, rest, _ := strings.Cut(a.Text, "\n")
-	if p.Message != "" || line != "@channel @bob" || mentionPattern.MatchString(rest) || a.Title != "#1 DiskFull" ||
+	if p.Message != "" || line != "@channel @bob" || mentionPattern.MatchString(rest) ||
+		a.Title != "#1 DiskFull — Firing" ||
 		rest != rootPost(rootMessage(messages.ColourFiring), testLook(), nil).Props.Attachments[0].Text ||
 		a.Fallback != "🔴 #1 DiskFull" {
 		t.Errorf("post = %q, %q, %q", p.Message, a.Text, a.Fallback)
 	}
 	edit := rootPost(rootMessage(messages.ColourAcknowledged), testLook(), nil)
 	if edit.Message != "" || mentionPattern.MatchString(edit.Props.Attachments[0].Text) ||
-		!strings.HasPrefix(edit.Props.Attachments[0].Text, "a · Started") ||
+		!strings.HasPrefix(edit.Props.Attachments[0].Text, "Disk \\*almost\\* full\n") ||
 		edit.Props.Attachments[0].Fallback != "🟠 #1 DiskFull" {
 		t.Errorf("edit = %q, %q", edit.Message, edit.Props.Attachments[0].Text)
 	}
@@ -269,18 +279,13 @@ func TestTokens(t *testing.T) {
 // link to Muster and the footer stay; its message is empty.
 func TestLengthLimit(t *testing.T) {
 	m := rootMessage(messages.ColourFiring)
-	list := &messages.AlertList{}
-	values := []string{}
-	for i := range 600 {
-		pod := fmt.Sprintf("pod-%03d", i)
-		list.Lines = append(list.Lines, messages.AlertLine{Text: "alertname=DiskFull, cluster=a, instance=" +
-			pod + ".db.example.org:9100, pod=" + pod})
-		if i < 10 {
-			values = append(values, pod)
-		}
+	line := &messages.AlertsLine{Label: "pod", Total: 600}
+	for i := range messages.CompactAlertsListed {
+		line.Values = append(line.Values, messages.AlertValue{Value: fmt.Sprintf("pod-%03d", i)})
 	}
-	list.Distinct = []messages.Distinct{{Label: "pod", Values: values, More: 590}}
-	m.Alerts = list
+	m.AlertsLine = line
+	m.Description = strings.Repeat("d", 4*messages.ValueCap)
+	m.Summary = strings.Repeat("s", messages.ValueCap)
 	m.Heading.Title = strings.Repeat("T", messages.ValueCap)
 	p := rootPost(m, testLook(), []string{"@channel"})
 	text := p.Props.Attachments[0].Text
@@ -290,13 +295,13 @@ func TestLengthLimit(t *testing.T) {
 	if p.Message != "" || !strings.HasPrefix(text, "@channel\n") {
 		t.Errorf("message %q, text %.40q…", p.Message, text)
 	}
-	for _, want := range []string{"pod: pod-000, pod-001", "+590 more", "[Full list in Muster](" + groupURL + ")",
-		"[Open in Muster](" + groupURL + ")"} {
+	for _, want := range []string{"\npod: pod-000, pod-001, pod-002, pod-003, pod-004 …and 595 more\n",
+		"\n" + strings.Repeat("s", messages.ValueCap) + "\n", "\nAcknowledged by bob\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the text has no %q", want)
 		}
 	}
-	if strings.Contains(text, "pod-599") || !strings.HasSuffix(text, "\nAcknowledged by bob") {
+	if strings.Contains(text, "ddd") || !strings.HasSuffix(text, "\n[Open in Muster]("+groupURL+") · [Runbook](https://runbooks.example.org/disk)") {
 		t.Errorf("text = %s", text)
 	}
 }
@@ -310,14 +315,14 @@ func TestTextCut(t *testing.T) {
 	m := rootMessage(messages.ColourFiring)
 	m.Summary = strings.Repeat("s", 300)
 	got := text(m, l, nil)
-	if n := utf8.RuneCountInString(got); n > l.limit || !strings.Contains(got, "…\n[Open in Muster](") ||
-		!strings.HasSuffix(got, "Reopened 2 times\nAcknowledged by bob") {
+	tail := "Reopened 2 times\nAcknowledged by bob\n[Open in Muster](" + groupURL + ") · [Runbook](https://runbooks.example.org/disk)"
+	if n := utf8.RuneCountInString(got); n > l.limit || !strings.HasSuffix(got, "…\n"+tail) {
 		t.Errorf("text (%d) = %q", n, got)
 	}
 	l.limit = 200
 	got = text(m, l, []string{"@channel", "@bob"})
 	if n := utf8.RuneCountInString(got); n != l.limit || !strings.HasPrefix(got, "@channel @bob\n") ||
-		!strings.Contains(got, "…\n[Open in Muster](") || !strings.HasSuffix(got, "Reopened 2 times\nAcknowledged by bob") {
+		!strings.HasSuffix(got, "…\n"+tail) {
 		t.Errorf("text with mentions (%d) = %q", n, got)
 	}
 	var many []string
@@ -328,8 +333,7 @@ func TestTextCut(t *testing.T) {
 	line, _, _ := strings.Cut(got, "\n")
 	words := strings.Fields(line)
 	if n := utf8.RuneCountInString(got); n > l.limit || len(words) == 0 || len(words) == len(many) ||
-		!slices.Equal(words, many[:len(words)]) || !strings.Contains(got, "\n[Open in Muster](") ||
-		!strings.HasSuffix(got, "Reopened 2 times\nAcknowledged by bob") {
+		!slices.Equal(words, many[:len(words)]) || !strings.HasSuffix(got, "\n"+tail) {
 		t.Errorf("a long Mentions line (%d) = %q", n, got)
 	}
 	for _, c := range []struct {
@@ -351,7 +355,7 @@ func TestTextCut(t *testing.T) {
 		}
 	}
 	l.limit = 40
-	if got := text(m, l, nil); utf8.RuneCountInString(got) != 40 || !strings.HasPrefix(got, "[Open in Muster](") ||
+	if got := text(m, l, nil); utf8.RuneCountInString(got) != 40 || !strings.HasPrefix(got, "Reopened 2 times\n") ||
 		!strings.HasSuffix(got, "…") {
 		t.Errorf("a long tail = %q", got)
 	}
@@ -379,7 +383,7 @@ func TestFooterMention(t *testing.T) {
 			"mattermost:4": {Name: "Bob_Smith", Username: "bob <@here>"}}
 		for _, mentioned := range [][]string{nil, {"@channel"}} {
 			lines := strings.Split(rootPost(m, testLook(), mentioned).Props.Attachments[0].Text, "\n")
-			if got := lines[len(lines)-1]; got != fmt.Sprintf(sentence, "@bob.s") {
+			if got := lines[len(lines)-2]; got != fmt.Sprintf(sentence, "@bob.s") {
 				t.Errorf("footer %q with mentions %q", got, mentioned)
 			}
 		}
@@ -388,14 +392,14 @@ func TestFooterMention(t *testing.T) {
 		long := m
 		long.Summary = strings.Repeat("s", 300)
 		if got := text(long, l, nil); utf8.RuneCountInString(got) > l.limit ||
-			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "@bob.s")) {
+			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "@bob.s")+"\n[Open in Muster]("+groupURL+") · [Runbook](https://runbooks.example.org/disk)") {
 			t.Errorf("a cut text = %q", got)
 		}
 		for _, space := range []string{"mattermost:4", "mattermost:5"} {
 			l := testLook()
 			l.space = space
 			lines := strings.Split(rootPost(m, l, nil).Props.Attachments[0].Text, "\n")
-			if got := lines[len(lines)-1]; got != fmt.Sprintf(sentence, `Bob\_Smith`) {
+			if got := lines[len(lines)-2]; got != fmt.Sprintf(sentence, `Bob\_Smith`) {
 				t.Errorf("footer in %s = %q", space, got)
 			}
 		}
@@ -535,7 +539,7 @@ func TestPlain(t *testing.T) {
 	l.markup = messages.MarkupPlain
 	p := rootPost(rootMessage(messages.ColourFiring), l, nil)
 	text := p.Props.Attachments[0].Text
-	if !strings.Contains(text, "Open in Muster "+groupURL) || !strings.Contains(text, "note: @\u200bchannel <b>x</b>") {
+	if !strings.Contains(text, "Open in Muster "+groupURL) || !strings.Contains(text, "note=@\u200bchannel <b>x</b>") {
 		t.Errorf("plain text = %s", text)
 	}
 }

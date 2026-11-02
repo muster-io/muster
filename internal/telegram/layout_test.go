@@ -6,11 +6,16 @@ package telegram
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -235,5 +240,54 @@ func TestCutEndKeepsEntities(t *testing.T) {
 	mention := `<a href="tg://user?id=42">Ann</a>`
 	if got := fit(m, writer{}, mention, LengthLimit); !strings.Contains(got, "Ann") || length(got) > LengthLimit {
 		t.Fatalf("fit lost the mentions: %q", got[:60])
+	}
+	// The last resort cuts the rest and keeps the line of links whole, "Open in Muster" with its link.
+	m.Links = []messages.Link{{Text: "Open in Muster", URL: groupPage}}
+	got := fit(m, writer{}, strings.Repeat("m", 5000), LengthLimit)
+	if length(got) > LengthLimit || !strings.HasSuffix(got, "…\n"+`<a href="`+groupPage+`">Open in Muster</a>`) {
+		t.Fatalf("the last resort lost the link: %q", got[max(len(got)-120, 0):])
+	}
+}
+
+// TestCompactRootMessage is C-29.AC-1, C-29.FR-4 and C-14.FR-16 from the renderer to Telegram's HTML: the Root message
+// of three KubernetesContainerOOMKilled Alerts on a Route with the Group key alertname, system and team is one message
+// — the title with the status emoji beside the word, the fields as lines, the summary and the description, the key
+// labels, the Alerts by pod and the link to Muster — with no blockquote and no table; an Alert Group of one Alert has
+// no Alerts line and leaves out a label no Alert has.
+func TestCompactRootMessage(t *testing.T) {
+	c := clock.NewManual(time.Date(2026, 10, 4, 3, 12, 0, 0, time.UTC))
+	r := messages.New(messages.Config{OrgID: 1, PublicURL: "http://localhost:8080", Business: c, Real: c,
+		Log: logging.New(io.Discard, logging.LevelInfo)})
+	alert := func(pod string) messages.SourceAlert {
+		return messages.SourceAlert{Fingerprint: pod, Firing: true, Labels: map[string]string{
+			"alertname": "KubernetesContainerOOMKilled", "system": "kubernetes", "team": "payments",
+			"namespace": "checkout", "cluster": "prod", "pod": pod, "severity": "warning"}}
+	}
+	src := &messages.Source{ID: 1, PublicID: "AG0000000000A1", Number: 1287, Title: "KubernetesContainerOOMKilled",
+		Summary: "Container killed for memory", Description: "The container exceeded its limit.", Status: "firing",
+		SeverityLevel: "warning", StartedAt: c.Now(), TimeZone: "UTC", Teams: []string{"payments"},
+		InstanceLabels: []string{"pod", "instance", "container", "endpoint"}, TotalAlerts: 3,
+		Route: messages.RouteRef{Name: "Infrastructure", Language: "en",
+			MessageLabels: routing.MessageLabels(nil, []string{"alertname", "system", "team"}, "severity", "team")},
+		Alerts: []messages.SourceAlert{alert("checkout-api-7d9f4"), alert("checkout-api-5b2c1"),
+			alert("checkout-worker-8e6a0")}}
+	got := writer{}.text(r.Root(src, messages.MarkupHTML).Message, "")
+	want := strings.Join([]string{
+		`<b><a href="http://localhost:8080/alert-groups/AG0000000000A1">#1287 KubernetesContainerOOMKilled</a></b>` +
+			` — 🔴 Firing`,
+		"Severity: warning", "Route: Infrastructure", "Teams: payments", "Started: 2026-10-04 03:12 UTC",
+		"Container killed for memory", "The container exceeded its limit.",
+		"system=kubernetes · team=payments · namespace=checkout",
+		"pod: checkout-api-5b2c1, checkout-api-7d9f4, checkout-worker-8e6a0",
+		`<a href="http://localhost:8080/alert-groups/AG0000000000A1">Open in Muster</a>`,
+	}, "\n")
+	if got != want {
+		t.Errorf("text\n%s\nwant\n%s", got, want)
+	}
+	src.Alerts, src.TotalAlerts = src.Alerts[:1], 1
+	delete(src.Alerts[0].Labels, "namespace")
+	if got := (writer{}).text(r.Root(src, messages.MarkupHTML).Message, ""); strings.Contains(got, "pod:") ||
+		!strings.Contains(got, "\nsystem=kubernetes · team=payments\n") {
+		t.Errorf("one alert\n%s", got)
 	}
 }

@@ -227,6 +227,7 @@ type Group struct {
 	Title            string
 	TitleFromKey     bool
 	Summary          *string
+	Description      *string
 	CommonLabels     map[string]string
 	CommonAnnots     map[string]string
 	IntegrationIDs   []int64
@@ -280,7 +281,7 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 	g := &Group{
 		ID: r.ID, PublicID: r.PublicID, Number: r.Number, RouteID: r.RouteID, MovedFromRouteID: int8Of(r.MovedFromRouteID),
 		KeyLabels: r.GroupKeyLabels, KeySHA: r.GroupKeySha256, Title: r.Title, TitleFromKey: r.TitleFromGroupKey,
-		Summary: textOf(r.Summary), IntegrationIDs: r.IntegrationIds, Status: Status(r.Status),
+		Summary: textOf(r.Summary), Description: textOf(r.Description), IntegrationIDs: r.IntegrationIds, Status: Status(r.Status),
 		Severity: organization.SeverityLevel(r.SeverityLevel), Urgent: r.Urgent, OwnerUserID: int8Of(r.OwnerUserID),
 		AcknowledgedAt: timeOf(r.AcknowledgedAt), SnoozeUntil: timeOf(r.SnoozeUntil), SnoozeNoEnd: r.SnoozeNoEnd,
 		SnoozedWhileUrgent: r.SnoozedWhileUrgent, SnoozedByUserID: int8Of(r.SnoozedByUserID),
@@ -317,7 +318,8 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 func (g *Group) saveParams(orgID int64) dbgen.SaveGroupParams {
 	p := dbgen.SaveGroupParams{
 		OrgID: orgID, ID: g.ID, RouteID: g.RouteID, MovedFromRouteID: nullInt(g.MovedFromRouteID), Title: g.Title,
-		TitleFromGroupKey: g.TitleFromKey, Summary: text(g.Summary), CommonLabels: jsonOf(g.CommonLabels),
+		TitleFromGroupKey: g.TitleFromKey, Summary: text(g.Summary), Description: text(g.Description),
+		CommonLabels:      jsonOf(g.CommonLabels),
 		CommonAnnotations: jsonOf(g.CommonAnnots), IntegrationIds: g.IntegrationIDs, Status: string(g.Status),
 		SeverityLevel: string(g.Severity), Urgent: g.Urgent, OwnerUserID: nullInt(g.OwnerUserID),
 		AcknowledgedAt: timestamptz(g.AcknowledgedAt), SnoozeUntil: timestamptz(g.SnoozeUntil),

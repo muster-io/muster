@@ -90,7 +90,7 @@ WHERE org_id = @org_id AND id = @id;
 -- worker, internal/delivery/worker.go).
 -- name: LockGroups :many
 SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, group_key_values, group_key_sha256,
-       title, title_from_group_key, summary, common_labels, common_annotations, integration_ids, status,
+       title, title_from_group_key, summary, description, common_labels, common_annotations, integration_ids, status,
        severity_level, urgent, owner_user_id, acknowledged_at, snooze_until, snooze_no_end, snoozed_while_urgent,
        snoozed_by_user_id, snoozed_by_service_account_id, firing_alert_count, resolved_alert_count, reopen_count,
        resolved_at, resolved_by_kind, resolved_by_user_id, resolved_by_service_account_id, resolve_reason,
@@ -138,13 +138,13 @@ RETURNING last_number;
 -- name: InsertGroup :one
 INSERT INTO alert_groups (
     org_id, public_id, number, route_id, group_key_labels, group_key_values, group_key_sha256, title,
-    title_from_group_key, summary, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
-    firing_again_after_id, created_at, last_changed_at
+    title_from_group_key, summary, description, common_labels, common_annotations, integration_ids, status,
+    severity_level, urgent, firing_again_after_id, created_at, last_changed_at
 )
 VALUES (
     @org_id, @public_id, @number, @route_id, @group_key_labels::text[], @group_key_values, @group_key_sha256, @title,
-    @title_from_group_key, sqlc.narg('summary'), @common_labels, @common_annotations, @integration_ids::bigint[],
-    'firing', @severity_level, @urgent, sqlc.narg('firing_again_after_id'), @created_at, @created_at
+    @title_from_group_key, sqlc.narg('summary'), sqlc.narg('description'), @common_labels, @common_annotations,
+    @integration_ids::bigint[], 'firing', @severity_level, @urgent, sqlc.narg('firing_again_after_id'), @created_at, @created_at
 )
 RETURNING id;
 
@@ -152,7 +152,8 @@ RETURNING id;
 -- name: SaveGroup :exec
 UPDATE alert_groups
 SET route_id = @route_id, moved_from_route_id = sqlc.narg('moved_from_route_id'), title = @title,
-    title_from_group_key = @title_from_group_key, summary = sqlc.narg('summary'), common_labels = @common_labels,
+    title_from_group_key = @title_from_group_key, summary = sqlc.narg('summary'),
+    description = sqlc.narg('description'), common_labels = @common_labels,
     common_annotations = @common_annotations, integration_ids = @integration_ids::bigint[], status = @status,
     severity_level = @severity_level, urgent = @urgent, owner_user_id = sqlc.narg('owner_user_id'),
     acknowledged_at = sqlc.narg('acknowledged_at'), snooze_until = sqlc.narg('snooze_until'),

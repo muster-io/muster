@@ -24,9 +24,12 @@ import (
 // or `markdown` (F-081, F-086). A Root message's `text` and top `section` hold the summary line — the status emoji, #N
 // and the title — and, on a Loud message, its Mentions after it: a User with an Account link for the Destination's
 // Connection as `<@U…>` (F-097), anyone else by their display name as text; one attachment in the colour of its status
-// (F-075) holds a `section` with the heading linked to the Alert Group page, a `section` with items 3 to 11 in mrkdwn —
-// the body, the line of links that starts with "Open in Muster", the notices and the footer — within 3,000 code points
-// as sent (F-076), a `context` with "Muster v<version>" and no image, and the buttons with the Snooze menu (C-24.FR-5).
+// (F-075) holds the compact layout of C-29.FR-4 in mrkdwn — a `section` with the heading linked to the Alert Group page
+// and the status as a word, one `section` with the fields of item 2 as its `fields`, a `section` with the summary and
+// the description, a `context` with the key labels, a `section` with the Alerts and the notices, a `context` with the
+// footer, which names the people, and a `section` with the line of links that starts with "Open in Muster" — the whole
+// within 3,000 code points as sent (F-076), so that each block is, then a `context` with "Muster v<version>" and no
+// image, and the buttons with the Snooze menu (C-24.FR-5).
 // A Thread reply, a Reminder and a Storm summary have their Mentions and text in one `section`, a Reminder's buttons in
 // an `actions` block, and no attachment. `text` is only a notification's fallback: its title is cut to 60 code points
 // and its Mentions to 1,000 bytes, so that it stays under the 4,000 bytes an edit takes even when Slack stores every
@@ -65,10 +68,22 @@ const (
 const (
 	blockSummary = "muster_summary"
 	blockHeading = "muster_heading"
+	blockFields  = "muster_fields"
 	blockBody    = "muster_body"
+	blockLabels  = "muster_labels"
+	blockAlerts  = "muster_alerts"
+	blockPeople  = "muster_people"
+	blockLinks   = "muster_links"
 	blockContext = "muster_context"
 	blockActions = "muster_actions"
 	blockText    = "muster_text"
+)
+
+// The limits of a section's `fields` in Block Kit: at most ten, each at most 2,000 code points, as Slack documents them;
+// unlike the limits of F-076 they were not measured, and the fake server checks them as documented.
+const (
+	maxFields  = 10
+	fieldLimit = 2000
 )
 
 // The types of blocks, elements and text objects Muster sends, and the one button style it uses (F-074).
@@ -149,12 +164,13 @@ func mrkdwnText(s string) *textObject { return &textObject{Type: typeMrkdwn, Tex
 
 func plainText(s string) textObject { return textObject{Type: typePlainText, Text: s} }
 
-// block is a `section` with its text, a `context` or an `actions` block with its elements.
+// block is a `section` with its text or its fields, a `context` or an `actions` block with its elements.
 type block struct {
-	Type     string      `json:"type"`
-	BlockID  string      `json:"block_id"`
-	Text     *textObject `json:"text,omitempty"`
-	Elements []any       `json:"elements,omitempty"`
+	Type     string       `json:"type"`
+	BlockID  string       `json:"block_id"`
+	Text     *textObject  `json:"text,omitempty"`
+	Fields   []textObject `json:"fields,omitempty"`
+	Elements []any        `json:"elements,omitempty"`
 }
 
 func section(id, text string) block {
@@ -243,15 +259,17 @@ func request(l look) outgoing {
 }
 
 // rootRequest is a Root message: the summary line in `text` and in the top section, with the Mentions, and one
-// attachment in the colour of its status with the heading, the body, the context and the buttons.
+// attachment in the colour of its status with the heading, the fields, the blocks of the body, the context and the
+// buttons.
 func rootRequest(m messages.Message, l look, mentions []string) outgoing {
 	o := request(l)
 	o.Text = withMentions(head(m, l, " · ", textTitleLimit), mentions)
 	o.Blocks = append(o.Blocks, section(blockSummary, topText(m, l, mentions)))
 	blocks := []block{section(blockHeading, headingText(m))}
-	if body := bodyText(m, l, sectionBound); body != "" {
-		blocks = append(blocks, section(blockBody, body))
+	if f, ok := fieldsBlock(m); ok {
+		blocks = append(blocks, f)
 	}
+	blocks = append(blocks, bodyBlocks(m, l)...)
 	blocks = append(blocks, block{Type: typeContext, BlockID: blockContext,
 		Elements: []any{plainText("Muster v" + l.version)}})
 	if a, ok := actionsBlock(m); ok {
@@ -380,14 +398,19 @@ func fitMentions(mentions []string, b bound) []string {
 	return out
 }
 
-// headingText is the heading of a Root message (C-12.FR-1 item 2): #N and the title, in bold and linked to the Alert
-// Group page, the title cut before it is escaped to the most code points with which the section fits.
+// headingText is the heading of a Root message (C-29.FR-1 item 1): #N and the title, in bold and linked to the Alert
+// Group page, and the status as a word, the colour bar of the attachment standing for its emoji; the title cut before
+// it is escaped to the most code points with which the section fits.
 func headingText(m messages.Message) string {
 	title := templates.StripTokens(m.Heading.Title)
+	word := ""
+	if m.StatusWord != "" {
+		word = " — " + messages.EscapeMrkdwn(m.StatusWord)
+	}
 	text := func(n int) string {
 		h := *m.Heading
 		h.Title = cutRunes(title, n)
-		return "*" + messages.Layout(messages.Message{Heading: &h}, messages.MarkupMrkdwn) + "*"
+		return "*" + messages.Layout(messages.Message{Heading: &h}, messages.MarkupMrkdwn) + "*" + word
 	}
 	n := utf8.RuneCountInString(title)
 	if sectionBound.fits(text(n)) {
@@ -438,6 +461,85 @@ func bodyText(m messages.Message, l look, b bound) string {
 	return tail
 }
 
+// fieldsBlock is the `section` of the fields of a Root message (C-29.FR-4): each field as mrkdwn, its name in bold on
+// the line above its value, at most maxFields of them and each within fieldLimit; false without fields.
+func fieldsBlock(m messages.Message) (block, bool) {
+	if len(m.Fields) == 0 {
+		return block{}, false
+	}
+	b := block{Type: typeSection, BlockID: blockFields}
+	for _, f := range m.Fields[:min(len(m.Fields), maxFields)] {
+		text := "*" + messages.EscapeMrkdwn(templates.StripTokens(f.Name)) + "*\n" +
+			messages.EscapeMrkdwn(templates.StripTokens(f.Value))
+		b.Fields = append(b.Fields, *mrkdwnText(cutText(text, bound{limit: fieldLimit, size: utf8.RuneCountInString})))
+	}
+	return b, true
+}
+
+// bodyBlocks are the blocks of a Root message under its fields (C-29.FR-4), in mrkdwn: a `section` with the summary
+// and the description — or the body of a Route's template, and the label sections of the Fallback template — a
+// `context` with the key labels, a `section` with the Alerts, the text lines and the notices, a `context` with the
+// footer and a `section` with the links. Laid out together they stay within the section limit (C-29.FR-6), shortened
+// by messages.Shorten in its order, so that each block does; a block with nothing to show is left out.
+func bodyBlocks(m messages.Message, l look) []block {
+	short := compact(laidOut(m, l))
+	lay := func(m messages.Message) string {
+		return cutText(messages.Layout(m, messages.MarkupMrkdwn), sectionBound)
+	}
+	var out []block
+	add := func(kind, id, text string) {
+		switch {
+		case text == "":
+		case kind == typeContext:
+			out = append(out, block{Type: typeContext, BlockID: id, Elements: []any{mrkdwnText(text)}})
+		default:
+			out = append(out, section(id, text))
+		}
+	}
+	add(typeSection, blockBody, lay(messages.Message{Language: short.Language, Environment: short.Environment,
+		GroupLabels: short.GroupLabels, CommonLabels: short.CommonLabels, CommonAnnotations: short.CommonAnnotations,
+		Summary: short.Summary, Description: short.Description, Body: short.Body}))
+	add(typeContext, blockLabels, lay(messages.Message{Language: short.Language, KeyLabels: short.KeyLabels}))
+	add(typeSection, blockAlerts, lay(messages.Message{Language: short.Language, AlertsLine: short.AlertsLine,
+		Alerts: short.Alerts, Lines: short.Lines, Notices: short.Notices}))
+	add(typeContext, blockPeople, lay(messages.Message{Language: short.Language, Footer: short.Footer,
+		FooterMention: short.FooterMention}))
+	add(typeSection, blockLinks, lay(messages.Message{Language: short.Language, Links: short.Links}))
+	return out
+}
+
+// compact is the Root message cp, laid out for the Destination, shortened so that its body — every block under the
+// fields — fits sectionBound, without its heading, fields and buttons (C-29.FR-6): its notices, footer and links stay
+// whole, and the rest is shortened by messages.Shorten in its order within what they leave, losing whole items, so that
+// no entity and no link is ever cut; when they leave no room, they are all that is left. Shortening keeps the heading
+// without its title and the status word, so that the full list of Alerts of the Fallback template links to the Alert
+// Group page; its line does not count.
+func compact(cp messages.Message) messages.Message {
+	cp.Fields, cp.StatusWord = nil, ""
+	tail := messages.Message{Language: cp.Language, Links: cp.Links, Notices: cp.Notices, Footer: cp.Footer,
+		FooterMention: cp.FooterMention}
+	with := func(m messages.Message) messages.Message {
+		m.Heading, m.Links, m.Notices, m.Footer, m.FooterMention = nil, tail.Links, tail.Notices, tail.Footer,
+			tail.FooterMention
+		return m
+	}
+	cp.Links, cp.Notices, cp.Footer, cp.FooterMention = nil, nil, "", ""
+	extra := 0
+	if cp.Heading != nil {
+		extra = messages.Length(messages.Message{Heading: cp.Heading, Colour: cp.Colour}, messages.MarkupMrkdwn) + 1
+	}
+	for budget := sectionBound.limit - sectionBound.size(messages.Layout(tail, messages.MarkupMrkdwn)) - 1; budget > 0; {
+		short, _ := messages.Shorten(cp, budget+extra, messages.MarkupMrkdwn)
+		out := with(short)
+		n := sectionBound.size(messages.Layout(out, messages.MarkupMrkdwn))
+		if n <= sectionBound.limit {
+			return out
+		}
+		budget = min(budget*sectionBound.limit/n, budget-1)
+	}
+	return with(messages.Message{Language: cp.Language})
+}
+
 // laidOut is m as its body lays it out for the Destination: without buttons, with the footer of its identity space,
 // whose user with an Account link there is <@U…> (C-12.FR-12), the heading without its title, and its template output
 // with its trusted Mention tokens as text that notifies nobody and its literal Mentions neutralized.
@@ -459,6 +561,14 @@ func laidOut(m messages.Message, l look) messages.Message {
 			}
 		}
 		cp.Alerts = &a
+	}
+	if m.AlertsLine != nil {
+		a := *m.AlertsLine
+		a.Lines = slices.Clone(a.Lines)
+		for i, line := range a.Lines {
+			a.Lines[i].Text = templateText(line.Text)
+		}
+		cp.AlertsLine = &a
 	}
 	return cp
 }
@@ -490,6 +600,11 @@ func templateTokens(m messages.Message) []templates.Token {
 			if line.Markup != "" {
 				out = append(out, templates.Tokens(line.Text)...)
 			}
+		}
+	}
+	if m.AlertsLine != nil {
+		for _, line := range m.AlertsLine.Lines {
+			out = append(out, templates.Tokens(line.Text)...)
 		}
 	}
 	return out

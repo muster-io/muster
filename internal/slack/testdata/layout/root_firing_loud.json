@@ -9,15 +9,63 @@
           "block_id": "muster_heading",
           "text": {
             "type": "mrkdwn",
-            "text": "*<http://localhost:8080/alert-groups/AG0000000000A1|#12 DiskFull>*"
+            "text": "*<http://localhost:8080/alert-groups/AG0000000000A1|#12 DiskFull>* — Firing"
           }
+        },
+        {
+          "type": "section",
+          "block_id": "muster_fields",
+          "fields": [
+            {
+              "type": "mrkdwn",
+              "text": "*Severity*\ncritical"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Route*\nsl"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Teams*\nsl"
+            },
+            {
+              "type": "mrkdwn",
+              "text": "*Started*\n2026-10-20 11:50 UTC"
+            }
+          ]
         },
         {
           "type": "section",
           "block_id": "muster_body",
           "text": {
             "type": "mrkdwn",
-            "text": "a · Started 2026-10-20 11:50 UTC\ncluster: a\nnote: @​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;\nteam: sl\n_Disk almost full_\n• pod: i1\n• ~pod: i2~\n<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>\n🔁 Reopened ×1"
+            "text": "Disk almost full\nThe disk of cluster a fills up."
+          }
+        },
+        {
+          "type": "context",
+          "block_id": "muster_labels",
+          "elements": [
+            {
+              "type": "mrkdwn",
+              "text": "team=sl · note=@​channel &lt;!here&gt; &lt;b&gt;x&lt;/b&gt; *​y*​ &lt;https://evil.example|z&gt; &amp;"
+            }
+          ]
+        },
+        {
+          "type": "section",
+          "block_id": "muster_alerts",
+          "text": {
+            "type": "mrkdwn",
+            "text": "pod: i1, ~i2~\n🔁 Reopened ×1"
+          }
+        },
+        {
+          "type": "section",
+          "block_id": "muster_links",
+          "text": {
+            "type": "mrkdwn",
+            "text": "<http://localhost:8080/alert-groups/AG0000000000A1|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>"
           }
         },
         {

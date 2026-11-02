@@ -117,6 +117,10 @@ type slackBlock struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"text"`
+	Fields []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"fields"`
 	Elements []slackElement `json:"elements"`
 }
 
@@ -133,13 +137,26 @@ type slackMessage struct {
 	Attachments []slackAttachment
 }
 
-// body is the text of the body section of the message's attachment.
+// body is the text of the blocks of the message's attachment under its heading and fields, one line each: the
+// sections of the summary, the description, the Alerts, the notices and the links, and the contexts of the key labels
+// and the footer, without the context of the version (C-29.FR-4).
 func (m slackMessage) body(t *testing.T) string {
 	t.Helper()
-	if len(m.Attachments) != 1 || len(m.Attachments[0].Blocks) < 2 || m.Attachments[0].Blocks[1].Text == nil {
+	if len(m.Attachments) != 1 || len(m.Attachments[0].Blocks) < 2 {
 		t.Fatalf("message %s has no body: %s", m.TS, m.Message.Attachments)
 	}
-	return m.Attachments[0].Blocks[1].Text.Text
+	var out []string
+	for _, b := range m.Attachments[0].Blocks[1:] {
+		switch {
+		case b.Type == "section" && b.Text != nil:
+			out = append(out, b.Text.Text)
+		case b.Type == "context" && b.BlockID != "muster_context":
+			for _, e := range b.Elements {
+				out = append(out, e.label())
+			}
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // actions are the elements of the actions block of the message's attachment, none without one.
@@ -313,7 +330,10 @@ func TestSlack(t *testing.T) {
 	t.Run("root_message", func(t *testing.T) {
 		s := s.on(t)
 		labels, _ := json.Marshal(map[string]string{"team": "sl", "cluster": "a", "pod": "i1", "note": slackLabel})
-		s.fire("s1", "DiskFull", "i1", string(labels))
+		description, _ := json.Marshal(slackLabel)
+		s.group("s1", "DiskFull")
+		s.alert("s1", "i1", string(labels), `,"annotations":{"description":`+string(description)+`}`)
+		s.notify("s1", "first notification")
 		g = s.groupOf("a")
 		n = s.number(g)
 		root = s.root(n, "DiskFull")
@@ -331,15 +351,24 @@ func TestSlack(t *testing.T) {
 		for _, b := range att.Blocks {
 			types = append(types, b.Type)
 		}
-		heading := fmt.Sprintf("*<%s/alert-groups/%s|#%d DiskFull>*", devmode.PublicURL, g, n)
-		if att.Color != "#d32f2f" || !slices.Equal(types, []string{"section", "section", "context", "actions"}) ||
-			att.Blocks[0].Text.Text != heading || !strings.HasPrefix(att.Blocks[2].Elements[0].label(), "Muster v") ||
-			att.Blocks[2].Elements[0].Type != "plain_text" {
+		// C-29.FR-4: the heading with the status word, the fields as one section's fields, the description, the key
+		// labels as a context, the links, the version and the buttons.
+		heading := fmt.Sprintf("*<%s/alert-groups/%s|#%d DiskFull>* — Firing", devmode.PublicURL, g, n)
+		version := att.Blocks[len(att.Blocks)-2]
+		var fields []string
+		for _, f := range att.Blocks[1].Fields {
+			name, _, _ := strings.Cut(f.Text, "\n")
+			fields = append(fields, name)
+		}
+		if att.Color != "#d32f2f" || !slices.Equal(types, []string{"section", "section", "section", "context", "section",
+			"context", "actions"}) || att.Blocks[0].Text.Text != heading ||
+			!slices.Equal(fields, []string{"*Severity*", "*Route*", "*Started*"}) ||
+			!strings.HasPrefix(version.Elements[0].label(), "Muster v") || version.Elements[0].Type != "plain_text" {
 			t.Errorf("attachment %s", root.Message.Attachments)
 		}
 		body := root.body(t)
-		if !strings.Contains(body, "<"+devmode.PublicURL+"/alert-groups/"+g+"|Open in Muster>") ||
-			!strings.Contains(body, "note: "+slackEscaped) || strings.Contains(body, "<https://evil") ||
+		if body != slackEscaped+"\ncluster=a · team=sl\n<"+devmode.PublicURL+"/alert-groups/"+g+"|Open in Muster>" ||
+			strings.Contains(body, "<https://evil") ||
 			strings.Contains(string(root.Message.Attachments), "<!here>") {
 			t.Errorf("body %q", body)
 		}

@@ -905,8 +905,8 @@ func TestSeveralConnectionsTelegramSameChat(t *testing.T) {
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g2+"/acknowledge", "", http.StatusOK)
 	e.settle()
 	eventually(t, "the footer of bot B's post", func() bool {
-		return strings.HasSuffix(e.tgMessage(faketelegram.ChannelID, pb2).Text,
-			"\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`)
+		return strings.Contains(e.tgMessage(faketelegram.ChannelID, pb2).Text,
+			"\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`+"\n")
 	})
 
 	// C-17.FR-2: the ack timeout notices of a new Alert Group, each a reply to its own copy from its own bot.

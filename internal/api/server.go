@@ -191,6 +191,7 @@ type Routes interface {
 	AcceptSuggestion(ctx context.Context, r routing.Requester, id string, destinationIDs []string) (routing.Route,
 		error)
 	DismissSuggestion(ctx context.Context, userID int64, id string) error
+	LabelSuggestions(ctx context.Context, publicID string) ([]routing.LabelSuggestion, error)
 }
 
 // Config is what the API serves with.
@@ -300,7 +301,7 @@ var implemented = map[string]bool{
 	"ListIntegrationAlerts": true, "ListAlertmanagerRoutes": true,
 	"ListRoutes": true, "CreateRoute": true, "GetRoute": true, "UpdateRoute": true, "DeleteRoute": true,
 	"ReorderRoutes": true, "ListRouteProfiles": true, "PreviewGroupKey": true, "ListRouteSuggestions": true,
-	"AcceptRouteSuggestion": true, "DismissRouteSuggestion": true,
+	"AcceptRouteSuggestion": true, "DismissRouteSuggestion": true, "ListRouteLabelSuggestions": true,
 	"GetAlertGroup": true, "ListAlertGroupAlerts": true, "GetAlertGroupTimeline": true, "MoveOpenAlertGroups": true,
 	"ListAlertGroups": true, "GetAlertGroupCounts": true, "ListRelatedAlertGroups": true,
 	"GetAlertGroupStatistics": true,

@@ -17,11 +17,12 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// The layout of posts (C-13.FR-3, C-12.FR-1): a Root message is a post whose message is empty, with one attachment
-// coloured by status whose title, #N and the title, links to the Alert Group page and whose text holds, on a Loud post,
-// its Mentions as its first line, then the sections 3 to 8 of C-12.FR-1, the line of links that starts with "Open in
-// Muster", the notices and the footer, as its last line, a user with an Account link for the Connection written
-// as `@username` (C-12.FR-12); its buttons follow. A Storm summary, which has no heading, is
+// The layout of posts (C-13.FR-3, C-29.FR-4): a Root message is a post whose message is empty, with one attachment
+// coloured by status whose title, #N, the title and the status as a word, links to the Alert Group page, whose short
+// `fields` are the fields of C-29.FR-1 item 2, and whose text holds, on a Loud post, its Mentions as its first line,
+// then the summary, the description, the key labels, the Alerts, the notices and the footer, a user with an Account
+// link for the Connection written as `@username` (C-12.FR-12), and the line of links that starts with "Open in
+// Muster" as its last line; its buttons follow. A Storm summary, which has no heading, is
 // laid out the same way without a title, in the Storm colour. A user's Mention, `@channel`, `@here` and `@all` in the
 // attachment notify (F-056, F-113); an email of such a post shows no content (F-056), while push and desktop
 // notifications show the attachment's fallback, the summary line without Mentions, which the channel does not draw
@@ -88,7 +89,15 @@ func rootPost(m messages.Message, l look, mentions []string) post {
 		Text: text(m, l, mentions), Actions: actions(m.Buttons, l.callback)}
 	if h := m.Heading; h != nil {
 		att.Title = "#" + strconv.FormatInt(h.Number, 10) + " " + templates.StripTokens(h.Title)
+		if m.StatusWord != "" {
+			att.Title += " — " + m.StatusWord
+		}
 		att.TitleLink, att.Footer, att.FooterIcon = h.URL, l.footer, l.icon
+	}
+	esc := messages.Escaper(l.markup)
+	for _, f := range m.Fields {
+		att.Fields = append(att.Fields, field{Title: templates.StripTokens(f.Name),
+			Value: esc(templates.StripTokens(f.Value)), Short: true})
 	}
 	return post{Props: &props{Attachments: []attachment{att}}}
 }
@@ -118,14 +127,14 @@ func replyPost(m messages.Message, l look, mentions []string) post {
 		Color: messages.StatusColour(m.Colour), Text: text(m, l, nil), Actions: actions(m.Buttons, l.callback)}}}}
 }
 
-// text is the text of m without its heading and buttons, as messages.Layout lays it out for the markup, after the
-// line of mentions when there is one, with the footer of the Destination's identity space as its last line and the
-// trusted Mention tokens of template output as text that notifies nobody.
+// text is the text of m without its heading, fields and buttons, as messages.Layout lays it out for the markup, after
+// the line of mentions when there is one, with the footer of the Destination's identity space and the line of links
+// as its last lines and the trusted Mention tokens of template output as text that notifies nobody.
 // A text still longer than the limit loses its middle, so that the Mentions, the line of links, the notices and the
 // footer stay; a Mentions line too long for that loses whole Mentions from its end.
 func text(m messages.Message, l look, mentions []string) string {
 	cp := l.withFooter(m)
-	cp.Heading, cp.Buttons = nil, nil
+	cp.Heading, cp.Fields, cp.Buttons = nil, nil, nil
 	if m.Body != nil {
 		cp.Body = &messages.Body{Text: templates.ReplaceTokens(m.Body.Text, tokenText), Markup: m.Body.Markup}
 	}
@@ -138,6 +147,14 @@ func text(m messages.Message, l look, mentions []string) string {
 			}
 		}
 		cp.Alerts = &a
+	}
+	if m.AlertsLine != nil {
+		a := *m.AlertsLine
+		a.Lines = slices.Clone(a.Lines)
+		for i, line := range a.Lines {
+			a.Lines[i].Text = templates.ReplaceTokens(line.Text, tokenText)
+		}
+		cp.AlertsLine = &a
 	}
 	full := joinLines(strings.Join(mentions, " "), messages.Layout(cp, l.markup))
 	if utf8.RuneCountInString(full) <= l.limit {
@@ -190,6 +207,11 @@ func templateTokens(m messages.Message) []templates.Token {
 			if line.Markup != "" {
 				out = append(out, templates.Tokens(line.Text)...)
 			}
+		}
+	}
+	if m.AlertsLine != nil {
+		for _, line := range m.AlertsLine.Lines {
+			out = append(out, templates.Tokens(line.Text)...)
 		}
 	}
 	return out

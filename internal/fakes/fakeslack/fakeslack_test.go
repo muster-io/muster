@@ -820,8 +820,8 @@ func TestTSSequence(t *testing.T) {
 	}
 }
 
-// TestBlockLimits covers F-074 and F-076: each limit of Block Kit holds at its bound and is invalid_blocks, with its
-// json-pointer, one past it — in the message's blocks and in an attachment's.
+// TestBlockLimits covers F-074 and F-076, and the limits of a section's fields of Block Kit: each limit holds at its
+// bound and is invalid_blocks, with its json-pointer, one past it — in the message's blocks and in an attachment's.
 func TestBlockLimits(t *testing.T) {
 	long := func(n int) string { return strings.Repeat("é", n) }
 	for _, tc := range []struct {
@@ -880,6 +880,11 @@ func TestBlockLimits(t *testing.T) {
 		{"option value", map[string]any{"blocks": []any{actionsOf("a", menu(1, "1h", long(151)))}},
 			map[string]any{"blocks": []any{actionsOf("a", menu(1, "1h", long(150)))}},
 			"/blocks/0/elements/0/options/0/value"},
+		{"section fields", map[string]any{"blocks": []any{fieldsBlock(11, "x")}},
+			map[string]any{"blocks": []any{fieldsBlock(10, "x")}}, "/blocks/0/fields"},
+		{"field text", map[string]any{"blocks": []any{fieldsBlock(1, long(2001))}},
+			map[string]any{"blocks": []any{fieldsBlock(1, long(2000))}}, "/blocks/0/fields/0/text"},
+		{"empty field", map[string]any{"blocks": []any{fieldsBlock(1, "")}}, nil, "/blocks/0/fields/0/text"},
 		{"attachment section", map[string]any{"attachments": []any{map[string]any{
 			"blocks": []any{textBlock("s", long(3001))}}}}, map[string]any{"attachments": []any{map[string]any{
 			"blocks": []any{textBlock("s", long(3000))}}}}, "/attachments/0/blocks/0/text/text"},
@@ -894,6 +899,15 @@ func TestBlockLimits(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fieldsBlock is a section with n fields in mrkdwn of the text text, as the fields of a Root message (C-29.FR-4).
+func fieldsBlock(n int, text string) map[string]any {
+	fields := make([]any, n)
+	for i := range fields {
+		fields[i] = map[string]any{"type": "mrkdwn", "text": text}
+	}
+	return map[string]any{"type": "section", "block_id": "f", "fields": fields}
 }
 
 // buttons are n buttons with distinct action ids.

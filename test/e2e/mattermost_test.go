@@ -297,9 +297,17 @@ type mmAttachment struct {
 	Title      string     `json:"title"`
 	TitleLink  string     `json:"title_link"`
 	Text       string     `json:"text"`
+	Fields     []mmField  `json:"fields"`
 	Footer     string     `json:"footer"`
 	FooterIcon string     `json:"footer_icon"`
 	Actions    []mmAction `json:"actions"`
+}
+
+// mmField is a short field of an attachment: a field of item 2 of the compact layout (C-29.FR-4).
+type mmField struct {
+	Title string `json:"title"`
+	Value string `json:"value"`
+	Short bool   `json:"short"`
 }
 
 type mmPost struct {
@@ -501,6 +509,18 @@ func lastLine(s string) string {
 	return s[strings.LastIndex(s, "\n")+1:]
 }
 
+// fieldTitles are the titles of the short fields of a Root message's attachment, separated by spaces (C-29.FR-4).
+func fieldTitles(a mmAttachment) string {
+	titles := make([]string, len(a.Fields))
+	for i, f := range a.Fields {
+		titles[i] = f.Title
+		if !f.Short {
+			titles[i] += "(long)"
+		}
+	}
+	return strings.Join(titles, " ")
+}
+
 func requestBody(t *testing.T, r fakeserver.Request) map[string]any {
 	t.Helper()
 	var m map[string]any
@@ -535,22 +555,23 @@ func TestMattermost(t *testing.T) {
 	bot := fakemattermost.BotUserID
 	callbackURL := devmode.IngestURL + "/api/v1/callbacks/mattermost/" + conn
 
-	// C-13.AC-13, AC-5: a new Alert Group with @channel <b>x</b> in a label.
+	// C-13.AC-13, AC-5, C-29.AC-1: a new Alert Group with @channel <b>x</b> in its description, in the compact layout.
 	e.group("d1", "DiskFull")
-	e.alert("d1", "i1", `{"team":"db","cluster":"a","pod":"i1","note":"@channel <b>x</b>"}`, "")
+	e.alert("d1", "i1", `{"team":"db","cluster":"a","pod":"i1","note":"@channel <b>x</b>"}`,
+		`,"annotations":{"description":"@channel <b>x</b>"}`)
 	e.notify("d1", "first notification")
 	g := e.groupOf("a")
 	n := e.number(g)
 	root := e.root(n)
 	att := root.attachment(t)
 	if mentions, _ := root.mentionsAndBody(); root.Message != "" || mentions != "" || att.Color != "#d32f2f" ||
-		att.Title != fmt.Sprintf("#%d DiskFull", n) || !strings.HasSuffix(att.TitleLink, "/alert-groups/"+g) ||
+		att.Title != fmt.Sprintf("#%d DiskFull — Firing", n) || !strings.HasSuffix(att.TitleLink, "/alert-groups/"+g) ||
 		!strings.HasPrefix(att.Footer, "Muster v") || att.FooterIcon != devmode.PublicURL+"/muster-mark-256.png" ||
-		att.Fallback != fmt.Sprintf("🔴 #%d DiskFull", n) {
+		att.Fallback != fmt.Sprintf("🔴 #%d DiskFull", n) || fieldTitles(att) != "Severity Route Started" {
 		t.Errorf("root message %q, attachment %+v", root.Message, att)
 	}
-	if !strings.Contains(att.Text, "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")") ||
-		!strings.Contains(att.Text, "note: @\u200bchannel \\<b\\>x\\</b\\>") {
+	if lastLine(att.Text) != "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")" ||
+		!strings.Contains(att.Text, "@\u200bchannel \\<b\\>x\\</b\\>\ncluster=a · team=db\n") {
 		t.Errorf("attachment text %q", att.Text)
 	}
 	var ids []string
@@ -580,8 +601,8 @@ func TestMattermost(t *testing.T) {
 	ea := edited.attachment(t)
 	if ea.Color != "#f57c00" || !slices.Equal(actionNames(ea), []string{"Unack", "Resolve", "Snooze 1 h", "Snooze 4 h",
 		"Snooze 24 h", "Until tomorrow 09:00", "Until Monday 09:00"}) ||
-		!strings.HasPrefix(lastLine(ea.Text), "Acknowledged by ") || edited.Message != "" ||
-		ea.Title != fmt.Sprintf("#%d DiskFull", n) || ea.Fallback != fmt.Sprintf("🟠 #%d DiskFull", n) {
+		!strings.Contains(ea.Text, "\nAcknowledged by ") || edited.Message != "" ||
+		ea.Title != fmt.Sprintf("#%d DiskFull — Acknowledged", n) || ea.Fallback != fmt.Sprintf("🟠 #%d DiskFull", n) {
 		t.Errorf("edited post %q: %+v", edited.Message, ea)
 	}
 	e.alert("d1", "i2", `{"team":"db","cluster":"a","disk":"i2"}`, "")
@@ -1048,21 +1069,22 @@ func TestMattermostMessages(t *testing.T) {
 		e := e.on(t)
 		e.route("big", "big", []string{dest}, nil)
 		e.group("b1", "BigOne")
-		// Ten distinct values of two labels take some 14,000 characters and a common label 4,000 more, so the Root
-		// message is shortened and its Alert list keeps the distinct values.
-		long, common := strings.Repeat("x", 700), strings.Repeat("c", 4000)
+		// Five values of the distinguishing label disk take some 15,000 characters and the description 2,000 more, so
+		// the Root message is shortened: the description goes first, and the Alerts line keeps its five values and
+		// "…and 595 more" (C-29.FR-3, FR-6).
+		long, description := strings.Repeat("x", 3000), strings.Repeat("d", 2000)
 		for i := range 600 {
 			e.alert("b1", fmt.Sprint("b", i), fmt.Sprintf(`{"team":"big","cluster":"big","disk":"disk-%03d-%s",`+
-				`"node":"node-%02d-%s","info":%q}`, i, long, i%37, long, common), "")
+				`"node":"node-%02d"}`, i, long, i%37), fmt.Sprintf(`,"annotations":{"description":%q}`, description))
 		}
 		e.notify("b1", "first notification")
 		g := e.groupOf("big")
 		root := e.root(e.number(g))
 		text := root.attachment(t).Text
-		if root.Message != "" || utf8.RuneCountInString(text) > fakemattermost.MaxPostSize || !regexp.MustCompile(`\+[0-9]+ more`).MatchString(text) ||
-			!strings.Contains(text, "+590 more") || !strings.Contains(text, "+27 more") ||
-			!strings.Contains(text, "Full list in Muster") || strings.Contains(text, common) ||
-			!strings.Contains(text, "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")") {
+		if root.Message != "" || utf8.RuneCountInString(text) > fakemattermost.MaxPostSize ||
+			!regexp.MustCompile(`\ndisk: disk-000-x+, disk-001-x+, disk-002-x+, disk-003-x+, disk-004-x+ …and 595 more\n`).
+				MatchString(text) || strings.Contains(text, description[:100]) ||
+			lastLine(text) != "[Open in Muster]("+devmode.PublicURL+"/alert-groups/"+g+")" {
 			t.Errorf("message of %d and text of %d characters: %.300q … %.300q", utf8.RuneCountInString(root.Message),
 				utf8.RuneCountInString(text), text, text[max(len(text)-300, 0):])
 		}

@@ -59,11 +59,46 @@ const (
 )
 
 // KindMinimumSeverity is the kind of the open_group_updates row that a changed Minimum severity writes (C-26.FR-9),
-// and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+// KindMessageLabels that of a changed "Labels in the message" (C-29.FR-2), and OpenGroupUpdatesChannel the
+// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
 const (
 	KindMinimumSeverity     = "route_minimum_severity"
+	KindMessageLabels       = "route_message_labels"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
+
+// The computed "Labels in the message" (route.message_labels, C-29.FR-2): the Group key without alertname and the
+// Organization's severity label, then the Team label and namespace; and the most labels a Route's own list holds.
+const (
+	labelAlertname     = "alertname"
+	labelNamespace     = "namespace"
+	maxMessageLabels   = 50
+	messageLabelsField = "/message_labels"
+)
+
+// MessageLabels is the effective "Labels in the message" of a Route (route.message_labels, C-29.FR-2): its own list
+// own when it has one, otherwise the list computed from its Group key key and the Organization's severity and Team
+// labels — the labels of the Group key except alertname and the severity label, then the Team label and namespace,
+// each once, in that order.
+func MessageLabels(own []string, key []string, severityLabel, teamLabel string) []string {
+	if own != nil {
+		return slices.Clone(own)
+	}
+	out := make([]string, 0, len(key)+2)
+	add := func(name string) {
+		if name != "" && !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	for _, name := range key {
+		if name != labelAlertname && name != severityLabel {
+			add(name)
+		}
+	}
+	add(teamLabel)
+	add(labelNamespace)
+	return out
+}
 
 // The Audit log actions and resource type, and the live hint, of Routes (C-03.FR-14).
 const (
@@ -246,6 +281,30 @@ type Route struct {
 	OpenAlertGroupCount int64
 	// OwningTeam is the Team that owns the Route (C-25.FR-2), nil when none does.
 	OwningTeam *TeamRef
+	// OwnMessageLabels says whether the Route has a list of "Labels in the message" of its own, and MessageLabels is
+	// the effective list (C-29.FR-2): its own, or the one computed from its Group key and labels while it has none.
+	OwnMessageLabels bool
+	MessageLabels    []string
+	// labels are the Organization's labels the computed list is made of.
+	labels labelSettings
+}
+
+// labelSettings are the Organization's severity and Team labels, which the computed "Labels in the message" leave out
+// and add (C-29.FR-2).
+type labelSettings struct {
+	severity string
+	team     string
+}
+
+// ownLabels is the Route's own list of "Labels in the message", nil while it has none.
+func (r Route) ownLabels() []string {
+	if !r.OwnMessageLabels {
+		return nil
+	}
+	if r.MessageLabels == nil {
+		return []string{}
+	}
+	return r.MessageLabels
 }
 
 // TeamRef names the Team that owns a Route: its internal id, public_id, name and slug, and whether it was deleted.
@@ -303,6 +362,11 @@ type Input struct {
 	// OwningTeamID is the public_id of the Team that owns the Route: nil keeps the stored one on an update and is none
 	// on a creation, and an empty string clears it.
 	OwningTeamID *string
+	// OwnMessageLabels says whether the Route has a list of "Labels in the message" of its own: nil keeps the stored
+	// choice on an update and is false on a creation. MessageLabels is that list, read only when the Route has one, nil
+	// when the request left it out — which keeps a stored list of its own — and a slice, empty included, when it gave one.
+	OwnMessageLabels *bool
+	MessageLabels    []string
 }
 
 // List is every Route that is not deleted in evaluation order, the Default route last, with the version of the list
@@ -344,6 +408,8 @@ type Queries interface {
 	HasOpenAlertGroups(ctx context.Context, arg dbgen.HasOpenAlertGroupsParams) (bool, error)
 	InsertOpenGroupUpdate(ctx context.Context, arg dbgen.InsertOpenGroupUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
+	ListRouteLabelSuggestions(ctx context.Context, arg dbgen.ListRouteLabelSuggestionsParams) (
+		[]dbgen.ListRouteLabelSuggestionsRow, error)
 	ListRouteSuggestionDismissals(ctx context.Context, arg dbgen.ListRouteSuggestionDismissalsParams) ([]string,
 		error)
 	DismissRouteSuggestion(ctx context.Context, arg dbgen.DismissRouteSuggestionParams) error
@@ -526,7 +592,8 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
 			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
 			OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName,
-			OwningTeamSlug: r.OwningTeamSlug, OwningTeamDeleted: r.OwningTeamDeleted})
+			OwningTeamSlug: r.OwningTeamSlug, OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels,
+			SeverityLabel: r.SeverityLabel, TeamLabel: r.TeamLabel})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
 		return List{}, err
@@ -846,6 +913,10 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if in.Description != nil {
 			description = *in.Description
 		}
+		own, err := messageLabelsOf(in, nil)
+		if err != nil {
+			return err
+		}
 		id := publicid.New(publicid.Route)
 		p := in.Policy
 		routeID, err := q.InsertRoute(ctx, dbgen.InsertRouteParams{
@@ -859,7 +930,7 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			OwningTeamID: ownerID(owner), Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(owner), MessageLabels: own, Now: s.clock.Now().UTC(),
 		})
 		if err != nil {
 			return fmt.Errorf("create the route: %w", nameTaken(err))
@@ -996,6 +1067,12 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
+		own, err := messageLabelsOf(in, &before)
+		if err != nil {
+			return err
+		}
+		next.OwnMessageLabels = own != nil
+		next.MessageLabels = MessageLabels(own, next.GroupKey, before.labels.severity, before.labels.team)
 		changes := audit.Diff(viewOf(before), viewOf(next))
 		if len(changes) == 0 {
 			updated = before
@@ -1013,7 +1090,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			OwningTeamID: ownerID(next.OwningTeam), Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(next.OwningTeam), MessageLabels: own, Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the route %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -1038,7 +1115,13 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if before.MinimumSeverity != next.MinimumSeverity {
-			if err := s.requestOpenGroupUpdate(ctx, q, before); err != nil {
+			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMinimumSeverity); err != nil {
+				return err
+			}
+		}
+		// The field Route of every open Root message names the Route, so a rename re-renders them too (C-29.FR-1).
+		if !slices.Equal(before.MessageLabels, next.MessageLabels) || before.Name != next.Name {
+			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMessageLabels); err != nil {
 				return err
 			}
 		}
@@ -1062,11 +1145,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return updated, nil
 }
 
-// requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity, asks the workers of
-// internal/groups to apply it to the open Alert Groups of r (C-26.FR-9): one open_group_updates row, when r has any,
-// and a notification that wakes them once the transaction commits. The row is requested at the business time of the
-// change.
-func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route) error {
+// requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity or of its effective
+// "Labels in the message", asks the workers of internal/groups to apply it to the open Alert Groups of r (C-26.FR-9,
+// C-29.FR-2): one open_group_updates row of the kind given, when r has any, and a notification that wakes them once the
+// transaction commits. The row is requested at the business time of the change.
+func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route, kind string) error {
 	open, err := q.HasOpenAlertGroups(ctx, dbgen.HasOpenAlertGroupsParams{OrgID: s.orgID, RouteID: r.ID})
 	if err != nil {
 		return fmt.Errorf("look for the open alert groups of the route %s: %w", r.PublicID, err)
@@ -1075,9 +1158,9 @@ func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route
 		return nil
 	}
 	if err := q.InsertOpenGroupUpdate(ctx, dbgen.InsertOpenGroupUpdateParams{OrgID: s.orgID,
-		Kind: KindMinimumSeverity, RouteID: pgtype.Int8{Int64: r.ID, Valid: true},
+		Kind: kind, RouteID: pgtype.Int8{Int64: r.ID, Valid: true},
 		RequestedAt: s.clock.Now().UTC()}); err != nil {
-		return fmt.Errorf("apply the minimum severity of the route %s to its open alert groups: %w", r.PublicID, err)
+		return fmt.Errorf("apply the change of the route %s to its open alert groups: %w", r.PublicID, err)
 	}
 	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
 		return fmt.Errorf("wake the open alert group update workers: %w", err)
@@ -1280,6 +1363,52 @@ func check(in Input) error {
 	return checkPolicy(in.Policy)
 }
 
+// checkMessageLabels refuses a list of "Labels in the message" of a Route's own longer than maxMessageLabels, or with
+// an empty or a repeated name, as checkGroupKey refuses a Group key: any label name a Group key takes, such as
+// `app-name`, is taken here too.
+func checkMessageLabels(names []string) error {
+	if len(names) > maxMessageLabels {
+		return &FieldError{Pointer: messageLabelsField, Code: CodeTooLong,
+			Detail: fmt.Sprintf("At most %d labels are shown in the message.", maxMessageLabels)}
+	}
+	seen := make(map[string]bool, len(names))
+	for i, name := range names {
+		pointer := messageLabelsField + "/" + strconv.Itoa(i)
+		if name == "" {
+			return &FieldError{Pointer: pointer, Code: CodeInvalidFormat, Detail: "A label name is empty."}
+		}
+		if seen[name] {
+			return &FieldError{Pointer: pointer, Code: CodeDuplicate, Detail: "The label is already in the list."}
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// messageLabelsOf is the own list of "Labels in the message" that a write of in stores, nil for the computed one: on a
+// creation, before is nil and the list is computed unless in asks for one of its own; on an update, an omitted choice
+// keeps the stored one and an omitted list the stored list. A list of its own without a list to keep is required, and
+// only a list of its own is checked: the computed list a read gives, sent back unchanged, is ignored.
+func messageLabelsOf(in Input, before *Route) ([]string, error) {
+	own := before != nil && before.OwnMessageLabels
+	if in.OwnMessageLabels != nil {
+		own = *in.OwnMessageLabels
+	}
+	switch {
+	case !own:
+		return nil, nil
+	case in.MessageLabels != nil:
+		if err := checkMessageLabels(in.MessageLabels); err != nil {
+			return nil, err
+		}
+		return slices.Clone(in.MessageLabels), nil
+	case before != nil && before.OwnMessageLabels:
+		return before.ownLabels(), nil
+	}
+	return nil, &FieldError{Pointer: messageLabelsField, Code: CodeRequired,
+		Detail: "A Route with labels of its own lists them."}
+}
+
 // checkGroupKey refuses a Group key, at the pointer base, with an empty or a repeated label name.
 func checkGroupKey(base string, key []string) error {
 	seen := make(map[string]bool, len(key))
@@ -1423,7 +1552,9 @@ type view struct {
 	GroupKey        []string  `json:"group_key"`
 	DestinationIDs  []string  `json:"destination_ids"`
 	OwningTeamID    *string   `json:"owning_team_id"`
-	Policy          Policy    `json:"policy"`
+	// MessageLabels is the Route's own list of "Labels in the message", null while it is computed.
+	MessageLabels []string `json:"message_labels"`
+	Policy        Policy   `json:"policy"`
 }
 
 func viewOf(r Route) view {
@@ -1443,7 +1574,7 @@ func viewOf(r Route) view {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
 	v := view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
-		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, Policy: p}
+		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, MessageLabels: r.ownLabels(), Policy: p}
 	if r.OwningTeam != nil {
 		v.OwningTeamID = &r.OwningTeam.PublicID
 	}
@@ -1464,8 +1595,11 @@ func routeOf(r dbgen.GetRouteRow) Route {
 		owner = &TeamRef{ID: r.OwningTeamID.Int64, PublicID: r.OwningTeamPublicID.String,
 			Name: r.OwningTeamName.String, Slug: r.OwningTeamSlug.String, Deleted: r.OwningTeamDeleted}
 	}
-	return Route{Storm: st, TemplateError: te, OwningTeam: owner,
-		ID: r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
+	labels := labelSettings{severity: r.SeverityLabel, team: r.TeamLabel}
+	return Route{Storm: st, TemplateError: te, OwningTeam: owner, labels: labels,
+		OwnMessageLabels: r.MessageLabels != nil,
+		MessageLabels:    MessageLabels(r.MessageLabels, r.GroupKey, labels.severity, labels.team),
+		ID:               r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
 		IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity, Urgent: r.MinimumSeverity == MinimumCritical,
 		GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
 		Version: r.Version,

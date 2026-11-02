@@ -10,11 +10,13 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// Shortening (C-12.FR-11): a message laid out longer than the length limit an adapter declares loses, in turn, its
-// Alert lines (down to the distinct values of the differing labels), its common annotations, common labels and group
-// labels, and then its distinct values, environment, summary, text lines, the lines of a template's body and the
-// notices, until it fits. The heading, status, footer, buttons and the link to Muster are never removed; only a title
-// or a footer that cannot fit even alone is cut.
+// Shortening (C-29.FR-6, C-12.FR-11): a message laid out longer than the length limit an adapter declares loses, in
+// turn, its description, its Alerts line, its summary and its key labels; then, in a message of the Fallback template
+// or a Desired state of an earlier version, its Alert lines (down to the distinct values of the differing labels), its
+// common annotations, common labels and group labels, its distinct values and its environment; then its text lines,
+// the lines of a template's body and the notices, until it fits. The heading, the status, the fields, the footer with
+// its people, the buttons and the links, the one to Muster first, are never removed; only a title or a footer that
+// cannot fit even alone is cut.
 
 // Length is the length of m laid out in a markup, in characters.
 func Length(m Message, markup Markup) int {
@@ -29,6 +31,18 @@ func Shorten(m Message, limit int, markup Markup) (Message, bool) {
 	m = cloneMessage(m)
 	fits := func() bool { return Length(m, markup) <= limit }
 	steps := []func() bool{
+		func() bool { return clearText(&m.Description) },
+		func() bool { // the Alerts line
+			had := m.AlertsLine != nil
+			m.AlertsLine = nil
+			return had
+		},
+		func() bool { return clearText(&m.Summary) },
+		func() bool { // the key labels
+			had := len(m.KeyLabels) > 0
+			m.KeyLabels = nil
+			return had
+		},
 		func() bool { // the Alert lines, down to the distinct values
 			if m.Alerts == nil || len(m.Alerts.Lines) == 0 {
 				return false
@@ -50,7 +64,6 @@ func Shorten(m Message, limit int, markup Markup) (Message, bool) {
 			return true
 		},
 		func() bool { return clearText(&m.Environment) },
-		func() bool { return clearText(&m.Summary) },
 	}
 	for _, step := range steps {
 		if step() && fits() {

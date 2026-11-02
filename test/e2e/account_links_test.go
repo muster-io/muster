@@ -609,7 +609,7 @@ func TestAccountLinks(t *testing.T) {
 	eventually(t, "bob's acknowledgement", func() bool { s, _ := e.ownerOf(g); return s == "acknowledged" })
 	// C-12.FR-12: the footer of the Mattermost Root message mentions him by his linked username.
 	eventually(t, "the mattermost footer mentioning bob", func() bool {
-		return strings.HasSuffix(e.root(e.number(g)).attachment(t).Text, "\nAcknowledged by @bob")
+		return strings.Contains(e.root(e.number(g)).attachment(t).Text, "\nAcknowledged by @bob\n[Open in Muster](")
 	})
 	if x := e.timeline(g, "")[0]; x.Event != "acknowledged" || x.Actor.Transport != "mattermost" || x.Actor.Name != "bob" {
 		t.Errorf("timeline %+v", x)
@@ -699,7 +699,7 @@ func TestAccountLinks(t *testing.T) {
 	eventually(t, "the telegram footer", func() bool {
 		for _, m := range e.messages(faketelegram.ChannelID) {
 			if m.ID == post2 {
-				return strings.HasSuffix(m.Text, "\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`)
+				return strings.Contains(m.Text, "\n"+`Acknowledged by <a href="tg://user?id=7001">Alice Smith</a>`+"\n")
 			}
 		}
 		return false
@@ -1391,7 +1391,7 @@ func TestSlackAccountLinks(t *testing.T) {
 	}
 	alice.pat.json(http.MethodPost, "/api/v1/alert-groups/"+g+"/acknowledge", "", http.StatusOK)
 	eventually(t, "the footer mentioning alice", func() bool {
-		return strings.HasSuffix(s.message(root.TS).body(t), "Acknowledged by <@"+fakeslack.UserAlice+">")
+		return strings.Contains(s.message(root.TS).body(t), "\nAcknowledged by <@"+fakeslack.UserAlice+">\n")
 	})
 
 	// C-24.AC-14: a press of Alice's account runs as her; once she unlinked it, a press is answered "not linked".

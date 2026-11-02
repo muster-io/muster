@@ -17,6 +17,7 @@ import (
 
 	"github.com/muster-io/muster/internal/messages/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -73,24 +74,33 @@ type PreviewRequest struct {
 
 // PreviewResult is what a preview shows: whether the template rendered against every sample, the output against the
 // first one in the requested markup, whether it was shortened, the source of the template — the built-in one for an
-// empty template — the sample and the errors with their positions.
+// empty template — the sample and the errors with their positions. A Root message also has its Layout, nil when the
+// template failed, the Length of its output as its messenger counts it and the MessengerLimit of the adapter of its
+// markup, 0 for none (C-29.FR-7).
 type PreviewResult struct {
-	Valid     bool
-	Output    string
-	Truncated bool
-	Format    Markup
-	Source    string
-	Sample    string
-	Errors    []*templates.Error
+	Valid          bool
+	Output         string
+	Truncated      bool
+	Format         Markup
+	Source         string
+	Sample         string
+	Errors         []*templates.Error
+	Layout         *MessageLayout
+	Length         int
+	MessengerLimit int
 }
 
 // settings are what a preview takes from its Route, or from the Default route without one, and from the
-// Organization: its time zone, start of the working day and first day of the week.
+// Organization: its time zone, start of the working day and first day of the week, its Instance labels and the
+// severity and Team labels its computed "Labels in the message" are made of.
 type settings struct {
-	route        RouteRef
-	tz           string
-	workdayStart string
-	weekStart    string
+	route          RouteRef
+	tz             string
+	workdayStart   string
+	weekStart      string
+	instanceLabels []string
+	severityLabel  string
+	teamLabel      string
 }
 
 // Preview renders a template against its sample (previewTemplate), reading the main pool. An unknown Route, Stored
@@ -177,6 +187,11 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 		if i == 0 {
 			m, res.Truncated = Shorten(m, req.LengthLimit, format)
 			res.Output = Layout(m, format)
+			if req.Kind == TemplateRootMessage {
+				l := LayoutOf(m)
+				res.Layout, res.Length = &l, MessengerLength(res.Output, format)
+				res.MessengerLimit = MessengerLimit(format)
+			}
 		}
 	}
 	res.Valid = true
@@ -233,14 +248,17 @@ func (r *Renderer) previewMessage(src *Source, kind string, tmpl *string, format
 		return out.Message, nil
 	case TemplateLine:
 		src.Route.Line = tmpl
+		if src.Route.Line == nil {
+			src.Route.Line = new(lineSource)
+		}
 		listed := *src
 		listed.Alerts = src.Alerts[:min(len(src.Alerts), AlertsListed)]
 		listed.TotalAlerts = int64(len(listed.Alerts))
-		list, fail := r.alertList(&listed, language(src.Route.Language), format)
+		line, fail := r.alertsLine(&listed, format, true)
 		if fail != nil {
 			return Message{}, fail.Error
 		}
-		return Message{Language: src.Route.Language, Alerts: list}, nil
+		return Message{Language: src.Route.Language, AlertsLine: line}, nil
 	}
 	source := cmp.Or(deref(tmpl), BuiltinSource(TemplateAckTimeoutNotice, src.Route.Language))
 	start := r.real.Now()
@@ -296,7 +314,9 @@ func (r *Renderer) settings(ctx context.Context, q queries, publicID string) (se
 		return settings{}, fmt.Errorf("read the settings of a preview: %w", err)
 	}
 	set := settings{tz: s.TimeZone, workdayStart: s.WorkdayStart, weekStart: s.WeekStart,
-		route: RouteRef{Name: s.Name, Language: s.Language, SnoozeDurations: s.SnoozeDurationsSeconds}}
+		instanceLabels: s.InstanceLabels, severityLabel: s.SeverityLabel, teamLabel: s.TeamLabel,
+		route: RouteRef{Name: s.Name, Language: s.Language, SnoozeDurations: s.SnoozeDurationsSeconds,
+			MessageLabels: routing.MessageLabels(s.MessageLabels, s.GroupKey, s.SeverityLabel, s.TeamLabel)}}
 	if publicID == "" {
 		return set, nil
 	}
@@ -312,7 +332,8 @@ func (r *Renderer) settings(ctx context.Context, q queries, publicID string) (se
 		return settings{}, fmt.Errorf("read the route %s: %w", id, err)
 	}
 	set.route = RouteRef{ID: rt.ID, PublicID: rt.PublicID, Name: rt.Name, Language: rt.Language,
-		SnoozeDurations: rt.SnoozeDurationsSeconds}
+		SnoozeDurations: rt.SnoozeDurationsSeconds,
+		MessageLabels:   routing.MessageLabels(rt.MessageLabels, rt.GroupKey, set.severityLabel, set.teamLabel)}
 	return set, nil
 }
 
@@ -395,7 +416,14 @@ func (r *Renderer) sampleSource(d templates.Data, set settings) *Source {
 	src := &Source{Number: 1, Status: ColourResolved, SeverityLevel: "warning", KeyLabels: d.GroupLabels.Names(),
 		KeyValues: d.GroupLabels, CommonLabels: d.CommonLabels, CommonAnnotations: d.CommonAnnotations,
 		Summary: d.CommonAnnotations["summary"], Route: set.route, TimeZone: set.tz, WorkdayStart: set.workdayStart,
-		WeekStart: set.weekStart, TotalAlerts: int64(len(d.Alerts)), StartedAt: r.business.Now().UTC()}
+		WeekStart: set.weekStart, InstanceLabels: set.instanceLabels, TotalAlerts: int64(len(d.Alerts)),
+		StartedAt: r.business.Now().UTC()}
+	for _, a := range d.Alerts {
+		if v := a.Annotations["description"]; v != "" {
+			src.Description = v
+			break
+		}
+	}
 	if len(src.CommonLabels) == 0 && len(d.Alerts) > 0 {
 		src.CommonLabels = commonOf(d.Alerts)
 	}

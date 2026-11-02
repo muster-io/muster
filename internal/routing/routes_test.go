@@ -79,6 +79,10 @@ type fakeStore struct {
 	updates  []dbgen.InsertOpenGroupUpdateParams
 	notified []string
 
+	// suggestions are the label suggestions of each Route by id, and suggested the reads of them.
+	suggestions map[int64][]dbgen.ListRouteLabelSuggestionsRow
+	suggested   []dbgen.ListRouteLabelSuggestionsParams
+
 	// dests are the Destinations by public_id, deleted the deleted ones, and links the Destinations of each Route with
 	// when they were added.
 	dests   map[string]int64
@@ -162,9 +166,15 @@ func (s *fakeStore) ListRoutes(_ context.Context, org int64) ([]dbgen.ListRoutes
 	}
 	var out []dbgen.ListRoutesRow
 	for _, r := range s.live() {
-		out = append(out, r.ListRoutesRow)
+		out = append(out, s.withLabels(r.ListRoutesRow))
 	}
 	return out, nil
+}
+
+// withLabels is the row r with the Organization's severity and Team labels, as the reads of the Routes join them.
+func (s *fakeStore) withLabels(r dbgen.ListRoutesRow) dbgen.ListRoutesRow {
+	r.SeverityLabel, r.TeamLabel = s.severityLabel, s.teamLabel
+	return r
 }
 
 func (s *fakeStore) GetRoute(_ context.Context, arg dbgen.GetRouteParams) (dbgen.GetRouteRow, error) {
@@ -173,7 +183,7 @@ func (s *fakeStore) GetRoute(_ context.Context, arg dbgen.GetRouteParams) (dbgen
 	}
 	for i, r := range s.live() {
 		if r.PublicID == arg.PublicID && arg.OrgID == orgID {
-			return getRowOf(r.ListRoutesRow, int64(i)), nil
+			return getRowOf(s.withLabels(r.ListRoutesRow), int64(i)), nil
 		}
 	}
 	return dbgen.GetRouteRow{}, pgx.ErrNoRows
@@ -251,7 +261,7 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 		AckTimeoutEnabled: arg.AckTimeoutEnabled, AckTimeoutFirstIntervalSeconds: arg.AckTimeoutFirstIntervalSeconds,
 		RemindersEnabled: arg.RemindersEnabled, RemindersFirstIntervalSeconds: arg.RemindersFirstIntervalSeconds,
 		RemindersCapSeconds: arg.RemindersCapSeconds, AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now,
-		Version: 1,
+		Version: 1, MessageLabels: arg.MessageLabels,
 	}})
 	s.own(&s.rows[len(s.rows)-1].ListRoutesRow, arg.OwningTeamID)
 	return s.nextID, nil
@@ -331,7 +341,7 @@ func (s *fakeStore) UpdateRoute(_ context.Context, arg dbgen.UpdateRouteParams) 
 			r.AckTimeoutFirstIntervalSeconds, r.RemindersEnabled = arg.AckTimeoutFirstIntervalSeconds, arg.RemindersEnabled
 			r.RemindersFirstIntervalSeconds, r.RemindersCapSeconds = arg.RemindersFirstIntervalSeconds,
 				arg.RemindersCapSeconds
-			r.AutoUnacknowledge = arg.AutoUnacknowledge
+			r.AutoUnacknowledge, r.MessageLabels = arg.AutoUnacknowledge, arg.MessageLabels
 			s.own(&r.ListRoutesRow, arg.OwningTeamID)
 			r.Version++
 		}
@@ -389,6 +399,15 @@ func (s *fakeStore) InsertOpenGroupUpdate(_ context.Context, arg dbgen.InsertOpe
 	}
 	s.updates = append(s.updates, arg)
 	return nil
+}
+
+func (s *fakeStore) ListRouteLabelSuggestions(_ context.Context, arg dbgen.ListRouteLabelSuggestionsParams) (
+	[]dbgen.ListRouteLabelSuggestionsRow, error) {
+	if err := s.call("ListRouteLabelSuggestions"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	s.suggested = append(s.suggested, arg)
+	return s.suggestions[arg.RouteID], nil
 }
 
 func (s *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
@@ -582,7 +601,8 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		TemplateErrorSince: r.TemplateErrorSince, TemplateError: r.TemplateError,
 		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
 		OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName, OwningTeamSlug: r.OwningTeamSlug,
-		OwningTeamDeleted: r.OwningTeamDeleted}
+		OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels, SeverityLabel: r.SeverityLabel,
+		TeamLabel: r.TeamLabel}
 }
 
 func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
@@ -1755,5 +1775,161 @@ func TestOwningTeam(t *testing.T) {
 	store.fail["ListRoutes"] = errBoom
 	if _, err := svc.ListOwned(ctx, OwnerFilter{Team: "TM0000000000PA"}); !errors.Is(err, errBoom) {
 		t.Errorf("failed list = %v", err)
+	}
+}
+
+// TestMessageLabels is C-29.FR-2: "Labels in the message" is computed from the current Group key without alertname
+// and the severity label, then the Team label and namespace, until the Route has a list of its own; an omitted choice
+// or list keeps the stored one, a list of its own needs a list, and names are label names given once. A change of the
+// effective list — of its own, or of the Group key while it is computed — on a Route with open Alert Groups writes a
+// row of route_message_labels; one that leaves the list as it was writes none.
+func TestMessageLabels(t *testing.T) {
+	if got := MessageLabels(nil, []string{"alertname", "system", "team", "severity"}, "severity", "team"); !slices.Equal(
+		got, []string{"system", "team", "namespace"}) {
+		t.Errorf("computed %v", got)
+	}
+	if got := MessageLabels(nil, []string{"namespace", "level"}, "level", "squad"); !slices.Equal(got,
+		[]string{"namespace", "squad"}) {
+		t.Errorf("computed with other labels %v", got)
+	}
+	if got := MessageLabels([]string{}, []string{"system"}, "severity", "team"); got == nil || len(got) != 0 {
+		t.Errorf("an empty list of its own %v", got)
+	}
+	svc, store, c := newService(t)
+	in := input("infra")
+	in.GroupKey = []string{"alertname", "system", "team"}
+	r, err := svc.Create(t.Context(), by, in)
+	if err != nil || r.OwnMessageLabels || !slices.Equal(r.MessageLabels, []string{"system", "team", "namespace"}) {
+		t.Fatalf("created %+v, %v", r, err)
+	}
+	store.open[r.ID] = 1
+	c.Advance(time.Minute)
+	// The Group key changes while the list is computed: the list follows it.
+	in.GroupKey = []string{"alertname", "system", "team", "severity"}
+	if got, err := svc.Update(t.Context(), by, r.PublicID, nil, in); err != nil || len(store.updates) != 0 ||
+		!slices.Equal(got.MessageLabels, []string{"system", "team", "namespace"}) {
+		t.Errorf("severity in the key: %+v, %v, rows %+v", got.MessageLabels, err, store.updates)
+	}
+	in.GroupKey = []string{"alertname", "cluster"}
+	got, err := svc.Update(t.Context(), by, r.PublicID, nil, in)
+	want := dbgen.InsertOpenGroupUpdateParams{OrgID: orgID, Kind: KindMessageLabels,
+		RouteID: pgtype.Int8{Int64: r.ID, Valid: true}, RequestedAt: c.Now().UTC()}
+	if err != nil || !slices.Equal(got.MessageLabels, []string{"cluster", "team", "namespace"}) ||
+		len(store.updates) != 1 || store.updates[0] != want {
+		t.Errorf("a new key: %+v, %v, rows %+v", got.MessageLabels, err, store.updates)
+	}
+	// A list of its own: cluster joins the labels.
+	in.OwnMessageLabels, in.MessageLabels = ptr(true), []string{"system", "team", "namespace", "cluster"}
+	if got, err = svc.Update(t.Context(), by, r.PublicID, nil, in); err != nil || !got.OwnMessageLabels ||
+		!slices.Equal(got.MessageLabels, in.MessageLabels) || len(store.updates) != 2 ||
+		store.updates[1].Kind != KindMessageLabels {
+		t.Errorf("own list: %+v, %v, rows %+v", got, err, store.updates)
+	}
+	// Omitted, the choice and the list are kept, and the Group key no longer changes the list.
+	keep := input("infra")
+	keep.GroupKey = []string{"alertname"}
+	if got, err = svc.Update(t.Context(), by, r.PublicID, nil, keep); err != nil || !got.OwnMessageLabels ||
+		!slices.Equal(got.MessageLabels, []string{"system", "team", "namespace", "cluster"}) || len(store.updates) != 2 {
+		t.Errorf("kept: %+v, %v, rows %+v", got, err, store.updates)
+	}
+	keep.OwnMessageLabels, keep.MessageLabels = ptr(true), []string{}
+	if got, err = svc.Update(t.Context(), by, r.PublicID, nil, keep); err != nil || len(got.MessageLabels) != 0 ||
+		!got.OwnMessageLabels || len(store.updates) != 3 {
+		t.Errorf("an empty list of its own: %+v, %v", got, err)
+	}
+	// Back to the computed list, which ignores a list given beside it.
+	keep.OwnMessageLabels, keep.MessageLabels = ptr(false), []string{"ignored"}
+	if got, err = svc.Update(t.Context(), by, r.PublicID, nil, keep); err != nil || got.OwnMessageLabels ||
+		!slices.Equal(got.MessageLabels, []string{"team", "namespace"}) || len(store.updates) != 4 {
+		t.Errorf("computed again: %+v, %v", got, err)
+	}
+	if got, _ := svc.Get(t.Context(), r.PublicID); got.OwnMessageLabels {
+		t.Errorf("read %+v", got)
+	}
+	// A list of its own needs a list; its names are not empty, each once, and at most 50.
+	required := input("infra")
+	required.OwnMessageLabels = ptr(true)
+	if f := fieldError(t, func() error {
+		_, err := svc.Update(t.Context(), by, r.PublicID, nil, required)
+		return err
+	}()); f.Pointer != "/message_labels" || f.Code != CodeRequired {
+		t.Errorf("own without a list: %+v", f)
+	}
+	if f := fieldError(t, func() error { _, err := svc.Create(t.Context(), by, required); return err }()); f.Code !=
+		CodeRequired {
+		t.Errorf("created own without a list: %+v", f)
+	}
+	for _, tc := range []struct {
+		labels  []string
+		pointer string
+		code    string
+	}{
+		{[]string{"system", ""}, "/message_labels/1", CodeInvalidFormat},
+		{[]string{""}, "/message_labels/0", CodeInvalidFormat},
+		{[]string{"system", "system"}, "/message_labels/1", CodeDuplicate},
+		{slices.Repeat([]string{"x"}, 51), "/message_labels", CodeTooLong},
+	} {
+		bad := input("infra")
+		bad.OwnMessageLabels, bad.MessageLabels = ptr(true), tc.labels
+		if f := fieldError(t, func() error { _, err := svc.Create(t.Context(), by, bad); return err }()); f.Pointer !=
+			tc.pointer || f.Code != tc.code {
+			t.Errorf("%v: %+v", tc.labels, f)
+		}
+	}
+	// A name a Group key takes is taken in a list of its own.
+	odd := input("odd")
+	odd.OwnMessageLabels, odd.MessageLabels = ptr(true), []string{"app-name", "k8s.app"}
+	if r, err := svc.Create(t.Context(), by, odd); err != nil || !slices.Equal(r.MessageLabels, odd.MessageLabels) {
+		t.Errorf("odd names of its own: %+v, %v", r, err)
+	}
+	created := input("own")
+	created.OwnMessageLabels, created.MessageLabels = ptr(true), []string{"cluster"}
+	if r, err := svc.Create(t.Context(), by, created); err != nil || !r.OwnMessageLabels ||
+		!slices.Equal(r.MessageLabels, []string{"cluster"}) {
+		t.Errorf("created with its own list: %+v, %v", r, err)
+	}
+}
+
+// TestMessageLabelsRoundTrip is C-29.FR-2 at the boundary of the API: a Route whose Group key holds a label name
+// outside Prometheus's form, `app-name`, reads with the computed list that holds it, and an update that sends the Route
+// back as it was read — own_message_labels false beside that list — is taken and changes nothing; only a list of its
+// own is checked.
+func TestMessageLabelsRoundTrip(t *testing.T) {
+	svc, store, _ := newService(t)
+	in := input("apps")
+	in.GroupKey = []string{"alertname", "app-name", "k8s.app"}
+	r, err := svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := svc.Get(t.Context(), r.PublicID)
+	if err != nil || !slices.Equal(read.MessageLabels, []string{"app-name", "k8s.app", "team", "namespace"}) {
+		t.Fatalf("read %+v, %v", read.MessageLabels, err)
+	}
+	store.open[r.ID] = 1
+	back := in
+	back.OwnMessageLabels, back.MessageLabels = ptr(read.OwnMessageLabels), read.MessageLabels
+	got, err := svc.Update(t.Context(), by, r.PublicID, &read.Version, back)
+	if err != nil || got.Version != read.Version || got.OwnMessageLabels || len(store.updates) != 0 {
+		t.Errorf("sent back: %+v, %v, rows %+v", got, err, store.updates)
+	}
+}
+
+// TestRenameRerenders is C-29.FR-1: the field Route of every open Root message names the Route, so renaming a Route
+// with open Alert Groups writes a row of route_message_labels, whose run re-renders them; a Route without open Alert
+// Groups writes none.
+func TestRenameRerenders(t *testing.T) {
+	svc, store, _ := newService(t)
+	r, err := svc.Create(t.Context(), by, input("infra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Update(t.Context(), by, r.PublicID, nil, input("quiet")); err != nil || len(store.updates) != 0 {
+		t.Errorf("renamed without open alert groups: %v, rows %+v", err, store.updates)
+	}
+	store.open[r.ID] = 2
+	if _, err := svc.Update(t.Context(), by, r.PublicID, nil, input("Infrastructure")); err != nil ||
+		len(store.updates) != 1 || store.updates[0].Kind != KindMessageLabels || store.updates[0].RouteID.Int64 != r.ID {
+		t.Errorf("renamed: %v, rows %+v", err, store.updates)
 	}
 }

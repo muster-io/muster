@@ -1535,6 +1535,30 @@ func (e MentionSettingEveryone) Valid() bool {
 	}
 }
 
+// Defines values for MessageLayoutStatusKey.
+const (
+	MessageLayoutStatusKeyAcknowledged MessageLayoutStatusKey = "acknowledged"
+	MessageLayoutStatusKeyFiring       MessageLayoutStatusKey = "firing"
+	MessageLayoutStatusKeyResolved     MessageLayoutStatusKey = "resolved"
+	MessageLayoutStatusKeySnoozed      MessageLayoutStatusKey = "snoozed"
+)
+
+// Valid indicates whether the value is a known member of the MessageLayoutStatusKey enum.
+func (e MessageLayoutStatusKey) Valid() bool {
+	switch e {
+	case MessageLayoutStatusKeyAcknowledged:
+		return true
+	case MessageLayoutStatusKeyFiring:
+		return true
+	case MessageLayoutStatusKeyResolved:
+		return true
+	case MessageLayoutStatusKeySnoozed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Messenger.
 const (
 	MessengerBridge     Messenger = "bridge"
@@ -5797,6 +5821,104 @@ type MentionSettings struct {
 	SnoozeEnded MentionSetting `json:"snooze_ended"`
 }
 
+// MessageLayout The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.
+type MessageLayout struct {
+	// Alerts The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.
+	Alerts nullable.Nullable[MessageLayoutAlerts] `json:"alerts"`
+
+	// Assignees The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people.
+	Assignees []MessageLayoutPerson `json:"assignees"`
+
+	// Description The `description` annotation of the first Alert that has one; empty when there is none.
+	Description string `json:"description"`
+
+	// Fields Severity, Route, Teams (left out when the Alert Group has none) and Started.
+	Fields []MessageLayoutField `json:"fields"`
+
+	// Labels The key labels of "Labels in the message"; the value of a label whose values differ among the firing Alerts is "N values" in the Route's language.
+	Labels []MessageLayoutLabel `json:"labels"`
+
+	// Links The links, "Open in Muster" first.
+	Links []MessageLayoutLink `json:"links"`
+
+	// Notices The notices that apply, then the footer as a line.
+	Notices []string `json:"notices"`
+
+	// Number The Alert Group's number alone, without `#`.
+	Number int `json:"number"`
+
+	// Owner Who acknowledged the Alert Group, with their Team; null while the footer names them.
+	Owner  nullable.Nullable[MessageLayoutPerson] `json:"owner"`
+	Status MessageLayoutStatus                    `json:"status"`
+
+	// Summary Empty when there is none.
+	Summary string `json:"summary"`
+
+	// Title The title without the number.
+	Title string `json:"title"`
+}
+
+// MessageLayoutAlertValue defines model for MessageLayoutAlertValue.
+type MessageLayoutAlertValue struct {
+	Resolved bool   `json:"resolved"`
+	Value    string `json:"value"`
+}
+
+// MessageLayoutAlerts defines model for MessageLayoutAlerts.
+type MessageLayoutAlerts struct {
+	// Label The distinguishing label.
+	Label string `json:"label"`
+
+	// Total How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.
+	Total int `json:"total"`
+
+	// Values Up to `message.compact_alerts_listed` values, firing Alerts first.
+	Values []MessageLayoutAlertValue `json:"values"`
+}
+
+// MessageLayoutField defines model for MessageLayoutField.
+type MessageLayoutField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// MessageLayoutLabel defines model for MessageLayoutLabel.
+type MessageLayoutLabel struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// MessageLayoutLink defines model for MessageLayoutLink.
+type MessageLayoutLink struct {
+	Label string `json:"label"`
+	Url   string `json:"url"`
+}
+
+// MessageLayoutPerson defines model for MessageLayoutPerson.
+type MessageLayoutPerson struct {
+	Name string `json:"name"`
+
+	// Ref The `ref` of the person's entry in the envelope's `mentions` where the message carries their Mention, otherwise null.
+	Ref  nullable.Nullable[string] `json:"ref"`
+	Team *MessageLayoutTeam        `json:"team,omitempty"`
+}
+
+// MessageLayoutStatus defines model for MessageLayoutStatus.
+type MessageLayoutStatus struct {
+	Key MessageLayoutStatusKey `json:"key"`
+
+	// Word The status as a word in the Route's language.
+	Word string `json:"word"`
+}
+
+// MessageLayoutStatusKey defines model for MessageLayoutStatus.Key.
+type MessageLayoutStatusKey string
+
+// MessageLayoutTeam defines model for MessageLayoutTeam.
+type MessageLayoutTeam struct {
+	Name string `json:"name"`
+}
+
 // Messenger defines model for Messenger.
 type Messenger string
 
@@ -6855,12 +6977,18 @@ type Route struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MessageLabels The label names of the line of key labels of the Route's Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route's own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization's settings as they are now, and a change of them does not change the Route's ETag; sent back with `own_message_labels` false, it is ignored.
+	MessageLabels []string `json:"message_labels"`
+
 	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
 	MinimumSeverity MinimumSeverity `json:"minimum_severity"`
 
 	// Name Unique in the Organization.
 	Name                string `json:"name"`
 	OpenAlertGroupCount int    `json:"open_alert_group_count"`
+
+	// OwnMessageLabels Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization's settings and ignores `message_labels`; an update that omits it keeps it.
+	OwnMessageLabels bool `json:"own_message_labels"`
 
 	// OwningTeam The Team that owns the Route, null when none does.
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
@@ -6895,11 +7023,17 @@ type RouteInput struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MessageLabels The label names of the line of key labels of the Route's Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route's own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization's settings as they are now, and a change of them does not change the Route's ETag; sent back with `own_message_labels` false, it is ignored.
+	MessageLabels *[]string `json:"message_labels,omitempty"`
+
 	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
 	MinimumSeverity *MinimumSeverity `json:"minimum_severity,omitempty"`
 
 	// Name Unique in the Organization.
 	Name string `json:"name"`
+
+	// OwnMessageLabels Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization's settings and ignores `message_labels`; an update that omits it keeps it.
+	OwnMessageLabels *bool `json:"own_message_labels,omitempty"`
 
 	// OwningTeamId The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -6908,6 +7042,21 @@ type RouteInput struct {
 	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Urgent *bool `json:"urgent,omitempty"`
+}
+
+// RouteLabelSuggestion defines model for RouteLabelSuggestion.
+type RouteLabelSuggestion struct {
+	// AlertGroupCount How many of the Route's recent Alert Groups have an Alert with the label.
+	AlertGroupCount int `json:"alert_group_count"`
+
+	// ExampleValue The most frequent value of the label among the Alerts of those Alert Groups, the smallest of equally frequent ones.
+	ExampleValue string `json:"example_value"`
+	Label        string `json:"label"`
+}
+
+// RouteLabelSuggestionList defines model for RouteLabelSuggestionList.
+type RouteLabelSuggestionList struct {
+	Items []RouteLabelSuggestion `json:"items"`
 }
 
 // RouteList All Routes in evaluation order, the Default route last. The list ETag covers the order.
@@ -8196,6 +8345,15 @@ type TemplatePreviewResult struct {
 
 	// Format The markup of `output`; null for kinds without markup.
 	Format nullable.Nullable[TemplatePreviewResultFormat] `json:"format,omitempty"`
+
+	// Layout For `root_message`, the content of the rendered message as structured data; null when the template failed.
+	Layout nullable.Nullable[MessageLayout] `json:"layout,omitempty"`
+
+	// Length For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.
+	Length *int `json:"length,omitempty"`
+
+	// MessengerLimit For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost, 4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.
+	MessengerLimit nullable.Nullable[int] `json:"messenger_limit,omitempty"`
 
 	// Output Rendered text; null when the template failed.
 	Output nullable.Nullable[string]                      `json:"output,omitempty"`
@@ -12364,6 +12522,9 @@ type ServerInterface interface {
 	// UpdateRoute Update a Route
 	// (PUT /routes/{route_id})
 	UpdateRoute(w http.ResponseWriter, r *http.Request, routeId RouteId, params UpdateRouteParams)
+	// ListRouteLabelSuggestions List the labels to suggest for "Labels in the message"
+	// (GET /routes/{route_id}/label-suggestions)
+	ListRouteLabelSuggestions(w http.ResponseWriter, r *http.Request, routeId RouteId)
 	// MoveOpenAlertGroups Move open Alert Groups to the Default route
 	// (POST /routes/{route_id}/move-open-alert-groups)
 	MoveOpenAlertGroups(w http.ResponseWriter, r *http.Request, routeId RouteId)
@@ -17073,6 +17234,32 @@ func (siw *ServerInterfaceWrapper) UpdateRoute(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListRouteLabelSuggestions operation middleware
+func (siw *ServerInterfaceWrapper) ListRouteLabelSuggestions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "route_id" -------------
+	var routeId RouteId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "route_id", r.PathValue("route_id"), &routeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "route_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRouteLabelSuggestions(w, r, routeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // MoveOpenAlertGroups operation middleware
 func (siw *ServerInterfaceWrapper) MoveOpenAlertGroups(w http.ResponseWriter, r *http.Request) {
 
@@ -19292,6 +19479,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/routes/{route_id}", wrapper.GetRoute)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/routes/{route_id}", wrapper.UpdateRoute)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/route-order", wrapper.ReorderRoutes)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/routes/{route_id}/label-suggestions", wrapper.ListRouteLabelSuggestions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/routes/{route_id}/move-open-alert-groups", wrapper.MoveOpenAlertGroups)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/route-profiles", wrapper.ListRouteProfiles)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/group-key-previews", wrapper.PreviewGroupKey)
@@ -32944,6 +33132,95 @@ func (response UpdateRoute429ApplicationProblemPlusJSONResponse) VisitUpdateRout
 	return err
 }
 
+type ListRouteLabelSuggestionsRequestObject struct {
+	RouteId RouteId `json:"route_id"`
+}
+
+type ListRouteLabelSuggestionsResponseObject interface {
+	VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error
+}
+
+type ListRouteLabelSuggestions200JSONResponse RouteLabelSuggestionList
+
+func (response ListRouteLabelSuggestions200JSONResponse) VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRouteLabelSuggestions401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListRouteLabelSuggestions401ApplicationProblemPlusJSONResponse) VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRouteLabelSuggestions403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListRouteLabelSuggestions403ApplicationProblemPlusJSONResponse) VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRouteLabelSuggestions404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListRouteLabelSuggestions404ApplicationProblemPlusJSONResponse) VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRouteLabelSuggestions429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListRouteLabelSuggestions429ApplicationProblemPlusJSONResponse) VisitListRouteLabelSuggestionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type MoveOpenAlertGroupsRequestObject struct {
 	RouteId RouteId `json:"route_id"`
 }
@@ -39258,6 +39535,9 @@ type StrictServerInterface interface {
 	// UpdateRoute Update a Route
 	// (PUT /routes/{route_id})
 	UpdateRoute(ctx context.Context, request UpdateRouteRequestObject) (UpdateRouteResponseObject, error)
+	// ListRouteLabelSuggestions List the labels to suggest for "Labels in the message"
+	// (GET /routes/{route_id}/label-suggestions)
+	ListRouteLabelSuggestions(ctx context.Context, request ListRouteLabelSuggestionsRequestObject) (ListRouteLabelSuggestionsResponseObject, error)
 	// MoveOpenAlertGroups Move open Alert Groups to the Default route
 	// (POST /routes/{route_id}/move-open-alert-groups)
 	MoveOpenAlertGroups(ctx context.Context, request MoveOpenAlertGroupsRequestObject) (MoveOpenAlertGroupsResponseObject, error)
@@ -43039,6 +43319,32 @@ func (sh *strictHandler) UpdateRoute(w http.ResponseWriter, r *http.Request, rou
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateRouteResponseObject); ok {
 		if err := validResponse.VisitUpdateRouteResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRouteLabelSuggestions operation middleware
+func (sh *strictHandler) ListRouteLabelSuggestions(w http.ResponseWriter, r *http.Request, routeId RouteId) {
+	var request ListRouteLabelSuggestionsRequestObject
+
+	request.RouteId = routeId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRouteLabelSuggestions(ctx, request.(ListRouteLabelSuggestionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRouteLabelSuggestions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRouteLabelSuggestionsResponseObject); ok {
+		if err := validResponse.VisitListRouteLabelSuggestionsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

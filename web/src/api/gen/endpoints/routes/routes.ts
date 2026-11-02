@@ -34,6 +34,7 @@ import type {
   PreconditionRequiredResponse,
   Route,
   RouteInput,
+  RouteLabelSuggestionList,
   RouteList,
   RouteOrder,
   RouteProfileList,
@@ -613,7 +614,108 @@ export const useReorderRoutes = <TError = BadRequestResponse | UnauthorizedRespo
       > => {
       return useMutation(getReorderRoutesMutationOptions(options), queryClient);
     }
-    export const getMoveOpenAlertGroupsUrl = (routeId: string,) => {
+    export const getListRouteLabelSuggestionsUrl = (routeId: string,) => {
+
+
+
+
+  return `/api/v1/routes/${routeId}/label-suggestions`
+}
+
+/**
+ * The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+ * @summary List the labels to suggest for "Labels in the message"
+ */
+export const listRouteLabelSuggestions = async (routeId: string, options?: Parameters<typeof apiFetch>[1]): Promise<RouteLabelSuggestionList> => {
+
+  return apiFetch<RouteLabelSuggestionList>(getListRouteLabelSuggestionsUrl(routeId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRouteLabelSuggestionsQueryKey = (routeId: string,) => {
+    return [
+    `/api/v1/routes/${routeId}/label-suggestions`
+    ] as const;
+    }
+
+
+export const getListRouteLabelSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRouteLabelSuggestionsQueryKey(routeId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRouteLabelSuggestions>>> = ({ signal }) => listRouteLabelSuggestions(routeId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: routeId !== null && routeId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListRouteLabelSuggestionsQueryResult = NonNullable<Awaited<ReturnType<typeof listRouteLabelSuggestions>>>
+export type ListRouteLabelSuggestionsQueryError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse
+
+
+export function useListRouteLabelSuggestions<TData = Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ routeId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRouteLabelSuggestions>>,
+          TError,
+          Awaited<ReturnType<typeof listRouteLabelSuggestions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRouteLabelSuggestions<TData = Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRouteLabelSuggestions>>,
+          TError,
+          Awaited<ReturnType<typeof listRouteLabelSuggestions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRouteLabelSuggestions<TData = Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the labels to suggest for "Labels in the message"
+ */
+
+export function useListRouteLabelSuggestions<TData = Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse>(
+ routeId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRouteLabelSuggestions>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListRouteLabelSuggestionsQueryOptions(routeId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getMoveOpenAlertGroupsUrl = (routeId: string,) => {
 
 
 

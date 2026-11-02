@@ -441,7 +441,7 @@ func TestButtonSets(t *testing.T) {
 }
 
 // TestQuietConfigurationRerender is ADR-0018 for the re-render without lifecycle events: a change of configuration —
-// a changed button set, or a rise that the Route's Minimum severity made — that revives a Not delivered Publication
+// a changed button set, changed Labels in the message, or a rise that the Route's Minimum severity made — that revives a Not delivered Publication
 // which was never published publishes it Quietly, while an Alert that revives it keeps its Loud Publication; and an
 // Urgent Alert Group that a Storm holds is released Quietly by a re-render without events.
 func TestQuietConfigurationRerender(t *testing.T) {
@@ -470,6 +470,13 @@ func TestQuietConfigurationRerender(t *testing.T) {
 			g.Urgent = true
 			e.enqueue(t, g, groups.System, groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised,
 				Variant: groups.VariantRemovesNone, Loudness: groups.Quiet, Reason: groups.ReasonMinimumSeverity})
+		}, groups.Quiet},
+		{"changed Labels in the message", func(e *env) {
+			// The re-render of route_message_labels: no lifecycle event, a change of configuration (C-29.FR-2).
+			if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring,
+				"disk full, cluster prod"), Actor: groups.System, Configuration: true}); err != nil {
+				t.Fatal(err)
+			}
 		}, groups.Quiet},
 		{"new Alerts", func(e *env) {
 			e.enqueue(t, e.group(groups.StatusFiring, "disk full again"), groups.System, groups.Recorded{Seq: 2,

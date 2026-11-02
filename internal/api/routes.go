@@ -294,6 +294,22 @@ func (s *Server) DismissRouteSuggestion(ctx context.Context, req gen.DismissRout
 	return gen.DismissRouteSuggestion204Response{}, nil
 }
 
+// ListRouteLabelSuggestions is listRouteLabelSuggestions: the labels of the Route's recent Alert Groups to suggest for
+// "Labels in the message", each with an example value (C-29.FR-2).
+func (s *Server) ListRouteLabelSuggestions(ctx context.Context, req gen.ListRouteLabelSuggestionsRequestObject) (
+	gen.ListRouteLabelSuggestionsResponseObject, error) {
+	items, err := s.routes.LabelSuggestions(ctx, req.RouteId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.RouteLabelSuggestionList{Items: make([]gen.RouteLabelSuggestion, 0, len(items))}
+	for _, it := range items {
+		out.Items = append(out.Items, gen.RouteLabelSuggestion{Label: it.Label, ExampleValue: it.ExampleValue,
+			AlertGroupCount: int(it.AlertGroupCount)})
+	}
+	return gen.ListRouteLabelSuggestions200JSONResponse(out), nil
+}
+
 // routeInputFor is the API form of a Route to create, with its Minimum severity and the urgent mark that follows it.
 func routeInputFor(in routing.Input) gen.RouteInput {
 	description := ""
@@ -308,7 +324,10 @@ func routeInputFor(in routing.Input) gen.RouteInput {
 	out := gen.RouteInput{Name: in.Name, Description: &description, MinimumSeverity: &minimum, Urgent: &urgent,
 		GroupKey:       in.GroupKey,
 		DestinationIds: in.DestinationIDs, Matchers: make([]gen.Matcher, 0, len(in.Matchers)),
-		Policy: routePolicyOf(in.Policy)}
+		Policy: routePolicyOf(in.Policy), OwnMessageLabels: in.OwnMessageLabels}
+	if in.MessageLabels != nil {
+		out.MessageLabels = &in.MessageLabels
+	}
 	if out.DestinationIds == nil {
 		out.DestinationIds = []gen.PublicId{}
 	}
@@ -340,7 +359,10 @@ func routeOf(rt routing.Route) gen.Route {
 		GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
-		Etag: &tag,
+		Etag: &tag, OwnMessageLabels: rt.OwnMessageLabels, MessageLabels: rt.MessageLabels,
+	}
+	if out.MessageLabels == nil {
+		out.MessageLabels = []string{}
 	}
 	if o := rt.OwningTeam; o != nil {
 		out.OwningTeam = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true)
@@ -390,7 +412,10 @@ func routeInputOf(in gen.RouteInput) routing.Input {
 		GroupKey:       in.GroupKey,
 		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy), OwningTeamID: owningTeamOf(in.OwningTeamId),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
-			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}}
+			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}, OwnMessageLabels: in.OwnMessageLabels}
+	if in.MessageLabels != nil {
+		out.MessageLabels = append([]string{}, *in.MessageLabels...)
+	}
 	if in.MinimumSeverity != nil {
 		out.MinimumSeverity = new(string(*in.MinimumSeverity))
 	}

@@ -96,12 +96,16 @@ func TestTesterSendsOneMessage(t *testing.T) {
 	for _, b := range atts[0].Blocks {
 		types = append(types, b.Type)
 	}
-	if !slices.Equal(types, []string{"section", "section", "context", "actions"}) {
+	// The compact layout of a firing Root message: the heading, the fields, the body, the key labels, the Alerts, the
+	// links, the context and the buttons (C-29.FR-4).
+	if !slices.Equal(types, []string{"section", "section", "section", "context", "section", "section", "context",
+		"actions"}) {
 		t.Errorf("attachment blocks %v", types)
 	}
 	sent := e.sentBody(t, "chat.postMessage")
 	var values []string
-	for _, el := range sent["attachments"].([]any)[0].(map[string]any)["blocks"].([]any)[3].(map[string]any)["elements"].([]any) {
+	blocks := sent["attachments"].([]any)[0].(map[string]any)["blocks"].([]any)
+	for _, el := range blocks[len(blocks)-1].(map[string]any)["elements"].([]any) {
 		switch x := el.(map[string]any); x["type"] {
 		case "button":
 			values = append(values, x["value"].(string))

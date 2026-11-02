@@ -386,7 +386,8 @@ func (f *fakeDB) InsertGroup(_ context.Context, arg dbgen.InsertGroupParams) (in
 	id := f.id()
 	f.groups[id] = &dbgen.LockGroupsRow{ID: id, PublicID: arg.PublicID, Number: arg.Number, RouteID: arg.RouteID,
 		GroupKeyLabels: arg.GroupKeyLabels, GroupKeyValues: arg.GroupKeyValues, GroupKeySha256: arg.GroupKeySha256,
-		Title: arg.Title, TitleFromGroupKey: arg.TitleFromGroupKey, Summary: arg.Summary, CommonLabels: arg.CommonLabels,
+		Title: arg.Title, TitleFromGroupKey: arg.TitleFromGroupKey, Summary: arg.Summary, Description: arg.Description,
+		CommonLabels:      arg.CommonLabels,
 		CommonAnnotations: arg.CommonAnnotations, IntegrationIds: arg.IntegrationIds, Status: "firing",
 		SeverityLevel: arg.SeverityLevel, Urgent: arg.Urgent, FiringAgainAfterID: arg.FiringAgainAfterID,
 		CreatedAt: arg.CreatedAt, LastChangedAt: arg.CreatedAt}
@@ -405,6 +406,7 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 	g := f.groups[a.ID]
 	g.RouteID, g.MovedFromRouteID, g.Title, g.TitleFromGroupKey, g.Summary = a.RouteID, a.MovedFromRouteID, a.Title,
 		a.TitleFromGroupKey, a.Summary
+	g.Description = a.Description
 	g.CommonLabels, g.CommonAnnotations, g.IntegrationIds, g.Status = a.CommonLabels, a.CommonAnnotations,
 		a.IntegrationIds, a.Status
 	g.SeverityLevel, g.Urgent, g.OwnerUserID, g.AcknowledgedAt = a.SeverityLevel, a.Urgent, a.OwnerUserID,

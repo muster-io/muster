@@ -24,6 +24,7 @@ import (
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/templates"
 )
 
@@ -83,6 +84,7 @@ type Renderer struct {
 // queries are the queries of the package and the Internal alerts it raises and resolves.
 type queries interface {
 	GetRenderGroup(ctx context.Context, arg dbgen.GetRenderGroupParams) (dbgen.GetRenderGroupRow, error)
+	ListRenderTeams(ctx context.Context, arg dbgen.ListRenderTeamsParams) ([]string, error)
 	GetGroupIDByPublicID(ctx context.Context, arg dbgen.GetGroupIDByPublicIDParams) (int64, error)
 	ListRenderAlerts(ctx context.Context, arg dbgen.ListRenderAlertsParams) ([]dbgen.ListRenderAlertsRow, error)
 	ListAlertsByFingerprint(ctx context.Context, arg dbgen.ListAlertsByFingerprintParams) (
@@ -136,7 +138,10 @@ const ReadAlerts = 1000
 
 // Source is an Alert Group as its messages show it, read through the transaction of the change, with the
 // Organization's time zone, start of the working day (organization.workday_start, HH:MM) and first day of the week
-// (organization.week_start, monday to sunday), which the labels of the Snooze presets name (C-10.FR-18). Buttons is the
+// (organization.week_start, monday to sunday), which the labels of the Snooze presets name (C-10.FR-18), and its
+// Instance labels, which name the Alerts first (C-29.FR-3). Teams are the names of the Alert Group's Teams in the
+// order they joined (C-25.FR-6), and Description the description annotation of its first Alert that has one, set
+// once like the summary (C-29.FR-1); an Alert Group created before 0.2.0 has none. Buttons is the
 // button set of the Destination a test message or a preview is for, which TestRoot applies (C-16.FR-4); nil shows
 // every button. Delivery applies each Destination's set to the Root messages it stores (ShownButtons).
 type Source struct {
@@ -145,6 +150,7 @@ type Source struct {
 	Number            int64
 	Title             string
 	Summary           string
+	Description       string
 	Status            string
 	SeverityLevel     string
 	Urgent            bool
@@ -164,6 +170,8 @@ type Source struct {
 	TimeZone          string
 	WorkdayStart      string
 	WeekStart         string
+	InstanceLabels    []string
+	Teams             []string
 	Owner             string
 	SnoozedBy         string
 	ResolvedBy        string
@@ -176,8 +184,9 @@ type Source struct {
 	Buttons     *buttons.Set
 }
 
-// RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — and the
-// template its error state is about, empty when there is none.
+// RouteRef is the Route of an Alert Group as its messages use it: its templates — nil for the built-in one — the
+// template its error state is about, empty when there is none, and its effective "Labels in the message"
+// (C-29.FR-2).
 type RouteRef struct {
 	ID              int64
 	PublicID        string
@@ -189,6 +198,7 @@ type RouteRef struct {
 	// AckTimeoutNotice is the Route's ack_timeout_notice template, nil for the built-in one.
 	AckTimeoutNotice *string
 	ErrorTemplate    string
+	MessageLabels    []string
 }
 
 // SourceAlert is one Alert of an Alert Group.
@@ -222,6 +232,11 @@ func (r *Renderer) Load(ctx context.Context, db DBTX, groupID int64) (*Source, e
 			sa.EndsAt = &t
 		}
 		src.Alerts = append(src.Alerts, sa)
+	}
+	q := r.q(db)
+	if src.Teams, err = q.ListRenderTeams(ctx, dbgen.ListRenderTeamsParams{OrgID: r.orgID,
+		AlertGroupID: groupID}); err != nil {
+		return nil, fmt.Errorf("read the teams of alert group #%d: %w", src.Number, err)
 	}
 	if err := r.withLinks(ctx, db, src); err != nil {
 		return nil, err
@@ -259,17 +274,19 @@ func (r *Renderer) loadGroup(ctx context.Context, db DBTX, groupID int64) (*Sour
 		return nil, fmt.Errorf("read alert group %d for its message: %w", groupID, err)
 	}
 	src := &Source{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title, Summary: g.Summary.String,
-		Status: g.Status, SeverityLevel: g.SeverityLevel, Urgent: g.Urgent, KeyLabels: g.GroupKeyLabels,
+		Description: g.Description.String,
+		Status:      g.Status, SeverityLevel: g.SeverityLevel, Urgent: g.Urgent, KeyLabels: g.GroupKeyLabels,
 		KeyValues: jsonMap(g.GroupKeyValues), CommonLabels: jsonMap(g.CommonLabels),
 		CommonAnnotations: jsonMap(g.CommonAnnotations), FiringCount: g.FiringAlertCount, ReopenCount: g.ReopenCount,
 		ResolvedByKind: g.ResolvedByKind.String, ResolveReason: g.ResolveReason.String,
 		SnoozeUntil: timeOf(g.SnoozeUntil), SnoozeNoEnd: g.SnoozeNoEnd, Unclaimed: g.Unclaimed,
 		StartedAt: g.CreatedAt.UTC(), TimeZone: g.TimeZone, WorkdayStart: g.WorkdayStart, WeekStart: g.WeekStart,
-		Owner: g.OwnerName, SnoozedBy: g.SnoozedByName, ResolvedBy: g.ResolvedByName,
+		InstanceLabels: g.InstanceLabels, Owner: g.OwnerName, SnoozedBy: g.SnoozedByName, ResolvedBy: g.ResolvedByName,
 		Route: RouteRef{ID: g.RouteID, PublicID: g.RoutePublicID, Name: g.RouteName, Language: g.Language,
 			SnoozeDurations: g.SnoozeDurationsSeconds, RootMessage: textOf(g.TemplateRootMessage),
 			Line: textOf(g.TemplateLine), AckTimeoutNotice: textOf(g.TemplateAckTimeoutNotice),
-			ErrorTemplate: g.TemplateErrorTemplate.String}}
+			ErrorTemplate: g.TemplateErrorTemplate.String,
+			MessageLabels: routing.MessageLabels(g.MessageLabels, g.RouteGroupKey, g.SeverityLabel, g.TeamLabel)}}
 	return src, nil
 }
 
@@ -314,9 +331,9 @@ type Rendered struct {
 	Rendered []string
 }
 
-// Root renders the Root message of src for a markup (C-12.FR-1, FR-2, FR-6): Muster's colour, heading, links,
-// notices, footer and buttons around the body of the Route's root_message template or the default content with the
-// Route's line template; when a Route template fails, the Fallback template. In CommonMark and mrkdwn it also carries
+// Root renders the Root message of src for a markup (C-29.FR-1, FR-5, C-12.FR-6): Muster's colour, heading with the
+// status word, fields, links, notices, footer and buttons around the body of the Route's root_message template or the
+// compact default content with the Route's line template; when a Route template fails, the Fallback template. In CommonMark and mrkdwn it also carries
 // the Route's Snooze durations, for a bridge's commands line and Slack's Snooze menu.
 func (r *Renderer) Root(src *Source, markup Markup) Rendered {
 	return r.root(src, markup, true)
@@ -344,15 +361,12 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 		out.Message = m
 		return out
 	}
-	r.defaultBody(&m, src, lang)
-	list, fail := r.alertList(src, lang, markup)
-	if fail != nil {
+	if fail := r.compactBody(&m, src, markup); fail != nil {
 		out.Failure = fail
 		out.Message = r.fallback(m, src, lang)
 		return out
 	}
-	m.Alerts = list
-	if src.Route.Line != nil && len(list.Lines) > 0 {
+	if src.Route.Line != nil && m.AlertsLine != nil && len(m.AlertsLine.Lines) > 0 {
 		out.Rendered = append(out.Rendered, TemplateLine)
 	}
 	out.Message = m

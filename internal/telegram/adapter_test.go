@@ -86,13 +86,16 @@ func root(status string) messages.Message {
 // rootOf is root on a Route with the given number of Snooze durations, at most three.
 func rootOf(status string, durations int) messages.Message {
 	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
-		Heading:      &messages.Heading{Number: 7, Title: "CertExpiry", URL: groupPage},
-		Environment:  "prod · started 2026-10-09 12:00 UTC",
-		GroupLabels:  []messages.Label{{Name: "alertname", Value: "CertExpiry"}},
-		CommonLabels: []messages.Label{{Name: "note", Value: messages.Value("@channel <b>x</b>")}},
-		Summary:      "Certificates expire",
-		Alerts: &messages.AlertList{Lines: []messages.AlertLine{{Text: "a.example.org"},
-			{Text: "b.example.org", Resolved: true}}},
+		Heading:    &messages.Heading{Number: 7, Title: "CertExpiry", URL: groupPage},
+		StatusWord: messages.T("en", "status."+status, nil),
+		Fields: []messages.Label{{Name: "Severity", Value: "warning"}, {Name: "Route", Value: "<Infra>"},
+			{Name: "Teams", Value: "payments"}, {Name: "Started", Value: "2026-10-09 12:00 UTC"}},
+		Summary:     "Certificates expire",
+		Description: "The certificates of <prod> expire in 3 days.",
+		KeyLabels: []messages.KeyLabel{{Name: "system", Value: "tls"},
+			{Name: "note", Value: messages.Value("@channel <b>x</b>")}},
+		AlertsLine: &messages.AlertsLine{Label: "domain", Values: []messages.AlertValue{{Value: "a.example.org"},
+			{Value: "b.example.org", Resolved: true}}, Total: 2},
 		Links:  []messages.Link{{Text: "Open in Muster", URL: groupPage}},
 		Footer: "Acknowledged by bob", Footers: map[string]string{"telegram": "Acknowledged by @bob_tg"}}
 	labels := map[string]string{buttons.CommandAcknowledge: "Ack", buttons.CommandUnacknowledge: "Unack",
@@ -146,9 +149,10 @@ func only(t *testing.T, f *faketelegram.Fake) faketelegram.Message {
 	return msgs[0]
 }
 
-// TestPublishRootMessage is C-14.AC-17, C-14.FR-16, C-12.FR-1 and C-14.AC-8: a channel post in HTML with its label
-// sections in an expandable blockquote, its Alerts as list lines, no table, alert data escaped and neutralized, the
-// keyboard of its status, and a Loud post without disable_notification.
+// TestPublishRootMessage is C-14.FR-16, C-29.FR-4, C-29.AC-1, C-14.AC-17 and C-14.AC-8: a channel post in HTML — the
+// heading with the status emoji beside the word, the fields as lines "{name}: {value}", the summary, the description,
+// the key labels and the Alerts line, then the footer and the links — with no blockquote and no table, alert data
+// escaped and neutralized, the keyboard of its status, and a Loud post without disable_notification.
 func TestPublishRootMessage(t *testing.T) {
 	e := newAdapter(t)
 	o := e.adapter.Publish(t.Context(), loud(), root(messages.ColourFiring))
@@ -156,16 +160,17 @@ func TestPublishRootMessage(t *testing.T) {
 		t.Fatalf("publish = %+v", o)
 	}
 	m := only(t, e.fake)
-	want := "🔴 <b><a href=\"" + groupPage + "\">#7 CertExpiry</a></b>\n" +
-		"prod · started 2026-10-09 12:00 UTC\n" +
-		"<blockquote expandable>alertname: CertExpiry\nnote: @\u200bchannel &lt;b&gt;x&lt;/b&gt;</blockquote>\n" +
-		"<i>Certificates expire</i>\n" +
-		"• a.example.org\n" +
-		"• <s>b.example.org</s>\n" +
-		"<a href=\"" + groupPage + "\">Open in Muster</a>\n" +
-		"Acknowledged by @bob_tg"
+	want := "<b><a href=\"" + groupPage + "\">#7 CertExpiry</a></b> — 🔴 Firing\n" +
+		"Severity: warning\nRoute: &lt;Infra&gt;\nTeams: payments\nStarted: 2026-10-09 12:00 UTC\n" +
+		"Certificates expire\n" +
+		"The certificates of &lt;prod&gt; expire in 3 days.\n" +
+		"system=tls · note=@\u200bchannel &lt;b&gt;x&lt;/b&gt;\n" +
+		"domain: a.example.org, <s>b.example.org</s>\n" +
+		"Acknowledged by @bob_tg\n" +
+		"<a href=\"" + groupPage + "\">Open in Muster</a>"
 	if m.ParseMode != "HTML" || m.Text != want || m.DisableNotification || m.ReplyParameters != nil ||
-		strings.Contains(m.Text, "<table") || strings.Contains(m.Text, "<pre>") {
+		strings.Contains(m.Text, "<table") || strings.Contains(m.Text, "<pre>") ||
+		strings.Contains(m.Text, "<blockquote") {
 		t.Fatalf("post = %+v\n%s", m, m.Text)
 	}
 	if got := fmt.Sprint(keyboardOf(t, m.ReplyMarkup)); got != "[[Ack Resolve] [Snooze 1 h Snooze 4 h Snooze 24 h] "+
@@ -337,6 +342,7 @@ func TestFooterMention(t *testing.T) {
 	o := e.adapter.Publish(t.Context(), call(1), root(messages.ColourFiring))
 	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
 	link := `<a href="tg://user?id=42">Bob &lt;B&gt;</a>`
+	muster := `<a href="` + groupPage + `">Open in Muster</a>`
 	for _, sentence := range []string{"Acknowledged by %s", "Snoozed by %s with no end", "Resolved by %s"} {
 		m := root(messages.ColourAcknowledged)
 		m.Footer = fmt.Sprintf(sentence, messages.Value("Bob <B>"))
@@ -345,13 +351,14 @@ func TestFooterMention(t *testing.T) {
 		if u := e.adapter.Update(t.Context(), call(1), o.MessageID, m); u.Kind != delivery.OutcomeOK {
 			t.Fatalf("update = %+v", u)
 		}
-		if got := only(t, e.fake).Text; !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)) {
+		if got := only(t, e.fake).Text; !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)+"\n"+muster) {
 			t.Errorf("edited footer:\n%s", got)
 		}
 		huge := m
 		huge.Heading = &messages.Heading{Number: 7, Title: strings.Repeat("Ü", 5000), URL: groupPage}
 		if got := fit(huge, writer{}, "", LengthLimit); length(got) > LengthLimit ||
-			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)) {
+			!strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, link)+"\n"+muster) || !strings.Contains(got,
+			"\nSeverity: warning\nRoute: &lt;Infra&gt;\nTeams: payments\n") {
 			t.Errorf("shortened footer: %q", got[max(len(got)-200, 0):])
 		}
 		// About 2 KB of links and a long Mentions line leave only the heading, the links and the footer: wherever the
@@ -367,41 +374,45 @@ func TestFooterMention(t *testing.T) {
 			strings.HasSuffix(got, fmt.Sprintf(strings.TrimSuffix(sentence, " with no end"), "")) {
 			t.Errorf("a crowded message: %q", got[max(len(got)-200, 0):])
 		}
-		if got := (writer{plain: true}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob <B>")) {
+		if got := (writer{plain: true}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob <B>")+
+			"\nOpen in Muster "+groupPage) {
 			t.Errorf("plain footer:\n%s", got)
 		}
 		m.FooterUsers["telegram"] = messages.FooterUser{Name: "Bob <B>", ExternalID: "u-42"}
-		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")) {
+		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")+
+			"\n"+muster) {
 			t.Errorf("footer without a Telegram user id:\n%s", got)
 		}
 		delete(m.Footers, "telegram")
-		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")) {
+		if got := (writer{}).text(m, ""); !strings.HasSuffix(got, "\n"+fmt.Sprintf(sentence, "Bob &lt;B&gt;")+
+			"\n"+muster) {
 			t.Errorf("footer without a link:\n%s", got)
 		}
 	}
 }
 
-// TestLongMessagesFit is C-14.AC-8 and C-12.FR-11: 25 Alerts fit in 4,096 characters with their title, status, footer,
-// buttons and the link to Muster; a message far too long is shortened and still accepted.
+// TestLongMessagesFit is C-29.FR-6, C-14.AC-8 and C-12.FR-11: a long description and summary are cut, the description
+// first, so that the message fits in 4,096 UTF-16 code units with its title, status, fields, footer, buttons and the
+// link to Muster; a message far too long, of the Fallback template too, is shortened and still accepted.
 func TestLongMessagesFit(t *testing.T) {
 	e := newAdapter(t)
 	m := root(messages.ColourFiring)
-	m.Alerts = &messages.AlertList{}
-	for i := range 25 {
-		m.Alerts.Lines = append(m.Alerts.Lines, messages.AlertLine{
-			Text: fmt.Sprintf("alertname=CertExpiry domain=host-%02d.example.org", i)})
-	}
+	m.Description, m.Summary = strings.Repeat("d", 3000), strings.Repeat("s", 1000)
+	m.AlertsLine.Total = 12
 	if o := e.adapter.Publish(t.Context(), call(1), m); o.Kind != delivery.OutcomeOK {
 		t.Fatal(o)
 	}
 	text := only(t, e.fake).Text
-	if length(text) > LengthLimit || strings.Count(text, "• ") != 25 || !strings.Contains(text, "#7 CertExpiry") ||
-		!strings.Contains(text, "🔴") || !strings.Contains(text, "Open in Muster") ||
-		!strings.HasSuffix(text, "Acknowledged by @bob_tg") {
-		t.Fatalf("25 alerts = %d\n%s", length(text), text)
+	if length(text) > LengthLimit || strings.Contains(text, "ddd") || !strings.Contains(text, "\n"+m.Summary+"\n") ||
+		!strings.Contains(text, "domain: a.example.org, <s>b.example.org</s> …and 10 more\n") ||
+		!strings.Contains(text, "#7 CertExpiry</a></b> — 🔴 Firing\nSeverity: warning\n") ||
+		!strings.HasSuffix(text, "Acknowledged by @bob_tg\n<a href=\""+groupPage+"\">Open in Muster</a>") {
+		t.Fatalf("a long description = %d\n%s", length(text), text)
 	}
 	huge := root(messages.ColourFiring)
 	huge.Heading.Title = strings.Repeat("Ü", 5000)
+	huge.Description, huge.Summary = strings.Repeat("🔥", 3000), strings.Repeat("<&>", 1000)
+	huge.Alerts = &messages.AlertList{}
 	for i := range 300 {
 		huge.CommonAnnotations = append(huge.CommonAnnotations, messages.Label{Name: fmt.Sprint("a", i),
 			Value: strings.Repeat("<&>", 50)})
@@ -621,7 +632,7 @@ func TestMarkupRejectedIsSentPlain(t *testing.T) {
 	}
 	m := only(t, e.fake)
 	if m.ParseMode != "" || strings.Contains(m.Text, "<blockquote") || strings.Contains(m.Text, "<i>") ||
-		!strings.Contains(m.Text, "#7 CertExpiry "+groupPage) || !strings.Contains(m.Text, "note: @\u200bchannel <b>x</b>") ||
+		!strings.Contains(m.Text, "#7 CertExpiry "+groupPage) || !strings.Contains(m.Text, "note=@\u200bchannel <b>x</b>") ||
 		m.ReplyMarkup == nil {
 		t.Fatalf("plain = %+v\n%s", m, m.Text)
 	}

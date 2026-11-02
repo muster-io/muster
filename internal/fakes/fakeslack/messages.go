@@ -42,10 +42,13 @@ const (
 	shortcodeBytes = 12
 )
 
-// The limits of Block Kit the fake checks (F-074, F-076), in code points.
+// The limits of Block Kit the fake checks (F-074, F-076), in code points; those of a section's fields are Block Kit's
+// documented ones.
 const (
 	maxBlocks         = 50
 	maxSectionText    = 3000
+	maxSectionFields  = 10
+	maxFieldText      = 2000
 	maxHeaderText     = 150
 	maxContextItems   = 10
 	maxActionItems    = 25
@@ -447,6 +450,9 @@ func (v *validator) block(b map[string]any, p string) {
 		case !fields:
 			v.fail(p, "must provide either text or fields")
 		}
+		if fields {
+			v.fields(b["fields"], p+"/fields")
+		}
 	case "header":
 		text, _ := textOf(b["text"])
 		if text == "" {
@@ -460,6 +466,22 @@ func (v *validator) block(b map[string]any, p string) {
 		}
 	case "actions":
 		v.actions(b, p)
+	}
+}
+
+// fields checks the fields of a section, as Block Kit limits them: 1 to 10 text objects of at most 2,000 characters.
+func (v *validator) fields(raw any, p string) {
+	fields, _ := raw.([]any)
+	if len(fields) == 0 || len(fields) > maxSectionFields {
+		v.fail(p, "must have between 1 and 10 items")
+	}
+	for i, f := range fields {
+		text, ok := textOf(f)
+		if !ok || text == "" {
+			v.fail(fmt.Sprintf("%s/%d/text", p, i), "must be more than 0 characters")
+			continue
+		}
+		v.within(text, fmt.Sprintf("%s/%d/text", p, i), maxFieldText)
 	}
 }
 

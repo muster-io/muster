@@ -17,29 +17,28 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// The default Root message (C-12.FR-1): its exclusions and the limits of its Alerts section.
+// The default Root message (C-29.FR-1): the limits of its Alerts and the labels a new-Alert Thread reply leaves out.
 
-// AlertsListed is message.alerts_listed: one line per Alert up to it; above it, the distinct values of each differing
-// label, at most AlertsListed per label.
+// AlertsListed is message.alerts_listed: the distinct values of each label that differs between the Alerts that the
+// Fallback template keeps for shortening, at most AlertsListed per label, and the Alerts a preview of a line template
+// reads.
 const AlertsListed = 10
 
-// excludedLabels are left out of the common labels and the Alert lines (C-12.FR-1 items 5 and 8), with the group
-// labels.
+// CompactAlertsListed is message.compact_alerts_listed (P-83): the values of the distinguishing label a Root message
+// lists before "…and K more" (C-29.FR-3).
+const CompactAlertsListed = 5
+
+// excludedLabels are left out of the lines of a new-Alert Thread reply (C-12.FR-1 of L1).
 var excludedLabels = []string{"severity", "environment", "prometheus", "alertname"}
 
-// excludedAnnotation reports whether a common annotation is left out (item 6): the summary, which item 7 shows, the
-// description and the runbook links.
-func excludedAnnotation(name string) bool {
-	return name == "summary" || name == "description" || strings.HasPrefix(name, "runbook")
-}
-
-// frame is what Muster always shows around the body (C-12.FR-2): the colour of the status, the heading linked to the
-// Alert Group page, the link to Muster, the notices that apply, the footer and the buttons of the status, with the id
-// of the key that signed them.
+// frame is what Muster always shows around the body (C-12.FR-2, C-29.FR-5): the colour of the status, the heading
+// linked to the Alert Group page with the status as a word, the fields, the links starting with "Open in Muster", the
+// notices that apply, the footer and the buttons of the status, with the id of the key that signed them.
 func (r *Renderer) frame(src *Source, lang string, sign bool) (Message, string) {
 	url := r.GroupURL(src.PublicID)
 	m := Message{Kind: KindRoot, Language: lang, TimeZone: src.TimeZone, Colour: src.Status,
-		Heading: &Heading{Number: src.Number, Title: Value(src.Title), URL: url},
+		Heading:    &Heading{Number: src.Number, Title: Value(src.Title), URL: url},
+		StatusWord: T(lang, "status."+src.Status, nil), Fields: fields(src, lang),
 		Links:   append([]Link{{Text: T(lang, "link.open", nil), URL: url}}, linksOf(src.Links, lang)...),
 		Notices: notices(src, lang), Footer: footer(src, lang, Value), Buttons: []Button{}}
 	token := func(string) string { return templates.MentionToken(templates.Token{Name: FooterUserToken}) }
@@ -112,7 +111,7 @@ func PresetLabel(lang string, argument int, workdayStart, weekStart string) stri
 	return ""
 }
 
-// notices are the notices of reference.md that apply to src (item 10): still firing after a manual resolve,
+// notices are the notices of reference.md that apply to src (item 6): still firing after a manual resolve,
 // Unclaimed and the Reopen count. Delivery adds the late, deleted and final notes at call time.
 func notices(src *Source, lang string) []string {
 	var out []string
@@ -128,7 +127,7 @@ func notices(src *Source, lang string) []string {
 	return out
 }
 
-// footer is item 11: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it, with the
+// footer is item 7, until the Assignees and the Owner's Team come: who acknowledged, resolved or snoozed the Alert Group, or why the system resolved it, with the
 // user written by user from their Muster display name: the name made safe, or the trusted token of the user that an
 // adapter writes as its messenger's Mention where they have an Account link (C-12.FR-12).
 func footer(src *Source, lang string, user func(name string) string) string {
@@ -158,116 +157,171 @@ func reason(lang, r string) string {
 	return T(lang, "reason."+r, nil)
 }
 
-// defaultBody fills items 3 to 7 of the default Root message: the environment and start time, the group labels, the
-// common labels and annotations without the excluded ones, and the summary. Values are cut and neutralized; the
-// adapters escape them.
-func (r *Renderer) defaultBody(m *Message, src *Source, lang string) {
-	m.Environment = environment(src, lang)
-	for _, name := range src.KeyLabels {
-		if v := src.KeyValues[name]; name != "alertname" && v != "" {
-			m.GroupLabels = append(m.GroupLabels, Label{Name: Value(name), Value: Value(v)})
+// fields are item 2 of the default Root message (C-29.FR-1): the Severity level, the Route, the Teams — left out when
+// the Alert Group has none (C-25.FR-6) — and the start, absolute in the Organization's time zone.
+func fields(src *Source, lang string) []Label {
+	out := []Label{{Name: T(lang, "field.severity", nil), Value: Value(src.SeverityLevel)},
+		{Name: T(lang, "field.route", nil), Value: Value(src.Route.Name)}}
+	if len(src.Teams) > 0 {
+		names := make([]string, len(src.Teams))
+		for i, t := range src.Teams {
+			names[i] = Value(t)
 		}
+		out = append(out, Label{Name: T(lang, "field.teams", nil), Value: strings.Join(names, ", ")})
 	}
-	for _, name := range slices.Sorted(maps.Keys(src.CommonLabels)) {
-		if !slices.Contains(excludedLabels, name) && !slices.Contains(src.KeyLabels, name) {
-			m.CommonLabels = append(m.CommonLabels, Label{Name: Value(name), Value: Value(src.CommonLabels[name])})
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(src.CommonAnnotations)) {
-		if !excludedAnnotation(name) {
-			m.CommonAnnotations = append(m.CommonAnnotations, Label{Name: Value(name),
-				Value: Value(src.CommonAnnotations[name])})
-		}
-	}
-	m.Summary = Value(src.Summary)
+	return append(out, Label{Name: T(lang, "field.started", nil), Value: FullTime(src.StartedAt, src.TimeZone)})
 }
 
-// environment is item 3: the cluster and environment labels when present and the start time, absolute in the
-// Organization's time zone.
-func environment(src *Source, lang string) string {
-	var parts []string
-	for _, l := range []string{"cluster", "environment"} {
-		if v := src.CommonLabels[l]; v != "" {
-			parts = append(parts, Value(v))
-		}
+// compactBody fills items 3 to 5 of the default Root message (C-29.FR-1): the summary and the description as plain
+// text, the key labels of the Route's "Labels in the message" and the Alerts by their distinguishing label, with the
+// Route's line template when it has one, which may fail. Values are cut and neutralized; the adapters escape them.
+func (r *Renderer) compactBody(m *Message, src *Source, markup Markup) *Failure {
+	m.Summary, m.Description = Value(src.Summary), Value(src.Description)
+	m.KeyLabels = keyLabels(src)
+	line, fail := r.alertsLine(src, markup, false)
+	if fail != nil {
+		return fail
 	}
-	parts = append(parts, T(lang, "environment.started", Args{"time": FullTime(src.StartedAt, src.TimeZone)}))
-	return strings.Join(parts, " · ")
+	m.AlertsLine = line
+	return nil
 }
 
-// alertList is item 8: up to AlertsListed Alerts one line each — the Route's line template or the labels that differ
-// between the Alerts — firing and newest first, resolved ones struck through; above it the distinct values of each
-// differing label and "Full list in Muster". The distinct values are kept in either case, for shortening.
-func (r *Renderer) alertList(src *Source, lang string, markup Markup) (*AlertList, *Failure) {
-	if len(src.Alerts) == 0 {
-		return nil, nil
+// keyLabels are item 4 (C-29.FR-2): each label of the Route's "Labels in the message", in its order, as its value when
+// every firing Alert that has it has the same one, with the number of its values when they differ, and left out when
+// no Alert has it. An Alert Group without a firing Alert reads its resolved ones, and one whose Alerts were not read
+// its Group key and common labels.
+func keyLabels(src *Source) []KeyLabel {
+	alerts := slices.DeleteFunc(slices.Clone(src.Alerts), func(a SourceAlert) bool { return !a.Firing })
+	if len(alerts) == 0 {
+		alerts = src.Alerts
 	}
-	differing := differingLabels(src)
-	list := &AlertList{Distinct: distinct(src.Alerts, differing)}
-	if max(src.TotalAlerts, int64(len(src.Alerts))) > AlertsListed {
-		list.FullList = &Link{Text: T(lang, "alerts.fullList", nil), URL: r.GroupURL(src.PublicID)}
-		return list, nil
-	}
-	group, loc := r.groupData(src), location(src.TimeZone)
-	for _, a := range src.Alerts {
-		line := AlertLine{Resolved: !a.Firing}
-		if t := src.Route.Line; t != nil {
-			start := r.real.Now()
-			out, err := r.execute(TemplateLine, *t, SafeLine(alertData(a, loc), group, markup))
-			observe(TemplateLine, r.real.Now().Sub(start))
-			if err != nil {
-				return nil, &Failure{Template: TemplateLine, Error: sandboxError(err)}
+	var out []KeyLabel
+	for _, name := range src.Route.MessageLabels {
+		values := map[string]bool{}
+		for _, a := range alerts {
+			if v := a.Labels[name]; v != "" {
+				values[v] = true
 			}
-			line.Text, line.Markup = Neutralize(out), markup
-		} else {
-			line.Text = defaultLine(a, differing)
 		}
-		list.Lines = append(list.Lines, line)
-	}
-	return list, nil
-}
-
-// defaultLine is the labels of an Alert that differ between the Alerts of its Alert Group; an Alert alone is named by
-// its alertname, or its fingerprint.
-func defaultLine(a SourceAlert, differing []string) string {
-	var parts []string
-	for _, name := range differing {
-		if v, ok := a.Labels[name]; ok {
-			parts = append(parts, Value(name)+": "+Value(v))
+		if len(alerts) == 0 {
+			if v := cmp.Or(src.KeyValues[name], src.CommonLabels[name]); v != "" {
+				values[v] = true
+			}
+		}
+		switch len(values) {
+		case 0:
+		case 1:
+			for v := range values {
+				out = append(out, KeyLabel{Name: Value(name), Value: Value(v)})
+			}
+		default:
+			out = append(out, KeyLabel{Name: Value(name), Count: len(values)})
 		}
 	}
-	if len(parts) == 0 {
-		return Value(cmp.Or(a.Labels["alertname"], a.Fingerprint))
-	}
-	return strings.Join(parts, ", ")
+	return out
 }
 
-// differingLabels are the labels whose values are not the same in every Alert, a missing one counting as empty,
-// except the excluded ones and the group labels, sorted.
-func differingLabels(src *Source) []string {
+// distinctAlerts are the Alerts of an Alert Group once each, by fingerprint: the episodes of an Alert that resolved
+// and fired again are one Alert, its firing episode or else its latest one. The Alerts come firing first and newest
+// first (ListRenderAlerts), so the first episode of each fingerprint is the one kept.
+func distinctAlerts(alerts []SourceAlert) []SourceAlert {
+	seen := make(map[string]bool, len(alerts))
+	out := make([]SourceAlert, 0, len(alerts))
+	for _, a := range alerts {
+		if !seen[a.Fingerprint] {
+			seen[a.Fingerprint] = true
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// distinguishingLabel is the label that tells the Alerts apart (C-29.FR-3, P-67): the first of the Instance labels
+// whose values differ among them, else the first label, by name, whose values differ, a missing one counting as
+// empty; none when every Alert has the same labels.
+func distinguishingLabel(alerts []SourceAlert, instance []string) string {
+	if len(alerts) < 2 {
+		return ""
+	}
+	differs := func(name string) bool {
+		first := alerts[0].Labels[name]
+		return slices.ContainsFunc(alerts[1:], func(a SourceAlert) bool { return a.Labels[name] != first })
+	}
+	for _, name := range instance {
+		if differs(name) {
+			return name
+		}
+	}
 	names := map[string]bool{}
-	for _, a := range src.Alerts {
+	for _, a := range alerts {
 		for n := range a.Labels {
 			names[n] = true
 		}
 	}
-	var out []string
 	for _, n := range slices.Sorted(maps.Keys(names)) {
-		if slices.Contains(excludedLabels, n) || slices.Contains(src.KeyLabels, n) {
-			continue
-		}
-		first, same := src.Alerts[0].Labels[n], true
-		for _, a := range src.Alerts[1:] {
-			if a.Labels[n] != first {
-				same = false
-				break
-			}
-		}
-		if !same {
-			out = append(out, n)
+		if differs(n) {
+			return n
 		}
 	}
-	return out
+	return ""
+}
+
+// alertsLine is item 5 (C-29.FR-3): when the Alert Group has more than one Alert, or always for the preview of a line
+// template, up to CompactAlertsListed Alerts — firing ones first, then by the value of the distinguishing label in
+// natural order, those without it last — named by that value, or each on a line of its own by the Route's line
+// template, with the total for "…and K more". An Alert without the label is listed only by a line template; nil
+// without Alerts, and without a line template when no label tells them apart.
+func (r *Renderer) alertsLine(src *Source, markup Markup, always bool) (*AlertsLine, *Failure) {
+	alerts := distinctAlerts(src.Alerts)
+	total := int64(len(alerts)) + max(src.TotalAlerts-int64(len(src.Alerts)), 0)
+	if len(alerts) == 0 || (total < 2 && !always) {
+		return nil, nil
+	}
+	label := distinguishingLabel(alerts, src.InstanceLabels)
+	if label == "" && src.Route.Line == nil {
+		return nil, nil
+	}
+	slices.SortStableFunc(alerts, func(a, b SourceAlert) int {
+		if a.Firing != b.Firing {
+			if a.Firing {
+				return -1
+			}
+			return 1
+		}
+		va, vb := a.Labels[label], b.Labels[label]
+		if (va == "") != (vb == "") {
+			if va == "" {
+				return 1
+			}
+			return -1
+		}
+		return naturalCompare(va, vb)
+	})
+	listed := alerts[:min(len(alerts), CompactAlertsListed)]
+	out := &AlertsLine{Label: Value(label), Total: total}
+	for _, a := range listed {
+		if v := a.Labels[label]; label != "" && v != "" {
+			out.Values = append(out.Values, AlertValue{Value: Value(v), Resolved: !a.Firing})
+		}
+	}
+	t := src.Route.Line
+	if t == nil {
+		if len(out.Values) == 0 {
+			return nil, nil // no listed Alert has the label: no "pod: …and K more"
+		}
+		return out, nil
+	}
+	group, loc := r.groupData(src), location(src.TimeZone)
+	for _, a := range listed {
+		start := r.real.Now()
+		text, err := r.execute(TemplateLine, *t, SafeLine(alertData(a, loc), group, markup))
+		observe(TemplateLine, r.real.Now().Sub(start))
+		if err != nil {
+			return nil, &Failure{Template: TemplateLine, Error: sandboxError(err)}
+		}
+		out.Lines = append(out.Lines, AlertLine{Text: Neutralize(text), Resolved: !a.Firing, Markup: markup})
+	}
+	return out, nil
 }
 
 // distinct are the distinct values of each label, in natural order, at most AlertsListed per label.
@@ -327,12 +381,14 @@ func digitRun(s string) int {
 }
 
 // The built-in templates of each kind and language (C-12.FR-2): an editor starts from their source, which
-// previewTemplate returns for an empty template. They show what the default message shows; the default message
-// itself is laid out section by section, so that shortening can trim the Alerts and the label sections in turn.
+// previewTemplate returns for an empty template. The built-in Root message template is a starting point in the spirit
+// of items 3 to 5 of C-29.FR-1, written with what a template reads — not the default message itself, which is laid
+// out item by item from the Route's "Labels in the message" and the distinguishing label, so that shortening can cut
+// the items in turn.
 var builtinSources = map[string]map[string]string{
 	TemplateRootMessage: {
-		LanguageEnglish: rootSource("Started", "resolved"),
-		LanguageRussian: rootSource("Начало:", "закрыт"),
+		LanguageEnglish: rootSource("resolved"),
+		LanguageRussian: rootSource("закрыт"),
 	},
 	TemplateLine: {
 		LanguageEnglish: lineSource,
@@ -348,19 +404,17 @@ var builtinSources = map[string]map[string]string{
 const lineSource = `{{ range (.Labels.Remove (stringSlice "alertname" "severity" "environment" "prometheus")).SortedPairs -}}
 {{ .Name }}: {{ .Value }} {{ end }}`
 
-// rootSource is the built-in Root message template in a language: the words for the start and for a resolved Alert.
-func rootSource(started, resolved string) string {
-	return `{{ with .CommonLabels.cluster }}{{ . }} · {{ end }}{{ with .CommonLabels.environment }}{{ . }} · {{ end -}}
-` + started + ` {{ .AlertGroup.StartedAt | date "2006-01-02 15:04 MST" }}
-{{ range (.GroupLabels.Remove (stringSlice "alertname")).SortedPairs }}{{ .Name }}: {{ .Value }}
+// rootSource is the built-in Root message template in a language, the word for a resolved Alert: the summary, the
+// common description annotation, the labels of the Group key without alertname and severity as `name=value` — not
+// "Labels in the message", which templates do not read — and one line per Alert, every Alert, with its labels that are
+// neither excluded, in the Group key nor common.
+func rootSource(resolved string) string {
+	return `{{ with .AlertGroup.Summary }}{{ . }}
 {{ end -}}
-{{ range ((.CommonLabels.Remove (stringSlice "severity" "environment" "prometheus" "alertname")).Remove .GroupLabels.Names).SortedPairs -}}
-{{ .Name }}: {{ .Value }}
+{{ with .CommonAnnotations.description }}{{ . }}
 {{ end -}}
-{{ range (.CommonAnnotations.Remove (stringSlice "summary" "description" "runbook_url")).SortedPairs -}}
-{{ .Name }}: {{ .Value }}
-{{ end -}}
-{{ with .AlertGroup.Summary }}{{ . }}
+{{ with (.GroupLabels.Remove (stringSlice "alertname" "severity")).SortedPairs }}{{ range $i, $l := . -}}
+{{ if $i }} · {{ end }}{{ $l.Name }}={{ $l.Value }}{{ end }}
 {{ end -}}
 {{ range .Alerts }}• {{ range (((.Labels.Remove (stringSlice "alertname" "severity" "environment" "prometheus")).Remove $.GroupLabels.Names).Remove $.CommonLabels.Names).SortedPairs -}}
 {{ .Name }}: {{ .Value }} {{ end }}{{ if eq .Status "resolved" }}(` + resolved + `){{ end }}

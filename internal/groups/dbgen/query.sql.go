@@ -1103,13 +1103,13 @@ func (q *Queries) InsertDowntimeEntries(ctx context.Context, arg InsertDowntimeE
 const insertGroup = `-- name: InsertGroup :one
 INSERT INTO alert_groups (
     org_id, public_id, number, route_id, group_key_labels, group_key_values, group_key_sha256, title,
-    title_from_group_key, summary, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
-    firing_again_after_id, created_at, last_changed_at
+    title_from_group_key, summary, description, common_labels, common_annotations, integration_ids, status,
+    severity_level, urgent, firing_again_after_id, created_at, last_changed_at
 )
 VALUES (
     $1, $2, $3, $4, $5::text[], $6, $7, $8,
-    $9, $10, $11, $12, $13::bigint[],
-    'firing', $14, $15, $16, $17, $17
+    $9, $10, $11, $12, $13,
+    $14::bigint[], 'firing', $15, $16, $17, $18, $18
 )
 RETURNING id
 `
@@ -1125,6 +1125,7 @@ type InsertGroupParams struct {
 	Title              string
 	TitleFromGroupKey  bool
 	Summary            pgtype.Text
+	Description        pgtype.Text
 	CommonLabels       []byte
 	CommonAnnotations  []byte
 	IntegrationIds     []int64
@@ -1147,6 +1148,7 @@ func (q *Queries) InsertGroup(ctx context.Context, arg InsertGroupParams) (int64
 		arg.Title,
 		arg.TitleFromGroupKey,
 		arg.Summary,
+		arg.Description,
 		arg.CommonLabels,
 		arg.CommonAnnotations,
 		arg.IntegrationIds,
@@ -4148,7 +4150,7 @@ func (q *Queries) LockDefaultRoute(ctx context.Context, orgID int64) (LockDefaul
 
 const lockGroups = `-- name: LockGroups :many
 SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, group_key_values, group_key_sha256,
-       title, title_from_group_key, summary, common_labels, common_annotations, integration_ids, status,
+       title, title_from_group_key, summary, description, common_labels, common_annotations, integration_ids, status,
        severity_level, urgent, owner_user_id, acknowledged_at, snooze_until, snooze_no_end, snoozed_while_urgent,
        snoozed_by_user_id, snoozed_by_service_account_id, firing_alert_count, resolved_alert_count, reopen_count,
        resolved_at, resolved_by_kind, resolved_by_user_id, resolved_by_service_account_id, resolve_reason,
@@ -4180,6 +4182,7 @@ type LockGroupsRow struct {
 	Title                          string
 	TitleFromGroupKey              bool
 	Summary                        pgtype.Text
+	Description                    pgtype.Text
 	CommonLabels                   []byte
 	CommonAnnotations              []byte
 	IntegrationIds                 []int64
@@ -4252,6 +4255,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 			&i.Title,
 			&i.TitleFromGroupKey,
 			&i.Summary,
+			&i.Description,
 			&i.CommonLabels,
 			&i.CommonAnnotations,
 			&i.IntegrationIds,
@@ -4677,31 +4681,32 @@ func (q *Queries) RouteStatistics(ctx context.Context, arg RouteStatisticsParams
 const saveGroup = `-- name: SaveGroup :exec
 UPDATE alert_groups
 SET route_id = $1, moved_from_route_id = $2, title = $3,
-    title_from_group_key = $4, summary = $5, common_labels = $6,
-    common_annotations = $7, integration_ids = $8::bigint[], status = $9,
-    severity_level = $10, urgent = $11, owner_user_id = $12,
-    acknowledged_at = $13, snooze_until = $14,
-    snooze_no_end = $15, snoozed_while_urgent = $16,
-    snoozed_by_user_id = $17,
-    snoozed_by_service_account_id = $18,
-    firing_alert_count = $19, resolved_alert_count = $20,
-    reopen_count = $21, resolved_at = $22,
-    resolved_by_kind = $23, resolved_by_user_id = $24,
-    resolved_by_service_account_id = $25,
-    resolve_reason = $26, resolve_reason_text = $27,
-    reopen_deadline = $28, prior_status = $29,
-    prior_owner_user_id = $30, prior_snooze_until = $31,
-    prior_snooze_no_end = $32,
-    prior_snoozed_while_urgent = $33,
-    prior_snoozed_by_user_id = $34,
-    prior_snoozed_by_service_account_id = $35,
-    grace_deadline = $36, event_seq = $37, last_changed_at = $38,
-    first_acknowledged_at = $39,
-    first_published_at = $40, ack_timeout_started_at = $41,
-    ack_timeout_notices_sent = $42, unclaimed = $43, reminders_sent = $44,
-    reminders_unanswered = $45, last_reminder_at = $46,
-    owner_answered_at = $47
-WHERE org_id = $48 AND id = $49
+    title_from_group_key = $4, summary = $5,
+    description = $6, common_labels = $7,
+    common_annotations = $8, integration_ids = $9::bigint[], status = $10,
+    severity_level = $11, urgent = $12, owner_user_id = $13,
+    acknowledged_at = $14, snooze_until = $15,
+    snooze_no_end = $16, snoozed_while_urgent = $17,
+    snoozed_by_user_id = $18,
+    snoozed_by_service_account_id = $19,
+    firing_alert_count = $20, resolved_alert_count = $21,
+    reopen_count = $22, resolved_at = $23,
+    resolved_by_kind = $24, resolved_by_user_id = $25,
+    resolved_by_service_account_id = $26,
+    resolve_reason = $27, resolve_reason_text = $28,
+    reopen_deadline = $29, prior_status = $30,
+    prior_owner_user_id = $31, prior_snooze_until = $32,
+    prior_snooze_no_end = $33,
+    prior_snoozed_while_urgent = $34,
+    prior_snoozed_by_user_id = $35,
+    prior_snoozed_by_service_account_id = $36,
+    grace_deadline = $37, event_seq = $38, last_changed_at = $39,
+    first_acknowledged_at = $40,
+    first_published_at = $41, ack_timeout_started_at = $42,
+    ack_timeout_notices_sent = $43, unclaimed = $44, reminders_sent = $45,
+    reminders_unanswered = $46, last_reminder_at = $47,
+    owner_answered_at = $48
+WHERE org_id = $49 AND id = $50
 `
 
 type SaveGroupParams struct {
@@ -4710,6 +4715,7 @@ type SaveGroupParams struct {
 	Title                          string
 	TitleFromGroupKey              bool
 	Summary                        pgtype.Text
+	Description                    pgtype.Text
 	CommonLabels                   []byte
 	CommonAnnotations              []byte
 	IntegrationIds                 []int64
@@ -4764,6 +4770,7 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.Title,
 		arg.TitleFromGroupKey,
 		arg.Summary,
+		arg.Description,
 		arg.CommonLabels,
 		arg.CommonAnnotations,
 		arg.IntegrationIds,
