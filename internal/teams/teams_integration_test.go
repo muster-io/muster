@@ -593,8 +593,9 @@ func TestIntegrationTeamEvaluation(t *testing.T) {
 	})
 }
 
-// TestIntegrationTeamRename is C-29.FR-1 on every supported PostgreSQL: a rename of a Team writes one open_group_updates
-// row team_name with the Team in the save's transaction, and a second rename while it is unclaimed writes none; the
+// TestIntegrationTeamRename is C-29.FR-1 on every supported PostgreSQL: a rename of a Team writes one
+// open_group_updates row team_name with the Team in the save's transaction, and a second rename while it is unclaimed
+// writes none; the
 // worker of internal/groups runs the re-render step, as the system, marked as a change of configuration and without a
 // lifecycle event, on the open Alert Group that has the Team and on no other — not on one whose Alerts name another
 // Team — then deletes the row and logs the Team. A save that changes the description writes no row and re-renders

@@ -193,10 +193,10 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), or of what else the Root messages show
 // (evaluateAndRerender): delivery edits, Quietly, each Root message whose Desired state the change changed and leaves
 // the others, whose hashes are unchanged, so that a second run changes nothing. The Alert Groups themselves do not
-// change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as
-// the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which changes no Desired
-// state, records nothing. It returns how many Alert Groups had a Desired state changed; after collects what runs once
-// the transaction committed.
+// change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a Desired state of an
+// Alert Group is a Route template that failed recorded, as the dispatcher records it, with the Alert Group's
+// live-update hint, so that a second run, which changes no Desired state, records nothing. It returns how many Alert
+// Groups had a Desired state changed; after collects what runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	if len(ids) == 0 || s.d.rerender == nil {
 		return 0, nil
