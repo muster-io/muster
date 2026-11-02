@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -90,8 +91,9 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 5 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != OIDCSecretExpiring ||
-		defs[3] != SnapshotTruncated || defs[4] != TemplateError ||
+	if len(defs) != 6 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != OIDCSecretExpiring ||
+		defs[3] != ScheduleGap || defs[4] != SnapshotTruncated || defs[5] != TemplateError ||
+		Lookup("MusterScheduleGap") != ScheduleGap ||
 		Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
 		Lookup("MusterHeartbeatLost") != HeartbeatLost || Lookup("MusterDestinationBroken") != DestinationBroken ||
 		Lookup("MusterTemplateError") != TemplateError || Lookup("MusterUnknown") != nil {
@@ -140,18 +142,29 @@ func TestRegistryChecks(t *testing.T) {
 			NameLabel: "destination_name", Extra: []string{"template"}}),
 		text(&Definition{Name: "MusterStatic", Severity: SeverityCritical, Entity: EntityRoute,
 			NameLabel: "route_name", StaticLabels: true}),
+		text(&Definition{Name: "MusterTeamless", Severity: SeverityWarning, Entity: EntitySchedule,
+			NameLabel: "schedule_name", TeamLabel: true}),
+		text(&Definition{Name: "MusterTeamOfNothing", Severity: SeverityWarning, TeamLabel: true,
+			Extra: []string{LabelTeamID, LabelTeamName}}),
+		text(&Definition{Name: "MusterNotes", Severity: SeverityWarning, Annotations: []string{"summary", "Bad"}}),
+		text(&Definition{Name: "MusterTeamGood", Severity: SeverityWarning, Entity: EntitySchedule,
+			NameLabel: "schedule_name", Extra: []string{LabelTeamID, LabelTeamName}, TeamLabel: true,
+			Annotations: []string{"gap_start"}}),
 	}
 	defs, err := Definitions()
 	for _, want := range []string{`"Bad": the name is not`, `"MusterTwice" is registered twice`,
 		`"MusterTwice": unknown severity "page"`, `"MusterNameless": a name label without an entity`,
 		`"MusterRoute": the name label of route is route_name`, `"MusterThing": unknown entity "thing"`,
 		`"MusterLabels": invalid label "severity"`, `"MusterLabels": a label is listed twice`,
-		`"MusterQuiet": condition, summary`, `"MusterStatic": Static labels need the integration entity`} {
+		`"MusterQuiet": condition, summary`, `"MusterStatic": Static labels need the integration entity`,
+		`"MusterTeamless": the Team label needs an entity, the extra labels team_id`,
+		`"MusterTeamOfNothing": the Team label needs`, `"MusterNotes": invalid annotation "summary"`,
+		`"MusterNotes": invalid annotation "Bad"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("error %v lacks %q", err, want)
 		}
 	}
-	if err != nil && strings.Contains(err.Error(), "MusterGood") {
+	if err != nil && (strings.Contains(err.Error(), "MusterGood") || strings.Contains(err.Error(), "MusterTeamGood")) {
 		t.Errorf("a valid definition was refused: %v", err)
 	}
 	if len(defs) != len(registry) || defs[0].Name != "Bad" {
@@ -559,6 +572,109 @@ func TestFiring(t *testing.T) {
 	}
 	q.fail["ListOpenInternalAlerts"] = errors.New("down")
 	if _, err := r.Firing(ctx, q, OIDCSecretExpiring); err == nil {
+		t.Error("a failed read was ignored")
+	}
+}
+
+// TestScheduleGap is C-27.FR-7 and C-25.FR-5 on the registry: MusterScheduleGap is a warning about a Schedule with its
+// Team's id and name, and the Team's slug under the Organization's Team label outside the fingerprint; the labels it
+// sets itself are reserved, the Team label is not, and the reserved list keeps the labels of the later Internal
+// alerts.
+func TestScheduleGap(t *testing.T) {
+	d := ScheduleGap
+	if d.Severity != SeverityWarning || d.Capability != "C-27" || !d.TeamLabel || d.StaticLabels ||
+		!slices.Equal(d.Labels(), []string{"schedule", "schedule_name", "team_id", "team_name"}) ||
+		!slices.Equal(d.Annotations, []string{"gap_start"}) || d.Runbook() != "operations/runbooks/MusterScheduleGap/" {
+		t.Errorf("MusterScheduleGap = %+v", d)
+	}
+	extra := TeamExtra("TM0000000000PY", "Payments", "owner", "payments")
+	extra["env"] = "prod" // carried like the Team label; its own labels win and an empty name is dropped
+	extra[""] = "nothing"
+	extra["schedule"] = "SC0000000000XX"
+	labels := d.AlertLabels(Entity{ID: "SC0000000000AA", Name: "Main"}, extra)
+	want := map[string]string{"alertname": "MusterScheduleGap", "severity": "warning", "schedule": "SC0000000000AA",
+		"schedule_name": "Main", "team_id": "TM0000000000PY", "team_name": "Payments", "owner": "payments",
+		"env": "prod"}
+	if !mapsEqual(labels, want) {
+		t.Errorf("labels %v", labels)
+	}
+	renamed := d.AlertLabels(Entity{ID: "SC0000000000AA", Name: "Primary"}, TeamExtra("TM0000000000PY", "Payments EU",
+		"team", "payments-eu"))
+	if Fingerprint(d, labels) != Fingerprint(d, renamed) || Fingerprint(d, labels) == Fingerprint(d,
+		map[string]string{"schedule": "SC0000000000BB"}) {
+		t.Error("the names or the Team label reach the fingerprint")
+	}
+	reserved := ReservedLabels()
+	for _, l := range []string{"alertname", "severity", "schedule", "schedule_name", "team_id", "team_name",
+		"connection", "connection_name"} {
+		if !slices.Contains(reserved, l) {
+			t.Errorf("%s is not reserved: %v", l, reserved)
+		}
+	}
+	if slices.Contains(reserved, "team") || slices.Contains(reserved, "gap_start") || !slices.IsSorted(reserved) {
+		t.Errorf("reserved %v", reserved)
+	}
+}
+
+// TestRaiseWithAnnotations: RaiseWith carries the values of the definition's annotations, which and the Team's name
+// fill its texts; Open lists the open alerts by entity, the pending raises included, with their annotations; Refresh
+// raises one again as the same firing; Renamed keeps the annotations.
+func TestRaiseWithAnnotations(t *testing.T) {
+	ctx := t.Context()
+	q := newFake()
+	r := NewRaiser(1, "")
+	e := Entity{ID: "SC0000000000AA", Name: "Main"}
+	values := map[string]string{"gap_start": "2026-11-02T00:00:00Z"}
+	if err := r.RaiseWith(ctx, q, t0, ScheduleGap, e, TeamExtra("TM0000000000PY", "Payments", "team", "payments"),
+		values); err != nil {
+		t.Fatal(err)
+	}
+	a := q.read(t, 0).Alerts[0]
+	if a.Annotations["gap_start"] != "2026-11-02T00:00:00Z" ||
+		a.Annotations["summary"] != "No one is On-call in Schedule Main of Payments" ||
+		!strings.HasPrefix(a.Annotations["description"], "Schedule Main of Team Payments has a gap from "+
+			"2026-11-02T00:00:00Z: ") || a.Labels["team"] != "payments" ||
+		a.Annotations["runbook_url"] != DefaultRunbookBase+"/latest/operations/runbooks/MusterScheduleGap/" {
+		t.Errorf("alert %+v", a)
+	}
+	q.pending = [][]byte{q.bodies[0].Body}
+	open, err := r.Open(ctx, q, ScheduleGap)
+	if err != nil || len(open) != 1 || open[e.ID].Annotations["gap_start"] != "2026-11-02T00:00:00Z" ||
+		!open[e.ID].StartsAt.Equal(t0.Truncate(time.Microsecond)) {
+		t.Fatalf("open with a pending raise = %+v, %v", open, err)
+	}
+	if q.contains[len(q.contains)-1] != `{"alertname":"MusterScheduleGap"}` {
+		t.Errorf("contains %v", q.contains)
+	}
+	labels := maps.Clone(open[e.ID].Labels)
+	labels["schedule_name"] = "Primary"
+	later := t0.Add(time.Hour)
+	if err := r.Refresh(ctx, q, later, ScheduleGap, open[e.ID], labels, map[string]string{
+		"gap_start": "2026-11-09T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	b := q.read(t, 1).Alerts[0]
+	if b.StartsAt != a.StartsAt || b.Fingerprint != a.Fingerprint || b.Labels["schedule_name"] != "Primary" ||
+		b.Annotations["gap_start"] != "2026-11-09T00:00:00Z" || !strings.Contains(b.Annotations["summary"], "Primary") {
+		t.Errorf("raised again %+v", b)
+	}
+	q.pending = nil
+	q.open = []dbgen.ListOpenInternalAlertsRow{{Fingerprint: b.Fingerprint, StartsAt: t0,
+		Labels:      []byte(`{"alertname":"MusterScheduleGap","schedule":"SC0000000000AA","schedule_name":"Primary","team_name":"Payments"}`),
+		Annotations: []byte(`{"gap_start":"2026-11-09T00:00:00Z"}`)}}
+	if err := r.Renamed(ctx, q, later, EntitySchedule, e.ID, "Third"); err != nil {
+		t.Fatal(err)
+	}
+	if c := q.read(t, 2).Alerts[0]; c.Labels["schedule_name"] != "Third" || c.Annotations["gap_start"] !=
+		"2026-11-09T00:00:00Z" {
+		t.Errorf("renamed %+v", c)
+	}
+	q.open[0].Annotations = []byte("{")
+	if _, err := r.Open(ctx, q, ScheduleGap); err == nil {
+		t.Error("unreadable annotations were taken")
+	}
+	q.fail["ListOpenInternalAlerts"] = errors.New("down")
+	if _, err := r.Open(ctx, q, ScheduleGap); err == nil {
 		t.Error("a failed read was ignored")
 	}
 }

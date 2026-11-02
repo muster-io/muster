@@ -89,7 +89,7 @@ func (q *Queries) InsertInternalSnapshot(ctx context.Context, arg InsertInternal
 }
 
 const listOpenInternalAlerts = `-- name: ListOpenInternalAlerts :many
-SELECT a.fingerprint, a.labels, a.starts_at
+SELECT a.fingerprint, a.labels, a.starts_at, a.annotations
 FROM alerts a
 JOIN integrations i ON i.org_id = $1 AND i.id = a.integration_id AND i.builtin
 WHERE a.org_id = $1 AND a.status = 'firing' AND a.labels @> $2::jsonb
@@ -105,10 +105,11 @@ type ListOpenInternalAlertsRow struct {
 	Fingerprint string
 	Labels      []byte
 	StartsAt    time.Time
+	Annotations []byte
 }
 
 // ListOpenInternalAlerts lists the firing Internal alerts of the built-in Integration whose labels contain
-// @contains, with what raising them again keeps.
+// @contains, with what raising them again keeps and their annotations.
 func (q *Queries) ListOpenInternalAlerts(ctx context.Context, arg ListOpenInternalAlertsParams) ([]ListOpenInternalAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listOpenInternalAlerts, arg.OrgID, arg.Contains)
 	if err != nil {
@@ -118,7 +119,12 @@ func (q *Queries) ListOpenInternalAlerts(ctx context.Context, arg ListOpenIntern
 	items := []ListOpenInternalAlertsRow{}
 	for rows.Next() {
 		var i ListOpenInternalAlertsRow
-		if err := rows.Scan(&i.Fingerprint, &i.Labels, &i.StartsAt); err != nil {
+		if err := rows.Scan(
+			&i.Fingerprint,
+			&i.Labels,
+			&i.StartsAt,
+			&i.Annotations,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

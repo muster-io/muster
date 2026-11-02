@@ -61,6 +61,10 @@ const OutgoingHeartbeatPoll = 5 * time.Second
 // RequestLogPruningInterval is how often the Leader prunes the Request log to its bounds (C-23.FR-4).
 const RequestLogPruningInterval = time.Minute
 
+// ScheduleGapScanInterval is schedule.gap_scan_interval (P-80): how often the Leader looks for the gaps of the
+// Schedules and raises and resolves MusterScheduleGap (C-27.FR-7).
+const ScheduleGapScanInterval = 5 * time.Minute
+
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
 const PruneBatch = 1000
@@ -74,6 +78,8 @@ type Task struct {
 	Run   func(ctx context.Context) error
 	// Wake, when set, runs the task out of its interval.
 	Wake <-chan struct{}
+	// Stop, when set, runs once the task has stopped, when the lock is lost or the process stops.
+	Stop func()
 }
 
 // Wakes runs Leader tasks out of their interval: in development mode, the development clock moved, and the
@@ -191,10 +197,16 @@ type Work struct {
 	// orgID until ctx ends (C-24.FR-9): it closes every one of them before it returns, and a failed read of the
 	// Connections returns early.
 	SlackSocketMode func(ctx context.Context, orgID int64) error
+	// ScheduleGapScan looks for the gaps of the Schedules of the Organization orgID, raises and resolves
+	// MusterScheduleGap and exports muster_schedule_gap (C-27.FR-7).
+	ScheduleGapScan func(ctx context.Context, orgID int64) error
+	// ScheduleGapForget removes the muster_schedule_gap series once the gap scan stops with the lock.
+	ScheduleGapForget func()
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
 	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
-	// secret expiry check, the outgoing heartbeat and the pruning of the Request log when the development clock moved, so
-	// that the alive mark keeps up with the business clock and the Leader is not taken for absent; nil otherwise.
+	// secret expiry check, the outgoing heartbeat, the pruning of the Request log and the gap scan of the Schedules when
+	// the development clock moved, so that the alive mark keeps up with the business clock and the Leader is not taken
+	// for absent; nil otherwise.
 	ClockMoved *Wakes
 }
 
@@ -257,8 +269,9 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // pending deliveries, the retention of Thread replies and of outgoing webhook events, the long polling of Telegram
 // Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open Root
 // messages after a key rotation (C-20.FR-7), which also runs when a key was activated, the polling of the events of
-// Bridge Connections in poll mode (C-22.FR-11), the pruning of the Request log (C-23.FR-4) and the Socket Mode
-// connections of Slack Connections (C-24.FR-9). Later capabilities add theirs at the end of the list. The Keeper calls
+// Bridge Connections in poll mode (C-22.FR-11), the pruning of the Request log (C-23.FR-4), the Socket Mode
+// connections of Slack Connections (C-24.FR-9) and the gap scan of the Schedules (C-27.FR-7). Later capabilities add
+// theirs at the end of the list. The Keeper calls
 // the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it, so that it
 // measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
@@ -266,7 +279,7 @@ func Tasks(w Work) func() []Task {
 	replyRetentionWake, eventRetentionWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	shortLivedWake := w.ClockMoved.channel()
 	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
-	aliveWake, requestLogWake := w.ClockMoved.channel(), w.ClockMoved.channel()
+	aliveWake, requestLogWake, gapScanWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
 	keyringWake := w.KeyringChanged.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
@@ -322,6 +335,10 @@ func Tasks(w Work) func() []Task {
 			{Name: "request_log_pruning", Every: RequestLogPruningInterval, Wake: requestLogWake,
 				Run: w.requestLogPruning},
 			{Name: "slack_socket_mode", Every: SlackSocketModeInterval, Run: w.slackSocketMode},
+			{Name: "schedule_gap_scan", Every: ScheduleGapScanInterval, Wake: gapScanWake, Stop: w.ScheduleGapForget,
+				Run: func(ctx context.Context) error {
+					return w.perOrganization(ctx, "the schedule gap scan", w.ScheduleGapScan)
+				}},
 		}
 	}
 }

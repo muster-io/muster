@@ -115,6 +115,17 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Team matchers, or the Team label, adds the Team to the open Alert Groups whose firing Alerts it now picks, with a
       Quiet `team_joined`. It only adds, so the Alert Groups of Alerts that fired before the upgrade get their Teams
       the first time a Team is created, its slug or Team matchers change, or the Team label changes.
+    - Migration 0028 adds the [gap alert](../concepts/schedules.md#gaps-and-the-internal-alert) of each Schedule,
+      `by_default`: the main Schedule of each Team raises the Internal alert `MusterScheduleGap` for a gap now or within
+      7 days.
+
+    **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
+    Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
+    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule` —
+    so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team; without
+    them, the gaps of every Schedule share one Alert Group, which collects the Teams of all of them. When the Routes
+    can deliver to the Teams of their Alert Groups, the suggestion turns that on too, so that each gap reaches its own
+    Team; turn it on for a Route accepted before.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -156,7 +167,7 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
     replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
     Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
-    rollout.
+    rollout. Migration 0028 adds a column with a default to the Schedules, which 0.1 replicas do not use.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -283,6 +294,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0028 adds the gap alert of the Schedules in one transaction: a failure leaves nothing of it, but the
+    schema recorded as dirty at version 28. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 27, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

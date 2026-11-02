@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/oapi-codegen/nullable"
@@ -16,8 +17,8 @@ import (
 	"github.com/muster-io/muster/internal/schedules"
 )
 
-// Schedules is what the API needs of internal/schedules: Schedules with their Rotation layers, their Overrides and
-// their On-call.
+// Schedules is what the API needs of internal/schedules: Schedules with their Rotation layers, their Overrides, their
+// On-call and gaps, and "On call now".
 type Schedules interface {
 	List(ctx context.Context, f schedules.ListFilter) (schedules.Page, error)
 	Get(ctx context.Context, publicID string) (schedules.Schedule, error)
@@ -32,6 +33,7 @@ type Schedules interface {
 	UpdateOverride(ctx context.Context, r schedules.Requester, scheduleID, overrideID string, version *int64,
 		in schedules.OverrideInput) (schedules.Override, error)
 	DeleteOverride(ctx context.Context, r schedules.Requester, scheduleID, overrideID string, version *int64) error
+	OnCallNow(ctx context.Context, memberID int64) ([]schedules.TeamOnCall, error)
 }
 
 // The cursors of the Schedule and Override lists.
@@ -195,6 +197,69 @@ func (s *Server) GetScheduleOnCall(ctx context.Context, req gen.GetScheduleOnCal
 	return gen.GetScheduleOnCall200JSONResponse(out), nil
 }
 
+// errServiceAccountOnCallTeams is the refusal of teams=mine in "On call now" for a Service account, which is in no
+// Team.
+var errServiceAccountOnCallTeams = fieldProblem(http.StatusUnprocessableEntity, "/query/teams", fieldUnsupported,
+	"A Service account is in no Team; list all Teams instead of mine.")
+
+// GetOnCallNow is getOnCallNow: the On-call of each Team's main Schedule, of every Team or of "My Teams".
+func (s *Server) GetOnCallNow(ctx context.Context, req gen.GetOnCallNowRequestObject) (gen.GetOnCallNowResponseObject,
+	error) {
+	var member int64
+	if t := req.Params.Teams; t != nil && *t == gen.GetOnCallNowParamsTeamsMine {
+		id, err := identity(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if id.IsServiceAccount() {
+			return nil, errServiceAccountOnCallTeams
+		}
+		member = id.Session.User.ID
+	}
+	list, err := s.schedules.OnCallNow(ctx, member)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.OnCallNow{Items: make([]gen.TeamOnCall, len(list))}
+	for i, t := range list {
+		out.Items[i] = teamOnCallOf(t)
+	}
+	return gen.GetOnCallNow200JSONResponse(out), nil
+}
+
+// teamOnCallOf is the API form of a Team in "On call now".
+func teamOnCallOf(t schedules.TeamOnCall) gen.TeamOnCall {
+	team := gen.TeamRef{Id: t.Team.PublicID, Name: t.Team.Name, Slug: t.Team.Slug, Deleted: t.Team.Deleted}
+	out := gen.TeamOnCall{Team: team, NoSchedule: t.Schedule == nil}
+	out.Schedule.SetNull()
+	out.User.SetNull()
+	out.RotationLayer.SetNull()
+	out.Until.SetNull()
+	out.Next.SetNull()
+	if t.Schedule == nil {
+		return out
+	}
+	out.Schedule.Set(gen.ScheduleRef{Id: t.Schedule.PublicID, Name: t.Schedule.Name, Team: team})
+	if cur := t.Current; cur != nil && cur.User != nil {
+		out.User.Set(personRefOf(*cur.User))
+		if src := cur.Source; src != nil && src.Kind == schedules.SourceRotationLayer {
+			out.RotationLayer.Set(gen.EntityRef{Id: src.RotationLayer.PublicID, Name: src.RotationLayer.Name})
+		}
+	}
+	if t.Until != nil {
+		out.Until.Set(t.Until.UTC())
+	}
+	if n := t.Next; n != nil {
+		next := gen.OnCallNext{Start: n.Start.UTC(), End: n.End.UTC()}
+		next.User.SetNull()
+		if n.User != nil {
+			next.User.Set(personRefOf(*n.User))
+		}
+		out.Next.Set(next)
+	}
+	return out
+}
+
 // ListScheduleOverrides is listScheduleOverrides.
 func (s *Server) ListScheduleOverrides(ctx context.Context, req gen.ListScheduleOverridesRequestObject) (
 	gen.ListScheduleOverridesResponseObject, error) {
@@ -286,6 +351,10 @@ func (s *Server) DeleteScheduleOverride(ctx context.Context, req gen.DeleteSched
 func scheduleInputOf(b gen.ScheduleInput) schedules.Input {
 	in := schedules.Input{TeamID: b.TeamId, Name: b.Name, TimeZone: b.TimeZone, Main: b.Main,
 		RotationLayers: make([]schedules.RotationLayerInput, len(b.RotationLayers))}
+	if b.GapAlert != nil {
+		gapAlert := string(*b.GapAlert)
+		in.GapAlert = &gapAlert
+	}
 	for i, l := range b.RotationLayers {
 		li := schedules.RotationLayerInput{Name: l.Name, UserIDs: append([]string(nil), l.UserIds...),
 			ShiftLength: string(l.ShiftLength), ShiftSeconds: l.ShiftSeconds, HandoverTime: l.HandoverTime,
@@ -321,11 +390,16 @@ func limitsIn(lm gen.RotationLimits) *schedules.Limits {
 
 // scheduleOf is the API form of a Schedule.
 func scheduleOf(sc schedules.Schedule) gen.Schedule {
-	tag := etag(sc.Version)
+	tag, active := etag(sc.Version), sc.GapAlertActive()
 	out := gen.Schedule{Id: sc.PublicID, TeamId: sc.Team.PublicID,
 		Team: gen.TeamRef{Id: sc.Team.PublicID, Name: sc.Team.Name, Slug: sc.Team.Slug, Deleted: sc.Team.Deleted},
-		Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, CreatedAt: sc.CreatedAt.UTC(), Etag: &tag,
+		Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, GapAlert: gen.ScheduleGapAlert(sc.GapAlert),
+		GapAlertActive: &active, CreatedAt: sc.CreatedAt.UTC(), Etag: &tag,
 		RotationLayers: make([]gen.RotationLayer, len(sc.RotationLayers))}
+	out.NextGap.SetNull()
+	if g := sc.NextGap; g != nil {
+		out.NextGap.Set(gen.ScheduleGap{Start: g.Start.UTC(), End: g.End.UTC()})
+	}
 	for i, l := range sc.RotationLayers {
 		out.RotationLayers[i] = rotationLayerOf(l)
 	}
@@ -423,7 +497,15 @@ func segmentOf(seg schedules.Segment) gen.OnCallSegment {
 // warningOf is the API form of a warning of the Result.
 func warningOf(w schedules.Warning) gen.ScheduleWarning {
 	out := gen.ScheduleWarning{Kind: gen.ScheduleWarningKind(w.Kind)}
-	out.User.Set(personRefOf(w.User))
+	out.Start.SetNull()
+	out.End.SetNull()
+	if w.Kind == schedules.WarningGap {
+		out.User.SetNull()
+		out.Start.Set(w.Start.UTC())
+		out.End.Set(w.End.UTC())
+	} else {
+		out.User.Set(personRefOf(w.User))
+	}
 	out.RotationLayer.SetNull()
 	if w.RotationLayer != nil {
 		out.RotationLayer.Set(gen.EntityRef{Id: w.RotationLayer.PublicID, Name: w.RotationLayer.Name})

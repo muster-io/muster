@@ -296,10 +296,13 @@ func (k *Keeper) release(ctx context.Context) {
 	k.closeSession(ctx)
 }
 
-// runTask runs t at once, then at every interval and whenever it is woken, until ctx ends.
+// runTask runs t at once, then at every interval and whenever it is woken, until ctx ends, and then its Stop.
 func (k *Keeper) runTask(ctx context.Context, t Task) {
 	ticks, stop := k.every(t.Every)
 	defer stop()
+	if t.Stop != nil {
+		defer t.Stop()
+	}
 	for {
 		if err := t.Run(ctx); err != nil && ctx.Err() == nil {
 			k.log.Log(ctx, logging.LeaderTaskFailed, logging.F("task", t.Name), logging.F("error", err.Error()))

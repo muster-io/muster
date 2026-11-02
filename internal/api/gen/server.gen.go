@@ -2441,6 +2441,27 @@ func (e RouteSuggestionId) Valid() bool {
 	}
 }
 
+// Defines values for ScheduleGapAlert.
+const (
+	ByDefault ScheduleGapAlert = "by_default"
+	Off       ScheduleGapAlert = "off"
+	On        ScheduleGapAlert = "on"
+)
+
+// Valid indicates whether the value is a known member of the ScheduleGapAlert enum.
+func (e ScheduleGapAlert) Valid() bool {
+	switch e {
+	case ByDefault:
+		return true
+	case Off:
+		return true
+	case On:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ScheduleWarningKind.
 const (
 	ScheduleWarningKindDisabled    ScheduleWarningKind = "disabled"
@@ -3746,6 +3767,24 @@ func (e ListIntegrationAlertsParamsSort) Valid() bool {
 	case MinusStartsAt:
 		return true
 	case StartsAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOnCallNowParamsTeams.
+const (
+	GetOnCallNowParamsTeamsAll  GetOnCallNowParamsTeams = "all"
+	GetOnCallNowParamsTeamsMine GetOnCallNowParamsTeams = "mine"
+)
+
+// Valid indicates whether the value is a known member of the GetOnCallNowParamsTeams enum.
+func (e GetOnCallNowParamsTeams) Valid() bool {
+	switch e {
+	case GetOnCallNowParamsTeamsAll:
+		return true
+	case GetOnCallNowParamsTeamsMine:
 		return true
 	default:
 		return false
@@ -5997,6 +6036,20 @@ type OidcWarning struct {
 // OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 type OidcWarningKind string
 
+// OnCallNext The segment of a Schedule's Result after the current one, cut to `schedule.gap_view`.
+type OnCallNext struct {
+	End   time.Time `json:"end"`
+	Start time.Time `json:"start"`
+
+	// User The person On-call then; null for a gap.
+	User nullable.Nullable[UserRef] `json:"user"`
+}
+
+// OnCallNow "On call now": the On-call of each Team, by the Team's name.
+type OnCallNow struct {
+	Items []TeamOnCall `json:"items"`
+}
+
 // OnCallSegment A segment of the Result, with the person On-call in it, or nobody in a gap.
 type OnCallSegment struct {
 	End time.Time `json:"end"`
@@ -6960,10 +7013,19 @@ type Schedule struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update.
 	Etag *string `json:"etag,omitempty"`
 
+	// GapAlert Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team's main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.
+	GapAlert ScheduleGapAlert `json:"gap_alert"`
+
+	// GapAlertActive Whether the Leader's gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team's main one.
+	GapAlertActive *bool `json:"gap_alert_active,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Main bool     `json:"main"`
 	Name string   `json:"name"`
+
+	// NextGap The first gap within `schedule.gap_view` from the business clock's now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.
+	NextGap nullable.Nullable[ScheduleGap] `json:"next_gap,omitempty"`
 
 	// RotationLayers From the lowest to the highest.
 	RotationLayers []RotationLayer `json:"rotation_layers"`
@@ -6976,8 +7038,20 @@ type Schedule struct {
 	TimeZone string   `json:"time_zone"`
 }
 
+// ScheduleGap A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.
+type ScheduleGap struct {
+	End   time.Time `json:"end"`
+	Start time.Time `json:"start"`
+}
+
+// ScheduleGapAlert Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team's main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.
+type ScheduleGapAlert string
+
 // ScheduleInput defines model for ScheduleInput.
 type ScheduleInput struct {
+	// GapAlert Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted.
+	GapAlert *ScheduleGapAlert `json:"gap_alert,omitempty"`
+
 	// Main True makes the Schedule its Team's main Schedule, whose On-call is the Team's; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead.
 	Main *bool `json:"main,omitempty"`
 
@@ -7075,16 +7149,24 @@ type ScheduleRef struct {
 
 // ScheduleWarning defines model for ScheduleWarning.
 type ScheduleWarning struct {
-	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and `unreachable` come with later releases of 0.2.
+	// End The end of the gap, cut to the period; null for another kind.
+	End nullable.Nullable[time.Time] `json:"end"`
+
+	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
 	Kind ScheduleWarningKind `json:"kind"`
 
 	// OverrideId A `public_id` in the format of `PublicId`, or null.
 	OverrideId    nullable.Nullable[NullablePublicId] `json:"override_id"`
 	RotationLayer nullable.Nullable[EntityRef]        `json:"rotation_layer"`
-	User          nullable.Nullable[UserRef]          `json:"user"`
+
+	// Start The start of the gap, cut to the period; null for another kind.
+	Start nullable.Nullable[time.Time] `json:"start"`
+
+	// User Null for a gap.
+	User nullable.Nullable[UserRef] `json:"user"`
 }
 
-// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and `unreachable` come with later releases of 0.2.
+// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
 type ScheduleWarningKind string
 
 // SecretStatus What a read shows instead of a Secret. The value itself is never returned.
@@ -7805,6 +7887,30 @@ type TeamMembership struct {
 
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
+}
+
+// TeamOnCall The On-call of a Team's main Schedule now. With `no_schedule` true, the Team has no main Schedule and every other field but `team` is null.
+type TeamOnCall struct {
+	// Next The segment that follows within `schedule.gap_view`, or null.
+	Next nullable.Nullable[OnCallNext] `json:"next"`
+
+	// NoSchedule The Team has no main Schedule ("No Schedule").
+	NoSchedule bool `json:"no_schedule"`
+
+	// RotationLayer The Rotation layer whose Shift makes the person On-call; null for an Override, in a gap and without a Schedule.
+	RotationLayer nullable.Nullable[EntityRef] `json:"rotation_layer"`
+
+	// Schedule The Team's main Schedule, or null.
+	Schedule nullable.Nullable[ScheduleRef] `json:"schedule"`
+
+	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
+	Team TeamRef `json:"team"`
+
+	// Until The end of the current segment — the On-call's, or the gap's; null when it lasts beyond `schedule.gap_view` and without a Schedule.
+	Until nullable.Nullable[time.Time] `json:"until"`
+
+	// User The On-call now; null in a gap and without a Schedule.
+	User nullable.Nullable[UserRef] `json:"user"`
 }
 
 // TeamRef The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
@@ -9353,6 +9459,15 @@ type UpdateOidcSettingsParams struct {
 	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
 	IfMatch IfMatch `json:"If-Match"`
 }
+
+// GetOnCallNowParams defines parameters for GetOnCallNow.
+type GetOnCallNowParams struct {
+	// Teams `all`, the default, lists every Team; `mine` the Teams of the calling User, as "My Teams". A Service account is in no Team, so its `mine` is refused with `422` `unsupported` at `/query/teams`.
+	Teams *GetOnCallNowParamsTeams `form:"teams,omitempty" json:"teams,omitempty"`
+}
+
+// GetOnCallNowParamsTeams defines parameters for GetOnCallNow.
+type GetOnCallNowParamsTeams string
 
 // UpdateOrganizationParams defines parameters for UpdateOrganization.
 type UpdateOrganizationParams struct {
@@ -12183,6 +12298,9 @@ type ServerInterface interface {
 	// CheckOidcSettings Check the connection to the identity provider
 	// (POST /oidc-settings/checks)
 	CheckOidcSettings(w http.ResponseWriter, r *http.Request)
+	// GetOnCallNow Read who is On-call now in each Team
+	// (GET /on-call-now)
+	GetOnCallNow(w http.ResponseWriter, r *http.Request, params GetOnCallNowParams)
 	// GetOpenApiSpec Read this specification
 	// (GET /openapi.yaml)
 	GetOpenApiSpec(w http.ResponseWriter, r *http.Request)
@@ -16269,6 +16387,39 @@ func (siw *ServerInterfaceWrapper) CheckOidcSettings(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetOnCallNow operation middleware
+func (siw *ServerInterfaceWrapper) GetOnCallNow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetOnCallNowParams
+
+	// ------------- Optional query parameter "teams" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "teams", r.URL.Query(), &params.Teams, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "teams"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "teams", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOnCallNow(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetOpenApiSpec operation middleware
 func (siw *ServerInterfaceWrapper) GetOpenApiSpec(w http.ResponseWriter, r *http.Request) {
 
@@ -19166,6 +19317,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/schedules/{schedule_id}/overrides", wrapper.CreateScheduleOverride)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/schedules/{schedule_id}/overrides/{override_id}", wrapper.DeleteScheduleOverride)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/schedules/{schedule_id}/overrides/{override_id}", wrapper.UpdateScheduleOverride)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/on-call-now", wrapper.GetOnCallNow)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-groups", wrapper.ListAlertGroups)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-group-counts", wrapper.GetAlertGroupCounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-group-statistics", wrapper.GetAlertGroupStatistics)
@@ -30470,6 +30622,111 @@ func (response CheckOidcSettings429ApplicationProblemPlusJSONResponse) VisitChec
 	return err
 }
 
+type GetOnCallNowRequestObject struct {
+	Params GetOnCallNowParams
+}
+
+type GetOnCallNowResponseObject interface {
+	VisitGetOnCallNowResponse(w http.ResponseWriter) error
+}
+
+type GetOnCallNow200JSONResponse OnCallNow
+
+func (response GetOnCallNow200JSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOnCallNow400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetOnCallNow400ApplicationProblemPlusJSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOnCallNow401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetOnCallNow401ApplicationProblemPlusJSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOnCallNow403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetOnCallNow403ApplicationProblemPlusJSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOnCallNow422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response GetOnCallNow422ApplicationProblemPlusJSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOnCallNow429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetOnCallNow429ApplicationProblemPlusJSONResponse) VisitGetOnCallNowResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetOpenApiSpecRequestObject struct {
 }
 
@@ -38935,6 +39192,9 @@ type StrictServerInterface interface {
 	// CheckOidcSettings Check the connection to the identity provider
 	// (POST /oidc-settings/checks)
 	CheckOidcSettings(ctx context.Context, request CheckOidcSettingsRequestObject) (CheckOidcSettingsResponseObject, error)
+	// GetOnCallNow Read who is On-call now in each Team
+	// (GET /on-call-now)
+	GetOnCallNow(ctx context.Context, request GetOnCallNowRequestObject) (GetOnCallNowResponseObject, error)
 	// GetOpenApiSpec Read this specification
 	// (GET /openapi.yaml)
 	GetOpenApiSpec(ctx context.Context, request GetOpenApiSpecRequestObject) (GetOpenApiSpecResponseObject, error)
@@ -42173,6 +42433,32 @@ func (sh *strictHandler) CheckOidcSettings(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckOidcSettingsResponseObject); ok {
 		if err := validResponse.VisitCheckOidcSettingsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOnCallNow operation middleware
+func (sh *strictHandler) GetOnCallNow(w http.ResponseWriter, r *http.Request, params GetOnCallNowParams) {
+	var request GetOnCallNowRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOnCallNow(ctx, request.(GetOnCallNowRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOnCallNow")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOnCallNowResponseObject); ok {
+		if err := validResponse.VisitGetOnCallNowResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

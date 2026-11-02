@@ -7,11 +7,13 @@ Muster reports problems it can still report through its own pipeline as Internal
 synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with
 them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or
 Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,
-`route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and
-the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every
-Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
+`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from
+`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new
+one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,
+outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,
+`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
 `major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
-joined by `/`. The capability is the one that raises it.
+joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.
 
 ### `MusterDestinationBroken`
 
@@ -30,6 +32,12 @@ Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived with
 warning · no labels · C-19 · runbook: [`operations/runbooks/MusterOIDCSecretExpiring/`](../operations/runbooks/MusterOIDCSecretExpiring.md)
 
 Raised while: The OIDC client secret expires within oidc.secret_expiry_lead, by the expiry date an Admin entered in the OIDC settings. It resolves when the date moves further out or is removed.
+
+### `MusterScheduleGap`
+
+warning · labels: `schedule`, `schedule_name`, `team_id`, `team_name`, the Team's slug under the Team label · annotations: `gap_start` · C-27 · runbook: [`operations/runbooks/MusterScheduleGap/`](../operations/runbooks/MusterScheduleGap.md)
+
+Raised while: A Schedule whose gap alert is active — schedule.gap_alert on, or by default while the Schedule is its Team's main one — has a gap now or one that starts within schedule.gap_alert_horizon: a time when no Override and no Rotation layer has a Shift with a person who may be Paged. The annotation gap_start says when the nearest gap starts. It resolves when no gap is current or within the horizon, when the gap alert is no longer active or when the Schedule is deleted.
 
 ### `MusterSnapshotTruncated`
 

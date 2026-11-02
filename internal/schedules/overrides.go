@@ -550,7 +550,12 @@ func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.
 	if err != nil {
 		return Result{}, err
 	}
-	return s.result(ctx, s.store, sc, start, end)
+	res, err := s.result(ctx, s.store, sc, start, end)
+	if err != nil {
+		return Result{}, err
+	}
+	res.Warnings = append(res.Warnings, gapWarnings(res)...)
+	return res, nil
 }
 
 // OnCallAt is the person On-call in the Schedule scheduleID at t and what decides it, nil in a gap (C-27.FR-4).
@@ -569,29 +574,9 @@ func (s *Service) OnCallAt(ctx context.Context, scheduleID string, t time.Time) 
 // result is the Result of the Schedule sc from from to to, with whether its people may be Paged read once from their
 // current state.
 func (s *Service) result(ctx context.Context, q Queries, sc Schedule, from, to time.Time) (Result, error) {
-	loc, err := location(sc.TimeZone)
-	if err != nil {
-		loc = time.UTC
-	}
-	rows, err := q.ListPeriodOverrides(ctx, dbgen.ListPeriodOverridesParams{OrgID: s.orgID, ScheduleID: sc.ID,
-		PeriodStart: from, PeriodEnd: to})
-	if err != nil {
-		return Result{}, fmt.Errorf("list the overrides of the schedule %s: %w", sc.PublicID, err)
-	}
-	overrides := make([]Override, len(rows))
-	var ids []int64
-	for i, r := range rows {
-		overrides[i] = overrideOf(overrideRow(r))
-		ids = append(ids, r.UserID)
-	}
-	for _, l := range sc.RotationLayers {
-		for _, u := range l.Users {
-			ids = append(ids, u.ID)
-		}
-	}
-	skipped, err := s.pageable(ctx, q, sc.Team.ID, ids)
+	res, err := s.results(ctx, q, []Schedule{sc}, from, to)
 	if err != nil {
 		return Result{}, err
 	}
-	return compute(loc, sc.RotationLayers, overrides, skipped, from, to), nil
+	return res[0], nil
 }

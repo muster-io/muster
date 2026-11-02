@@ -48,6 +48,8 @@ type fakeSchedules struct {
 	versions  []*int64
 	by        []schedules.Requester
 	deleted   []string
+	members   []int64
+	onCall    []schedules.TeamOnCall
 	err       error
 }
 
@@ -60,8 +62,10 @@ func newFakeSchedules() *fakeSchedules {
 		StartDate: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
 		Limits:    &schedules.Limits{Days: []string{"friday"}, Start: "19:00", End: "09:00"}}
 	sc := schedules.Schedule{ID: 1, PublicID: scheduleID, Name: "Main", TimeZone: "Europe/Berlin", Main: true,
+		GapAlert:       schedules.GapAlertByDefault,
 		Team:           schedules.TeamRef{ID: 1, PublicID: teamID, Name: "Payments", Slug: "payments"},
-		RotationLayers: []schedules.RotationLayer{low, high}, CreatedAt: t0, Version: 3}
+		RotationLayers: []schedules.RotationLayer{low, high}, CreatedAt: t0, Version: 3,
+		NextGap: &schedules.Gap{Start: t0.Add(2 * time.Hour), End: t0.Add(3 * time.Hour)}}
 	o := schedules.Override{ID: 1, PublicID: overrideID, User: apiPetr, Replaces: &apiOlga, Start: t0,
 		End: t0.Add(time.Hour), CreatedBy: schedules.Actor{Kind: "user", PublicID: bobPublicID, Name: "Petr",
 			Login: "petr"}, CreatedAt: t0, Version: 2}
@@ -79,8 +83,18 @@ func newFakeSchedules() *fakeSchedules {
 				Skipped: schedules.ReasonNotInTeam}}}},
 		Overrides: []schedules.Override{o},
 		Warnings: []schedules.Warning{{Kind: schedules.ReasonNotInTeam, User: apiOlga, RotationLayer: &ref},
-			{Kind: schedules.ReasonDisabled, User: apiOlga, Override: overrideID}}}
-	return &fakeSchedules{schedule: sc, override: o, result: res}
+			{Kind: schedules.ReasonDisabled, User: apiOlga, Override: overrideID},
+			{Kind: schedules.WarningGap, Start: t0.Add(2 * time.Hour), End: t0.Add(3 * time.Hour)}}}
+	until := t0.Add(time.Hour)
+	onCall := []schedules.TeamOnCall{
+		{Team: schedules.TeamRef{ID: 3, PublicID: "TM0000000000BI", Name: "Billing", Slug: "billing"}},
+		{Team: sc.Team, Schedule: &sc, Current: &res.Segments[1], Until: &until, Next: &res.Segments[2]},
+		{Team: schedules.TeamRef{ID: 4, PublicID: "TM0000000000SE", Name: "Security", Slug: "security"},
+			Schedule: &sc, Current: &res.Segments[0], Next: &res.Segments[1]},
+		{Team: schedules.TeamRef{ID: 5, PublicID: "TM0000000000ST", Name: "Storage", Slug: "storage"},
+			Schedule: &sc, Current: &res.Segments[2]},
+	}
+	return &fakeSchedules{schedule: sc, override: o, result: res, onCall: onCall}
 }
 
 func (f *fakeSchedules) List(_ context.Context, lf schedules.ListFilter) (schedules.Page, error) {
@@ -142,6 +156,11 @@ func (f *fakeSchedules) DeleteOverride(_ context.Context, r schedules.Requester,
 	return f.err
 }
 
+func (f *fakeSchedules) OnCallNow(_ context.Context, memberID int64) ([]schedules.TeamOnCall, error) {
+	f.members = append(f.members, memberID)
+	return f.onCall, f.err
+}
+
 // newSchedulesAPI adds the fake Schedules and four tokens: an Admin's, a Responder's, a Viewer's and a Service
 // account's that is not an Admin.
 func newSchedulesAPI(t *testing.T) (*testAPI, *fakeSchedules) {
@@ -169,7 +188,7 @@ func newSchedulesAPI(t *testing.T) (*testAPI, *fakeSchedules) {
 	return x, fs
 }
 
-const scheduleBody = `{"team_id":"` + teamID + `","name":"Main","time_zone":"Europe/Berlin","main":true,
+const scheduleBody = `{"team_id":"` + teamID + `","name":"Main","time_zone":"Europe/Berlin","main":true,"gap_alert":"on",
 	"rotation_layers":[{"id":"RY0000000000L1","name":"Around the clock","user_ids":["` + bobPublicID + `"],
 	"shift_length":"week","handover_time":"10:00","handover_day":"monday","start_date":"2026-11-02","limits":null},
 	{"name":"Nights","user_ids":["SRCCCCCCCCCCCC"],"shift_length":"hours","shift_seconds":43200,
@@ -237,12 +256,25 @@ func testSchedulesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 		in.RotationLayers[0].ID != "RY0000000000L1" || in.RotationLayers[0].HandoverDay != "monday" || in.RotationLayers[0].Limits != nil ||
 		in.RotationLayers[1].ShiftLength != schedules.ShiftHours || *in.RotationLayers[1].ShiftSeconds != 43200 ||
 		in.RotationLayers[1].Limits.Start != "19:00" || in.RotationLayers[1].Limits.Days[0] != "friday" ||
-		in.RotationLayers[1].StartDate.Format(time.DateOnly) != "2026-11-02" || !fs.by[0].Admin {
+		in.RotationLayers[1].StartDate.Format(time.DateOnly) != "2026-11-02" || !fs.by[0].Admin ||
+		in.GapAlert == nil || *in.GapAlert != schedules.GapAlertOn {
 		t.Errorf("input %+v by %+v", in, fs.by[0])
 	}
 	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/"+scheduleID, ""); a.status != http.StatusOK ||
-		a.header.Get("ETag") != `"3"` {
-		t.Errorf("get = %d %v", a.status, a.header)
+		a.header.Get("ETag") != `"3"` || !strings.Contains(string(a.body), `"gap_alert":"by_default"`) ||
+		!strings.Contains(string(a.body), `"gap_alert_active":true`) ||
+		!strings.Contains(string(a.body), `"next_gap":{"end":"2026-10-05T15:00:00Z","start":"2026-10-05T14:00:00Z"}`) {
+		t.Errorf("get = %d %v %s", a.status, a.header, a.body)
+	}
+	fs.schedule.Main, fs.schedule.NextGap = false, nil
+	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/"+scheduleID, ""); a.status != http.StatusOK ||
+		!strings.Contains(string(a.body), `"gap_alert_active":false`) ||
+		!strings.Contains(string(a.body), `"next_gap":null`) {
+		t.Errorf("get without a gap = %d %s", a.status, a.body)
+	}
+	if a = x.as(t, schedulesAdmin, http.MethodPost, "/api/v1/schedules", strings.Replace(scheduleBody, `"on"`,
+		`"sometimes"`, 1)); a.status != http.StatusBadRequest && a.status != http.StatusUnprocessableEntity {
+		t.Errorf("an unknown gap_alert = %d %s", a.status, a.body)
 	}
 	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/schedules/SC0000000000ZZ", ""); a.status !=
 		http.StatusNotFound {
@@ -254,7 +286,8 @@ func testSchedulesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	}
 	if a = x.as(t, schedulesAdmin, http.MethodPut, "/api/v1/schedules/"+scheduleID, `{"team_id":"`+teamID+
 		`","name":"Main","rotation_layers":[]}`, "If-Match", `"3"`); a.status != http.StatusOK ||
-		*fs.versions[0] != 3 || fs.inputs[1].TimeZone != nil || fs.inputs[1].Main != nil {
+		*fs.versions[0] != 3 || fs.inputs[1].TimeZone != nil || fs.inputs[1].Main != nil ||
+		fs.inputs[1].GapAlert != nil {
 		t.Errorf("update = %d %s, %+v", a.status, a.body, fs.inputs[1])
 	}
 	if a = x.as(t, schedulesAdmin, http.MethodDelete, "/api/v1/schedules/"+scheduleID, "", "If-Match", `"3"`); a.status !=
@@ -355,8 +388,10 @@ func testScheduleOnCallAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 		} `json:"overrides"`
 		Warnings []struct {
 			Kind          string  `json:"kind"`
+			User          *any    `json:"user"`
 			RotationLayer *any    `json:"rotation_layer"`
 			OverrideID    *string `json:"override_id"`
+			Start, End    *string
 		} `json:"warnings"`
 	}
 	decodeInto(t, a, &res)
@@ -365,7 +400,10 @@ func testScheduleOnCallAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 		"Around the clock" || res.Segments[2].User != nil || res.Segments[2].Source != nil ||
 		res.RotationLayers[0].Shifts[0].Skipped != nil || *res.RotationLayers[0].Shifts[1].Skipped != "not_in_team" ||
 		!res.Overrides[0].ReplacesUser.Deactivated || res.Warnings[0].OverrideID != nil ||
-		res.Warnings[1].RotationLayer != nil || *res.Warnings[1].OverrideID != overrideID {
+		res.Warnings[1].RotationLayer != nil || *res.Warnings[1].OverrideID != overrideID ||
+		res.Warnings[0].Start != nil || res.Warnings[0].End != nil || len(res.Warnings) != 3 ||
+		res.Warnings[2].Kind != "gap" || res.Warnings[2].User != nil || *res.Warnings[2].Start != "2026-10-05T14:00:00Z" ||
+		*res.Warnings[2].End != "2026-10-05T15:00:00Z" {
 		t.Fatalf("on-call = %d %s", a.status, a.body)
 	}
 	if p := fs.periods[0]; p[0] == nil || p[1] == nil || p[0].Format(time.RFC3339) != "2026-11-02T00:00:00Z" {
@@ -469,6 +507,73 @@ func testScheduleOverridesAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
 	}
 }
 
+// testOnCallNowAPI is C-27.FR-9 at the API: every Team with the On-call of its main Schedule, the Rotation layer that
+// decides it, until when and the segment that follows, a gap or none; a Team without a main Schedule has no_schedule
+// true; teams=mine passes the caller and is 422 at /query/teams for a Service account; every Role reads it.
+func testOnCallNowAPI(t *testing.T, x *testAPI, fs *fakeSchedules) {
+	a := x.as(t, schedulesViewer, http.MethodGet, "/api/v1/on-call-now", "")
+	var res struct {
+		Items []struct {
+			Team          struct{ Slug string }
+			Schedule      *struct{ ID, Name string }
+			NoSchedule    bool                    `json:"no_schedule"`
+			User          *struct{ Login string } `json:"user"`
+			RotationLayer *struct{ Name string }  `json:"rotation_layer"`
+			Until         *string                 `json:"until"`
+			Next          *struct {
+				User       *struct{ Login string } `json:"user"`
+				Start, End string
+			} `json:"next"`
+		} `json:"items"`
+	}
+	decodeInto(t, a, &res)
+	if a.status != http.StatusOK || len(res.Items) != 4 || fs.members[0] != 0 {
+		t.Fatalf("on call now = %d %s", a.status, a.body)
+	}
+	if b := res.Items[0]; b.Team.Slug != "billing" || !b.NoSchedule || b.Schedule != nil || b.User != nil ||
+		b.Until != nil || b.Next != nil {
+		t.Errorf("a Team without a Schedule %+v", b)
+	}
+	if p := res.Items[1]; p.NoSchedule || p.Schedule.ID != scheduleID || p.User.Login != "petr" ||
+		p.RotationLayer.Name != "Around the clock" || *p.Until != "2026-10-05T13:00:00Z" || p.Next.User != nil ||
+		p.Next.Start != "2026-10-05T14:00:00Z" {
+		t.Errorf("payments %+v", p)
+	}
+	if s := res.Items[2]; s.User.Login != "petr" || s.RotationLayer != nil || s.Until != nil ||
+		s.Next.User.Login != "petr" {
+		t.Errorf("an Override now %+v", s)
+	}
+	if g := res.Items[3]; g.NoSchedule || g.User != nil || g.RotationLayer != nil || g.Next != nil {
+		t.Errorf("a gap now %+v", g)
+	}
+	for _, token := range []string{schedulesResponder, schedulesAdmin} {
+		if a = x.as(t, token, http.MethodGet, "/api/v1/on-call-now?teams=all", ""); a.status != http.StatusOK {
+			t.Errorf("%s = %d", token, a.status)
+		}
+	}
+	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/on-call-now?teams=mine", ""); a.status != http.StatusOK ||
+		fs.members[len(fs.members)-1] != 4 {
+		t.Errorf("mine = %d, %v", a.status, fs.members)
+	}
+	if status, _, ptr, code := firstProblemError(t, x.as(t, schedulesSA, http.MethodGet,
+		"/api/v1/on-call-now?teams=mine", "")); status != http.StatusUnprocessableEntity || ptr != "/query/teams" ||
+		code != fieldUnsupported {
+		t.Errorf("mine of a service account = %d %s %s", status, ptr, code)
+	}
+	if a = x.as(t, schedulesSA, http.MethodGet, "/api/v1/on-call-now", ""); a.status != http.StatusOK {
+		t.Errorf("all for a service account = %d", a.status)
+	}
+	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/on-call-now?teams=some", ""); a.status !=
+		http.StatusBadRequest {
+		t.Errorf("an unknown teams = %d", a.status)
+	}
+	fs.err = errors.New("boom")
+	if a = x.as(t, schedulesViewer, http.MethodGet, "/api/v1/on-call-now", ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failure = %d", a.status)
+	}
+}
+
 // testSchedulesPermissions is C-27.FR-13 and C-27.AC-10 at the API: a Responder reads Schedules and the On-call and
 // makes Overrides, and gets 403 on createSchedule, updateSchedule and deleteSchedule; a Viewer only reads.
 func testSchedulesPermissions(t *testing.T, x *testAPI, fs *fakeSchedules) {
@@ -529,6 +634,7 @@ func TestSchedules(t *testing.T) {
 	}{
 		{"schedules", testSchedulesAPI}, {"on-call", testScheduleOnCallAPI}, {"overrides", testScheduleOverridesAPI},
 		{"permissions", testSchedulesPermissions}, {"team in use", testTeamInUseProblem},
+		{"on call now", testOnCallNowAPI},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			*fs = *newFakeSchedules()

@@ -59,7 +59,9 @@
   (the personal iCal feeds, C-27.FR-10, S-134) and
   [`0027_team_evaluation`](../../internal/db/migrations/0027_team_evaluation.up.sql)
   (`open_group_updates.team_id` and the kind `team_evaluation`, the evaluation of the open Alert Groups when a Team or
-  the Team label is saved, C-25.FR-13, S-163), in
+  the Team label is saved, C-25.FR-13, S-163) and
+  [`0028_schedule_gap_alert`](../../internal/db/migrations/0028_schedule_gap_alert.up.sql)
+  (`schedules.gap_alert`, C-27.FR-7, S-133), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1454,7 +1456,11 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
   and `main`; the partial unique index `schedules_main_key` on `(team_id) WHERE main` keeps at most one main Schedule
   per Team. A Team's first Schedule is created main (P-90); marking another one main clears the previous one in the
   same transaction, and deleting the main Schedule leaves the Team without one (P-66). Deletion is a `DELETE` that
-  cascades to the Rotation layers, their people and the Overrides; the Audit log keeps the name.
+  cascades to the Rotation layers, their people and the Overrides; the Audit log keeps the name. `gap_alert`
+  (migration 0028, `schedule.gap_alert`, C-27.FR-7) is `by_default`, `on` or `off` (`schedules_gap_alert_check`),
+  `by_default` for every Schedule the migration found and for one created without it; with `by_default` the Leader's
+  gap scan raises `MusterScheduleGap` while the Schedule is main. The scan reads every Schedule of the Organization
+  and writes only Internal alerts, so the column needs no index.
 - **`rotation_layers`** — the Rotation layers of a Schedule, `position` 1 for the lowest, unique per Schedule through
   `rotation_layers_position_key`, deferred to the commit so that a save renumbers the layers it keeps. `shift_length`
   is `day`, `week` or `hours`; `shift_seconds` is set exactly with `hours`, a multiple of 3600 from 3600 to 2419200,

@@ -8,28 +8,41 @@ depends_on: [S-118, S-131]
 covers: [C-27.FR-7, C-27.FR-9, C-27.FR-14, C-27.AC-5, C-27.AC-8, C-25.FR-5]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0030_schedule_gap_alert.up.sql
-  - internal/db/migrations/0030_schedule_gap_alert.down.sql
+  - internal/db/migrations/0028_schedule_gap_alert.up.sql
+  - internal/db/migrations/0028_schedule_gap_alert.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/schedules/schedules.go
+  - internal/schedules/schedules_test.go
+  - internal/schedules/result.go
+  - internal/schedules/overrides.go
+  - internal/schedules/overrides_test.go
+  - internal/schedules/feeds_test.go
   - internal/schedules/gaps.go
   - internal/schedules/gaps_test.go
   - internal/schedules/scan.go
+  - internal/schedules/scan_test.go
   - internal/schedules/scan_integration_test.go
   - internal/schedules/oncallnow.go
   - internal/schedules/oncallnow_test.go
   - internal/schedules/query.sql
   - internal/api/schedules.go
   - internal/api/schedules_test.go
+  - internal/api/server.go
   - internal/internalalerts/registry.go
   - internal/internalalerts/raise.go
   - internal/internalalerts/internalalerts_test.go
+  - internal/internalalerts/query.sql
+  - internal/tools/refgen/main.go
+  - internal/tools/chartcheck/chartcheck_test.go
   - internal/routing/suggestions.go
   - internal/routing/suggestions_test.go
+  - internal/routing/routes.go
+  - internal/routing/routes_test.go
   - internal/routing/query.sql
   - internal/leader/tasks.go
+  - internal/leader/leader.go
   - internal/leader/leader_test.go
   - internal/runtime/runtime.go
   - internal/metrics/catalogue.go
@@ -45,18 +58,21 @@ files_touched:
   - mkdocs.yml
   - docs/install/versions.md
   - design/prd/l1/reference.md
+  - design/stories/coverage.md
+  - design/stories/S-121-severity-conditions-delivery-to-teams-and-destination-joined.md
+  - api/README.md
   - test/e2e/schedule_gaps_test.go
 acceptance:
   - "[C-27.FR-7] `Schedule` carries `gap_alert` — `by_default`, `on` or `off`, `by_default` on a new Schedule and after the migration — and the derived read-only `gap_alert_active`, true for `on`, and for `by_default` while the Schedule is its Team's main one; `updateSchedule` changes it, recorded in the diff of `schedule.updated` (`schedules_test.go`)."
   - "[C-27.FR-7] `getScheduleOnCall` lists a warning `gap` with its `start` and `end` for each gap of the period, and `Schedule.next_gap` is the first gap within `schedule.gap_view` from the business clock's now, or null (`gaps_test.go`)."
-  - "[C-27.FR-7, C-27.AC-5, C-25.FR-5] With a gap 5 days ahead in a Team's main Schedule, the next run of the Leader task `schedule_gap_scan` raises `MusterScheduleGap` with the labels `schedule`, `schedule_name`, `team_id`, `team_name` and, under the Organization's Team label, the Team's slug outside the fingerprint, and the annotation of when the nearest gap starts; `muster_schedule_gap{schedule}` is 1; the Alert belongs to the Team by the Team label and its Alert Group records no `unknown_team_value`; a run of the task twice in a row raises it once (`scan_integration_test.go`)."
+  - "[C-27.FR-7, C-27.AC-5, C-25.FR-5] With a gap 5 days ahead in a Team's main Schedule, the next run of the Leader task `schedule_gap_scan` raises `MusterScheduleGap` with the labels `schedule`, `schedule_name`, `team_id`, `team_name` and, under the Organization's Team label, the Team's slug outside the fingerprint, and the annotation of when the nearest gap starts; `muster_schedule_gap{schedule}` is 1; the Alert belongs to the Team by the Team label and its Alert Group records no `unknown_team_value`; a run of the task twice in a row raises it once (`scan_integration_test.go`; the Team of the Alert Group and `unknown_team_value` in `schedule_gaps_test.go`)."
   - "[C-27.FR-7] With a Rotation layer limited to Friday 19:00–09:00 as the only one of a Schedule, its gaps run from Saturday 09:00 to Friday 19:00 and the night from Friday to Saturday is no gap, which `next_gap` and the gap warnings show (`gaps_test.go`)."
   - "[C-27.FR-7, C-27.AC-5] Once the gap has started the alert stays raised; an Override that closes the gap resolves it at the next run, and so does the end of the gap; a gap 8 days ahead raises nothing yet; a second Schedule of the Team with a gap raises nothing and exports `muster_schedule_gap` 0 until an Admin sets its `gap_alert` to `on` (`scan_integration_test.go`, `schedule_gaps_test.go`)."
   - "[C-27.AC-8] With `gap_alert` `by_default` on two Schedules of a Team, making the second one main moves the gap alert to it at the next run and resolves the first one's; with `on` on the first one it stays raised there (`scan_integration_test.go`)."
   - "[C-27.FR-7] Renaming a Schedule or its Team updates the name labels of the open `MusterScheduleGap`, a changed slug or Team label its Team label, and deleting a Schedule resolves its alert, without a second Alert (`scan_integration_test.go`)."
   - "[C-27.FR-9] `getOnCallNow` lists for every Team — or with `teams=mine` the Teams of the calling User — the main Schedule with the On-call now and until when, the next segment (its person, or a gap) and `no_schedule` true for a Team without a main Schedule, sorted by the Team's name (`oncallnow_test.go`)."
-  - "[C-27.FR-7] The chart renders the rule `MusterScheduleGap` with its expression, severity, `description` and `runbook_url`, its threshold and `for` as chart values; its rule unit test fires on `muster_schedule_gap` 1 and not on 0; reference.md moves `MusterScheduleGap` and `muster_schedule_gap` into the main tables; the runbook page says how to fill a gap; `make rules-test helm-check docs-check` pass."
-  - "[C-27.FR-7] The suggested Route \"Muster internal alerts\" groups by `schedule` too — its Group key gains `schedule` after `route`, before S-149's `connection` if that has merged — so that the gaps of two Schedules make two Alert Groups, each delivered to its own Team; the simulation of `Suggestions` that decides whether the suggestion applies counts each Schedule as an entity of `MusterScheduleGap`, with its Team's label and name; the upgrade notes of 0.2.0 tell an installation that accepted the suggestion in 0.1 to add `schedule` to that Route's Group key (`suggestions_test.go`)."
+  - "[C-27.FR-7] The chart renders the rule `MusterScheduleGap` with its expression, severity, `description` and `runbook_url`, its `for` as a chart value; its rule unit test fires on `muster_schedule_gap` 1 and not on 0; reference.md moves `MusterScheduleGap` and `muster_schedule_gap` into the main tables; the runbook page says how to fill a gap; `make rules-test helm-check docs-check` pass."
+  - "[C-27.FR-7] The suggested Route \"Muster internal alerts\" groups by `schedule` too — its Group key gains `schedule` after `route`, before S-149's `connection` if that has merged — so that the gaps of two Schedules make two Alert Groups, each belonging to its own Team (delivered to it once S-121's `deliver_to_teams` is on); the simulation of `Suggestions` that decides whether the suggestion applies counts each Schedule as an entity of `MusterScheduleGap`, with its Team's label and name; the upgrade notes of 0.2.0 tell an installation that accepted the suggestion in 0.1 to add `schedule` to that Route's Group key (`suggestions_test.go`)."
   - "[C-27.FR-14] Concepts → Schedules has \"Gaps and the Internal alert\": the people whose Shifts are skipped, `schedule.gap_alert`, and that a Schedule which covers only part of the day, such as a second line in working hours, keeps it off; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: false
@@ -96,7 +112,7 @@ issue: 422
     `schedule` (`ScheduleRef` or null), `no_schedule` (boolean), `user` (`UserRef` or null — null in a gap),
     `rotation_layer` (`EntityRef` or null), `until` (the end of the current segment, or null), `next` ({`user` or
     null for a gap, `start`, `end`} or null)}; S-164 adds `unreachable`.
-- **Schema** (migration `0030_schedule_gap_alert`, expand only; `schema.md` §4.16):
+- **Schema** (migration `0028_schedule_gap_alert`, expand only; `schema.md` §4.16):
   `schedules.gap_alert text NOT NULL DEFAULT 'by_default' CHECK (gap_alert IN ('by_default', 'on', 'off'))`. The down
   migration drops it.
 - **Gaps** (`internal/schedules/gaps.go`): the gaps of a period from the Result (S-131); `next_gap`; the warnings `gap`.
@@ -134,7 +150,8 @@ issue: 422
   upgrade note that the first wrote.
 - **Chart** (`deploy/helm/muster/files/rules.yaml`, `values.yaml`, `values.schema.json`): the rule `MusterScheduleGap`
   of reference.md — `max by (schedule) (muster_schedule_gap{job="muster"}) == 1`, `for` `0m`, severity `warning`
-  (P-88) — with its threshold and `for` as chart values and its `runbook_url`; `tests/rules/MusterScheduleGap.yaml`.
+  (P-88) — with its `for` as a chart value and its `runbook_url`; the gauge is 0 or 1, so like `MusterDestinationBroken`
+  and `MusterHeartbeatLost` the rule has no threshold to set; `tests/rules/MusterScheduleGap.yaml`.
 - **Metric** (`internal/metrics/catalogue.go`): `muster_schedule_gap` — gauge (Leader), labels `schedule` — 1 while
   there is a gap now or one that starts within `schedule.gap_alert_horizon`; C-27 — the row of reference.md "Metrics
   added in L2", which moves into the catalogue with "of a Schedule whose gap alert is active" added (settled 1).
@@ -245,13 +262,74 @@ None open. Settled:
 ## Notes
 
 - Suggested commit: `feat(schedules): report gaps of schedules with an internal alert and show who is on call now`.
-- Migration `0030` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0028` (journal D585): the story map named `0030`; the next free number was 0026 when the story was
+  written, and S-134 (`0026_ical_feeds`) and S-163 (`0027_team_evaluation`) merged first, so this story renumbered to
+  0028 when it rebased. A story
+  merged out of that order renumbers its migration to the next free number in its own pull request (S-131's Notes).
 - The Team label on the alert is what makes `MusterScheduleGap` reach the Team's own Destinations through a Route that
   delivers to the Teams from the label (C-25.FR-5, C-26.FR-2); the slug stays outside the fingerprint, so a renamed
   Team never starts a second alert.
 - The scan computes the Result for one horizon per active Schedule; it reads, and writes only Internal alerts.
 - "On call now" with `teams=mine` uses the caller's Teams, as "My Teams" does (S-115).
+- Settled while implementing, within C-27, C-25 and ADR-0007 (the maintainer may revisit any of them):
+  - **The annotation** is `gap_start`, the nearest gap's start in RFC 3339 UTC; the summary is "No one is On-call in
+    Schedule {name} of {team}" and the description "Schedule {name} of Team {team} has a gap from {gap_start}: …",
+    which names the runbook. The registry gains `Annotations` (values given at the raise, `{<annotation>}` in the
+    texts) and `TeamLabel` (the Team label carried like a Static label, outside the fingerprint, `{team}` in the
+    texts); `internalalerts.TeamExtra` builds the extra labels for the scan and the suggestion alike.
+  - **A gap that has begun** starts at the business clock's now in the Result from now, so in `next_gap` too. The scan
+    finds when it began in the Result of the `schedule.gap_view` before now, read together for every such Schedule,
+    and annotates that start, no earlier than the Schedule's creation (`created_at`, on the business clock); a gap
+    that began earlier still, of a Schedule created earlier too, is annotated with the start of that window and keeps
+    the start it was raised with while the window moves. Past gaps are computed with today's state of the people, as
+    `getScheduleOnCall` shows a past period: a person disabled in the middle of a Shift moves `gap_start` back to that
+    Shift's start. So a started gap raises nothing more, and a gap that ended while
+    another began between two scans is raised again, as the same firing, with the new start. `gap_start` and the log
+    line are in UTC whatever the Schedule's time zone.
+  - **Raising again** where the names, the slug, the Team label or the nearest gap changed (the first gap passed and
+    the next is within the horizon) keeps the firing's `startsAt` (`Raiser.Refresh`), so processing updates the one
+    Alert in place, as a rename does (C-06.AC-11); only a new raise logs `schedule_gap_detected`. The names follow at
+    the next scan, not at the rename itself.
+  - **The gauge** is set before the alerts are written, so that the backup of the Internal alert stays current when
+    the write fails; two Leaders that overlap may write the same raise twice, which the fingerprint deduplicates, so
+    the scan takes no lock of its own.
+  - **The chart rule** has its `for` as a chart value and no threshold: `muster_schedule_gap` is 0 or 1, as
+    `muster_destination_broken` and `muster_heartbeat_lost` are, whose rules have none either (this story's contract
+    first said "threshold and `for`", corrected here).
+  - **"On call now"** looks over `schedule.gap_view`: `until` is the end of the current segment and `next` the one
+    after, both null when the current segment lasts beyond the view; `rotation_layer` is null for an Override and in a
+    gap. `teams` is `all` or `mine`; `mine` of a Service account is `422` `unsupported` at `/query/teams`.
+  - **The warnings `gap`** come after the warnings about people, cut to the period; `ScheduleWarning.start` and `end`
+    are required and null for the other kinds.
+  - **One read for many Schedules**: the Results of a page of `listSchedules` (for `next_gap`), of the scan and of "On
+    call now" are computed together, with the Overrides of all of them in one read (`ListPeriodOverrides` takes the
+    Schedule ids) and their people in another (`ListPageableInTeams`), so neither the reads nor the work grows with the
+    product of Schedules and people (the Result itself stays O((S+N) log N), S-131).
+  - **The suggestion** counts every Schedule, whatever its gap alert, as the contract says.
+- Changes of this story file and why: the migration is `0028` (D585, after S-134 took 0026 and S-163 0027); `files_touched` gains `result.go` (the warning's
+  `start` and `end`), `overrides.go` and `overrides_test.go` (the On-call adds the gap warnings and reads through the
+  batch Result), `scan_test.go` (the unit tests of the scan, for the coverage gate), `internal/api/server.go` (the list
+  of implemented operations), `internal/routing/routes.go` and `routes_test.go` (the Queries interface and its fake),
+  `internal/internalalerts/query.sql` (the open alerts with their annotations), `internal/tools/refgen/main.go` (the
+  Internal alerts page names the Team label and the annotations) and `internal/tools/chartcheck/chartcheck_test.go`
+  (the number of chart rules); the chart acceptance says `for` without a threshold (above).
+- `docs/operations/monitoring.md` said that two Internal alerts have a chart rule; with `MusterTemplateError`, which
+  had one already, and `MusterScheduleGap` they are four.
+- After review: acceptance 3 cites `schedule_gaps_test.go` for the Team of the Alert Group and `unknown_team_value`,
+  since `scan_integration_test.go` processes the synthetic Snapshots without routing and makes no Alert Group;
+  `coverage.md` (now in `files_touched`) names P-88 with S-149, and reference.md says where `MusterScheduleGap` went,
+  so that the links of P-88 to "Chart rules added in L2" still explain it.
+- On the rebase onto S-134, its test helper `maps` in `feeds_test.go` shadowed the package `maps` that the scan and its
+  tests use, so it is renamed `cloneFeeds`; nothing else of S-134 changes.
+- After the review of the pull request: acceptance 10 says the Alert Groups of two Schedules each belong to their own
+  Team, delivered to it once S-121's `deliver_to_teams` is on, since until S-121 no Route delivers to the Teams of an
+  Alert Group; the maintainer's orchestrator decided (Q1) that the suggestion "Muster internal alerts" turns
+  `deliver_to_teams` on when S-121 adds it, which S-121's Notes and the upgrade note of 0.2.0 now say. Also: a rename
+  keeps the `gap_start` of a gap that began before the lookback; the Leader drops the `muster_schedule_gap` series
+  when it loses the lock, through the new `Stop` of a Leader task (`internal/leader/leader.go`); "On call now" joins the adjacent segments of one person, so that `until` and `next` never
+  name the person On-call now again; `api/README.md` lists `getOnCallNow` among the operations without pages.
+- The upgrade note of 0.2.0 names the labels to add "after `route` — `schedule` —", so that S-149 adds `connection`
+  there and to the reason that follows.
 
 ## Coverage
 

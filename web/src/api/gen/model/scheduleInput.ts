@@ -4,6 +4,7 @@
  */
 import type { PublicId } from './publicId';
 import type { RotationLayerInput } from './rotationLayerInput';
+import type { ScheduleGapAlert } from './scheduleGapAlert';
 
 export interface ScheduleInput {
   /** The Team of the Schedule, set on creation; a different one on an update is refused with `422` `unsupported`. */
@@ -18,6 +19,8 @@ export interface ScheduleInput {
   time_zone?: string;
   /** True makes the Schedule its Team's main Schedule, whose On-call is the Team's; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead. */
   main?: boolean;
+  /** Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted. */
+  gap_alert?: ScheduleGapAlert;
   /** From the lowest to the highest; at most 20, else `422` `out_of_range` at `/rotation_layers`. */
   rotation_layers: RotationLayerInput[];
 }

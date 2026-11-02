@@ -29,7 +29,17 @@ const (
 	EntityIntegration = "integration"
 	EntityRoute       = "route"
 	EntityDestination = "destination"
+	EntitySchedule    = "schedule"
 )
+
+// The labels of the Team an Internal alert with TeamLabel is about: its immutable id and its current name.
+const (
+	LabelTeamID   = "team_id"
+	LabelTeamName = "team_name"
+)
+
+// The annotations every Internal alert carries; Annotations of a Definition add others.
+var builtinAnnotations = []string{"summary", "description", "runbook_url"}
 
 // Definition is one Internal alert of the registry.
 type Definition struct {
@@ -51,8 +61,15 @@ type Definition struct {
 	// StaticLabels adds the Static labels of the Integration it is about; the labels above win over a Static label
 	// of the same name.
 	StaticLabels bool
+	// TeamLabel adds, under the Organization's Team label, the slug of the Team its entity belongs to, outside the
+	// fingerprint like a name label, so that the alert belongs to the Team (C-25.FR-5); its Extra labels name the
+	// Team by LabelTeamID and LabelTeamName, and TeamExtra gives the extra labels of a raise.
+	TeamLabel bool
+	// Annotations are the annotations it carries besides summary, description and runbook_url, whose values a raise
+	// gives; {<annotation>} in its Summary and Description stands for the value.
+	Annotations []string
 	// Condition says while what it fires; Summary and Description are its annotations, where {name} is the entity's
-	// current name.
+	// current name and, with TeamLabel, {team} the Team's.
 	Condition   string
 	Summary     string
 	Description string
@@ -77,9 +94,15 @@ func (d *Definition) Labels() []string {
 	return append(out, d.Extra...)
 }
 
-// reserved reports whether a Static label named name gives way to a label of d itself.
+// reserved reports whether a Static label, or the Team label, named name gives way to a label of d itself.
 func (d *Definition) reserved(name string) bool {
 	return name == "alertname" || name == "severity" || slices.Contains(d.Labels(), name)
+}
+
+// TeamExtra are the extra labels of a raise of an Internal alert with TeamLabel about an entity of the Team teamID,
+// named teamName, whose slug is slug, under the Organization's Team label teamLabel.
+func TeamExtra(teamID, teamName, teamLabel, slug string) map[string]string {
+	return map[string]string{LabelTeamID: teamID, LabelTeamName: teamName, teamLabel: slug}
 }
 
 // SnapshotTruncated is raised while any groupKey of an Integration is truncated (C-06.FR-6).
@@ -154,8 +177,8 @@ func Lookup(name string) *Definition {
 }
 
 // laterLabels are the entity and name labels of the Internal alerts of L2 that later capabilities register — about a
-// Schedule (C-27.FR-7), a Team and a Connection — which the Team label may not take before they exist (C-25.FR-5).
-var laterLabels = []string{"schedule", "schedule_name", "team_id", "team_name", "connection", "connection_name"}
+// Connection (C-30) — which the Team label may not take before they exist (C-25.FR-5).
+var laterLabels = []string{"connection", "connection_name"}
 
 // ReservedLabels are the labels that an Internal alert sets itself, sorted: alertname, severity, every label of the
 // registry and those of the later Internal alerts. The Team label may not be one of them (C-25.FR-5, C-20.FR-1), so a
@@ -191,7 +214,7 @@ func Definitions() ([]*Definition, error) {
 			if d.NameLabel != "" {
 				errs = append(errs, fmt.Errorf("internal alert %q: a name label without an entity", d.Name))
 			}
-		case EntityIntegration, EntityRoute, EntityDestination:
+		case EntityIntegration, EntityRoute, EntityDestination, EntitySchedule:
 			if d.NameLabel != d.Entity+"_name" {
 				errs = append(errs, fmt.Errorf("internal alert %q: the name label of %s is %s_name", d.Name, d.Entity,
 					d.Entity))
@@ -224,6 +247,16 @@ func Definitions() ([]*Definition, error) {
 		}
 		if d.StaticLabels && d.Entity != EntityIntegration {
 			errs = append(errs, fmt.Errorf("internal alert %q: Static labels need the integration entity", d.Name))
+		}
+		if d.TeamLabel && (d.Entity == "" || d.StaticLabels || !slices.Contains(d.Extra, LabelTeamID) ||
+			!slices.Contains(d.Extra, LabelTeamName)) {
+			errs = append(errs, fmt.Errorf("internal alert %q: the Team label needs an entity, the extra labels %s and "+
+				"%s, and no Static labels", d.Name, LabelTeamID, LabelTeamName))
+		}
+		for _, a := range d.Annotations {
+			if !labelRe.MatchString(a) || slices.Contains(builtinAnnotations, a) {
+				errs = append(errs, fmt.Errorf("internal alert %q: invalid annotation %q", d.Name, a))
+			}
 		}
 		if strings.TrimSpace(d.Condition) == "" || strings.TrimSpace(d.Summary) == "" ||
 			strings.TrimSpace(d.Description) == "" || d.Capability == "" {
@@ -271,4 +304,27 @@ var OIDCSecretExpiring = register(&Definition{
 		"date entered in the OIDC settings. Create a new secret at the identity provider, enter it and its expiry date " +
 		"in the OIDC settings; until then sign-in through OIDC keeps working.",
 	Capability: "C-19",
+})
+
+// ScheduleGap is raised while a Schedule whose gap alert is active has a gap now or one that starts within
+// schedule.gap_alert_horizon (C-27.FR-7); it carries the Team's slug under the Team label, so that it belongs to the
+// Schedule's Team (C-25.FR-5).
+var ScheduleGap = register(&Definition{
+	Name:        "MusterScheduleGap",
+	Severity:    SeverityWarning,
+	Entity:      EntitySchedule,
+	NameLabel:   "schedule_name",
+	Extra:       []string{LabelTeamID, LabelTeamName},
+	TeamLabel:   true,
+	Annotations: []string{"gap_start"},
+	Condition: "A Schedule whose gap alert is active — schedule.gap_alert on, or by default while the Schedule is its " +
+		"Team's main one — has a gap now or one that starts within schedule.gap_alert_horizon: a time when no " +
+		"Override and no Rotation layer has a Shift with a person who may be Paged. The annotation gap_start says when " +
+		"the nearest gap starts. It resolves when no gap is current or within the horizon, when the gap alert is no " +
+		"longer active or when the Schedule is deleted.",
+	Summary: "No one is On-call in Schedule {name} of {team}",
+	Description: "Schedule {name} of Team {team} has a gap from {gap_start}: no Override and no Rotation layer has a " +
+		"Shift with a person who may be Paged, so nobody is On-call then. Fill it with an Override or a change of the " +
+		"Rotation layers on the Schedule page, as the runbook describes.",
+	Capability: "C-27",
 })

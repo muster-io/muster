@@ -275,6 +275,21 @@ func (q *Queries) GetIcalFeed(ctx context.Context, arg GetIcalFeedParams) (time.
 	return issued_at, err
 }
 
+const getOrganizationTeamLabel = `-- name: GetOrganizationTeamLabel :one
+SELECT team_label
+FROM organizations
+WHERE id = $1
+`
+
+// GetOrganizationTeamLabel reads the Team label (organization.team_label), under which an Internal alert about a
+// Team's object carries the Team's slug (C-25.FR-5).
+func (q *Queries) GetOrganizationTeamLabel(ctx context.Context, orgID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getOrganizationTeamLabel, orgID)
+	var team_label string
+	err := row.Scan(&team_label)
+	return team_label, err
+}
+
 const getOrganizationTimeZone = `-- name: GetOrganizationTimeZone :one
 
 
@@ -295,7 +310,7 @@ func (q *Queries) GetOrganizationTimeZone(ctx context.Context, orgID int64) (str
 }
 
 const getSchedule = `-- name: GetSchedule :one
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM schedules s
@@ -314,6 +329,7 @@ type GetScheduleRow struct {
 	Name         string
 	TimeZone     string
 	Main         bool
+	GapAlert     string
 	Version      int64
 	CreatedAt    time.Time
 	TeamID       int64
@@ -333,6 +349,7 @@ func (q *Queries) GetSchedule(ctx context.Context, arg GetScheduleParams) (GetSc
 		&i.Name,
 		&i.TimeZone,
 		&i.Main,
+		&i.GapAlert,
 		&i.Version,
 		&i.CreatedAt,
 		&i.TeamID,
@@ -495,8 +512,8 @@ func (q *Queries) InsertRotationLayerUsers(ctx context.Context, arg InsertRotati
 }
 
 const insertSchedule = `-- name: InsertSchedule :one
-INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, gap_alert, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 RETURNING id
 `
 
@@ -507,6 +524,7 @@ type InsertScheduleParams struct {
 	Name     string
 	TimeZone string
 	Main     bool
+	GapAlert string
 	Now      time.Time
 }
 
@@ -519,6 +537,7 @@ func (q *Queries) InsertSchedule(ctx context.Context, arg InsertScheduleParams) 
 		arg.Name,
 		arg.TimeZone,
 		arg.Main,
+		arg.GapAlert,
 		arg.Now,
 	)
 	var id int64
@@ -590,6 +609,127 @@ func (q *Queries) IsTeamUser(ctx context.Context, arg IsTeamUserParams) (bool, e
 	return column_1, err
 }
 
+const listGapScanSchedules = `-- name: ListGapScanSchedules :many
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = $1
+ORDER BY s.id
+`
+
+type ListGapScanSchedulesRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	TimeZone     string
+	Main         bool
+	GapAlert     string
+	Version      int64
+	CreatedAt    time.Time
+	TeamID       int64
+	TeamPublicID string
+	TeamName     string
+	TeamSlug     string
+	TeamDeleted  bool
+}
+
+// ListGapScanSchedules reads every Schedule with its Team, for the gap scan (C-27.FR-7).
+func (q *Queries) ListGapScanSchedules(ctx context.Context, orgID int64) ([]ListGapScanSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listGapScanSchedules, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGapScanSchedulesRow{}
+	for rows.Next() {
+		var i ListGapScanSchedulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.TimeZone,
+			&i.Main,
+			&i.GapAlert,
+			&i.Version,
+			&i.CreatedAt,
+			&i.TeamID,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.TeamSlug,
+			&i.TeamDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOnCallTeams = `-- name: ListOnCallTeams :many
+SELECT t.id, t.public_id, t.name, t.slug, s.id AS schedule_id, s.public_id AS schedule_public_id,
+       s.name AS schedule_name, s.time_zone AS schedule_time_zone
+FROM teams t
+LEFT JOIN schedules s ON s.org_id = t.org_id AND s.team_id = t.id AND s.main
+WHERE t.org_id = $1 AND t.deleted_at IS NULL
+  AND ($2::bigint IS NULL OR EXISTS (
+        SELECT 1
+        FROM team_users tu
+        WHERE tu.org_id = $1 AND tu.team_id = t.id AND tu.user_id = $2::bigint))
+ORDER BY lower(t.name), t.id
+`
+
+type ListOnCallTeamsParams struct {
+	OrgID    int64
+	MemberID pgtype.Int8
+}
+
+type ListOnCallTeamsRow struct {
+	ID               int64
+	PublicID         string
+	Name             string
+	Slug             string
+	ScheduleID       pgtype.Int8
+	SchedulePublicID pgtype.Text
+	ScheduleName     pgtype.Text
+	ScheduleTimeZone pgtype.Text
+}
+
+// ListOnCallTeams reads the Teams that are not deleted by name, of the User @member_id when it is set, each with its
+// main Schedule, for "On call now" (C-27.FR-9).
+func (q *Queries) ListOnCallTeams(ctx context.Context, arg ListOnCallTeamsParams) ([]ListOnCallTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listOnCallTeams, arg.OrgID, arg.MemberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOnCallTeamsRow{}
+	for rows.Next() {
+		var i ListOnCallTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.ScheduleID,
+			&i.SchedulePublicID,
+			&i.ScheduleName,
+			&i.ScheduleTimeZone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPageable = `-- name: ListPageable :many
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status,
        EXISTS (SELECT 1
@@ -644,8 +784,58 @@ func (q *Queries) ListPageable(ctx context.Context, arg ListPageableParams) ([]L
 	return items, nil
 }
 
+const listPageableInTeams = `-- name: ListPageableInTeams :many
+SELECT u.id, u.role, u.status,
+       coalesce((SELECT array_agg(tu.team_id ORDER BY tu.team_id)
+                 FROM team_users tu
+                 WHERE tu.org_id = u.org_id AND tu.user_id = u.id AND tu.team_id = ANY($1::bigint[])),
+                '{}')::bigint[] AS team_ids
+FROM users u
+WHERE u.org_id = $2 AND u.id = ANY($3::bigint[])
+`
+
+type ListPageableInTeamsParams struct {
+	TeamIds []int64
+	OrgID   int64
+	UserIds []int64
+}
+
+type ListPageableInTeamsRow struct {
+	ID      int64
+	Role    string
+	Status  string
+	TeamIds []int64
+}
+
+// ListPageableInTeams reads Users with the Teams among @team_ids they are in, for "may be Paged" in each: active, not
+// a Viewer and in the Team.
+func (q *Queries) ListPageableInTeams(ctx context.Context, arg ListPageableInTeamsParams) ([]ListPageableInTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listPageableInTeams, arg.TeamIds, arg.OrgID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPageableInTeamsRow{}
+	for rows.Next() {
+		var i ListPageableInTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Role,
+			&i.Status,
+			&i.TeamIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPeriodOverrides = `-- name: ListPeriodOverrides :many
-SELECT o.id, o.public_id, o.user_id, o.starts_at, o.ends_at, o.version, o.created_at,
+SELECT o.schedule_id, o.id, o.public_id, o.user_id, o.starts_at, o.ends_at, o.version, o.created_at,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.status AS user_status,
        r.public_id AS replaces_public_id, r.name AS replaces_name, r.login AS replaces_login,
        r.status AS replaces_status,
@@ -658,18 +848,20 @@ JOIN users u ON u.org_id = o.org_id AND u.id = o.user_id
 LEFT JOIN users r ON r.org_id = o.org_id AND r.id = o.replaces_user_id
 LEFT JOIN users cu ON cu.org_id = o.org_id AND cu.id = o.created_by_user_id
 LEFT JOIN service_accounts sa ON sa.org_id = o.org_id AND sa.id = o.created_by_service_account_id
-WHERE o.org_id = $1 AND o.schedule_id = $2 AND o.ends_at > $3 AND o.starts_at < $4
+WHERE o.org_id = $1 AND o.schedule_id = ANY($2::bigint[]) AND o.ends_at > $3
+  AND o.starts_at < $4
 ORDER BY o.id
 `
 
 type ListPeriodOverridesParams struct {
 	OrgID       int64
-	ScheduleID  int64
+	ScheduleIds []int64
 	PeriodStart time.Time
 	PeriodEnd   time.Time
 }
 
 type ListPeriodOverridesRow struct {
+	ScheduleID               int64
 	ID                       int64
 	PublicID                 string
 	UserID                   int64
@@ -694,12 +886,12 @@ type ListPeriodOverridesRow struct {
 	ByServiceAccountStatus   pgtype.Text
 }
 
-// ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created: by id,
+// ListPeriodOverrides reads the Overrides of Schedules that overlap a period, in the order they were created: by id,
 // which every replica takes from the same sequence, where created_at may skew between replicas (P-65).
 func (q *Queries) ListPeriodOverrides(ctx context.Context, arg ListPeriodOverridesParams) ([]ListPeriodOverridesRow, error) {
 	rows, err := q.db.Query(ctx, listPeriodOverrides,
 		arg.OrgID,
-		arg.ScheduleID,
+		arg.ScheduleIds,
 		arg.PeriodStart,
 		arg.PeriodEnd,
 	)
@@ -711,6 +903,7 @@ func (q *Queries) ListPeriodOverrides(ctx context.Context, arg ListPeriodOverrid
 	for rows.Next() {
 		var i ListPeriodOverridesRow
 		if err := rows.Scan(
+			&i.ScheduleID,
 			&i.ID,
 			&i.PublicID,
 			&i.UserID,
@@ -1003,9 +1196,9 @@ func (q *Queries) ListScheduleOverrides(ctx context.Context, arg ListScheduleOve
 }
 
 const listSchedules = `-- name: ListSchedules :many
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, t.public_id AS team_public_id,
-       t.name AS team_name, t.slug AS team_slug, (t.deleted_at IS NOT NULL)::boolean AS team_deleted,
-       lower(s.name)::text AS sort_name
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(s.name)::text AS sort_name
 FROM schedules s
 JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
 WHERE s.org_id = $1
@@ -1037,8 +1230,10 @@ type ListSchedulesRow struct {
 	Name         string
 	TimeZone     string
 	Main         bool
+	GapAlert     string
 	Version      int64
 	CreatedAt    time.Time
+	TeamID       int64
 	TeamPublicID string
 	TeamName     string
 	TeamSlug     string
@@ -1071,8 +1266,10 @@ func (q *Queries) ListSchedules(ctx context.Context, arg ListSchedulesParams) ([
 			&i.Name,
 			&i.TimeZone,
 			&i.Main,
+			&i.GapAlert,
 			&i.Version,
 			&i.CreatedAt,
+			&i.TeamID,
 			&i.TeamPublicID,
 			&i.TeamName,
 			&i.TeamSlug,
@@ -1393,14 +1590,16 @@ func (q *Queries) UpdateRotationLayer(ctx context.Context, arg UpdateRotationLay
 
 const updateSchedule = `-- name: UpdateSchedule :exec
 UPDATE schedules
-SET name = $1, time_zone = $2, main = $3, updated_at = $4, version = version + 1
-WHERE org_id = $5 AND id = $6
+SET name = $1, time_zone = $2, main = $3, gap_alert = $4, updated_at = $5,
+    version = version + 1
+WHERE org_id = $6 AND id = $7
 `
 
 type UpdateScheduleParams struct {
 	Name     string
 	TimeZone string
 	Main     bool
+	GapAlert string
 	Now      time.Time
 	OrgID    int64
 	ID       int64
@@ -1412,6 +1611,7 @@ func (q *Queries) UpdateSchedule(ctx context.Context, arg UpdateScheduleParams) 
 		arg.Name,
 		arg.TimeZone,
 		arg.Main,
+		arg.GapAlert,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

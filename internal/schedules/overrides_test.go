@@ -293,8 +293,9 @@ func TestOnCall(t *testing.T) {
 	c.Set(berlinAt(t, "2026-11-02 00:00"))
 	res, err := svc.OnCall(ctx, sc.PublicID, nil, nil)
 	if err != nil || !res.From.Equal(c.Now()) || !res.To.Equal(c.Now().Add(GapView)) || len(res.RotationLayers) != 2 ||
-		len(res.Overrides) != 0 || len(res.Warnings) != 0 {
-		t.Fatalf("the default period = %+v, %v", res, err)
+		len(res.Overrides) != 0 || len(res.Warnings) != 1 || res.Warnings[0].Kind != WarningGap ||
+		!res.Warnings[0].Start.Equal(c.Now()) || !res.Warnings[0].End.Equal(berlinAt(t, "2026-11-02 10:00")) {
+		t.Fatalf("the default period, with the gap before the first Shift = %+v, %v", res, err)
 	}
 	store.users[0].Status = "disabled" // petr
 	from := berlinAt(t, "2026-11-09 00:00")
@@ -303,7 +304,9 @@ func TestOnCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := warningsText(res.Warnings); got != "disabled petr Around the clock\ndisabled petr Working hours 11-19\n" {
+	// petr's Shift of the lower Rotation layer until Monday 10:00 is skipped, which leaves a gap.
+	if got := warningsText(res.Warnings); got != "disabled petr Around the clock\ndisabled petr Working hours 11-19\n"+
+		"gap  \n" {
 		t.Errorf("warnings %q", got)
 	}
 	if got := who("2026-11-11 15:00"); got != "sergey" {
@@ -335,7 +338,7 @@ func TestOnCall(t *testing.T) {
 	if _, err := svc.OnCallAt(ctx, "SC00000000NNNE", from); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown schedule at a moment = %v", err)
 	}
-	for _, name := range []string{"ListPeriodOverrides", "ListPageable"} {
+	for _, name := range []string{"ListPeriodOverrides", "ListPageableInTeams"} {
 		store.fail[name] = errBoom
 		if _, err := svc.OnCall(ctx, sc.PublicID, nil, nil); !errors.Is(err, errBoom) {
 			t.Errorf("%s fails = %v", name, err)

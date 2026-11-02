@@ -71,12 +71,14 @@ type RotationLayerShifts struct {
 	Shifts        []RotationLayerShift
 }
 
-// Warning names a person of a Rotation layer or of an Override in the period who may not be Paged.
+// Warning names a person of a Rotation layer or of an Override in the period who may not be Paged, or with the kind
+// gap a gap of the period, from Start to End, and no person.
 type Warning struct {
 	Kind          string
 	User          Person
 	RotationLayer *RotationLayerRef
 	Override      string
+	Start, End    time.Time
 }
 
 // Result is the Result of a Schedule over a period: its segments, the Shifts of each Rotation layer, from the lowest,

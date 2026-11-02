@@ -18,6 +18,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterTemplateError](MusterTemplateError.md) | warning | both |
 | [MusterClockSkew](MusterClockSkew.md) | warning | chart rule |
 | [MusterLoginFailures](MusterLoginFailures.md) | warning | chart rule |
+| [MusterScheduleGap](MusterScheduleGap.md) | warning | both |
 | [MusterSnapshotTruncated](MusterSnapshotTruncated.md) | warning | Internal alert |
 | [MusterOIDCSecretExpiring](MusterOIDCSecretExpiring.md) | warning | Internal alert |
 

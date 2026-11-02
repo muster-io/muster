@@ -29,9 +29,9 @@ VALUES (
 SELECT pg_notify(@channel::text, @payload::text);
 
 -- ListOpenInternalAlerts lists the firing Internal alerts of the built-in Integration whose labels contain
--- @contains, with what raising them again keeps.
+-- @contains, with what raising them again keeps and their annotations.
 -- name: ListOpenInternalAlerts :many
-SELECT a.fingerprint, a.labels, a.starts_at
+SELECT a.fingerprint, a.labels, a.starts_at, a.annotations
 FROM alerts a
 JOIN integrations i ON i.org_id = @org_id AND i.id = a.integration_id AND i.builtin
 WHERE a.org_id = @org_id AND a.status = 'firing' AND a.labels @> @contains::jsonb

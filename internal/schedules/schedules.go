@@ -6,7 +6,8 @@
 // whose On-call is the Team's. The package computes the Shifts of the Rotation layers and the Result of a Schedule —
 // its segments, each with the person On-call or nobody in a gap — on the business clock, skipping the people who may
 // not be Paged. Every change is recorded in the Audit log and announced with the live hint schedule; nothing is sent
-// to a messenger (C-27.FR-11). The package exports muster_schedule_info.
+// to a messenger (C-27.FR-11). The package finds the gaps of the Schedules, whose Leader scan raises MusterScheduleGap
+// (C-27.FR-7), and "On call now" (C-27.FR-9); it exports muster_schedule_info and muster_schedule_gap.
 package schedules
 
 import (
@@ -30,6 +31,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
+	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
@@ -50,8 +52,11 @@ const (
 
 // The settings of Schedules that bound the periods it reads.
 const (
-	// GapView is schedule.gap_view, the default period of the On-call.
+	// GapView is schedule.gap_view, the default period of the On-call, in which next_gap and "On call now" look.
 	GapView = 14 * 24 * time.Hour
+	// GapAlertHorizon is schedule.gap_alert_horizon: the gap scan raises MusterScheduleGap for a gap now or one that
+	// starts within it.
+	GapAlertHorizon = 7 * 24 * time.Hour
 	// ICalWindowBack and ICalWindowAhead are ical.window (P-81): the iCal feed reaches from 7 days back to 60 days
 	// ahead.
 	ICalWindowBack  = 7 * 24 * time.Hour
@@ -74,6 +79,13 @@ const (
 	MaxOverrideLength = 31 * 24 * time.Hour
 	// MaxOverlappingOverrides is how many Overrides of a Schedule a new span may overlap, short of one more.
 	MaxOverlappingOverrides = 1000
+)
+
+// The values of schedule.gap_alert: by_default is on while the Schedule is its Team's main one (C-27.FR-7).
+const (
+	GapAlertByDefault = "by_default"
+	GapAlertOn        = "on"
+	GapAlertOff       = "off"
 )
 
 // The first and the last start date of a Rotation layer.
@@ -163,27 +175,37 @@ type TeamRef struct {
 	Deleted  bool
 }
 
-// Schedule is a Schedule as the API reads it, with its Rotation layers from the lowest.
+// Schedule is a Schedule as the API reads it, with its Rotation layers from the lowest. NextGap, which the reads of
+// the API set, is the first gap within schedule.gap_view from the business clock's now, nil when there is none.
 type Schedule struct {
 	ID             int64
 	PublicID       string
 	Name           string
 	TimeZone       string
 	Main           bool
+	GapAlert       string
 	Team           TeamRef
 	RotationLayers []RotationLayer
 	CreatedAt      time.Time
 	Version        int64
+	NextGap        *Gap
+}
+
+// GapAlertActive reports whether the Schedule reports its gaps as MusterScheduleGap: with gap_alert on, and with
+// by_default while it is its Team's main Schedule (C-27.FR-7).
+func (sc Schedule) GapAlertActive() bool {
+	return sc.GapAlert == GapAlertOn || (sc.GapAlert == GapAlertByDefault && sc.Main)
 }
 
 // Input is what createSchedule and updateSchedule write. A nil TimeZone is the Organization's on a creation and keeps
 // the stored one on an update; a nil Main is false on a creation, unless the Team has no Schedule, and keeps the
-// stored value on an update.
+// stored value on an update; a nil GapAlert is by_default on a creation and keeps the stored one on an update.
 type Input struct {
 	TeamID         string
 	Name           string
 	TimeZone       *string
 	Main           *bool
+	GapAlert       *string
 	RotationLayers []RotationLayerInput
 }
 
@@ -258,6 +280,8 @@ type Queries interface {
 	LookupUsers(ctx context.Context, arg dbgen.LookupUsersParams) ([]dbgen.LookupUsersRow, error)
 	FindUser(ctx context.Context, arg dbgen.FindUserParams) (int64, error)
 	ListPageable(ctx context.Context, arg dbgen.ListPageableParams) ([]dbgen.ListPageableRow, error)
+	ListPageableInTeams(ctx context.Context, arg dbgen.ListPageableInTeamsParams) ([]dbgen.ListPageableInTeamsRow,
+		error)
 	IsTeamUser(ctx context.Context, arg dbgen.IsTeamUserParams) (bool, error)
 	ListScheduleOverrides(ctx context.Context, arg dbgen.ListScheduleOverridesParams) (
 		[]dbgen.ListScheduleOverridesRow, error)
@@ -270,14 +294,19 @@ type Queries interface {
 	UpdateScheduleOverride(ctx context.Context, arg dbgen.UpdateScheduleOverrideParams) error
 	DeleteScheduleOverride(ctx context.Context, arg dbgen.DeleteScheduleOverrideParams) error
 	ListScheduleInfo(ctx context.Context, orgID int64) ([]dbgen.ListScheduleInfoRow, error)
+	ListGapScanSchedules(ctx context.Context, orgID int64) ([]dbgen.ListGapScanSchedulesRow, error)
+	GetOrganizationTeamLabel(ctx context.Context, orgID int64) (string, error)
+	ListOnCallTeams(ctx context.Context, arg dbgen.ListOnCallTeamsParams) ([]dbgen.ListOnCallTeamsRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
 
-// Store runs the queries alone or in one transaction.
+// Store runs the queries alone or in one transaction, and the writes of the gap scan, the Internal alerts of the
+// built-in Integration, in a transaction of their own.
 type Store interface {
 	Queries
 	InTx(ctx context.Context, f func(Queries) error) error
+	InAlertsTx(ctx context.Context, f func(internalalerts.Store) error) error
 }
 
 // NewStore is the Store over the main pool.
@@ -307,6 +336,12 @@ type pgStore struct {
 func (s pgStore) InTx(ctx context.Context, f func(Queries) error) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return f(newQueries(tx))
+	})
+}
+
+func (s pgStore) InAlertsTx(ctx context.Context, f func(internalalerts.Store) error) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		return f(internalalerts.NewStore(tx))
 	})
 }
 
@@ -372,18 +407,35 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 			break
 		}
 		page.Schedules = append(page.Schedules, Schedule{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
-			TimeZone: r.TimeZone, Main: r.Main, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
-			Team: TeamRef{PublicID: r.TeamPublicID, Name: r.TeamName, Slug: r.TeamSlug, Deleted: r.TeamDeleted}})
+			TimeZone: r.TimeZone, Main: r.Main, GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(),
+			Version: r.Version, Team: TeamRef{ID: r.TeamID, PublicID: r.TeamPublicID, Name: r.TeamName,
+				Slug: r.TeamSlug, Deleted: r.TeamDeleted}})
 	}
 	if err := s.withLayers(ctx, s.store, page.Schedules); err != nil {
+		return Page{}, err
+	}
+	if err := s.withNextGaps(ctx, s.store, page.Schedules); err != nil {
 		return Page{}, err
 	}
 	return page, nil
 }
 
-// Get reads the Schedule publicID with its Rotation layers.
+// Get reads the Schedule publicID with its Rotation layers and its next gap.
 func (s *Service) Get(ctx context.Context, publicID string) (Schedule, error) {
-	return s.get(ctx, s.store, publicID)
+	sc, err := s.get(ctx, s.store, publicID)
+	if err != nil {
+		return Schedule{}, err
+	}
+	return s.withNextGap(ctx, s.store, sc)
+}
+
+// withNextGap is the Schedule with its next gap, read through q.
+func (s *Service) withNextGap(ctx context.Context, q Queries, sc Schedule) (Schedule, error) {
+	list := []Schedule{sc}
+	if err := s.withNextGaps(ctx, q, list); err != nil {
+		return Schedule{}, err
+	}
+	return list[0], nil
 }
 
 func (s *Service) get(ctx context.Context, q Queries, publicID string) (Schedule, error) {
@@ -399,7 +451,7 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Schedule
 		return Schedule{}, fmt.Errorf("read the schedule %s: %w", id, err)
 	}
 	list := []Schedule{{ID: r.ID, PublicID: r.PublicID, Name: r.Name, TimeZone: r.TimeZone, Main: r.Main,
-		CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
+		GapAlert: r.GapAlert, CreatedAt: r.CreatedAt.UTC(), Version: r.Version,
 		Team: TeamRef{ID: r.TeamID, PublicID: r.TeamPublicID, Name: r.TeamName, Slug: r.TeamSlug,
 			Deleted: r.TeamDeleted}}}
 	if err := s.withLayers(ctx, q, list); err != nil {
@@ -475,6 +527,10 @@ func check(in Input) (Input, error) {
 			return in, &FieldError{Pointer: "/time_zone", Code: CodeInvalidFormat,
 				Detail: "The time zone is not an IANA time zone, such as Europe/Berlin."}
 		}
+	}
+	if in.GapAlert != nil && !slices.Contains([]string{GapAlertByDefault, GapAlertOn, GapAlertOff}, *in.GapAlert) {
+		return in, &FieldError{Pointer: "/gap_alert", Code: CodeInvalidFormat,
+			Detail: "The gap alert is by_default, on or off."}
 	}
 	if len(in.RotationLayers) > MaxRotationLayers {
 		return in, &FieldError{Pointer: "/rotation_layers", Code: CodeOutOfRange,
@@ -820,8 +876,12 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Schedule, 
 				return err
 			}
 		}
+		gapAlert := GapAlertByDefault
+		if in.GapAlert != nil {
+			gapAlert = *in.GapAlert
+		}
 		sid, err := q.InsertSchedule(ctx, dbgen.InsertScheduleParams{OrgID: s.orgID, PublicID: id, TeamID: team.ID,
-			Name: in.Name, TimeZone: zone, Main: main, Now: now})
+			Name: in.Name, TimeZone: zone, Main: main, GapAlert: gapAlert, Now: now})
 		if err != nil {
 			return fmt.Errorf("create the schedule: %w", taken(err))
 		}
@@ -829,6 +889,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Schedule, 
 			return err
 		}
 		if created, err = s.get(ctx, q, id); err != nil {
+			return err
+		}
+		if created, err = s.withNextGap(ctx, q, created); err != nil {
 			return err
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
@@ -983,24 +1046,27 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 			main = *in.Main
 		}
-		zone := before.TimeZone
+		zone, gapAlert := before.TimeZone, before.GapAlert
 		if in.TimeZone != nil {
 			zone = *in.TimeZone
+		}
+		if in.GapAlert != nil {
+			gapAlert = *in.GapAlert
 		}
 		people, err := s.resolve(ctx, q, before.Team.ID, in, before.RotationLayers)
 		if err != nil {
 			return err
 		}
 		next := before
-		next.Name, next.TimeZone, next.Main = in.Name, zone, main
+		next.Name, next.TimeZone, next.Main, next.GapAlert = in.Name, zone, main, gapAlert
 		next.RotationLayers = make([]RotationLayer, len(in.RotationLayers))
 		for i, l := range in.RotationLayers {
 			next.RotationLayers[i] = rotationLayerFromInput(l, people)
 		}
 		changes := audit.Diff(viewOf(before), viewOf(next))
 		if len(changes) == 0 {
-			updated = before
-			return nil
+			updated, err = s.withNextGap(ctx, q, before)
+			return err
 		}
 		now := s.clock.Now().UTC()
 		if main && !before.Main {
@@ -1009,7 +1075,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if err := q.UpdateSchedule(ctx, dbgen.UpdateScheduleParams{OrgID: s.orgID, ID: before.ID, Name: in.Name,
-			TimeZone: zone, Main: main, Now: now}); err != nil {
+			TimeZone: zone, Main: main, GapAlert: gapAlert, Now: now}); err != nil {
 			return fmt.Errorf("update the schedule %s: %w", before.PublicID, taken(err))
 		}
 		if err := s.writeLayers(ctx, q, before.ID, in.RotationLayers, before.RotationLayers, people); err != nil {
@@ -1021,6 +1087,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err := s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionUpdated, Resource: resourceOf(updated), Diff: audit.Diff(viewOf(before), viewOf(updated)),
 			SourceAddress: r.Address}); err != nil {
+			return err
+		}
+		if updated, err = s.withNextGap(ctx, q, updated); err != nil {
 			return err
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: updated.PublicID})
@@ -1118,6 +1187,7 @@ type view struct {
 	Name           string              `json:"name"`
 	TimeZone       string              `json:"time_zone"`
 	Main           bool                `json:"main"`
+	GapAlert       string              `json:"gap_alert"`
 	RotationLayers []rotationLayerView `json:"rotation_layers"`
 }
 
@@ -1135,7 +1205,7 @@ type rotationLayerView struct {
 }
 
 func viewOf(sc Schedule) view {
-	v := view{TeamID: sc.Team.PublicID, Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main,
+	v := view{TeamID: sc.Team.PublicID, Name: sc.Name, TimeZone: sc.TimeZone, Main: sc.Main, GapAlert: sc.GapAlert,
 		RotationLayers: make([]rotationLayerView, len(sc.RotationLayers))}
 	for i, l := range sc.RotationLayers {
 		lv := rotationLayerView{ID: l.PublicID, Name: l.Name, UserIDs: make([]string, len(l.Users)),

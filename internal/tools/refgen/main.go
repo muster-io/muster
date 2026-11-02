@@ -87,11 +87,13 @@ const internalAlertsIntro = "# Internal alerts\n\n" +
 	"synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with\n" +
 	"them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or\n" +
 	"Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,\n" +
-	"`route`, `destination`) with its current name in a `*_name` label; the fingerprint is computed from `alertname` and\n" +
-	"the id label only, so renaming the entity updates the open Internal alert instead of raising a new one. Every\n" +
-	"Internal alert carries the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
+	"`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from\n" +
+	"`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new\n" +
+	"one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,\n" +
+	"outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,\n" +
+	"`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
 	"`major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,\n" +
-	"joined by `/`. The capability is the one that raises it.\n"
+	"joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.\n"
 
 // entryHeading starts the heading of an entry of a page, whose anchor the heading's text gives.
 const entryHeading = "### "
@@ -249,12 +251,16 @@ func internalAlertsMarkdown(defs []*internalalerts.Definition) string {
 		if d.StaticLabels {
 			labels = strings.TrimPrefix(labels+", the Integration's Static labels", ", ")
 		}
+		if d.TeamLabel {
+			labels = strings.TrimPrefix(labels+", the Team's slug under the Team label", ", ")
+		}
 		labelsFact := "no labels"
 		if labels != "" {
 			labelsFact = "labels: " + labels
 		}
 		runbook := "runbook: [`" + d.Runbook() + "`](../" + strings.TrimSuffix(d.Runbook(), "/") + ".md)"
-		entry(&b, d.Name, []string{d.Severity, labelsFact, d.Capability, runbook}, "Raised while: "+text(d.Condition))
+		entry(&b, d.Name, []string{d.Severity, labelsFact, listFact("annotations", "", d.Annotations), d.Capability,
+			runbook}, "Raised while: "+text(d.Condition))
 	}
 	return b.String()
 }

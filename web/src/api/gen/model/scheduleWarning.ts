@@ -9,7 +9,18 @@ import type { UserRef } from './userRef';
 
 export interface ScheduleWarning {
   kind: ScheduleWarningKind;
+  /** Null for a gap. */
   user: UserRef | null;
   rotation_layer: EntityRef | null;
   override_id: NullablePublicId | null;
+  /**
+     * The start of the gap, cut to the period; null for another kind.
+     * @nullable
+     */
+  start: string | null;
+  /**
+     * The end of the gap, cut to the period; null for another kind.
+     * @nullable
+     */
+  end: string | null;
 }

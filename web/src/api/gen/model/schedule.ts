@@ -4,6 +4,8 @@
  */
 import type { PublicId } from './publicId';
 import type { RotationLayer } from './rotationLayer';
+import type { ScheduleGap } from './scheduleGap';
+import type { ScheduleGapAlert } from './scheduleGapAlert';
 import type { TeamRef } from './teamRef';
 
 export interface Schedule {
@@ -13,6 +15,11 @@ export interface Schedule {
   name: string;
   time_zone: string;
   main: boolean;
+  gap_alert: ScheduleGapAlert;
+  /** Whether the Leader's gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team's main one. */
+  readonly gap_alert_active: boolean;
+  /** The first gap within `schedule.gap_view` from the business clock's now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it. */
+  readonly next_gap: ScheduleGap | null;
   /** From the lowest to the highest. */
   rotation_layers: RotationLayer[];
   created_at: string;

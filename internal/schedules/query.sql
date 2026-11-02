@@ -34,9 +34,9 @@ WHERE org_id = @org_id AND team_id = @team_id;
 -- ListSchedules reads a page of the Schedules by name, after a cursor, with their Team: of the Team @team, or of the
 -- Teams of the User @member_id ("My Teams"), when one is set; @q matches the name, ignoring case.
 -- name: ListSchedules :many
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, t.public_id AS team_public_id,
-       t.name AS team_name, t.slug AS team_slug, (t.deleted_at IS NOT NULL)::boolean AS team_deleted,
-       lower(s.name)::text AS sort_name
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted, lower(s.name)::text AS sort_name
 FROM schedules s
 JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
 WHERE s.org_id = @org_id
@@ -53,7 +53,7 @@ LIMIT @page_size;
 
 -- GetSchedule reads a Schedule with its Team.
 -- name: GetSchedule :one
-SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.version, s.created_at, s.team_id,
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
        t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
        (t.deleted_at IS NOT NULL)::boolean AS team_deleted
 FROM schedules s
@@ -75,14 +75,15 @@ FOR UPDATE;
 
 -- InsertSchedule creates a Schedule.
 -- name: InsertSchedule :one
-INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, created_at, updated_at)
-VALUES (@org_id, @public_id, @team_id, @name, @time_zone, @main, @now, @now)
+INSERT INTO schedules (org_id, public_id, team_id, name, time_zone, main, gap_alert, created_at, updated_at)
+VALUES (@org_id, @public_id, @team_id, @name, @time_zone, @main, @gap_alert, @now, @now)
 RETURNING id;
 
 -- UpdateSchedule replaces the configured fields of a Schedule and bumps its version.
 -- name: UpdateSchedule :exec
 UPDATE schedules
-SET name = @name, time_zone = @time_zone, main = @main, updated_at = @now, version = version + 1
+SET name = @name, time_zone = @time_zone, main = @main, gap_alert = @gap_alert, updated_at = @now,
+    version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
 -- ClearMainSchedule takes the mark main off the Team's main Schedule other than @keep_id, with a new version, and
@@ -174,6 +175,17 @@ SELECT u.id, u.public_id, u.name, u.login, u.role, u.status,
 FROM users u
 WHERE u.org_id = @org_id AND u.id = ANY(@user_ids::bigint[]);
 
+-- ListPageableInTeams reads Users with the Teams among @team_ids they are in, for "may be Paged" in each: active, not
+-- a Viewer and in the Team.
+-- name: ListPageableInTeams :many
+SELECT u.id, u.role, u.status,
+       coalesce((SELECT array_agg(tu.team_id ORDER BY tu.team_id)
+                 FROM team_users tu
+                 WHERE tu.org_id = u.org_id AND tu.user_id = u.id AND tu.team_id = ANY(@team_ids::bigint[])),
+                '{}')::bigint[] AS team_ids
+FROM users u
+WHERE u.org_id = @org_id AND u.id = ANY(@user_ids::bigint[]);
+
 -- IsTeamUser reports whether a User is in a Team.
 -- name: IsTeamUser :one
 SELECT EXISTS (SELECT 1
@@ -203,10 +215,10 @@ WHERE o.org_id = @org_id AND o.schedule_id = @schedule_id AND o.ends_at > @perio
 ORDER BY o.starts_at, o.id
 LIMIT @page_size;
 
--- ListPeriodOverrides reads the Overrides of a Schedule that overlap a period, in the order they were created: by id,
+-- ListPeriodOverrides reads the Overrides of Schedules that overlap a period, in the order they were created: by id,
 -- which every replica takes from the same sequence, where created_at may skew between replicas (P-65).
 -- name: ListPeriodOverrides :many
-SELECT o.id, o.public_id, o.user_id, o.starts_at, o.ends_at, o.version, o.created_at,
+SELECT o.schedule_id, o.id, o.public_id, o.user_id, o.starts_at, o.ends_at, o.version, o.created_at,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.status AS user_status,
        r.public_id AS replaces_public_id, r.name AS replaces_name, r.login AS replaces_login,
        r.status AS replaces_status,
@@ -219,7 +231,8 @@ JOIN users u ON u.org_id = o.org_id AND u.id = o.user_id
 LEFT JOIN users r ON r.org_id = o.org_id AND r.id = o.replaces_user_id
 LEFT JOIN users cu ON cu.org_id = o.org_id AND cu.id = o.created_by_user_id
 LEFT JOIN service_accounts sa ON sa.org_id = o.org_id AND sa.id = o.created_by_service_account_id
-WHERE o.org_id = @org_id AND o.schedule_id = @schedule_id AND o.ends_at > @period_start AND o.starts_at < @period_end
+WHERE o.org_id = @org_id AND o.schedule_id = ANY(@schedule_ids::bigint[]) AND o.ends_at > @period_start
+  AND o.starts_at < @period_end
 ORDER BY o.id;
 
 -- CountOverlappingOverrides counts the Overrides of a Schedule other than @except_id that overlap a span.
@@ -330,3 +343,34 @@ SELECT f.org_id, f.user_id, u.public_id AS user_public_id, u.status AS user_stat
 FROM ical_feeds f
 JOIN users u ON u.org_id = f.org_id AND u.id = f.user_id
 WHERE f.token_hash = @token_hash;
+
+-- ListGapScanSchedules reads every Schedule with its Team, for the gap scan (C-27.FR-7).
+-- name: ListGapScanSchedules :many
+SELECT s.id, s.public_id, s.name, s.time_zone, s.main, s.gap_alert, s.version, s.created_at, s.team_id,
+       t.public_id AS team_public_id, t.name AS team_name, t.slug AS team_slug,
+       (t.deleted_at IS NOT NULL)::boolean AS team_deleted
+FROM schedules s
+JOIN teams t ON t.org_id = s.org_id AND t.id = s.team_id
+WHERE s.org_id = @org_id
+ORDER BY s.id;
+
+-- GetOrganizationTeamLabel reads the Team label (organization.team_label), under which an Internal alert about a
+-- Team's object carries the Team's slug (C-25.FR-5).
+-- name: GetOrganizationTeamLabel :one
+SELECT team_label
+FROM organizations
+WHERE id = @org_id;
+
+-- ListOnCallTeams reads the Teams that are not deleted by name, of the User @member_id when it is set, each with its
+-- main Schedule, for "On call now" (C-27.FR-9).
+-- name: ListOnCallTeams :many
+SELECT t.id, t.public_id, t.name, t.slug, s.id AS schedule_id, s.public_id AS schedule_public_id,
+       s.name AS schedule_name, s.time_zone AS schedule_time_zone
+FROM teams t
+LEFT JOIN schedules s ON s.org_id = t.org_id AND s.team_id = t.id AND s.main
+WHERE t.org_id = @org_id AND t.deleted_at IS NULL
+  AND (sqlc.narg('member_id')::bigint IS NULL OR EXISTS (
+        SELECT 1
+        FROM team_users tu
+        WHERE tu.org_id = @org_id AND tu.team_id = t.id AND tu.user_id = sqlc.narg('member_id')::bigint))
+ORDER BY lower(t.name), t.id;

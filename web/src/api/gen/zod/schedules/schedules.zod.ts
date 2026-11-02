@@ -46,6 +46,12 @@ export const ListSchedulesResponse = zod.object({
   "name": zod.string(),
   "time_zone": zod.string(),
   "main": zod.boolean(),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).describe('Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team\'s main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.'),
+  "gap_alert_active": zod.boolean().describe('Whether the Leader\'s gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team\'s main one.'),
+  "next_gap": zod.union([zod.object({
+  "start": zod.iso.datetime({"offset":true}),
+  "end": zod.iso.datetime({"offset":true})
+}).describe('A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.'),zod.null()]).describe('The first gap within `schedule.gap_view` from the business clock\'s now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(listSchedulesResponseItemsItemRotationLayersItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "number": zod.int().min(1).describe('The position of the Rotation layer, 1 for the lowest; a higher one overrides those below.'),
@@ -97,6 +103,7 @@ export const CreateScheduleBody = zod.object({
   "name": zod.string().min(1).max(createScheduleBodyNameMax).describe('Unique in the Team, ignoring case.'),
   "time_zone": zod.string().optional().describe('IANA time zone of the Schedule (`schedule.time_zone`); the Organization\'s at the time of creation when omitted, and kept on an update when omitted.'),
   "main": zod.boolean().optional().describe('True makes the Schedule its Team\'s main Schedule, whose On-call is the Team\'s; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead.'),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).optional().describe('Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(createScheduleBodyRotationLayersItemIdRegExp).optional().describe('The `id` of one of the Schedule\'s Rotation layers, which keeps its identity; omit it for a new one.'),
   "name": zod.string().min(1).max(createScheduleBodyRotationLayersItemNameMax),
@@ -138,6 +145,12 @@ export const CreateScheduleResponse = zod.object({
   "name": zod.string(),
   "time_zone": zod.string(),
   "main": zod.boolean(),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).describe('Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team\'s main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.'),
+  "gap_alert_active": zod.boolean().describe('Whether the Leader\'s gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team\'s main one.'),
+  "next_gap": zod.union([zod.object({
+  "start": zod.iso.datetime({"offset":true}),
+  "end": zod.iso.datetime({"offset":true})
+}).describe('A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.'),zod.null()]).describe('The first gap within `schedule.gap_view` from the business clock\'s now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(createScheduleResponseRotationLayersItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "number": zod.int().min(1).describe('The position of the Rotation layer, 1 for the lowest; a higher one overrides those below.'),
@@ -198,6 +211,12 @@ export const GetScheduleResponse = zod.object({
   "name": zod.string(),
   "time_zone": zod.string(),
   "main": zod.boolean(),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).describe('Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team\'s main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.'),
+  "gap_alert_active": zod.boolean().describe('Whether the Leader\'s gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team\'s main one.'),
+  "next_gap": zod.union([zod.object({
+  "start": zod.iso.datetime({"offset":true}),
+  "end": zod.iso.datetime({"offset":true})
+}).describe('A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.'),zod.null()]).describe('The first gap within `schedule.gap_view` from the business clock\'s now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(getScheduleResponseRotationLayersItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "number": zod.int().min(1).describe('The position of the Rotation layer, 1 for the lowest; a higher one overrides those below.'),
@@ -258,6 +277,7 @@ export const UpdateScheduleBody = zod.object({
   "name": zod.string().min(1).max(updateScheduleBodyNameMax).describe('Unique in the Team, ignoring case.'),
   "time_zone": zod.string().optional().describe('IANA time zone of the Schedule (`schedule.time_zone`); the Organization\'s at the time of creation when omitted, and kept on an update when omitted.'),
   "main": zod.boolean().optional().describe('True makes the Schedule its Team\'s main Schedule, whose On-call is the Team\'s; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead.'),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).optional().describe('Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(updateScheduleBodyRotationLayersItemIdRegExp).optional().describe('The `id` of one of the Schedule\'s Rotation layers, which keeps its identity; omit it for a new one.'),
   "name": zod.string().min(1).max(updateScheduleBodyRotationLayersItemNameMax),
@@ -299,6 +319,12 @@ export const UpdateScheduleResponse = zod.object({
   "name": zod.string(),
   "time_zone": zod.string(),
   "main": zod.boolean(),
+  "gap_alert": zod.enum(['by_default', 'on', 'off']).describe('Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team\'s main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.'),
+  "gap_alert_active": zod.boolean().describe('Whether the Leader\'s gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team\'s main one.'),
+  "next_gap": zod.union([zod.object({
+  "start": zod.iso.datetime({"offset":true}),
+  "end": zod.iso.datetime({"offset":true})
+}).describe('A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.'),zod.null()]).describe('The first gap within `schedule.gap_view` from the business clock\'s now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.'),
   "rotation_layers": zod.array(zod.object({
   "id": zod.string().regex(updateScheduleResponseRotationLayersItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "number": zod.int().min(1).describe('The position of the Rotation layer, 1 for the lowest; a higher one overrides those below.'),
@@ -343,7 +369,7 @@ export const DeleteScheduleHeader = zod.object({
 export const DeleteScheduleResponse = zod.void()
 
 /**
- * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+ * The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
  * @summary Read the On-call and the Result of a Schedule
  */
 export const getScheduleOnCallPathScheduleIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -441,18 +467,20 @@ export const GetScheduleOnCallResponse = zod.object({
   "etag": zod.string()
 })).describe('The Overrides in the period, in the order they were created.'),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['disabled', 'viewer', 'not_in_team', 'gap', 'unreachable']).describe('`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and `unreachable` come with later releases of 0.2.'),
+  "kind": zod.enum(['disabled', 'viewer', 'not_in_team', 'gap', 'unreachable']).describe('`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.'),
   "user": zod.union([zod.object({
   "id": zod.string().regex(getScheduleOnCallResponseWarningsItemUserOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string(),
   "login": zod.string().optional(),
   "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
-}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),zod.null()]),
+}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),zod.null()]).describe('Null for a gap.'),
   "rotation_layer": zod.union([zod.object({
   "id": zod.string().regex(getScheduleOnCallResponseWarningsItemRotationLayerOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "name": zod.string()
 }),zod.null()]),
-  "override_id": zod.string().regex(getScheduleOnCallResponseWarningsItemOverrideIdRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.')
+  "override_id": zod.string().regex(getScheduleOnCallResponseWarningsItemOverrideIdRegExp).nullable().describe('A `public_id` in the format of `PublicId`, or null.'),
+  "start": zod.iso.datetime({"offset":true}).nullable().describe('The start of the gap, cut to the period; null for another kind.'),
+  "end": zod.iso.datetime({"offset":true}).nullable().describe('The end of the gap, cut to the period; null for another kind.')
 })).describe('Each person of a Rotation layer or an Override in the period who may not be Paged, once per person and Rotation layer, or per Override.')
 }).describe('The Result of a Schedule over a period, with what it is made of.')
 
@@ -671,4 +699,65 @@ export const GetIcalCalendarParams = zod.object({
 })
 
 export const GetIcalCalendarResponse = zod.unknown()
+
+/**
+ * "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+ * @summary Read who is On-call now in each Team
+ */
+export const getOnCallNowQueryTeamsDefault = `all`;
+
+export const GetOnCallNowQueryParams = zod.object({
+  "teams": zod.enum(['all', 'mine']).default(getOnCallNowQueryTeamsDefault).describe('`all`, the default, lists every Team; `mine` the Teams of the calling User, as "My Teams". A Service account is in no Team, so its `mine` is refused with `422` `unsupported` at `/query/teams`.')
+})
+
+export const getOnCallNowResponseItemsItemTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemScheduleOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemScheduleOneTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemUserOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemRotationLayerOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getOnCallNowResponseItemsItemNextOneUserOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const GetOnCallNowResponse = zod.object({
+  "items": zod.array(zod.object({
+  "team": zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),
+  "schedule": zod.union([zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemScheduleOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "team": zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemScheduleOneTeamIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.')
+}).describe('The Schedule an object names, with its Team.'),zod.null()]).describe('The Team\'s main Schedule, or null.'),
+  "no_schedule": zod.boolean().describe('The Team has no main Schedule ("No Schedule").'),
+  "user": zod.union([zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemUserOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "login": zod.string().optional(),
+  "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
+}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),zod.null()]).describe('The On-call now; null in a gap and without a Schedule.'),
+  "rotation_layer": zod.union([zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemRotationLayerOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string()
+}),zod.null()]).describe('The Rotation layer whose Shift makes the person On-call; null for an Override, in a gap and without a Schedule.'),
+  "until": zod.iso.datetime({"offset":true}).nullable().describe('The end of the current segment — the On-call\'s, or the gap\'s; null when it lasts beyond `schedule.gap_view` and without a Schedule.'),
+  "next": zod.union([zod.object({
+  "user": zod.union([zod.object({
+  "id": zod.string().regex(getOnCallNowResponseItemsItemNextOneUserOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "login": zod.string().optional(),
+  "deactivated": zod.boolean().describe('The user was deleted; the UI shows "(deactivated)".')
+}).describe('A User. Used wherever the person must be a User: the Owner and the previous Owner.'),zod.null()]).describe('The person On-call then; null for a gap.'),
+  "start": zod.iso.datetime({"offset":true}),
+  "end": zod.iso.datetime({"offset":true})
+}).describe('The segment of a Schedule\'s Result after the current one, cut to `schedule.gap_view`.'),zod.null()]).describe('The segment that follows within `schedule.gap_view`, or null.')
+}).describe('The On-call of a Team\'s main Schedule now. With `no_schedule` true, the Team has no main Schedule and every other field but `team` is null.'))
+}).describe('"On call now": the On-call of each Team, by the Team\'s name.')
 

@@ -2443,6 +2443,27 @@ func (e RouteSuggestionId) Valid() bool {
 	}
 }
 
+// Defines values for ScheduleGapAlert.
+const (
+	ByDefault ScheduleGapAlert = "by_default"
+	Off       ScheduleGapAlert = "off"
+	On        ScheduleGapAlert = "on"
+)
+
+// Valid indicates whether the value is a known member of the ScheduleGapAlert enum.
+func (e ScheduleGapAlert) Valid() bool {
+	switch e {
+	case ByDefault:
+		return true
+	case Off:
+		return true
+	case On:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ScheduleWarningKind.
 const (
 	ScheduleWarningKindDisabled    ScheduleWarningKind = "disabled"
@@ -3748,6 +3769,24 @@ func (e ListIntegrationAlertsParamsSort) Valid() bool {
 	case MinusStartsAt:
 		return true
 	case StartsAt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetOnCallNowParamsTeams.
+const (
+	GetOnCallNowParamsTeamsAll  GetOnCallNowParamsTeams = "all"
+	GetOnCallNowParamsTeamsMine GetOnCallNowParamsTeams = "mine"
+)
+
+// Valid indicates whether the value is a known member of the GetOnCallNowParamsTeams enum.
+func (e GetOnCallNowParamsTeams) Valid() bool {
+	switch e {
+	case GetOnCallNowParamsTeamsAll:
+		return true
+	case GetOnCallNowParamsTeamsMine:
 		return true
 	default:
 		return false
@@ -5999,6 +6038,20 @@ type OidcWarning struct {
 // OidcWarningKind `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
 type OidcWarningKind string
 
+// OnCallNext The segment of a Schedule's Result after the current one, cut to `schedule.gap_view`.
+type OnCallNext struct {
+	End   time.Time `json:"end"`
+	Start time.Time `json:"start"`
+
+	// User The person On-call then; null for a gap.
+	User nullable.Nullable[UserRef] `json:"user"`
+}
+
+// OnCallNow "On call now": the On-call of each Team, by the Team's name.
+type OnCallNow struct {
+	Items []TeamOnCall `json:"items"`
+}
+
 // OnCallSegment A segment of the Result, with the person On-call in it, or nobody in a gap.
 type OnCallSegment struct {
 	End time.Time `json:"end"`
@@ -6962,10 +7015,19 @@ type Schedule struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update.
 	Etag *string `json:"etag,omitempty"`
 
+	// GapAlert Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team's main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.
+	GapAlert ScheduleGapAlert `json:"gap_alert"`
+
+	// GapAlertActive Whether the Leader's gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team's main one.
+	GapAlertActive *bool `json:"gap_alert_active,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Main bool     `json:"main"`
 	Name string   `json:"name"`
+
+	// NextGap The first gap within `schedule.gap_view` from the business clock's now, or null; a gap that has begun starts now, and one that lasts beyond the view ends with it.
+	NextGap nullable.Nullable[ScheduleGap] `json:"next_gap,omitempty"`
 
 	// RotationLayers From the lowest to the highest.
 	RotationLayers []RotationLayer `json:"rotation_layers"`
@@ -6978,8 +7040,20 @@ type Schedule struct {
 	TimeZone string   `json:"time_zone"`
 }
 
+// ScheduleGap A gap of a Schedule, a time when no Override and no Rotation layer has a Shift with a person who may be Paged.
+type ScheduleGap struct {
+	End   time.Time `json:"end"`
+	Start time.Time `json:"start"`
+}
+
+// ScheduleGapAlert Whether a Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`, C-27.FR-7): `by_default`, on while the Schedule is its Team's main one, so that the alert follows when another Schedule becomes main; `on`; or `off`, as for a Schedule that covers only part of the day.
+type ScheduleGapAlert string
+
 // ScheduleInput defines model for ScheduleInput.
 type ScheduleInput struct {
+	// GapAlert Whether the Schedule reports its gaps as the Internal alert `MusterScheduleGap` (`schedule.gap_alert`); `by_default` on a creation when omitted, and kept on an update when omitted.
+	GapAlert *ScheduleGapAlert `json:"gap_alert,omitempty"`
+
 	// Main True makes the Schedule its Team's main Schedule, whose On-call is the Team's; the first Schedule of a Team is main. False on the main Schedule is refused with `422` `unsupported`: mark another one main instead.
 	Main *bool `json:"main,omitempty"`
 
@@ -7077,16 +7151,24 @@ type ScheduleRef struct {
 
 // ScheduleWarning defines model for ScheduleWarning.
 type ScheduleWarning struct {
-	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and `unreachable` come with later releases of 0.2.
+	// End The end of the gap, cut to the period; null for another kind.
+	End nullable.Nullable[time.Time] `json:"end"`
+
+	// Kind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
 	Kind ScheduleWarningKind `json:"kind"`
 
 	// OverrideId A `public_id` in the format of `PublicId`, or null.
 	OverrideId    nullable.Nullable[NullablePublicId] `json:"override_id"`
 	RotationLayer nullable.Nullable[EntityRef]        `json:"rotation_layer"`
-	User          nullable.Nullable[UserRef]          `json:"user"`
+
+	// Start The start of the gap, cut to the period; null for another kind.
+	Start nullable.Nullable[time.Time] `json:"start"`
+
+	// User Null for a gap.
+	User nullable.Nullable[UserRef] `json:"user"`
 }
 
-// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` and `unreachable` come with later releases of 0.2.
+// ScheduleWarningKind `disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.
 type ScheduleWarningKind string
 
 // SecretStatus What a read shows instead of a Secret. The value itself is never returned.
@@ -7807,6 +7889,30 @@ type TeamMembership struct {
 
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
+}
+
+// TeamOnCall The On-call of a Team's main Schedule now. With `no_schedule` true, the Team has no main Schedule and every other field but `team` is null.
+type TeamOnCall struct {
+	// Next The segment that follows within `schedule.gap_view`, or null.
+	Next nullable.Nullable[OnCallNext] `json:"next"`
+
+	// NoSchedule The Team has no main Schedule ("No Schedule").
+	NoSchedule bool `json:"no_schedule"`
+
+	// RotationLayer The Rotation layer whose Shift makes the person On-call; null for an Override, in a gap and without a Schedule.
+	RotationLayer nullable.Nullable[EntityRef] `json:"rotation_layer"`
+
+	// Schedule The Team's main Schedule, or null.
+	Schedule nullable.Nullable[ScheduleRef] `json:"schedule"`
+
+	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
+	Team TeamRef `json:"team"`
+
+	// Until The end of the current segment — the On-call's, or the gap's; null when it lasts beyond `schedule.gap_view` and without a Schedule.
+	Until nullable.Nullable[time.Time] `json:"until"`
+
+	// User The On-call now; null in a gap and without a Schedule.
+	User nullable.Nullable[UserRef] `json:"user"`
 }
 
 // TeamRef The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
@@ -9355,6 +9461,15 @@ type UpdateOidcSettingsParams struct {
 	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
 	IfMatch IfMatch `json:"If-Match"`
 }
+
+// GetOnCallNowParams defines parameters for GetOnCallNow.
+type GetOnCallNowParams struct {
+	// Teams `all`, the default, lists every Team; `mine` the Teams of the calling User, as "My Teams". A Service account is in no Team, so its `mine` is refused with `422` `unsupported` at `/query/teams`.
+	Teams *GetOnCallNowParamsTeams `form:"teams,omitempty" json:"teams,omitempty"`
+}
+
+// GetOnCallNowParamsTeams defines parameters for GetOnCallNow.
+type GetOnCallNowParamsTeams string
 
 // UpdateOrganizationParams defines parameters for UpdateOrganization.
 type UpdateOrganizationParams struct {
@@ -13085,6 +13200,13 @@ type ClientInterface interface {
 	// Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 	CheckOidcSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetOnCallNow Read who is On-call now in each Team
+	//
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	//
+	// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
+	GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetOpenApiSpec Read this specification
 	//
 	// The specification the binary was built from, as checked in at `api/openapi.yaml`.
@@ -13369,7 +13491,7 @@ type ClientInterface interface {
 
 	// GetScheduleOnCall Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 	GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -16436,6 +16558,23 @@ func (c *Client) CheckOidcSettings(ctx context.Context, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
+// GetOnCallNow Read who is On-call now in each Team
+//
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+//
+// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
+func (c *Client) GetOnCallNow(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetOnCallNowRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetOpenApiSpec Read this specification
 //
 // The specification the binary was built from, as checked in at `api/openapi.yaml`.
@@ -17080,7 +17219,7 @@ func (c *Client) UpdateSchedule(ctx context.Context, scheduleId ScheduleId, para
 
 // GetScheduleOnCall Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Corresponds with GET /schedules/{schedule_id}/on-call (the `GetScheduleOnCall` operationId).
 func (c *Client) GetScheduleOnCall(ctx context.Context, scheduleId ScheduleId, params *GetScheduleOnCallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -23481,6 +23620,60 @@ func NewCheckOidcSettingsRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetOnCallNowRequest constructs an http.Request for the GetOnCallNow method
+func NewGetOnCallNowRequest(server string, params *GetOnCallNowParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/on-call-now")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Teams != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "teams", *params.Teams, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetOpenApiSpecRequest constructs an http.Request for the GetOpenApiSpec method
 func NewGetOpenApiSpecRequest(server string) (*http.Request, error) {
 	var err error
@@ -28412,6 +28605,15 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /oidc-settings/checks (the `CheckOidcSettings` operationId).
 	CheckOidcSettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*CheckOidcSettingsResponse, error)
 
+	// GetOnCallNowWithResponse Read who is On-call now in each Team
+	//
+	// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
+	GetOnCallNowWithResponse(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*GetOnCallNowResponse, error)
+
 	// GetOpenApiSpecWithResponse Read this specification
 	//
 	// The specification the binary was built from, as checked in at `api/openapi.yaml`.
@@ -28732,7 +28934,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 	//
-	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+	// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -37944,6 +38146,89 @@ func (r CheckOidcSettingsResponse) ContentType() string {
 	return ""
 }
 
+// GetOnCallNowResponse429Headers the declared response headers of an HTTP 429 response for GetOnCallNow
+type GetOnCallNowResponse429Headers struct {
+	RetryAfter *int
+}
+
+type GetOnCallNowResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *OnCallNow
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetOnCallNowResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetOnCallNowResponse) GetJSON200() *OnCallNow {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetOnCallNowResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetOnCallNowResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r GetOnCallNowResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetOnCallNowResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r GetOnCallNowResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetOnCallNowResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetOnCallNowResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetOnCallNowResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetOnCallNowResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetOpenApiSpecResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -46488,6 +46773,21 @@ func (c *ClientWithResponses) CheckOidcSettingsWithResponse(ctx context.Context,
 	return ParseCheckOidcSettingsResponse(rsp)
 }
 
+// GetOnCallNowWithResponse Read who is On-call now in each Team
+//
+// "On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the On-call of its main Schedule at the business clock's now with the Rotation layer that decides it, until when, and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /on-call-now (the `GetOnCallNow` operationId).
+func (c *ClientWithResponses) GetOnCallNowWithResponse(ctx context.Context, params *GetOnCallNowParams, reqEditors ...RequestEditorFn) (*GetOnCallNowResponse, error) {
+	rsp, err := c.GetOnCallNow(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetOnCallNowResponse(rsp)
+}
+
 // GetOpenApiSpecWithResponse Read this specification
 //
 // The specification the binary was built from, as checked in at `api/openapi.yaml`.
@@ -47024,7 +47324,7 @@ func (c *ClientWithResponses) UpdateScheduleWithResponse(ctx context.Context, sc
 
 // GetScheduleOnCallWithResponse Read the On-call and the Result of a Schedule
 //
-// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped. The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
+// The Result of the Schedule over a period on the business clock: its segments, each with the person On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock's now and `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it, else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the clocks move, and one that happens twice its first occurrence.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -55796,6 +56096,80 @@ func ParseCheckOidcSettingsResponse(rsp *http.Response) (*CheckOidcSettingsRespo
 	switch {
 	case rsp.StatusCode == 429:
 		var headers CheckOidcSettingsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetOnCallNowResponse parses an HTTP response from a GetOnCallNowWithResponse call
+func ParseGetOnCallNowResponse(rsp *http.Response) (*GetOnCallNowResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetOnCallNowResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest OnCallNow
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetOnCallNowResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

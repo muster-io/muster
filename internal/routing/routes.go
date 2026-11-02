@@ -340,6 +340,7 @@ type Queries interface {
 	ListHeartbeatIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListHeartbeatIntegrationsRow, error)
 	ListAlertingIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingIntegrationsRow, error)
 	ListAlertingDestinations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingDestinationsRow, error)
+	ListAlertingSchedules(ctx context.Context, orgID int64) ([]dbgen.ListAlertingSchedulesRow, error)
 	HasOpenAlertGroups(ctx context.Context, arg dbgen.HasOpenAlertGroupsParams) (bool, error)
 	InsertOpenGroupUpdate(ctx context.Context, arg dbgen.InsertOpenGroupUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error

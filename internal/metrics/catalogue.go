@@ -521,3 +521,15 @@ var ScheduleInfo = newGauge(Definition{
 	},
 	Capability: "C-27",
 })
+
+// ScheduleGap is 1 while a Schedule whose gap alert is active has a gap now or one that starts within
+// schedule.gap_alert_horizon, and 0 for every other Schedule, exported by the Leader, whose gap scan sets it
+// (C-27.FR-7).
+var ScheduleGap = newGauge(Definition{
+	Name: "muster_schedule_gap",
+	Help: "1 while the Schedule, whose gap alert is active, has a gap now or one that starts within " +
+		"schedule.gap_alert_horizon, 0 otherwise, per Schedule; set by the Leader's gap scan.",
+	Labels:     []Label{entity("schedule")},
+	Capability: "C-27",
+	LeaderOnly: true,
+})
