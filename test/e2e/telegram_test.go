@@ -741,6 +741,25 @@ func (e *tgd) keyboardOf(id int64, want ...string) {
 	})
 }
 
+// updatesReceived waits until Muster received every update the fake has for the demo bot, the edited_message of each
+// edit of a channel post with a copy included: every edit is answered, so its update is queued, and the bot confirmed
+// every queued update with its next getUpdates, after it had handled them.
+func (e *tgd) updatesReceived() {
+	e.t.Helper()
+	eventually(e.t, "the updates to be received", func() bool {
+		for _, q := range e.requests() {
+			if strings.Contains(q.Path, "/editMessage") && q.Status == 0 {
+				return false
+			}
+		}
+		var p struct {
+			Pending int `json:"pending"`
+		}
+		decode(e.t, call(e.t, http.MethodGet, e.ftg+"/pending?token="+devmode.TelegramConnectionBotToken, ""), &p)
+		return p.Pending == 0
+	})
+}
+
 // rootPost is the channel post of the Alert Group's Root message once Muster has recorded it. The fake keeps the post
 // before its answer to sendMessage reaches Muster, and a press on a post that Muster has not recorded yet is not bound
 // to the Alert Group: it is answered as not verified.
@@ -913,6 +932,8 @@ func TestTelegramPresses(t *testing.T) {
 		"Until Monday 09:00")
 	e.press(post2, 5001, "Snooze 4 h", "")
 	e.keyboardOf(post2, "Ack", "Unsnooze", "Resolve")
+	// The edit's edited_message is an update too: received after the advance, it would end the gap before the press.
+	e.updatesReceived()
 	answers := len(e.answers())
 	advance(t, r, 3700)
 	e.fake(http.MethodPost, e.ftg+"/press", fmt.Sprintf(`{"chat":%d,"message_id":%d,"from":{"id":5001},

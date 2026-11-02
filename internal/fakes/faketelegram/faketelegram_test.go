@@ -137,9 +137,19 @@ func TestGetUpdatesWithOffsetAndAllowedUpdates(t *testing.T) {
 	if f.Pending(token) != 2 {
 		t.Fatalf("pending = %d, want 2 unconfirmed", f.Pending(token))
 	}
+	pending := base + "/_fake/pending?token=" + token
+	if s, b, _ := call(t, http.MethodGet, pending, ""); s != http.StatusOK || b != `{"pending":2}`+"\n" {
+		t.Fatalf("GET /_fake/pending = %d %q", s, b)
+	}
 	_, _, a = call(t, http.MethodGet, base+"/bot"+token+"/getUpdates?offset=41&timeout=0", "")
 	if string(a.Result) != "[]" || f.Pending(token) != 0 {
 		t.Fatalf("after the offset = %s, pending %d", a.Result, f.Pending(token))
+	}
+	if s, b, _ := call(t, http.MethodGet, pending, ""); s != http.StatusOK || b != `{"pending":0}`+"\n" {
+		t.Fatalf("GET /_fake/pending after the offset = %d %q", s, b)
+	}
+	if s, _, _ := call(t, http.MethodGet, base+"/_fake/pending", ""); s != http.StatusBadRequest {
+		t.Fatalf("GET /_fake/pending without a token = %d", s)
 	}
 	if s, _, _ := call(t, http.MethodPost, base+"/bot"+token+"/getUpdates", `{"offset":"x"}`); s != 400 {
 		t.Fatalf("bad offset = %d", s)

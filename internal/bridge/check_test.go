@@ -395,12 +395,9 @@ func TestDryProbe(t *testing.T) {
 // policy refuses — and a proxy that refuses the credentials, SOCKS5 or HTTP, is proxy_refused; an unknown name, the
 // time and the proxy have the text of delivery.FailureMessage. Nothing reaches the bridge.
 func TestDryProbeWithoutAnswer(t *testing.T) {
-	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	refused := "http://" + ln.Addr().String()
-	_ = ln.Close()
+	// Port 1 is outside the ephemeral range, so no :0 listener of another test can take it; a port freed by closing a
+	// listener can be taken by one before the probe dials it.
+	refused := "http://127.0.0.1:1"
 	b := startStandIn(t, answerJSON(http.StatusUnauthorized, problemJSON, `{"title":"Unauthorized"}`))
 	strict, err := outbound.ParsePolicy("standard", nil, nil)
 	if err != nil {

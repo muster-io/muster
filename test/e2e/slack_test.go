@@ -198,7 +198,9 @@ func (s *slk) roots(n int, title string) []slackMessage {
 	return out
 }
 
-// root waits for the last Root message of Alert Group #n other than those of the ts in not, and returns it.
+// root waits for the last Root message of Alert Group #n other than those of the ts in not, and returns it once Muster
+// has recorded it. The fake keeps the message before its answer to chat.postMessage reaches Muster, and a press on a
+// message that Muster has not recorded yet is not bound to the Alert Group: it is answered as not verified.
 func (s *slk) root(n int, title string, not ...string) slackMessage {
 	s.t.Helper()
 	var got slackMessage
@@ -210,7 +212,19 @@ func (s *slk) root(n int, title string, not ...string) slackMessage {
 		}
 		return got.TS != ""
 	})
+	s.recorded(got.TS)
 	return got
+}
+
+// recorded waits until Muster has recorded the message ts of a Slack Destination, a Root message or a thread reply such
+// as a Reminder, to which it binds a press on its buttons. The fake's ts are unique across its Slack apps.
+func (s *slk) recorded(ts string) {
+	s.t.Helper()
+	eventually(s.t, "the message "+ts+" to be recorded", func() bool {
+		return s.h.count(s.t, `SELECT (SELECT count(*) FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id
+			WHERE ds.type = 'slack' AND d.message_id = '`+ts+`') + (SELECT count(*) FROM thread_replies r
+			JOIN destinations ds ON ds.id = r.destination_id WHERE ds.type = 'slack' AND r.message_id = '`+ts+`')`) > 0
+	})
 }
 
 // message is the message ts of the channel, failing without one.
@@ -1183,6 +1197,7 @@ func TestSlackPresses(t *testing.T) {
 			}
 			return false
 		})
+		s.recorded(reminder.TS)
 		before := len(s.ephemerals())
 		s.pressed(reminder.TS, "still_on_it", fakeslack.UserBob, nil)
 		if got := s.answered(before, 1); got[0].Text != slackForbidden || got[0].ThreadTS == nil ||
