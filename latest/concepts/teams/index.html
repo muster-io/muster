@@ -2977,8 +2977,9 @@ alerts included, because a missing label counts as empty.</dd>
 <p>Muster decides the Teams of an Alert when it starts firing — its first firing, and each firing after it resolved —
 and records them on the Alert with the rule that matched: <code>label</code>, or <code>matcher</code> with the matcher's text. The Alerts
 view of an Integration shows them as <code>teams</code>: the Teams of the Alert's latest firing, which replace those of an earlier
-one. A Continuation is not a new firing and decides nothing; a Team created or
-changed later reaches the Alerts that fire from then on.</p>
+one. A Continuation is not a new firing and decides nothing. Saving a Team or the Team label also evaluates the Alerts
+that are firing in open Alert Groups again, and only adds Teams to them
+(<a href="#values-without-a-team">Values without a Team</a>).</p>
 <p>The Teams of an Alert Group are those of every Alert that ever joined it. They only grow: a Team stays among them
 after its Alerts resolve. Each Team that joins records the Quiet lifecycle event <code>team_joined</code> in the Timeline, naming
 the Team and the rule that brought it; <code>getAlertGroup</code> and <code>listAlertGroups</code> carry the Teams as <code>teams</code>, and outgoing
@@ -3006,6 +3007,23 @@ records the Quiet lifecycle event <code>unknown_team_value</code> with the value
 webhooks in events mode receive it. Create a Team with that value as its slug, or add a Team matcher that picks those
 Alerts, and the Alerts that start firing from then on belong to it. A value that is not a valid slug, such as
 <code>Payments</code>, reaches a Team only through a Team matcher.</p>
+<p>The values of the Team label seen without a Team in the last 14 days (<code>organization.team_values_window</code>) are listed by
+<code>listTeamLabelValues</code> (<code>GET /api/v1/team-label-values</code>, Permission <code>teams:read</code>), the most recently seen first, each
+with when it was last seen, how many Alerts carried it and <code>valid_slug</code>, false for a value that is not a valid slug.</p>
+<p>Saving a Team — creating one, or changing its slug or its Team matchers — or saving a new Team label evaluates the
+Alerts that are firing in open Alert Groups again, and only adds:</p>
+<ul>
+<li>An Alert that the save now brings to a Team records that Team, and the Team joins the Alert's Alert Group with a
+  Quiet <code>team_joined</code>. The Root messages are updated Quietly, with no new message and no Mention, and no Escalation
+  chain starts.</li>
+<li>A Team that an Alert no longer belongs to stays where it is, on the Alert and in its Alert Group.</li>
+<li>Saving the name, the description, the people or the Working hours of a Team evaluates nothing.</li>
+</ul>
+<p>So "Create Team" for a value without a Team brings the Team the open Alert Groups of that value at once: with an open,
+firing Alert Group of <code>team="checkout"</code> and no such Team, creating the Team with the slug <code>checkout</code> adds it to the
+Alert Group, and <code>checkout</code> leaves the list of values without a Team. The evaluation runs on any replica shortly after
+the save; a replica that stops during it leaves the rest to another one, which goes on where it stopped. It records no
+<code>unknown_team_value</code> and leaves an Alert Group that gets no new Team as it is.</p>
 <p>With the default Team label <code>team</code> and no Teams defined yet, every Alert that carries a <code>team</code> label records
 <code>unknown_team_value</code> in its Alert Group's Timeline and sends it to outgoing webhooks in events mode. Create the Teams,
 or change the Team label to a label your Alerts do not use for something else, to avoid it.</p>

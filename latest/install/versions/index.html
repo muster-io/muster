@@ -3033,14 +3033,20 @@ critical, and a Route raises the level of its Alert Groups with its
 <li>Migration 0023 adds the <a href="../../concepts/statuses-and-commands/#button-sets">button sets</a>: the Organization's
   shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.</li>
 <li>Migration 0024 adds the <a href="../../concepts/teams/#which-alerts-belong-to-a-team">Team label and Team matchers</a>. The
-  Team label is <code>team</code> by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
-  label <code>team</code> records one Quiet <code>unknown_team_value</code> per value in its Timeline, and outgoing webhooks in events
-  mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.</li>
+  Team label is <code>team</code> by default, and no Team exists after the upgrade: each Alert Group whose Alerts start
+  firing with the label <code>team</code> after the upgrade records one Quiet <code>unknown_team_value</code> per value in its
+  Timeline, and outgoing webhooks in events mode receive one extra event for each. Create the Teams, or change the
+  Team label, to avoid it.</li>
 <li>Migration 0025 adds <a href="../../concepts/schedules/">Schedules</a> and the Permissions <code>schedules:read</code>,
   <code>schedules:write</code> and <code>schedule-overrides:write</code>. Roles get them at once; a Personal access token keeps the
   Permissions it was issued with, so issue a new one to reach Schedules with a token.</li>
 <li>Migration 0026 adds the personal <a href="../../concepts/schedules/#ical-feed">iCal feeds</a>; no User has one after the
   upgrade.</li>
+<li>Migration 0027 adds the <a href="../../concepts/teams/#values-without-a-team">evaluation of the open Alert Groups</a> when
+  a Team or the Team label is saved: creating a Team for a value of the Team label, or changing a Team's slug or
+  Team matchers, or the Team label, adds the Team to the open Alert Groups whose firing Alerts it now picks, with a
+  Quiet <code>team_joined</code>. It only adds, so the Alert Groups of Alerts that fired before the upgrade get their Teams
+  the first time a Team is created, its slug or Team matchers change, or the Team label changes.</li>
 </ul>
 <p><strong>Helm chart.</strong> <code>ingress.app.annotations</code> and <code>ingress.ingest.annotations</code> set the annotations of one Ingress, over
 the shared <code>ingress.annotations</code>, so an installation that turned the chart's Ingress off to get different annotations
@@ -3076,7 +3082,12 @@ does not know them and renders every button on the messages it touches. A 0.1 re
 processes no Teams, and the events-mode webhook bodies it sends lack <code>alert_group.teams</code>: create Teams only after
 every replica runs 0.2.0. A 0.1 replica does not serve the iCal feeds: it answers a link of a feed with the page
 of the web UI, and a User it deletes keeps the row of their feed, whose link then answers <code>404</code> as the feed of a
-deleted User does. Issue iCal links only after every replica runs 0.2.0.</p>
+deleted User does. Issue iCal links only after every replica runs 0.2.0. Neither a 0.1 replica nor one of a
+development image without migration 0027 writes the evaluation of the open Alert Groups, and neither claims one: a
+Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
+replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
+Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
+rollout.</p>
 <p>Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
 and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
 waiting for a lock (<code>lock_timeout</code>) or on a deadlock with the running replicas, and the 0.2.0 replica then refuses
@@ -3184,6 +3195,31 @@ dirty at version 25. To recover, with the same database role as Muster, run
 dirty at version 26. To recover, with the same database role as Muster, run
 <code>UPDATE schema_migrations SET version = 25, dirty = false;</code> and start the 0.2.0 replica again, or run
 <code>muster migrate</code>.</p>
+<p>Migration 0027 runs in three transactions: the first adds <code>open_group_updates.team_id</code> and the new CHECK of the
+kinds of <code>open_group_updates</code>, the second validates them, the third drops the old CHECK. A failure leaves the
+schema recorded as dirty at version 27. To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">columns</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'open_group_updates'</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">column_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'team_id'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 26, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_team_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_kind_v3_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">open_group_updates_kind_v2_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
