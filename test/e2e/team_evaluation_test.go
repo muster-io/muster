@@ -108,7 +108,7 @@ func evaluationsDone(h *Harness) int {
 // cluster="x" brings the second Alert Group, and a matcher that no longer picks it leaves the Team in it and on its
 // Alert; the Team label service_team brings the Alert Group whose service_team names the Team, and changing it back
 // adds nothing; a new slug that no longer picks the Alert leaves the Team where it is; a save of the name alone
-// writes no row. Every save that writes a row runs it once.
+// requests no evaluation, only the re-render of its name. Every save that writes a row runs it once.
 func TestTeamEvaluation(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -219,10 +219,15 @@ func TestTeamEvaluation(t *testing.T) {
 		t.Errorf("teams of the alert of cluster x %v", got)
 	}
 
-	// A save of the name alone writes no row.
+	// A save of the name alone requests no evaluation: only the re-render of the Root messages that show the name
+	// (C-29.FR-1).
 	put(`{"name":"Checkout team","slug":"checkout","own_working_hours":false}`)
-	if n := h.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 || evaluationsDone(h) != 3 {
-		t.Errorf("a new name wrote %d rows", n)
+	eventually(t, "the run of the new name", func() bool {
+		return h.count(t, `SELECT count(*) FROM open_group_updates`) == 0 &&
+			messageSettingsDone(h, "team_name") == 1
+	})
+	if evaluationsDone(h) != 3 {
+		t.Errorf("a new name ran %d evaluations", evaluationsDone(h)-3)
 	}
 
 	// The Team label service_team brings the third Alert Group; back to team adds nothing.

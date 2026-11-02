@@ -3154,6 +3154,51 @@ func (q *Queries) ListOpenGroupsOfRouteAfter(ctx context.Context, arg ListOpenGr
 	return items, nil
 }
 
+const listOpenGroupsOfTeamAfter = `-- name: ListOpenGroupsOfTeamAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = $1 AND g.status <> 'resolved' AND g.id > $2
+  AND EXISTS (SELECT 1
+              FROM alert_group_teams t
+              WHERE t.org_id = $1 AND t.alert_group_id = g.id AND t.team_id = $3)
+ORDER BY g.id
+LIMIT $4
+`
+
+type ListOpenGroupsOfTeamAfterParams struct {
+	OrgID   int64
+	AfterID int64
+	TeamID  int64
+	Lim     int32
+}
+
+// ListOpenGroupsOfTeamAfter lists, by id after a cursor, a batch of the open Alert Groups that have the Team, whose
+// Root messages show its name, which a rename re-renders.
+func (q *Queries) ListOpenGroupsOfTeamAfter(ctx context.Context, arg ListOpenGroupsOfTeamAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfTeamAfter,
+		arg.OrgID,
+		arg.AfterID,
+		arg.TeamID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOwnedGroups = `-- name: ListOwnedGroups :many
 SELECT id
 FROM alert_groups
@@ -4312,7 +4357,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 }
 
 const lockOpenGroupUpdate = `-- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, destination_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, team_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = $1 AND id = $2 AND leased_by = $3::text AND lease_until > $4::timestamptz
 FOR NO KEY UPDATE
@@ -4330,6 +4375,7 @@ type LockOpenGroupUpdateRow struct {
 	Kind              string
 	RouteID           pgtype.Int8
 	DestinationID     pgtype.Int8
+	TeamID            pgtype.Int8
 	AfterAlertGroupID int64
 }
 
@@ -4348,6 +4394,7 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 		&i.Kind,
 		&i.RouteID,
 		&i.DestinationID,
+		&i.TeamID,
 		&i.AfterAlertGroupID,
 	)
 	return i, err
@@ -4453,8 +4500,9 @@ type LockTeamEvaluationParams struct {
 }
 
 // LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
-// keyed by the Organization) exclusively, before a batch of the evaluation locks its Alert Groups: it waits for every
-// Snapshot that read the stamp of the classification before, which routing takes it shared for.
+// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings or
+// team_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared for before it
+// reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created or changed.
 func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
 	_, err := q.db.Exec(ctx, lockTeamEvaluation, arg.LockClass, arg.OrgID)
 	return err

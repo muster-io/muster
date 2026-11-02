@@ -1070,7 +1070,7 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
 -- LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
 -- now, and reads where its run stands; no row when the lease was lost.
 -- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, destination_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, team_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = @org_id AND id = @id AND leased_by = @owner::text AND lease_until > @now::timestamptz
 FOR NO KEY UPDATE;
@@ -1134,6 +1134,18 @@ WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
 ORDER BY g.id
 LIMIT @lim;
 
+-- ListOpenGroupsOfTeamAfter lists, by id after a cursor, a batch of the open Alert Groups that have the Team, whose
+-- Root messages show its name, which a rename re-renders.
+-- name: ListOpenGroupsOfTeamAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
+  AND EXISTS (SELECT 1
+              FROM alert_group_teams t
+              WHERE t.org_id = @org_id AND t.alert_group_id = g.id AND t.team_id = @team_id)
+ORDER BY g.id
+LIMIT @lim;
+
 -- ListOpenGroupsOfRouteAfter lists, by id after a cursor, a batch of the open Alert Groups of a Route, those moved to
 -- it included.
 -- name: ListOpenGroupsOfRouteAfter :many
@@ -1144,8 +1156,9 @@ ORDER BY id
 LIMIT @lim;
 
 -- LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
--- keyed by the Organization) exclusively, before a batch of the evaluation locks its Alert Groups: it waits for every
--- Snapshot that read the stamp of the classification before, which routing takes it shared for.
+-- keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings or
+-- team_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared for before it
+-- reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created or changed.
 -- name: LockTeamEvaluation :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@org_id::bigint));
 

@@ -59,6 +59,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   (C-10.FR-18).
   _Revised for L2 (2026-10-26):_ the start of the working day is also the start of the Organization's Working hours
   (C-25.FR-9).
+  _Revised for L2 (2026-11-02):_ from 0.2.0 a change of either re-renders the open Root messages at once, Quietly and
+  as edits, with the new labels of the presets (C-29.FR-2).
 
 ## UI
 

@@ -593,6 +593,106 @@ func TestIntegrationTeamEvaluation(t *testing.T) {
 	})
 }
 
+// TestIntegrationTeamRename is C-29.FR-1 on every supported PostgreSQL: a rename of a Team writes one
+// open_group_updates row team_name with the Team in the save's transaction, and a second rename while it is unclaimed
+// writes none; the
+// worker of internal/groups runs the re-render step, as the system, marked as a change of configuration and without a
+// lifecycle event, on the open Alert Group that has the Team and on no other — not on one whose Alerts name another
+// Team — then deletes the row and logs the Team. A save that changes the description writes no row and re-renders
+// nothing; a rename of another Team writes its own row.
+func TestIntegrationTeamRename(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		if _, err := e.d.Pool.Exec(ctx, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		_, group := e.fixture(t, 4, []fixtureAlert{{labels: `{"alertname": "Latency", "team": "checkout"}`,
+			status: "firing", member: "firing", seen: t0}})
+		_, other := e.fixture(t, 5, []fixtureAlert{{labels: `{"alertname": "Latency", "team": "search"}`,
+			status: "firing", member: "firing", seen: t0}})
+		checkout, err := e.svc.Create(ctx, by, teams.Input{Name: "Checkout", Slug: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		search, err := e.svc.Create(ctx, by, teams.Input{Name: "Search", Slug: "search"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		c := clock.NewManual(t0.Add(time.Minute))
+		gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, c), Business: c, Log: logger})
+		var rendered []int64
+		gs.SetRerender(func(_ context.Context, _ groups.DBTX, r groups.Rendering) error {
+			if r.Actor != groups.System || !r.Configuration {
+				t.Errorf("a rendering as %+v, configuration %v", r.Actor, r.Configuration)
+			}
+			if len(r.Events) == 0 {
+				rendered = append(rendered, r.Group.ID)
+				r.Changed()
+			}
+			return nil
+		})
+		worker := &groups.UpdateWorker{Service: gs, Log: logger, Lease: db.Lease{Owner: "r1",
+			Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: c, Real: clock.Real{}}}}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_teams WHERE org_id = $1`, e.orgID); n != 2 ||
+			len(rendered) != 0 {
+			t.Fatalf("%d alert_group_teams rows, rendered %v", n, rendered)
+		}
+		rows := func(t *testing.T, team int64) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1 AND kind = 'team_name'
+				AND team_id = $2 AND leased_by IS NULL`, e.orgID, team)
+		}
+		if _, err := e.svc.Update(ctx, by, checkout.PublicID, nil, teams.Input{Name: "Checkout",
+			Slug: "checkout", Description: new("Pays")}); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID); n != 0 {
+			t.Errorf("a new description wrote %d rows", n)
+		}
+		for _, name := range []string{"Checkout squad", "Checkout and payments"} {
+			if _, err := e.svc.Update(ctx, by, checkout.PublicID, nil, teams.Input{Name: name,
+				Slug: "checkout"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := rows(t, checkout.ID); n != 1 || e.count(t, `SELECT count(*) FROM open_group_updates
+			WHERE org_id = $1`, e.orgID) != 1 {
+			t.Errorf("%d rows of the renames, want the only one", n)
+		}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(rendered, []int64{group}) || !strings.Contains(log.String(),
+			`"event":"open_group_update_done","kind":"team_name","team":"`+checkout.PublicID+`","alert_groups":1`) ||
+			e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID) != 0 {
+			t.Errorf("rendered %v (not %d), log %s", rendered, other, log.String())
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE org_id = $1 AND event = 'team_joined'`,
+			e.orgID); n != 2 {
+			t.Errorf("%d team_joined entries, want those of the creations", n)
+		}
+		rendered = nil
+		if _, err := e.svc.Update(ctx, by, search.PublicID, nil, teams.Input{Name: "Search and discovery",
+			Slug: "search"}); err != nil {
+			t.Fatal(err)
+		}
+		if n := rows(t, search.ID); n != 1 {
+			t.Errorf("%d rows of the rename of search", n)
+		}
+		if _, err := worker.Round(ctx); err != nil || !slices.Equal(rendered, []int64{other}) {
+			t.Errorf("the rename of search rendered %v, %v", rendered, err)
+		}
+	})
+}
+
 // sync follows the entries of the Teams for the User userID with claims, in a transaction of its own, as a sign-in
 // does after it locked the user.
 func (e *env) sync(t *testing.T, userID int64, claims oidc.Claims) {
@@ -797,6 +897,143 @@ func TestIntegrationTeamEvaluationBarrier(t *testing.T) {
 			t.Errorf("the alert of the snapshot has %d rows of the team, log %s", n, log.String())
 		}
 	})
+}
+
+// TestIntegrationBarrierBeforeTheList is the race of a Snapshot in flight with the batches that list their Alert
+// Groups after a save, on every supported PostgreSQL: a Snapshot that took the lock of the evaluation shared before the
+// save creates a new Alert Group, and commits only after the batch started; the batch waits for it before it lists, so
+// the new Alert Group is not missed. For team_evaluation the Alert Group gets the new Team; for
+// organization_message_settings and team_name it is re-rendered with the settings and the name of the save.
+func TestIntegrationBarrierBeforeTheList(t *testing.T) {
+	for _, kind := range []string{groups.KindTeamEvaluation, groups.KindOrganizationMessageSettings,
+		groups.KindTeamName} {
+		t.Run(kind, func(t *testing.T) {
+			dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+				barrierBeforeTheList(t, s, kind)
+			})
+		})
+	}
+}
+
+func barrierBeforeTheList(t *testing.T, s dbtest.Server, kind string) {
+	e := setup(t, s)
+	ctx := t.Context()
+	if _, err := e.d.Pool.Exec(ctx, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+		FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+		t.Fatal(err)
+	}
+	e.fixture(t, 7, nil)
+	var log bytes.Buffer
+	logger := logging.New(&log, logging.LevelInfo)
+	c := clock.NewManual(t0.Add(time.Minute))
+	gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+		Audit: audit.NewWriter(logger, c), Business: c, Log: logger})
+	var rendered []int64
+	gs.SetRerender(func(_ context.Context, _ groups.DBTX, r groups.Rendering) error {
+		rendered = append(rendered, r.Group.ID)
+		return nil
+	})
+	worker := &groups.UpdateWorker{Service: gs, Log: logger, Lease: db.Lease{Owner: "r1",
+		Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: c, Real: clock.Real{}}}}
+	var team teams.Team
+	if kind == groups.KindTeamName {
+		var err error
+		if team, err = e.svc.Create(ctx, by, teams.Input{Name: "Checkout", Slug: "checkout"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rendered = nil
+
+	snapshot, err := e.d.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = snapshot.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := snapshot.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1, hashint8($2))`,
+		db.TeamEvaluationLockClass, e.orgID); err != nil {
+		t.Fatal(err)
+	}
+	switch kind {
+	case groups.KindTeamEvaluation:
+		if team, err = e.svc.Create(ctx, by, teams.Input{Name: "Checkout", Slug: "checkout"}); err != nil {
+			t.Fatal(err)
+		}
+	case groups.KindOrganizationMessageSettings:
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+			VALUES ($1, 'organization_message_settings', $2)`, e.orgID, t0); err != nil {
+			t.Fatal(err)
+		}
+	case groups.KindTeamName:
+		if _, err := e.svc.Update(ctx, by, team.PublicID, nil, teams.Input{Name: "Checkout squad",
+			Slug: "checkout"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := worker.Round(context.WithoutCancel(ctx))
+		done <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for e.count(t, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+		AND wait_event_type = 'Lock' AND wait_event = 'advisory'`) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the batch does not wait for the snapshot")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The Snapshot creates a new Alert Group of an Alert of team="checkout", as routing classified it before the save.
+	var group, alert int64
+	if err := snapshot.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+		group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+		integration_ids, status, severity_level, urgent, created_at, last_changed_at)
+		SELECT $1, 'AG0000000BARR1', 100, id, '{alertname}', '{}', sha256('barrier'), 't', '{}', '{}', '{}',
+			'firing', 'warning', false, $2, $2
+		FROM routes WHERE org_id = $1 AND is_default RETURNING id`, e.orgID, t0).Scan(&group); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.QueryRow(ctx, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels,
+		annotations, status, starts_at, fired_at, first_seen_at, last_seen_at, updated_at)
+		SELECT org_id, id, 'barrier-new', '{"alertname": "Latency", "team": "checkout"}', '{}', 'firing',
+			$2, $2, $2, $2, $2
+		FROM integrations WHERE org_id = $1 AND public_id = 'NT000000000007' RETURNING id`, e.orgID,
+		t0).Scan(&alert); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.Exec(ctx, `INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode,
+		state, joined_at, starts_at, annotations) VALUES ($1, $2, $3, 1, 'firing', $4, $4, '{}')`, e.orgID, group,
+		alert, t0); err != nil {
+		t.Fatal(err)
+	}
+	if kind == groups.KindTeamName {
+		if _, err := snapshot.Exec(ctx, `INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule,
+			joined_at) VALUES ($1, $2, $3, 'label', $4)`, e.orgID, group, team.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := snapshot.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	switch kind {
+	case groups.KindTeamEvaluation:
+		if n := e.count(t, `SELECT count(*) FROM alert_group_teams WHERE org_id = $1 AND alert_group_id = $2
+			AND team_id = $3`, e.orgID, group, team.ID); n != 1 {
+			t.Errorf("the alert group of the snapshot has %d rows of the team, log %s", n, log.String())
+		}
+	default:
+		if !slices.Contains(rendered, group) {
+			t.Errorf("the alert group of the snapshot was not re-rendered: rendered %v, log %s", rendered, log.String())
+		}
+	}
+	if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID); n != 0 {
+		t.Errorf("%d rows left, log %s", n, log.String())
+	}
 }
 
 // TestIntegrationEvaluationCoalesced is C-25.FR-13 for saves in a row: a save while the row of an earlier one is still

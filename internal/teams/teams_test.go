@@ -74,7 +74,7 @@ type fakeStore struct {
 	schedules map[int64][]dbgen.ListTeamSchedulesRow
 	// evaluations are the open_group_updates rows team_evaluation the saves wrote and wakes the notifications on their
 	// channel; label is the Team label, and values the values without a Team the query answers, with its arguments.
-	evaluations []dbgen.InsertTeamEvaluationParams
+	evaluations []dbgen.InsertTeamUpdateParams
 	wakes       []string
 	label       string
 	values      []dbgen.ListTeamLabelValuesRow
@@ -428,8 +428,8 @@ func (s *fakeStore) Notify(_ context.Context, h db.Hint) error {
 	return nil
 }
 
-func (s *fakeStore) InsertTeamEvaluation(_ context.Context, arg dbgen.InsertTeamEvaluationParams) error {
-	if err := s.fail["InsertTeamEvaluation"]; err != nil {
+func (s *fakeStore) InsertTeamUpdate(_ context.Context, arg dbgen.InsertTeamUpdateParams) error {
+	if err := s.fail["InsertTeamUpdate"]; err != nil {
 		return err
 	}
 	s.evaluations = append(s.evaluations, arg)
@@ -1378,8 +1378,8 @@ func TestMatchers(t *testing.T) {
 // TestEvaluationRows is C-25.FR-13 on the saves of a Team: creating one, and changing its slug or its Team matchers,
 // write in the save's transaction one open_group_updates row team_evaluation with the Team, requested at the business
 // time of the save, and wake the workers; a save of the same fields, a new name, a description, Working hours, Team
-// matchers kept or the same again, a person added or removed and the deletion write none. A failing row or
-// notification fails the save.
+// matchers kept or the same again, a person added or removed and the deletion write none. A new name writes one row
+// team_name with the Team instead (C-29.FR-1). A failing row or notification fails the save.
 func TestEvaluationRows(t *testing.T) {
 	svc, store := newService(t)
 	ctx := t.Context()
@@ -1387,8 +1387,8 @@ func TestEvaluationRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	row := func(id int64) dbgen.InsertTeamEvaluationParams {
-		return dbgen.InsertTeamEvaluationParams{OrgID: orgID, Kind: KindTeamEvaluation,
+	row := func(id int64) dbgen.InsertTeamUpdateParams {
+		return dbgen.InsertTeamUpdateParams{OrgID: orgID, Kind: KindTeamEvaluation,
 			TeamID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: t0}
 	}
 	if len(store.evaluations) != 1 || store.evaluations[0] != row(team.ID) ||
@@ -1397,24 +1397,31 @@ func TestEvaluationRows(t *testing.T) {
 	}
 	ms := []Matcher{{Label: "cluster", Op: "=", Value: "x"}}
 	none := []Matcher{}
+	// A new name writes one row team_name of the Team and no evaluation (C-29.FR-1); the other fields write none.
+	renamed := dbgen.InsertTeamUpdateParams{OrgID: orgID, Kind: KindTeamName,
+		TeamID: pgtype.Int8{Int64: team.ID, Valid: true}, RequestedAt: t0}
 	for _, c := range []struct {
 		name string
 		in   Input
+		rows int
 	}{
-		{"the same fields", Input{Name: "Checkout", Slug: "checkout"}},
-		{"a new name", Input{Name: "Checkout team", Slug: "checkout"}},
-		{"a description", Input{Name: "Checkout team", Slug: "checkout", Description: ptr("Pays")}},
+		{"the same fields", Input{Name: "Checkout", Slug: "checkout"}, 1},
+		{"a new name", Input{Name: "Checkout team", Slug: "checkout"}, 2},
+		{"a description", Input{Name: "Checkout team", Slug: "checkout", Description: ptr("Pays")}, 2},
 		{"own working hours", Input{Name: "Checkout team", Slug: "checkout", OwnWorkingHours: true,
-			WorkingHours: &berlin}},
+			WorkingHours: &berlin}, 2},
 		{"no team matchers again", Input{Name: "Checkout team", Slug: "checkout", OwnWorkingHours: true,
-			Matchers: &none}},
+			Matchers: &none}, 2},
 	} {
 		if _, err := svc.Update(ctx, by, team.PublicID, nil, c.in); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		if len(store.evaluations) != 1 || len(store.wakes) != 1 {
-			t.Errorf("%s wrote a row: %+v", c.name, store.evaluations)
+		if len(store.evaluations) != c.rows || len(store.wakes) != c.rows {
+			t.Errorf("%s wrote rows: %+v", c.name, store.evaluations)
 		}
+	}
+	if store.evaluations[1] != renamed {
+		t.Errorf("the rename wrote %+v", store.evaluations[1])
 	}
 	if _, _, err := svc.AddUser(ctx, by, team.PublicID, "SR0000000000BB"); err != nil {
 		t.Fatal(err)
@@ -1422,7 +1429,7 @@ func TestEvaluationRows(t *testing.T) {
 	if err := svc.RemoveUser(ctx, by, team.PublicID, "SR0000000000BB"); err != nil {
 		t.Fatal(err)
 	}
-	if len(store.evaluations) != 1 {
+	if len(store.evaluations) != 2 {
 		t.Errorf("the people wrote a row: %+v", store.evaluations)
 	}
 	for _, c := range []struct {
@@ -1453,7 +1460,7 @@ func TestEvaluationRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"InsertTeamEvaluation", "NotifyOpenGroupUpdates"} {
+	for _, name := range []string{"InsertTeamUpdate", "NotifyOpenGroupUpdates"} {
 		store.fail[name] = errBoom
 		if _, err := svc.Create(ctx, by, Input{Name: "z" + name, Slug: strings.ToLower(name)}); !errors.Is(err,
 			errBoom) {
@@ -1462,6 +1469,14 @@ func TestEvaluationRows(t *testing.T) {
 		if _, err := svc.Update(ctx, by, other.PublicID, nil, Input{Name: "Other", Slug: "other-" +
 			strings.ToLower(name)}); !errors.Is(err, errBoom) {
 			t.Errorf("update, %s fails = %v", name, err)
+		}
+		cur, err := svc.Get(ctx, other.PublicID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Update(ctx, by, other.PublicID, nil, Input{Name: "Other " + name,
+			Slug: cur.Slug}); !errors.Is(err, errBoom) || !strings.Contains(err.Error(), "the team's name") {
+			t.Errorf("rename, %s fails = %v", name, err)
 		}
 		delete(store.fail, name)
 	}

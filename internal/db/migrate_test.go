@@ -2656,24 +2656,99 @@ func TestIntegrationIdentityProviderClaims(t *testing.T) {
 	})
 }
 
+// TestIntegrationMessageSettingsUpdates runs 0031 over a database with a Team and rows of the kinds of 0029: up keeps
+// the rows, validates open_group_updates_kind_v5_check and drops the kind CHECK of 0029, so that a row of
+// organization_message_settings without a scope and one of team_name with its Team are taken while an unknown kind is
+// not. Down deletes the rows of the new kinds, keeps the older ones and restores the kind CHECK of 0029, validated;
+// up again works. The versions are reached by number.
+func TestIntegrationMessageSettingsUpdates(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 30)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000MS', 'Payments', 'payments', '2026-11-02', '2026-11-02' FROM organizations`)
+		for _, kind := range []string{"organization_buttons", "team_evaluation"} {
+			e.exec(t, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+				SELECT id, '`+kind+`', '2026-11-02' FROM organizations`)
+		}
+		insert := func(t *testing.T, kind string, withTeam bool) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
+				SELECT id, $1, CASE WHEN $2::boolean THEN (SELECT id FROM teams WHERE public_id = 'TM0000000000MS') END,
+					'2026-11-02'
+				FROM organizations`, kind, withTeam)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		refused(t, "a row of organization_message_settings before up", insert(t, "organization_message_settings", false),
+			"open_group_updates_kind_v4_check")
+
+		if err := e.mm.Migrate(31); err != nil {
+			t.Fatalf("up to 31: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after up: %d rows, want the 2 of 0029", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v5_check:true" {
+			t.Errorf("after up: the kind checks %q", got)
+		}
+		if err := insert(t, "organization_message_settings", false); err != nil {
+			t.Errorf("a row of organization_message_settings: %v", err)
+		}
+		if err := insert(t, "team_name", true); err != nil {
+			t.Errorf("a row of team_name: %v", err)
+		}
+		refused(t, "a row of an unknown kind", insert(t, "team_rename", true), "open_group_updates_kind_v5_check")
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 31 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates
+			WHERE kind IN ('organization_message_settings', 'team_name')`); n != 0 {
+			t.Errorf("after down: %d rows of the new kinds are left", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after down: %d rows, want the 2 of 0029", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v4_check:true" {
+			t.Errorf("after down: the kind checks %q", got)
+		}
+		refused(t, "a row of team_name after down", insert(t, "team_name", true), "open_group_updates_kind_v4_check")
+
+		if err := e.mm.Migrate(31); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if err := insert(t, "team_name", true); err != nil {
+			t.Errorf("up again: a row of team_name: %v", err)
+		}
+	})
+}
+
 func TestIntegrationMigrate(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		d := openFresh(t, s)
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (30)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (31)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":30`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":31`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":30`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":31`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2689,10 +2764,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (30)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (31)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":30`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":31`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}

@@ -108,7 +108,8 @@ Alerts that are firing in open Alert Groups again, and only adds:
   Quiet `team_joined`. The Root messages are updated Quietly, with no new message and no Mention, and no Escalation
   chain starts.
 - A Team that an Alert no longer belongs to stays where it is, on the Alert and in its Alert Group.
-- Saving the name, the description, the people or the Working hours of a Team evaluates nothing.
+- Saving the name, the description, the people or the Working hours of a Team evaluates nothing. A new name edits the
+  Root messages of the open Alert Groups that have the Team once, Quietly, so that their field Teams shows it.
 
 So "Create Team" for a value without a Team brings the Team the open Alert Groups of that value at once: with an open,
 firing Alert Group of `team="checkout"` and no such Team, creating the Team with the slug `checkout` adds it to the

@@ -1187,15 +1187,17 @@ func TestTeamLabel(t *testing.T) {
 		`[{"pointer":"/team_label","before":"team","after":"owner_team"}]` {
 		t.Errorf("audit = %+v", s.audit)
 	}
-	// C-25.FR-13: the new Team label requests the evaluation of the Teams of the open Alert Groups, without a Team.
-	if len(s.buttonUpdates) != 1 || s.buttonUpdates[0] != (dbgen.InsertOrganizationUpdateParams{OrgID: 7,
-		Kind: KindTeamEvaluation, RequestedAt: t0}) || !slices.Equal(s.woken, []string{OpenGroupUpdatesChannel}) {
+	// C-25.FR-13: the new Team label requests the evaluation of the Teams of the open Alert Groups, without a Team, and
+	// C-29.FR-2 the re-render of the open Root messages, whose default "Labels in the message" add it.
+	if !slices.Equal(s.buttonUpdates, []dbgen.InsertOrganizationUpdateParams{{OrgID: 7, Kind: KindTeamEvaluation,
+		RequestedAt: t0}, {OrgID: 7, Kind: KindMessageSettings, RequestedAt: t0}}) ||
+		!slices.Equal(s.woken, []string{OpenGroupUpdatesChannel, OpenGroupUpdatesChannel}) {
 		t.Errorf("evaluation requested %+v, woken %v", s.buttonUpdates, s.woken)
 	}
 	in = inputOf(got)
 	in.Name = "Ops"
 	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
-		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel.String != "owner_team" || len(s.buttonUpdates) != 1 {
+		kept.TeamLabel != "owner_team" || s.updates[1].TeamLabel.String != "owner_team" || len(s.buttonUpdates) != 2 {
 		t.Errorf("an update that omits it = %q, %v, rows %+v", kept.TeamLabel, err, s.buttonUpdates)
 	}
 	for _, method := range []string{"InsertOrganizationUpdate", "NotifyOpenGroupUpdates"} {
@@ -1212,4 +1214,62 @@ func TestTeamLabel(t *testing.T) {
 	if !slices.IsSorted(reserved) || !slices.Contains(reserved, "team_id") || slices.Contains(reserved, "team") {
 		t.Errorf("reserved labels %v", reserved)
 	}
+}
+
+// TestMessageSettingsRows is C-29.FR-1 to FR-3 on the update of the Organization: a changed Severity label, Instance
+// labels, time zone, start of the working day or first day of the week writes in the update's transaction one
+// open_group_updates row organization_message_settings without a scope, requested at the business time of the update,
+// and wakes the workers; the order of the Instance labels counts. A save of the same values, or of a setting the Root
+// messages do not show, writes none, and a failing row or notification fails the update.
+func TestMessageSettingsRows(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, err := svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := dbgen.InsertOrganizationUpdateParams{OrgID: 7, Kind: KindMessageSettings, RequestedAt: t0}
+	for _, c := range []struct {
+		name   string
+		change func(in *Input)
+		rows   int
+	}{
+		{"the same values", func(*Input) {}, 0},
+		{"a name", func(in *Input) { in.Name = "Ops" }, 0},
+		{"a severity label", func(in *Input) { in.SeverityLabel = "priority" }, 1},
+		{"instance labels", func(in *Input) { in.InstanceLabels = []string{"pod", "instance"} }, 1},
+		{"instance labels in another order", func(in *Input) { in.InstanceLabels = []string{"instance", "pod"} }, 1},
+		{"a time zone", func(in *Input) { in.TimeZone = "Europe/Berlin" }, 1},
+		{"the same time zone again", func(*Input) {}, 0},
+		{"a start of the working day", func(in *Input) { in.WorkdayStart = new("08:30") }, 1},
+		{"the same start of the working day", func(in *Input) { in.WorkdayStart = new("08:30") }, 0},
+		{"a first day of the week", func(in *Input) { in.WeekStart = new("sunday") }, 1},
+		{"an end of the working day", func(in *Input) { in.WorkdayEnd = new("17:00") }, 0},
+	} {
+		cur, err := svc.Get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		in := inputOf(cur)
+		c.change(&in)
+		s.buttonUpdates, s.woken = nil, nil
+		if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(s.buttonUpdates) != c.rows || len(s.woken) != c.rows ||
+			(c.rows == 1 && s.buttonUpdates[0] != row) {
+			t.Errorf("%s: rows %+v, woken %v", c.name, s.buttonUpdates, s.woken)
+		}
+	}
+	for _, method := range []string{"InsertOrganizationUpdate", "NotifyOpenGroupUpdates"} {
+		s.fail = map[string]error{method: errors.New("no")}
+		in := inputOf(o)
+		in.TimeZone = "Asia/Tokyo"
+		if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil ||
+			!strings.Contains(err.Error(), "re-render the open root messages for the organization's settings") {
+			t.Errorf("%s fails: %v", method, err)
+		}
+	}
+	s.fail = map[string]error{}
 }

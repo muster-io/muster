@@ -55,7 +55,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   key and settings, not copied when the Route is created, until an Admin sets a list of their own. A label is shown as
   `name=value` when every firing Alert of the Alert Group has the same value, as `name: N values` when they differ, and
   not at all when no Alert has it. The Route form suggests labels from the Route's recent Alert Groups with an example
-  value. A change re-renders the open Root messages of the Route.
+  value. A change re-renders the open Root messages of the Route. A change of the Organization's settings that the
+  Root messages show — `organization.severity_label`, `organization.team_label`, `organization.instance_labels`
+  (FR-3), `organization.time_zone` (item 2), and `organization.workday_start` and `organization.week_start`, which
+  label the Snooze presets (C-10.FR-18) — re-renders every open Root message of the Organization, and a rename of a
+  Team those of the open Alert Groups that have it (item 2), Quietly and as edits; a Root message the change does not
+  alter is not edited.
 - **C-29.FR-3** The Alerts of item 5 are named by their distinguishing label: the first of the Organization's Instance
   labels (`organization.instance_labels`) whose values differ among the Alerts, else the first label, by name, whose
   values differ (_provisional_, P-67). The line lists up to `message.compact_alerts_listed` values, firing Alerts first

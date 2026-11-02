@@ -6252,10 +6252,10 @@ type Organization struct {
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
 
-	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards, evaluates the Teams of the open Alert Groups again (C-25.FR-13) and re-renders their open Root messages Quietly, as edits, since their key labels show it (C-29.FR-2). A value that is not a label name is refused with `422` `invalid_format`.
 	TeamLabel string `json:"team_label"`
 
-	// TimeZone IANA time zone used for times in messages.
+	// TimeZone IANA time zone used for times in messages. A change re-renders the open Root messages Quietly, as edits (C-29.FR-1).
 	TimeZone string `json:"time_zone"`
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
@@ -6267,7 +6267,7 @@ type Organization struct {
 	// WorkdayEnd The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.
 	WorkdayEnd string `json:"workday_end"`
 
-	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set; it re-renders the open Root messages Quietly, as edits, whose Snooze presets show it (C-10.FR-18).
 	WorkdayStart string `json:"workday_start"`
 
 	// WorkingDays The days of the Organization's Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.
@@ -6301,10 +6301,10 @@ type OrganizationBase struct {
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
 
-	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards, evaluates the Teams of the open Alert Groups again (C-25.FR-13) and re-renders their open Root messages Quietly, as edits, since their key labels show it (C-29.FR-2). A value that is not a label name is refused with `422` `invalid_format`.
 	TeamLabel *string `json:"team_label,omitempty"`
 
-	// TimeZone IANA time zone used for times in messages.
+	// TimeZone IANA time zone used for times in messages. A change re-renders the open Root messages Quietly, as edits (C-29.FR-1).
 	TimeZone string `json:"time_zone"`
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
@@ -6316,7 +6316,7 @@ type OrganizationBase struct {
 	// WorkdayEnd The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.
 	WorkdayEnd *string `json:"workday_end,omitempty"`
 
-	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set; it re-renders the open Root messages Quietly, as edits, whose Snooze presets show it (C-10.FR-18).
 	WorkdayStart *string `json:"workday_start,omitempty"`
 
 	// WorkingDays The days of the Organization's Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.
@@ -6362,10 +6362,10 @@ type OrganizationInput struct {
 	SeverityMapping []SeverityMappingEntry `json:"severity_mapping"`
 	SeverityStyles  []SeverityLevelStyle   `json:"severity_styles"`
 
-	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+	// TeamLabel The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards, evaluates the Teams of the open Alert Groups again (C-25.FR-13) and re-renders their open Root messages Quietly, as edits, since their key labels show it (C-29.FR-2). A value that is not a label name is refused with `422` `invalid_format`.
 	TeamLabel *string `json:"team_label,omitempty"`
 
-	// TimeZone IANA time zone used for times in messages.
+	// TimeZone IANA time zone used for times in messages. A change re-renders the open Root messages Quietly, as edits (C-29.FR-1).
 	TimeZone string `json:"time_zone"`
 
 	// TotpRequired Who must enrol TOTP. `local_users` covers every account that has a password; an account that signs in through OIDC — created through OIDC or linked — is not one. A user has one TOTP enrolment, asked at every sign-in and kept when the account changes its sign-in method; on an OIDC sign-in `oidc.skip_totp_with_idp_mfa` may skip it.
@@ -6377,7 +6377,7 @@ type OrganizationInput struct {
 	// WorkdayEnd The end of the working day (`organization.working_hours`, default `18:00`), later than `workday_start` on the same day, else `422` `out_of_range` at the field the update changes, `/workday_end` or `/workday_start`. Omit it on an update to keep it.
 	WorkdayEnd *string `json:"workday_end,omitempty"`
 
-	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+	// WorkdayStart The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set; it re-renders the open Root messages Quietly, as edits, whose Snooze presets show it (C-10.FR-18).
 	WorkdayStart *string `json:"workday_start,omitempty"`
 
 	// WorkingDays The days of the Organization's Working hours (`organization.working_hours`, default Monday to Friday). Omit it on an update to keep it.

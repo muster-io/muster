@@ -51,11 +51,14 @@ const (
 )
 
 // KindOrganizationButtons is the kind of the open_group_updates row that a changed button set of the Organization
-// writes (C-28.FR-9), KindTeamEvaluation that of a changed Team label (C-25.FR-13), and OpenGroupUpdatesChannel the
-// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
+// writes (C-28.FR-9), KindTeamEvaluation that of a changed Team label (C-25.FR-13), KindMessageSettings that of a
+// changed Severity label, Team label, Instance labels, time zone, start of the working day or first day of the week,
+// which the Root messages show (C-29.FR-1 to FR-3), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes
+// the workers of internal/groups, which claim them.
 const (
 	KindOrganizationButtons = "organization_buttons"
 	KindTeamEvaluation      = "team_evaluation"
+	KindMessageSettings     = "organization_message_settings"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
@@ -433,6 +436,11 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 				return fmt.Errorf("evaluate the teams of the open alert groups for the team label: %w", err)
 			}
 		}
+		if messageSettingsChanged(before, after) {
+			if err := s.requestUpdate(ctx, q, KindMessageSettings, now); err != nil {
+				return fmt.Errorf("re-render the open root messages for the organization's settings: %w", err)
+			}
+		}
 		if out, err = s.get(ctx, q); err != nil {
 			return err
 		}
@@ -467,7 +475,8 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 // change to the open Alert Groups: one open_group_updates row of the kind, without a scope, requested at the business
 // time of the change, and a notification that wakes them once the transaction commits. The kind is
 // KindOrganizationButtons, which re-renders the open Root messages of the Destinations that follow the Organization's
-// button set (C-28.FR-9), or KindTeamEvaluation, which evaluates the Teams of the open Alert Groups (C-25.FR-13).
+// button set (C-28.FR-9), KindTeamEvaluation, which evaluates the Teams of the open Alert Groups (C-25.FR-13), or
+// KindMessageSettings, which evaluates them and then re-renders every open Root message (C-29.FR-1 to FR-3).
 func (s *Service) requestUpdate(ctx context.Context, q SettingsQueries, kind string, now time.Time) error {
 	if err := q.InsertOrganizationUpdate(ctx, dbgen.InsertOrganizationUpdateParams{OrgID: s.orgID,
 		Kind: kind, RequestedAt: now}); err != nil {
@@ -477,6 +486,16 @@ func (s *Service) requestUpdate(ctx context.Context, q SettingsQueries, kind str
 		return fmt.Errorf("wake the open alert group update workers: %w", err)
 	}
 	return nil
+}
+
+// messageSettingsChanged reports whether an update changes a setting that the Root messages show (C-29.FR-1 to FR-3):
+// the Severity label and the Team label, which the default "Labels in the message" leave out or add (C-29.FR-2), the
+// Instance labels, which name the Alerts (C-29.FR-3), the time zone, in which the start time is written, or the start
+// of the working day and the first day of the week, which label the Snooze presets (C-10.FR-18).
+func messageSettingsChanged(before, after Organization) bool {
+	return before.SeverityLabel != after.SeverityLabel || before.TeamLabel != after.TeamLabel ||
+		!slices.Equal(before.InstanceLabels, after.InstanceLabels) || before.TimeZone != after.TimeZone ||
+		before.WorkdayStart != after.WorkdayStart || before.WeekStart != after.WeekStart
 }
 
 // setsEqual reports whether two button sets show the same buttons.

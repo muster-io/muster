@@ -141,6 +141,9 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   (C-12.FR-1) and the Audit log entry of the Snooze, whose details name the preset and the time zone beside the end. A
   change of the two settings shows on the buttons of a Root message from its next re-render, as a new
   `organization.time_zone` does in message times; a press always computes with the current settings.
+  _Revised for L2 (2026-11-02):_ from 0.2.0 a change of the two settings, like a new `organization.time_zone`,
+  re-renders every open Root message at once, Quietly and as edits, so that its buttons show the new labels without
+  waiting for the next change of its Alert Group (C-29.FR-2).
 
 ## UI
 
@@ -238,6 +241,8 @@ Snooze presets now, for a time zone).
   start at 08:30, the next re-render of a Root message shows "Until tomorrow 08:30".
   _Revised for L2 (2026-10-26):_ from 0.2.0 the durations are those of the Paging profile, called On-call before
   (C-26.FR-11), and the Root message shows the buttons of its Destination's set, all of them by default (C-28.FR-8).
+  _Revised for L2 (2026-11-02):_ after the working day is set to start at 08:30, every open Root message is edited
+  once, Quietly, to show "Until tomorrow 08:30" (C-29.FR-2).
 - **C-10.AC-24** The Snooze dialog of the Alert Group page and of a bulk Snooze offers "Until tomorrow 09:00" and "Until
   Monday 09:00" («До завтра 09:00», «До понедельника 09:00») with the end each would set in the user's time zone;
   choosing one snoozes until that end, which the page header then shows; the dialog fits a screen 360 CSS pixels wide

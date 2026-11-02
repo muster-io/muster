@@ -12,10 +12,10 @@ import type { Weekday } from './weekday';
 export interface OrganizationBase {
   /** @minLength 1 */
   name: string;
-  /** IANA time zone used for times in messages. */
+  /** IANA time zone used for times in messages. A change re-renders the open Root messages Quietly, as edits (C-29.FR-1). */
   time_zone: string;
   /**
-     * The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set.
+     * The start of the working day, `organization.workday_start` (default `09:00`), a time of day `HH:MM` on the 24-hour clock, at which the Snooze presets end in their time zone. Omit it on an update to keep it. A change applies to Snoozes set afterwards and never moves one already set; it re-renders the open Root messages Quietly, as edits, whose Snooze presets show it (C-10.FR-18).
      * @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$
      */
   workday_start?: string;
@@ -33,7 +33,7 @@ export interface OrganizationBase {
   /** The Organization's button set (C-28.FR-8, FR-10); omit it on an update to keep it. */
   buttons?: OrganizationButtonSet;
   /**
-     * The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards. A value that is not a label name is refused with `422` `invalid_format`.
+     * The Team label (`organization.team_label`, default `team`), whose value names a Team by its slug (C-25.FR-5). Omit it on an update to keep it. A label that an Internal alert sets itself — `alertname`, `severity` and the entity and name labels of the Internal alerts, such as `schedule` or `team_id` — is refused with `422` `reserved_label` at `/team_label`. A change applies to the Alerts that start firing afterwards, evaluates the Teams of the open Alert Groups again (C-25.FR-13) and re-renders their open Root messages Quietly, as edits, since their key labels show it (C-29.FR-2). A value that is not a label name is refused with `422` `invalid_format`.
      * @pattern ^[a-zA-Z_][a-zA-Z0-9_]*$
      */
   team_label?: string;

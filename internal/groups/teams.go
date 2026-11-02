@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/muster-io/muster/internal/audit"
-	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams"
@@ -189,35 +188,28 @@ func (t *teamsEvaluated) apply(ctx context.Context, q Queries, g *Group, c *chan
 // Alert Group a person resolved that is still in its Grace period it only records the Teams on its firing tails,
 // which the end of the Grace period groups again with them; the Alert Group itself does not change. Only an Alert
 // whose own status is firing is classified: one that a Snapshot fires again is left to that Snapshot's routing, which
-// records its Teams in its own transaction. It returns how many Alert Groups a Team joined; after collects what runs
-// once the transaction committed.
-func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+// records its Teams in its own transaction. The batch took the lock of the evaluation before it listed ids
+// (updateBatch). It returns the Alert Groups a Team joined, by id; after collects what runs once the transaction
+// committed.
+func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, after *committed) ([]int64, error) {
 	if len(ids) == 0 {
-		return 0, nil
-	}
-	// The lock order of a batch: the claimed open_group_updates row, this lock exclusively, the Alert Groups in id
-	// order (LockGroups), then the Routes' Destinations shared in the re-render step. A Snapshot takes this lock
-	// shared before anything of its own (routing), so the batch waits only for Snapshots in flight, which hold none of
-	// its rows, and a Snapshot that starts later waits for the batch before it locks anything.
-	if err := q.LockTeamEvaluation(ctx, dbgen.LockTeamEvaluationParams{LockClass: db.TeamEvaluationLockClass,
-		OrgID: s.orgID}); err != nil {
-		return 0, fmt.Errorf("wait for the snapshots in flight: %w", err)
+		return nil, nil
 	}
 	locked, err := lock(ctx, q, s.orgID, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	st, err := q.GetTeamsStamp(ctx, s.orgID)
 	if err != nil {
-		return 0, fmt.Errorf("read the stamp of the teams: %w", err)
+		return nil, fmt.Errorf("read the stamp of the teams: %w", err)
 	}
 	classes, err := s.classifier.At(ctx, s.classify(q), teams.Stamp{Label: st.TeamLabel, Version: st.TeamsVersion})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: s.orgID, AlertGroupIds: ids})
 	if err != nil {
-		return 0, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
+		return nil, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
 	}
 	firing := map[int64][]classifiedAlert{}
 	for _, r := range rows {
@@ -226,7 +218,7 @@ func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, aft
 		}
 		var labels map[string]string
 		if err := json.Unmarshal(r.Labels, &labels); err != nil {
-			return 0, fmt.Errorf("read the labels of alert %d: %w", r.AlertID, err)
+			return nil, fmt.Errorf("read the labels of alert %d: %w", r.AlertID, err)
 		}
 		if c := classes.Classify(labels); len(c.Teams) > 0 {
 			firing[r.AlertGroupID] = append(firing[r.AlertGroupID], classifiedAlert{id: r.AlertID, teams: c.Teams})
@@ -253,26 +245,26 @@ func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, aft
 	if len(tails.AlertIds) > 0 {
 		tails.OrgID = s.orgID
 		if err := q.AddAlertTeams(ctx, tails); err != nil {
-			return 0, fmt.Errorf("add the teams of the alerts in grace periods: %w", err)
+			return nil, fmt.Errorf("add the teams of the alerts in grace periods: %w", err)
 		}
 	}
 	slices.SortFunc(open, func(a, b *Group) int {
 		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
 	})
 	now := s.d.clock.Now().UTC()
-	n := 0
+	var joined []int64
 	for _, g := range open {
 		t := &teamsEvaluated{orgID: s.orgID, alerts: sortedAlerts(firing[g.ID]), now: now}
 		if err := s.d.dispatch(ctx, q, g, System, t, after); errors.Is(err, errNotOpen) {
 			continue
 		} else if err != nil {
-			return 0, err
+			return nil, err
 		}
 		if t.joined {
-			n++
+			joined = append(joined, g.ID)
 		}
 	}
-	return n, nil
+	return joined, nil
 }
 
 // sortedAlerts are the classified Alerts of an Alert Group by id.

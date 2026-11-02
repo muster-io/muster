@@ -60,10 +60,12 @@ const (
 	hintDestination          = "destination"
 )
 
-// KindTeamEvaluation is the kind of the open_group_updates row that a save of a Team writes (C-25.FR-13), and
-// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+// KindTeamEvaluation is the kind of the open_group_updates row that a save of a Team writes (C-25.FR-13), KindTeamName
+// that of a rename, whose new name the Root messages of the open Alert Groups that have the Team show (C-29.FR-1), and
+// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
 const (
 	KindTeamEvaluation      = "team_evaluation"
+	KindTeamName            = "team_name"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
@@ -257,7 +259,7 @@ type Queries interface {
 	InsertTeamMatchers(ctx context.Context, arg dbgen.InsertTeamMatchersParams) error
 	LockTeamsVersion(ctx context.Context, orgID int64) (int64, error)
 	BumpTeamsVersion(ctx context.Context, orgID int64) error
-	InsertTeamEvaluation(ctx context.Context, arg dbgen.InsertTeamEvaluationParams) error
+	InsertTeamUpdate(ctx context.Context, arg dbgen.InsertTeamUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	GetTeamLabel(ctx context.Context, orgID int64) (string, error)
 	ListTeamLabelValues(ctx context.Context, arg dbgen.ListTeamLabelValuesParams) ([]dbgen.ListTeamLabelValuesRow,
@@ -621,9 +623,28 @@ func (s *Service) bumpVersion(ctx context.Context, q Queries) error {
 // requested at the business time of the save, and a notification that wakes them once the transaction commits, so
 // that a crash after the save loses nothing.
 func (s *Service) requestEvaluation(ctx context.Context, q Queries, id int64, now time.Time) error {
-	if err := q.InsertTeamEvaluation(ctx, dbgen.InsertTeamEvaluationParams{OrgID: s.orgID, Kind: KindTeamEvaluation,
-		TeamID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: now}); err != nil {
+	if err := s.requestUpdate(ctx, q, KindTeamEvaluation, id, now); err != nil {
 		return fmt.Errorf("evaluate the open alert groups for the team: %w", err)
+	}
+	return nil
+}
+
+// requestRename, in the transaction of a save of the Team id that changes its name, asks the workers of
+// internal/groups to re-render the Root messages of the open Alert Groups that have the Team, which show its name
+// (C-29.FR-1): one open_group_updates row team_name with the Team, requested at the business time of the save, and a
+// notification that wakes them once the transaction commits.
+func (s *Service) requestRename(ctx context.Context, q Queries, id int64, now time.Time) error {
+	if err := s.requestUpdate(ctx, q, KindTeamName, id, now); err != nil {
+		return fmt.Errorf("re-render the open root messages for the team's name: %w", err)
+	}
+	return nil
+}
+
+// requestUpdate inserts the open_group_updates row of kind for the Team id and wakes the workers.
+func (s *Service) requestUpdate(ctx context.Context, q Queries, kind string, id int64, now time.Time) error {
+	if err := q.InsertTeamUpdate(ctx, dbgen.InsertTeamUpdateParams{OrgID: s.orgID, Kind: kind,
+		TeamID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: now}); err != nil {
+		return err
 	}
 	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
 		return fmt.Errorf("wake the open alert group update workers: %w", err)
@@ -712,7 +733,8 @@ func setHours(days *[]string, start, end, zone *pgtype.Text, w *WorkingHours) {
 // Update replaces the configured fields of the Team publicID; a non-nil version must be its current one (If-Match).
 // An update that changes nothing writes nothing. A changed slug or changed Team matchers request in the transaction
 // the evaluation of the open Alert Groups (C-25.FR-13); a change of the name, the description or the Working hours
-// does not.
+// does not. A changed name requests the re-render of the Root messages of the open Alert Groups that have the Team
+// (C-29.FR-1).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Team, error) {
 	in, err := check(in)
 	if err != nil {
@@ -776,6 +798,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		}
 		if matchersChanged || next.Slug != before.Slug {
 			if err := s.requestEvaluation(ctx, q, before.ID, now); err != nil {
+				return err
+			}
+		}
+		if next.Name != before.Name {
+			if err := s.requestRename(ctx, q, before.ID, now); err != nil {
 				return err
 			}
 		}

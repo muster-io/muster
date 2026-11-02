@@ -126,8 +126,10 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 		return ingest.Routed{}, nil
 	}
 	// The lock order of a Snapshot: this lock shared, then the Routes FOR SHARE and the Alert Groups (grouping), then
-	// the Routes' Destinations shared (delivery). The evaluation of a save takes it exclusively before its Alert
-	// Groups, so neither waits for a lock the other holds (internal/groups, evaluateTeams).
+	// the Routes' Destinations shared (delivery). A batch of the open Alert Group updates team_evaluation,
+	// organization_message_settings or team_name takes it exclusively before it lists and locks its Alert Groups, so
+	// neither waits for a lock the other holds (internal/groups, updateBatch), and the batch sees the Alert Groups of
+	// every Snapshot that held it.
 	if err := q.ShareTeamEvaluation(ctx, dbgen.ShareTeamEvaluationParams{LockClass: db.TeamEvaluationLockClass,
 		OrgID: r.orgID}); err != nil {
 		return ingest.Routed{}, fmt.Errorf("wait for the evaluation of the teams: %w", err)

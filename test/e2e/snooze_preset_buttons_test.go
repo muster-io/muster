@@ -48,18 +48,19 @@ func lastTwo(s []string) []string {
 	return s[max(len(s)-2, 0):]
 }
 
-// TestSnoozePresetButtons is the Verification of S-093 against `muster dev` and its fake Mattermost, Telegram and bridge
-// servers (C-10.FR-18, C-10.AC-23, C-22.FR-5, C-22.FR-14, C-22.AC-27): the Root message of a firing and of an
+// TestSnoozePresetButtons is the Verification of S-093 against `muster dev` and its fake Mattermost, Telegram and
+// bridge servers (C-10.FR-18, C-10.AC-23, C-22.FR-5, C-22.FR-14, C-22.AC-27): the Root message of a firing and of an
 // acknowledged Alert Group offers "Until tomorrow 09:00" and "Until Monday 09:00" after its Snooze durations, as the
 // Mattermost actions snoozetomorrow and snoozeweek and a third Telegram keyboard row, without a style, and a snoozed
-// one, a Route without Snooze durations and nothing else offer them; a Route in Russian reads «До завтра 09:00» and
-// «До понедельника 09:00». At 02:00 UTC on the development clock, bob's press in Mattermost ends the Snooze at 09:00 in
-// his profile's Asia/Tokyo and the Admin's press in Telegram at 09:00 in the Organization's UTC, with the preset and
-// the time zone in the Audit log. A new start of the working day shows at the next re-render, and a press on a button
-// rendered before ends at the new start. A press on a preset of a message whose Route lost its Snooze durations is
-// refused as unverifiable, and one on a Destination test message changes nothing. A bridge with max_per_message 5, 6
-// and 10 gets the durations, then the tomorrow preset, then both, and the Text commands take tomorrow, завтра and the
-// first day of the week, list them when the day is another, and refuse them on a Route without Snooze durations.
+// one, a Route without Snooze durations and nothing else offer them; a Route in Russian reads «До завтра 09:00» and «До
+// понедельника 09:00». At 02:00 UTC on the development clock, bob's press in Mattermost ends the Snooze at 09:00 in his
+// profile's Asia/Tokyo and the Admin's press in Telegram at 09:00 in the Organization's UTC, with the preset and the
+// time zone in the Audit log. A new start of the working day edits the open Root messages Quietly with the new labels,
+// and a press on a re-rendered button ends at the new start. A press on a preset of a message whose Route lost its
+// Snooze durations is refused as unverifiable, and one on a Destination test message changes nothing. A bridge with
+// max_per_message 5, 6 and 10 gets the durations, then the tomorrow preset, then both, and the Text commands take
+// tomorrow, завтра and the first day of the week, list them when the day is another, and refuse them on a Route without
+// Snooze durations.
 func TestSnoozePresetButtons(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -232,7 +233,7 @@ func TestSnoozePresetButtons(t *testing.T) {
 		}
 	})
 
-	t.Run("a new start of the working day at the next re-render", func(t *testing.T) {
+	t.Run("a new start of the working day re-renders the open root messages", func(t *testing.T) {
 		e := e.on(t)
 		old := e.fire("p6", "Backlog", "t", true)
 		postOld := e.rootPost(old)
@@ -247,14 +248,15 @@ func TestSnoozePresetButtons(t *testing.T) {
 		if row := lastRow(e, e.rootPost(g3)); !slices.Equal(row, want) {
 			t.Errorf("a new telegram root message %v", row)
 		}
-		// The Russian Root message keeps its labels until its next change of status.
+		// The open Root messages, in English and in Russian, are edited Quietly with the new labels, without a change of
+		// their Alert Groups (C-10.FR-18, C-29.FR-2).
 		nr, postR := e.number(gr), e.rootPost(gr)
-		if names := actionNames(e.root(nr).attachment(t)); !slices.Equal(lastTwo(names), ruPresets("09:00")) {
-			t.Errorf("the russian mattermost root message before its re-render %v", names)
-		}
-		if row := lastRow(e, postR); !slices.Equal(row, ruPresets("09:00")) {
-			t.Errorf("the russian telegram root message before its re-render %v", row)
-		}
+		waitStyles(t, "the re-rendered russian mattermost root message", strings.Join(ruPresets("08:30"), ","),
+			func() string { return strings.Join(lastTwo(actionNames(e.root(nr).attachment(t))), ",") })
+		waitStyles(t, "the re-rendered russian telegram root message", fmt.Sprint(ruPresets("08:30")),
+			func() string { return fmt.Sprint(lastRow(e, postR)) })
+		waitStyles(t, "the re-rendered telegram root message", fmt.Sprint(want),
+			func() string { return fmt.Sprint(lastRow(e, postOld)) })
 		e.ack(e.api, gr)
 		acked := append([]string{"Снять подтверждение", "Закрыть", "Отложить на 1 ч", "Отложить на 4 ч",
 			"Отложить на 24 ч"}, ruPresets("08:30")...)
@@ -264,15 +266,12 @@ func TestSnoozePresetButtons(t *testing.T) {
 		waitStyles(t, "the acknowledged russian telegram root message", fmt.Sprint([][]string{acked[:2], acked[2:5],
 			acked[5:]}), func() string { return fmt.Sprint(tgRows(e, postR)) })
 
-		// A press on a button rendered before the change ends at the new start.
-		if row := lastRow(e, postOld); !slices.Equal(row, []string{"Until tomorrow 09:00", "Until Monday 09:00"}) {
-			t.Errorf("the telegram root message rendered before the change %v", row)
-		}
-		if a := e.press(postOld, 5002, "Until tomorrow 09:00", ""); a.Text != "Done: Snooze" {
-			t.Errorf("the press on the old button %+v", a)
+		// A press on the re-rendered button ends at the new start.
+		if a := e.press(postOld, 5002, "Until tomorrow 08:30", ""); a.Text != "Done: Snooze" {
+			t.Errorf("the press on the re-rendered button %+v", a)
 		}
 		if until := snoozedUntil(e, old); !until.Equal(at(8, 30)) {
-			t.Errorf("the old button ends at %v, want %v", until, at(8, 30))
+			t.Errorf("the re-rendered button ends at %v, want %v", until, at(8, 30))
 		}
 	})
 

@@ -252,3 +252,54 @@ func TestTeamsEvaluatedIsQuiet(t *testing.T) {
 		t.Errorf("released by the teams evaluated %+v", p)
 	}
 }
+
+// TestMessageSettingsRerenderIsQuiet is C-29.FR-1 to FR-3 and ADR-0018 in delivery: the re-render of the open Root
+// messages after a change of the Organization's message settings, or of a Team's name, has no lifecycle event and is
+// marked as a change of configuration; when it changes the Desired state of a Not delivered Publication that was never
+// published, it publishes it Quietly, once. When the evaluation of the Teams that follows it in the same transaction
+// brings a Team, whose Quiet team_joined renders the Alert Group again with another Desired state, the later state is
+// stored over the earlier one before the worker runs, so that the Root message is still published once, Quietly, with
+// the later state; and when that rendering finds the hash unchanged, it changes nothing.
+func TestMessageSettingsRerenderIsQuiet(t *testing.T) {
+	joined := groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Variant: groups.VariantAny,
+		Loudness: groups.Quiet}
+	type render struct {
+		title  string
+		events []groups.Recorded
+	}
+	for _, c := range []struct {
+		name     string
+		renders  []render
+		versions int64
+		want     string
+	}{
+		{"the re-render alone", []render{{"disk full in Europe/Berlin", nil}}, 1, "disk full in Europe/Berlin"},
+		{"the re-render, then a team joined", []render{{"disk full in Europe/Berlin", nil},
+			{"disk full in Europe/Berlin, team ops", []groups.Recorded{joined}}}, 2,
+			"disk full in Europe/Berlin, team ops"},
+		{"the re-render, then a rendering with the same state", []render{{"disk full in Europe/Berlin", nil},
+			{"disk full in Europe/Berlin", []groups.Recorded{joined}}}, 1, "disk full in Europe/Berlin"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+			d := e.only(t)
+			d.state, d.publishedAt = "not_delivered", nil
+			version := d.version
+			for _, r := range c.renders {
+				if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring,
+					r.title), Actor: groups.System, Events: r.events, Configuration: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if d := e.only(t); d.state != "pending" || d.loud.Bool || d.version != version+c.versions {
+				t.Fatalf("the delivery is %s, loud %+v, version %d after %d", d.state, d.loud, d.version, version)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet ||
+				!strings.Contains(textOf(p[0]), c.want) || strings.Contains(textOf(p[0]), c.want+",") {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+}
