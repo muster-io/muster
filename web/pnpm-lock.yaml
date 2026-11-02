@@ -176,8 +176,8 @@ importers:
         specifier: 5.9.1
         version: 5.9.1(ajv@8.20.0)(react-hook-form@7.89.0(@types/react@19.3.0)(react@19.3.1))(zod@4.6.6)
       '@tanstack/react-query':
-        specifier: 5.104.5
-        version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
+        specifier: 5.105.0
+        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
       '@tanstack/react-router':
         specifier: 1.170.46
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -268,7 +268,7 @@ importers:
         version: 2.15.0(@types/node@26.6.4)(typescript@7.0.2)
       orval:
         specifier: 8.39.0
-        version: 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6)
+        version: 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6)
       oxfmt:
         specifier: 0.71.0
         version: 0.71.0
@@ -1588,11 +1588,11 @@ packages:
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/query-core@5.104.5':
-    resolution: {integrity: sha512-Q94gI8Opd+CbdVNOdj8ZCyV8WqLYitrDq1t96Xc8WZT6lY0r5iRnJLXYDxMex7EEf2v+mXvn4FcjaBKSxXZQ9A==}
+  '@tanstack/query-core@5.105.0':
+    resolution: {integrity: sha512-7p56vRmT/z4UJ6sctGIdl5WRUQyUv53IUpUwEKi2g97zMbO7zh8ZsCLffGAvCPBR4xD72e3VXsDyLwXHhoNTMQ==}
 
-  '@tanstack/react-query@5.104.5':
-    resolution: {integrity: sha512-RORgFe052U+93weaNuqg7qHq7vNVNzXN/VrXqD4bbAuQCWUqOl2lV5Ui9flWk5CVvMyL/Bh27QWhzwH0aaOx9g==}
+  '@tanstack/react-query@5.105.0':
+    resolution: {integrity: sha512-y+hMuDERvgg6ay1da0V1a6ZC0ZONt7dELxSFkqRZuwm7p1TTZs0MoXrPlBRflIpRoYjvzQVYxycnLImpFLhWrw==}
     peerDependencies:
       '@types/react': ^18 || ^19
       react: ^18 || ^19
@@ -3602,12 +3602,12 @@ snapshots:
     transitivePeerDependencies:
       - '@faker-js/faker'
 
-  '@orval/query@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))':
+  '@orval/query@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1))':
     dependencies:
       '@orval/core': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/fetch': 8.39.0(@faker-js/faker@10.6.0)
     optionalDependencies:
-      '@tanstack/react-query': 5.104.5(@types/react@19.3.0)(react@19.3.1)
+      '@tanstack/react-query': 5.105.0(@types/react@19.3.0)(react@19.3.1)
     transitivePeerDependencies:
       - '@faker-js/faker'
 
@@ -4007,11 +4007,11 @@ snapshots:
 
   '@tanstack/history@1.162.5': {}
 
-  '@tanstack/query-core@5.104.5': {}
+  '@tanstack/query-core@5.105.0': {}
 
-  '@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1)':
+  '@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1)':
     dependencies:
-      '@tanstack/query-core': 5.104.5
+      '@tanstack/query-core': 5.105.0
       react: 19.3.1
     optionalDependencies:
       '@types/react': 19.3.0
@@ -4869,7 +4869,7 @@ snapshots:
       stdin-discarder: 0.3.2
       string-width: 8.3.0
 
-  orval@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6):
+  orval@8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1))(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))(prettier@3.9.9)(typescript@7.0.2)(zod@4.6.6):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
       '@orval/angular': 8.39.0(@faker-js/faker@10.6.0)
@@ -4881,7 +4881,7 @@ snapshots:
       '@orval/mcp': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
       '@orval/mock': 8.39.0(@faker-js/faker@10.6.0)(msw@2.15.0(@types/node@26.6.4)(typescript@7.0.2))
       '@orval/pinia-colada': 8.39.0(@faker-js/faker@10.6.0)
-      '@orval/query': 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1))
+      '@orval/query': 8.39.0(@faker-js/faker@10.6.0)(@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1))
       '@orval/solid-start': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/swr': 8.39.0(@faker-js/faker@10.6.0)
       '@orval/zod': 8.39.0(@faker-js/faker@10.6.0)(zod@4.6.6)
