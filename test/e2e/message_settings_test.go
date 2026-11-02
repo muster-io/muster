@@ -50,11 +50,11 @@ func messageSettingsDone(h *Harness, kind string) int {
 
 // TestMessageSettingsRerender is the Verification of the re-render of open Root messages after a change of what they
 // show that is not a Route's (C-29.FR-1 to FR-3), against `muster dev` and the fake Mattermost and Telegram servers:
-// changing the Organization's Severity label, Team label, Instance labels or time zone edits each open Root message
-// once, Quietly — no new post, no notification — so that it shows the new label line, Alerts line or start time, and a
-// Team label whose value names a Team brings the Team with the same one edit; a second save of the same values writes
-// no row and edits nothing; a rename of a Team edits the Root message of the open Alert Group that has the Team once
-// and not that of the Alert Group without it.
+// changing the Organization's Severity label, Team label, Instance labels, time zone, start of the working day or first
+// day of the week edits each open Root message once, Quietly — no new post, no notification — so that it shows the new
+// label line, Alerts line or start time, and a Team label whose value names a Team brings the Team with the same one
+// edit; a second save of the same values writes no row and edits nothing; a rename of a Team edits the Root message of
+// the open Alert Group that has the Team once and not that of the Alert Group without it.
 func TestMessageSettingsRerender(t *testing.T) {
 	h := Start(t, DevProcess)
 	c, dests := newCompact(t, h, h.Replicas[0])

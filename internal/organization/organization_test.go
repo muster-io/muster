@@ -1217,10 +1217,10 @@ func TestTeamLabel(t *testing.T) {
 }
 
 // TestMessageSettingsRows is C-29.FR-1 to FR-3 on the update of the Organization: a changed Severity label, Instance
-// labels or time zone writes in the update's transaction one open_group_updates row organization_message_settings
-// without a scope, requested at the business time of the update, and wakes the workers; the order of the Instance
-// labels counts. A save of the same values, or of a setting the Root messages do not show, writes none, and a failing
-// row or notification fails the update.
+// labels, time zone, start of the working day or first day of the week writes in the update's transaction one
+// open_group_updates row organization_message_settings without a scope, requested at the business time of the update,
+// and wakes the workers; the order of the Instance labels counts. A save of the same values, or of a setting the Root
+// messages do not show, writes none, and a failing row or notification fails the update.
 func TestMessageSettingsRows(t *testing.T) {
 	s := newFakeSettings(t)
 	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
@@ -1242,6 +1242,10 @@ func TestMessageSettingsRows(t *testing.T) {
 		{"instance labels in another order", func(in *Input) { in.InstanceLabels = []string{"instance", "pod"} }, 1},
 		{"a time zone", func(in *Input) { in.TimeZone = "Europe/Berlin" }, 1},
 		{"the same time zone again", func(*Input) {}, 0},
+		{"a start of the working day", func(in *Input) { in.WorkdayStart = new("08:30") }, 1},
+		{"the same start of the working day", func(in *Input) { in.WorkdayStart = new("08:30") }, 0},
+		{"a first day of the week", func(in *Input) { in.WeekStart = new("sunday") }, 1},
+		{"an end of the working day", func(in *Input) { in.WorkdayEnd = new("17:00") }, 0},
 	} {
 		cur, err := svc.Get(t.Context())
 		if err != nil {

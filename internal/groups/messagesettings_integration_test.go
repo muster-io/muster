@@ -32,12 +32,12 @@ func inputOf(o organization.Organization) organization.Input {
 }
 
 // TestIntegrationMessageSettingsUpdates is C-29.FR-1 to FR-3 on every supported PostgreSQL: an update of the
-// Organization that changes its Severity label, Team label, Instance labels or time zone writes one open_group_updates
-// row organization_message_settings in the update's transaction — the Team label also its row team_evaluation — and
-// one that changes none of them, or changes them back while a row is still unclaimed, writes no further row. A worker
-// claims the row and runs the re-render step, as the system, marked as a change of configuration and without a
-// lifecycle event, on each open Alert Group of the Organization, and on no resolved one; it records no Timeline entry
-// and deletes the row.
+// Organization that changes its Severity label, Team label, Instance labels, time zone, start of the working day or
+// first day of the week writes one open_group_updates row organization_message_settings in the update's transaction —
+// the Team label also its row team_evaluation — and one that changes none of them, or changes them back while a row is
+// still unclaimed, writes no further row. A worker claims the row and runs the re-render step, as the system, marked as
+// a change of configuration and without a lifecycle event, on each open Alert Group of the Organization, and on no
+// resolved one; it records no Timeline entry and deletes the row.
 func TestIntegrationMessageSettingsUpdates(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := setup(t, s)
@@ -98,6 +98,8 @@ func TestIntegrationMessageSettingsUpdates(t *testing.T) {
 			{"team_label", func(in *organization.Input) { in.TeamLabel = new("owner_team") }},
 			{"instance_labels", func(in *organization.Input) { in.InstanceLabels = []string{"pod"} }},
 			{"time_zone", func(in *organization.Input) { in.TimeZone = "Europe/Berlin" }},
+			{"workday_start", func(in *organization.Input) { in.WorkdayStart = new("08:30") }},
+			{"week_start", func(in *organization.Input) { in.WeekStart = new("sunday") }},
 		} {
 			e.clock.Advance(time.Minute)
 			update(t, c.change)

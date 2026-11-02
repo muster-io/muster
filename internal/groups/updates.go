@@ -33,10 +33,10 @@ import (
 // The kinds of open_group_updates rows: a changed Minimum severity or "Labels in the message" of a Route (C-29.FR-2),
 // which routing writes, a changed button set of a Destination or of the Organization (C-28.FR-9), which destinations
 // and organization write, the evaluation of the Teams of the open Alert Groups after a save of a Team or of the Team
-// label (C-25.FR-13), which teams and organization write, and a changed Severity label, Team label, Instance labels or
-// time zone of the Organization, or a renamed Team, whose values the Root messages show (C-29.FR-1 to FR-3), which
-// organization and teams write; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every
-// replica when a row is inserted.
+// label (C-25.FR-13), which teams and organization write, and a changed Severity label, Team label, Instance labels,
+// time zone, start of the working day or first day of the week of the Organization, or a renamed Team, whose values the
+// Root messages show (C-29.FR-1 to FR-3), which organization and teams write; and OpenGroupUpdatesChannel, the
+// LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity        = "route_minimum_severity"
 	KindRouteMessageLabels          = "route_message_labels"
@@ -191,19 +191,25 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // rerender runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids, locked
 // in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
 // (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), or of what else the Root messages show
-// (evaluateAndRerender): delivery edits, Quietly, each Root message whose Desired state the change changed and leaves
-// the others, whose hashes are unchanged, so that a second run changes nothing. The Alert Groups themselves do not
-// change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a Desired state of an
-// Alert Group is a Route template that failed recorded, as the dispatcher records it, with the Alert Group's
-// live-update hint, so that a second run, which changes no Desired state, records nothing. It returns how many Alert
-// Groups had a Desired state changed; after collects what runs once the transaction committed.
+// (evaluateAndRerender, KindTeamName): delivery edits, Quietly, each Root message whose Desired state the change
+// changed and leaves the others, whose hashes are unchanged, so that a second run changes nothing. The Alert Groups
+// themselves do not change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a
+// Desired state of an Alert Group is a Route template that failed recorded, as the dispatcher records it, with the
+// Alert Group's live-update hint, so that a second run, which changes no Desired state, records nothing. It returns
+// how many Alert Groups had a Desired state changed; after collects what runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+	changed, err := s.rerenderIDs(ctx, q, ids, after)
+	return len(changed), err
+}
+
+// rerenderIDs is rerender, returning the Alert Groups that had a Desired state changed, by id.
+func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after *committed) ([]int64, error) {
 	if len(ids) == 0 || s.d.rerender == nil {
-		return 0, nil
+		return nil, nil
 	}
 	locked, err := lock(ctx, q, s.orgID, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	// The re-render step takes the membership lock of each Alert Group's Route shared; the Alert Groups go in the
 	// order (Route, id), so that the Routes are taken in id order, as the deletion of a Destination takes them.
@@ -217,48 +223,50 @@ func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *c
 		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
 	})
 	now := s.d.clock.Now().UTC()
-	n := 0
+	var changedIDs []int64
 	for _, g := range open {
 		failures, changed, err := s.d.render(ctx, q, g, System, nil, true, after)
 		if err != nil {
-			return 0, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
+			return nil, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
 		}
 		if !changed {
 			continue
 		}
-		n++
+		changedIDs = append(changedIDs, g.ID)
 		if len(failures) == 0 {
 			continue
 		}
 		if err := s.d.recordFallbacks(ctx, q, g, failures, now); err != nil {
-			return 0, err
+			return nil, err
 		}
 		if err := s.d.hint(ctx, q, g, g.Status); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
-	return n, nil
+	return changedIDs, nil
 }
 
-// evaluateAndRerender evaluates the Teams of the Alert Groups ids again (evaluateTeams), then runs the re-render step
-// on the open ones (rerender), in the transaction of q, after a change of the Organization's settings that the Root
-// messages show: its Severity label, Team label, Instance labels or time zone (C-29.FR-1 to FR-3). The evaluation comes
-// first, so that a Team that a new Team label brings joins before the re-render: a Root message whose Desired state the
-// Team changed is re-rendered with it, and the re-render that follows finds its hash unchanged, so that each Root
-// message is edited once, whichever of this row and the team_evaluation row of the same save runs first. A rename of a
-// Team needs no evaluation (KindTeamName): the classification is per Team, so new Team matchers saved with the name can
-// bring only that Team, which the Alert Groups the rename walks already have. It returns how many Alert Groups a Team
-// joined or had a Desired state changed; after collects what runs once the transaction committed.
+// evaluateAndRerender runs the re-render step on the open Alert Groups ids (rerender), then evaluates their Teams again
+// (evaluateTeams), in the transaction of q, after a change of the Organization's settings that the Root messages show:
+// its Severity label, Team label, Instance labels, time zone, start of the working day or first day of the week
+// (C-29.FR-1 to FR-3, C-10.FR-18). The re-render comes first, so that the Routes' locks of the re-render step are taken
+// in one ascending pass over (Route, id), as the dispatcher's other walks take them. A Team that a new Team label
+// brings then joins with a Quiet team_joined, which renders its Alert Group again in the same transaction: delivery
+// stores the later Desired state over the earlier one before any worker sees either, so each Root message is still
+// edited once, whichever of this row and the team_evaluation row of the same save runs first. A rename of a Team needs
+// no evaluation (KindTeamName): the classification is per Team, so new Team matchers saved with the name can bring only
+// that Team, which the Alert Groups the rename walks already have. It returns how many Alert Groups had a Desired state
+// changed or a Team joined, each counted once; after collects what runs once the transaction committed.
 func (s *Service) evaluateAndRerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+	changed, err := s.rerenderIDs(ctx, q, ids, after)
+	if err != nil {
+		return 0, err
+	}
 	joined, err := s.evaluateTeams(ctx, q, ids, after)
 	if err != nil {
 		return 0, err
 	}
-	changed, err := s.rerender(ctx, q, ids, after)
-	if err != nil {
-		return 0, err
-	}
-	return joined + changed, nil
+	return len(slices.Compact(slices.Sorted(slices.Values(append(changed, joined...))))), nil
 }
 
 // firingLevels are the highest Severity levels of the firing Alerts of the Alert Groups ids, info for one without any.
@@ -325,6 +333,19 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 		if err != nil {
 			return fmt.Errorf("check the lease: %w", err)
 		}
+		if evaluationBarrier(row.Kind) {
+			// The lock order of these batches: the claimed open_group_updates row, the lock of the evaluation of the
+			// Teams exclusively, then the list of the batch, the Alert Groups in id order (LockGroups), and the
+			// Routes' Destinations shared in the re-render step. A Snapshot takes this lock shared before anything of
+			// its own (routing) and holds it until it commits, so the batch waits for the Snapshots in flight, which
+			// hold none of its rows, before it lists: an Alert Group that such a Snapshot creates or changes, with the
+			// Teams, settings or names it read before the save, is in the list. A Snapshot that starts later waits for
+			// the batch before it locks anything, and then reads what the save wrote.
+			if err := q.LockTeamEvaluation(ctx, dbgen.LockTeamEvaluationParams{
+				LockClass: db.TeamEvaluationLockClass, OrgID: s.orgID}); err != nil {
+				return fmt.Errorf("wait for the snapshots in flight: %w", err)
+			}
+		}
 		var ids []int64
 		lim := int32(limit) //nolint:gosec // G115: a batch is UpdateBatch or the small one of a test
 		switch row.Kind {
@@ -367,9 +388,11 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
 				return fmt.Errorf("list the open alert groups: %w", err)
 			}
-			if out.changed, err = s.evaluateTeams(ctx, q, ids, &after); err != nil {
+			var joined []int64
+			if joined, err = s.evaluateTeams(ctx, q, ids, &after); err != nil {
 				return err
 			}
+			out.changed = len(joined)
 		case KindOrganizationMessageSettings:
 			if ids, err = q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: s.orgID,
 				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
@@ -412,6 +435,14 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 	}
 	after.run(ctx)
 	return out, nil
+}
+
+// evaluationBarrier reports whether the batches of a kind wait for the Snapshots in flight before they list their
+// Alert Groups (updateBatch): those whose change a Snapshot that read the Teams, the Organization's settings or the
+// names of the Teams before the save could miss — the evaluation of the Teams, the Organization's message settings and
+// the name of a Team.
+func evaluationBarrier(kind string) bool {
+	return kind == KindTeamEvaluation || kind == KindOrganizationMessageSettings || kind == KindTeamName
 }
 
 // nextUpdate is how long until a row can be claimed, at most limit: none when one is free, else until the end of the

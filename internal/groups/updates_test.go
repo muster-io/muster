@@ -1122,13 +1122,14 @@ func (r *renders) install(t *testing.T, svc *Service) {
 }
 
 // TestMessageSettingsUpdate is C-29.FR-1 to FR-3 on the worker: a row organization_message_settings, which a changed
-// Severity label, Team label, Instance labels or time zone writes, first evaluates the Teams of every open Alert Group,
-// as team_evaluation does, then runs the re-render step without a lifecycle event on each, by id in batches and in the
-// order (Route, id), marked as a change of configuration, so that delivery edits each Root message Quietly. A Team the
-// evaluation brings joins before the re-render, so that its Alert Group is rendered with the Quiet team_joined first
-// and its Root message is not changed again by the re-render. A resolved Alert Group is not rendered. Nothing is saved
-// for the re-render, no Timeline entry is recorded but the team_joined, and the row is deleted with its last batch and
-// logged with the number of Alert Groups a Team joined or whose Desired state changed, none on a second run.
+// Severity label, Team label, Instance labels, time zone, start of the working day or first day of the week writes,
+// takes the lock of the evaluation before it lists its batch, runs the re-render step without a lifecycle event on
+// each open Alert Group, by id in batches and in the order (Route, id), marked as a change of configuration, so that
+// delivery edits each Root message Quietly, then evaluates their Teams, as team_evaluation does: a Team the evaluation
+// brings joins with the Quiet team_joined, which renders its Alert Group again in the same transaction. A resolved
+// Alert Group is not rendered. Nothing is saved for the re-render, no Timeline entry is recorded but the team_joined,
+// and the row is deleted with its last batch and logged with the number of Alert Groups a Team joined or whose Desired
+// state changed, each counted once, none on a second run.
 func TestMessageSettingsUpdate(t *testing.T) {
 	e := newEvaluation(t)
 	var r renders
@@ -1142,10 +1143,15 @@ func TestMessageSettingsUpdate(t *testing.T) {
 	r.install(t, e.svc)
 	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
 	e.worker.Batch = 1
+	locks, lists := 0, 0
+	e.db.before["ListEvaluatedGroupsAfter"] = func() { locks, lists = e.db.calls["LockTeamEvaluation"], 1 }
 	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindOrganizationMessageSettings,
 		requested: e.clock.Now()})
 	e.round(t, e.worker)
-	want := []string{fmt.Sprintf("%d:team_joined/quiet", g.ID), fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", other.ID)}
+	if lists != 1 || locks == 0 {
+		t.Errorf("the batch listed after %d locks of the evaluation", locks)
+	}
+	want := []string{fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:team_joined/quiet", g.ID), fmt.Sprintf("%d:", other.ID)}
 	if !slices.Equal(r.got, want) {
 		t.Errorf("rendered %v, want %v", r.got, want)
 	}
@@ -1194,7 +1200,8 @@ func TestMessageSettingsUpdate(t *testing.T) {
 
 // TestTeamNameUpdate is C-29.FR-1 on the worker: a row team_name, which a rename of a Team writes, re-renders, Quietly
 // and without a lifecycle event, the open Alert Groups that have the Team, whose field Teams shows its name, and no
-// other: not one of another Team, not one without a Team, not a resolved one. It evaluates nothing (C-25.FR-13). It is
+// other: not one of another Team, not one without a Team, not a resolved one. It evaluates nothing (C-25.FR-13), but
+// waits for the Snapshots in flight under the lock of the evaluation before it lists. It is
 // deleted with its last batch and logged with its Team; a second run changes no Desired state; a row of a Team no open
 // Alert Group has renders nothing, and one whose Team is gone is done.
 func TestTeamNameUpdate(t *testing.T) {
@@ -1219,16 +1226,20 @@ func TestTeamNameUpdate(t *testing.T) {
 	r.install(t, e.svc)
 	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
 	locks, evaluated := e.db.calls["LockTeamEvaluation"], e.db.calls["ListGroupFiringAlerts"]
+	listedAfter := 0
+	e.db.before["ListOpenGroupsOfTeamAfter"] = func() { listedAfter = e.db.calls["LockTeamEvaluation"] }
 	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
 		requested: e.clock.Now()})
 	e.round(t, e.worker)
 	if want := []string{fmt.Sprintf("%d:", g.ID)}; !slices.Equal(r.got, want) {
 		t.Errorf("rendered %v, want %v", r.got, want)
 	}
-	// A rename evaluates nothing (C-25.FR-13): no lock of the evaluation, no classification.
-	if e.db.calls["LockTeamEvaluation"] != locks || e.db.calls["ListGroupFiringAlerts"] != evaluated {
-		t.Errorf("the rename evaluated: %d locks, %d reads of the firing alerts",
-			e.db.calls["LockTeamEvaluation"]-locks, e.db.calls["ListGroupFiringAlerts"]-evaluated)
+	// A rename evaluates nothing (C-25.FR-13): no classification. Its one batch takes the lock of the evaluation, which
+	// waits for the Snapshots in flight, before it lists.
+	if e.db.calls["LockTeamEvaluation"] != locks+1 || e.db.calls["ListGroupFiringAlerts"] != evaluated ||
+		listedAfter != locks+1 {
+		t.Errorf("the rename: %d locks, %d reads of the firing alerts, listed after %d locks",
+			e.db.calls["LockTeamEvaluation"]-locks, e.db.calls["ListGroupFiringAlerts"]-evaluated, listedAfter-locks)
 	}
 	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 ||
 		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"team_name",`+

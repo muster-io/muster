@@ -215,9 +215,9 @@ durations, and a bridge with a limit on buttons drops them first; see
 [Bridge](../messengers/bridge.md#what-muster-posts). Slack offers the durations and then the presets as the options of
 one **Snooze…** menu, since its web client folds the buttons beyond five in a row.
 
-The labels are part of the message. After a change of `organization.workday_start` or `organization.week_start`, each
-Root message shows the new labels at its next update, and a press on a button shown before the change already ends at
-the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
+The labels are part of the message. A change of `organization.workday_start` or `organization.week_start` edits each
+open Root message once, Quietly, so that it shows the new labels, and a press on a button shown before the edit already
+ends at the new start of the working day: the preset is computed when the command runs. On a bridge without buttons, the presets
 are [Text commands](#text-commands).
 
 ### Who may

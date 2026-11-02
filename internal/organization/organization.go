@@ -52,8 +52,9 @@ const (
 
 // KindOrganizationButtons is the kind of the open_group_updates row that a changed button set of the Organization
 // writes (C-28.FR-9), KindTeamEvaluation that of a changed Team label (C-25.FR-13), KindMessageSettings that of a
-// changed Severity label, Team label, Instance labels or time zone, which the Root messages show (C-29.FR-1 to FR-3),
-// and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
+// changed Severity label, Team label, Instance labels, time zone, start of the working day or first day of the week,
+// which the Root messages show (C-29.FR-1 to FR-3), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes
+// the workers of internal/groups, which claim them.
 const (
 	KindOrganizationButtons = "organization_buttons"
 	KindTeamEvaluation      = "team_evaluation"
@@ -489,10 +490,12 @@ func (s *Service) requestUpdate(ctx context.Context, q SettingsQueries, kind str
 
 // messageSettingsChanged reports whether an update changes a setting that the Root messages show (C-29.FR-1 to FR-3):
 // the Severity label and the Team label, which the default "Labels in the message" leave out or add (C-29.FR-2), the
-// Instance labels, which name the Alerts (C-29.FR-3), or the time zone, in which the start time is written.
+// Instance labels, which name the Alerts (C-29.FR-3), the time zone, in which the start time is written, or the start
+// of the working day and the first day of the week, which label the Snooze presets (C-10.FR-18).
 func messageSettingsChanged(before, after Organization) bool {
 	return before.SeverityLabel != after.SeverityLabel || before.TeamLabel != after.TeamLabel ||
-		!slices.Equal(before.InstanceLabels, after.InstanceLabels) || before.TimeZone != after.TimeZone
+		!slices.Equal(before.InstanceLabels, after.InstanceLabels) || before.TimeZone != after.TimeZone ||
+		before.WorkdayStart != after.WorkdayStart || before.WeekStart != after.WeekStart
 }
 
 // setsEqual reports whether two button sets show the same buttons.

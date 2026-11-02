@@ -136,9 +136,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       [subtrees](../sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
       [identity provider entries of Teams](../concepts/teams.md#membership-from-the-identity-provider). The Role mapping
       reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
-    - Migration 0031 lets a change of the Organization's severity label, Team label, Instance labels or time zone, and
-      a rename of a Team, reach the open Alert Groups: their Root messages are edited once, Quietly, to show the new
-      labels, start time or name, instead of at each Alert Group's next change.
+    - Migration 0031 lets a change of the Organization's severity label, Team label, Instance labels, time zone, start
+      of the working day or first day of the week, and a rename of a Team, reach the open Alert Groups: their Root
+      messages are edited once, Quietly, to show the new labels, start time, Snooze presets or name, instead of at each
+      Alert Group's next change.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -203,9 +204,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
     mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
     Neither a 0.1 replica nor one of a development image without migration 0031 writes the re-render of the open Root
-    messages after a change of the severity label, the Team label, the Instance labels or the time zone, or a rename of
-    a Team, and neither claims one: such a change saved on one of them reaches the open Root messages only at each
-    Alert Group's next change, so make it after every replica runs this version.
+    messages after a change of the severity label, the Team label, the Instance labels, the time zone, the start of the
+    working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
+    of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
+    this version.
 
     **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
     that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
