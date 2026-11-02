@@ -32,22 +32,26 @@ import (
 
 // The kinds of open_group_updates rows: a changed Minimum severity or "Labels in the message" of a Route (C-29.FR-2),
 // which routing writes, a changed button set of a Destination or of the Organization (C-28.FR-9), which destinations
-// and organization write, and the evaluation of the Teams of the open Alert Groups after a save of a Team or of the
-// Team label (C-25.FR-13), which teams and organization write; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel
-// that wakes the workers of every replica when a row is inserted.
+// and organization write, the evaluation of the Teams of the open Alert Groups after a save of a Team or of the Team
+// label (C-25.FR-13), which teams and organization write, and a changed Severity label, Team label, Instance labels or
+// time zone of the Organization, or a renamed Team, whose values the Root messages show (C-29.FR-1 to FR-3), which
+// organization and teams write; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every
+// replica when a row is inserted.
 const (
-	KindRouteMinimumSeverity = "route_minimum_severity"
-	KindRouteMessageLabels   = "route_message_labels"
-	KindDestinationButtons   = "destination_buttons"
-	KindOrganizationButtons  = "organization_buttons"
-	KindTeamEvaluation       = "team_evaluation"
-	OpenGroupUpdatesChannel  = "muster_open_group_updates"
+	KindRouteMinimumSeverity        = "route_minimum_severity"
+	KindRouteMessageLabels          = "route_message_labels"
+	KindDestinationButtons          = "destination_buttons"
+	KindOrganizationButtons         = "organization_buttons"
+	KindTeamEvaluation              = "team_evaluation"
+	KindOrganizationMessageSettings = "organization_message_settings"
+	KindTeamName                    = "team_name"
+	OpenGroupUpdatesChannel         = "muster_open_group_updates"
 )
 
 // updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
 // of a kind a later version adds waits for a replica that knows it.
 var updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
-	KindOrganizationButtons, KindTeamEvaluation}
+	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -75,6 +79,7 @@ type updateQueries interface {
 		arg dbgen.ListOpenGroupsFollowingOrganizationAfterParams) ([]int64, error)
 	ListFiringLevels(ctx context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow, error)
 	ListEvaluatedGroupsAfter(ctx context.Context, arg dbgen.ListEvaluatedGroupsAfterParams) ([]int64, error)
+	ListOpenGroupsOfTeamAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfTeamAfterParams) ([]int64, error)
 	LockTeamEvaluation(ctx context.Context, arg dbgen.LockTeamEvaluationParams) error
 	GetTeamsStamp(ctx context.Context, orgID int64) (dbgen.GetTeamsStampRow, error)
 	AddAlertTeams(ctx context.Context, arg dbgen.AddAlertTeamsParams) error
@@ -185,10 +190,10 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 
 // rerender runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids, locked
 // in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
-// (C-28.FR-9) or of a Route's "Labels in the message" (C-29.FR-2): delivery edits, Quietly,
-// each Root message whose Desired state the change changed and leaves the others, whose hashes are unchanged, so that a
-// second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint is
-// sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as
+// (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), or of what else the Root messages show
+// (evaluateAndRerender): delivery edits, Quietly, each Root message whose Desired state the change changed and leaves
+// the others, whose hashes are unchanged, so that a second run changes nothing. The Alert Groups themselves do not
+// change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as
 // the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which changes no Desired
 // state, records nothing. It returns how many Alert Groups had a Desired state changed; after collects what runs once
 // the transaction committed.
@@ -233,6 +238,26 @@ func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *c
 		}
 	}
 	return n, nil
+}
+
+// evaluateAndRerender evaluates the Teams of the Alert Groups ids again (evaluateTeams), then runs the re-render step
+// on the open ones (rerender), in the transaction of q, after a change of what the Root messages show that is not a
+// Route's: the Organization's Severity label, Team label, Instance labels or time zone, or the name of a Team
+// (C-29.FR-1 to FR-3). The evaluation comes first, so that a Team the same save brings joins before the re-render: a
+// Root message whose Desired state the Team changed is re-rendered with it, and the re-render that follows finds its
+// hash unchanged, so that each Root message is edited once, whichever of this row and a team_evaluation row of the
+// same save runs first. It returns how many Alert Groups a Team joined or had a Desired state changed; after collects
+// what runs once the transaction committed.
+func (s *Service) evaluateAndRerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+	joined, err := s.evaluateTeams(ctx, q, ids, after)
+	if err != nil {
+		return 0, err
+	}
+	changed, err := s.rerender(ctx, q, ids, after)
+	if err != nil {
+		return 0, err
+	}
+	return joined + changed, nil
 }
 
 // firingLevels are the highest Severity levels of the firing Alerts of the Alert Groups ids, info for one without any.
@@ -342,6 +367,22 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				return fmt.Errorf("list the open alert groups: %w", err)
 			}
 			if out.changed, err = s.evaluateTeams(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindOrganizationMessageSettings:
+			if ids, err = q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: s.orgID,
+				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups: %w", err)
+			}
+			if out.changed, err = s.evaluateAndRerender(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindTeamName:
+			if ids, err = q.ListOpenGroupsOfTeamAfter(ctx, dbgen.ListOpenGroupsOfTeamAfterParams{OrgID: s.orgID,
+				TeamID: row.TeamID.Int64, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups of team %d: %w", row.TeamID.Int64, err)
+			}
+			if out.changed, err = s.evaluateAndRerender(ctx, q, ids, &after); err != nil {
 				return err
 			}
 		default:

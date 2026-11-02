@@ -593,6 +593,105 @@ func TestIntegrationTeamEvaluation(t *testing.T) {
 	})
 }
 
+// TestIntegrationTeamRename is C-29.FR-1 on every supported PostgreSQL: a rename of a Team writes one open_group_updates
+// row team_name with the Team in the save's transaction, and a second rename while it is unclaimed writes none; the
+// worker of internal/groups runs the re-render step, as the system, marked as a change of configuration and without a
+// lifecycle event, on the open Alert Group that has the Team and on no other — not on one whose Alerts name another
+// Team — then deletes the row and logs the Team. A save that changes the description writes no row and re-renders
+// nothing; a rename of another Team writes its own row.
+func TestIntegrationTeamRename(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		if _, err := e.d.Pool.Exec(ctx, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		_, group := e.fixture(t, 4, []fixtureAlert{{labels: `{"alertname": "Latency", "team": "checkout"}`,
+			status: "firing", member: "firing", seen: t0}})
+		_, other := e.fixture(t, 5, []fixtureAlert{{labels: `{"alertname": "Latency", "team": "search"}`,
+			status: "firing", member: "firing", seen: t0}})
+		checkout, err := e.svc.Create(ctx, by, teams.Input{Name: "Checkout", Slug: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		search, err := e.svc.Create(ctx, by, teams.Input{Name: "Search", Slug: "search"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		c := clock.NewManual(t0.Add(time.Minute))
+		gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, c), Business: c, Log: logger})
+		var rendered []int64
+		gs.SetRerender(func(_ context.Context, _ groups.DBTX, r groups.Rendering) error {
+			if r.Actor != groups.System || !r.Configuration {
+				t.Errorf("a rendering as %+v, configuration %v", r.Actor, r.Configuration)
+			}
+			if len(r.Events) == 0 {
+				rendered = append(rendered, r.Group.ID)
+				r.Changed()
+			}
+			return nil
+		})
+		worker := &groups.UpdateWorker{Service: gs, Log: logger, Lease: db.Lease{Owner: "r1",
+			Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: c, Real: clock.Real{}}}}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_teams WHERE org_id = $1`, e.orgID); n != 2 ||
+			len(rendered) != 0 {
+			t.Fatalf("%d alert_group_teams rows, rendered %v", n, rendered)
+		}
+		rows := func(t *testing.T, team int64) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1 AND kind = 'team_name'
+				AND team_id = $2 AND leased_by IS NULL`, e.orgID, team)
+		}
+		if _, err := e.svc.Update(ctx, by, checkout.PublicID, nil, teams.Input{Name: "Checkout",
+			Slug: "checkout", Description: new("Pays")}); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID); n != 0 {
+			t.Errorf("a new description wrote %d rows", n)
+		}
+		for _, name := range []string{"Checkout squad", "Checkout and payments"} {
+			if _, err := e.svc.Update(ctx, by, checkout.PublicID, nil, teams.Input{Name: name,
+				Slug: "checkout"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := rows(t, checkout.ID); n != 1 || e.count(t, `SELECT count(*) FROM open_group_updates
+			WHERE org_id = $1`, e.orgID) != 1 {
+			t.Errorf("%d rows of the renames, want the only one", n)
+		}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(rendered, []int64{group}) || !strings.Contains(log.String(),
+			`"event":"open_group_update_done","kind":"team_name","team":"`+checkout.PublicID+`","alert_groups":1`) ||
+			e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID) != 0 {
+			t.Errorf("rendered %v (not %d), log %s", rendered, other, log.String())
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE org_id = $1 AND event = 'team_joined'`,
+			e.orgID); n != 2 {
+			t.Errorf("%d team_joined entries, want those of the creations", n)
+		}
+		rendered = nil
+		if _, err := e.svc.Update(ctx, by, search.PublicID, nil, teams.Input{Name: "Search and discovery",
+			Slug: "search"}); err != nil {
+			t.Fatal(err)
+		}
+		if n := rows(t, search.ID); n != 1 {
+			t.Errorf("%d rows of the rename of search", n)
+		}
+		if _, err := worker.Round(ctx); err != nil || !slices.Equal(rendered, []int64{other}) {
+			t.Errorf("the rename of search rendered %v, %v", rendered, err)
+		}
+	})
+}
+
 // sync follows the entries of the Teams for the User userID with claims, in a transaction of its own, as a sign-in
 // does after it locked the user.
 func (e *env) sync(t *testing.T, userID int64, claims oidc.Claims) {

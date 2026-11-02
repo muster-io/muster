@@ -355,15 +355,19 @@ GROUP BY 1
 ORDER BY 2 DESC, 1
 LIMIT @max_values;
 
--- InsertTeamEvaluation requests, in the transaction of a save of the Team @team_id, the evaluation of the Teams of the
--- open Alert Groups (C-25.FR-13): the open_group_updates worker of any replica claims the row. A row of @kind that no
--- worker has claimed yet already covers the save, since its run classifies with the Teams as they are then: it is
--- locked, so that no worker claims it before this transaction commits, and no second one is inserted.
--- name: InsertTeamEvaluation :exec
+-- InsertTeamUpdate requests, in the transaction of a save of the Team @team_id, that the save reach the open Alert
+-- Groups with a row of @kind: team_evaluation for the evaluation of their Teams (C-25.FR-13), team_name for the
+-- re-render of the Root messages of those that have the Team after a rename (C-29.FR-1). The open_group_updates worker
+-- of any replica claims the row. A row team_evaluation that no worker has claimed yet already covers the save, since
+-- its run classifies with the Teams as they are then, and so does a row team_name of the same Team, which renders the
+-- Team's name as it is then: it is locked, so that no worker claims it before this transaction commits, and no second
+-- one is inserted.
+-- name: InsertTeamUpdate :exec
 WITH pending AS (
     SELECT u.id
     FROM open_group_updates u
-    WHERE u.org_id = @org_id AND u.kind = @kind AND u.leased_by IS NULL
+    WHERE u.org_id = @org_id AND u.kind = @kind::text AND u.leased_by IS NULL
+      AND (@kind::text = 'team_evaluation' OR u.team_id = @team_id)
     FOR UPDATE
 )
 INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)

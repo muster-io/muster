@@ -427,39 +427,6 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	return id, err
 }
 
-const insertTeamEvaluation = `-- name: InsertTeamEvaluation :exec
-WITH pending AS (
-    SELECT u.id
-    FROM open_group_updates u
-    WHERE u.org_id = $1 AND u.kind = $2 AND u.leased_by IS NULL
-    FOR UPDATE
-)
-INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
-SELECT $1, $2::text, $3, $4::timestamptz
-WHERE NOT EXISTS (SELECT 1 FROM pending)
-`
-
-type InsertTeamEvaluationParams struct {
-	OrgID       int64
-	Kind        string
-	TeamID      pgtype.Int8
-	RequestedAt time.Time
-}
-
-// InsertTeamEvaluation requests, in the transaction of a save of the Team @team_id, the evaluation of the Teams of the
-// open Alert Groups (C-25.FR-13): the open_group_updates worker of any replica claims the row. A row of @kind that no
-// worker has claimed yet already covers the save, since its run classifies with the Teams as they are then: it is
-// locked, so that no worker claims it before this transaction commits, and no second one is inserted.
-func (q *Queries) InsertTeamEvaluation(ctx context.Context, arg InsertTeamEvaluationParams) error {
-	_, err := q.db.Exec(ctx, insertTeamEvaluation,
-		arg.OrgID,
-		arg.Kind,
-		arg.TeamID,
-		arg.RequestedAt,
-	)
-	return err
-}
-
 const insertTeamIdpEntries = `-- name: InsertTeamIdpEntries :exec
 INSERT INTO team_idp_entries (org_id, team_id, claim, group_name, position)
 SELECT $1, $2, nullif(c.claim, ''), g.group_name, g.position::integer
@@ -508,6 +475,43 @@ func (q *Queries) InsertTeamMatchers(ctx context.Context, arg InsertTeamMatchers
 		arg.Labels,
 		arg.Ops,
 		arg.MatcherValues,
+	)
+	return err
+}
+
+const insertTeamUpdate = `-- name: InsertTeamUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = $2::text AND u.leased_by IS NULL
+      AND ($2::text = 'team_evaluation' OR u.team_id = $3)
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
+SELECT $1, $2::text, $3, $4::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertTeamUpdateParams struct {
+	OrgID       int64
+	Kind        string
+	TeamID      pgtype.Int8
+	RequestedAt time.Time
+}
+
+// InsertTeamUpdate requests, in the transaction of a save of the Team @team_id, that the save reach the open Alert
+// Groups with a row of @kind: team_evaluation for the evaluation of their Teams (C-25.FR-13), team_name for the
+// re-render of the Root messages of those that have the Team after a rename (C-29.FR-1). The open_group_updates worker
+// of any replica claims the row. A row team_evaluation that no worker has claimed yet already covers the save, since
+// its run classifies with the Teams as they are then, and so does a row team_name of the same Team, which renders the
+// Team's name as it is then: it is locked, so that no worker claims it before this transaction commits, and no second
+// one is inserted.
+func (q *Queries) InsertTeamUpdate(ctx context.Context, arg InsertTeamUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertTeamUpdate,
+		arg.OrgID,
+		arg.Kind,
+		arg.TeamID,
+		arg.RequestedAt,
 	)
 	return err
 }

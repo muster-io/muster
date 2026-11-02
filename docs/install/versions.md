@@ -136,6 +136,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       [subtrees](../sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
       [identity provider entries of Teams](../concepts/teams.md#membership-from-the-identity-provider). The Role mapping
       reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
+    - Migration 0031 lets a change of the Organization's severity label, Team label, Instance labels or time zone, and
+      a rename of a Team, reach the open Alert Groups: their Root messages are edited once, Quietly, to show the new
+      labels, start time or name, instead of at each Alert Group's next change.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -199,6 +202,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     higher one, and it changes no Team membership. Do not save the OIDC settings until every replica runs 0.2.0: a save
     on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
     mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
+    Neither a 0.1 replica nor one of a development image without migration 0031 writes the re-render of the open Root
+    messages after a change of the severity label, the Team label, the Instance labels or the time zone, or a rename of
+    a Team, and neither claims one: such a change saved on one of them reaches the open Root messages only at each
+    Alert Group's next change, so make it after every replica runs this version.
 
     **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
     that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
@@ -380,6 +387,29 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_claims_seen_check;
         ALTER TABLE team_users VALIDATE CONSTRAINT team_users_source_check;
         ALTER TABLE team_users VALIDATE CONSTRAINT team_users_idp_matches_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0031 lets a change of the Organization's message settings or a rename of a Team re-render the open
+    Root messages in three transactions: the first adds the new CHECK of the kinds of `open_group_updates`, the second
+    validates it, the third drops the CHECK of 0029. A failure leaves the schema recorded as dirty at version 31. To
+    recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v5_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 30, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v5_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v4_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 

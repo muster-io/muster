@@ -1070,7 +1070,7 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
 -- LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
 -- now, and reads where its run stands; no row when the lease was lost.
 -- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, destination_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, team_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = @org_id AND id = @id AND leased_by = @owner::text AND lease_until > @now::timestamptz
 FOR NO KEY UPDATE;
@@ -1131,6 +1131,18 @@ WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
               JOIN destinations x ON x.org_id = d.org_id AND x.id = d.destination_id
               WHERE d.org_id = @org_id AND d.alert_group_id = g.id AND NOT d.desired_retire AND x.buttons IS NULL
                 AND x.type <> 'webhook' AND x.deleted_at IS NULL)
+ORDER BY g.id
+LIMIT @lim;
+
+-- ListOpenGroupsOfTeamAfter lists, by id after a cursor, a batch of the open Alert Groups that have the Team, whose
+-- Root messages show its name, which a rename re-renders.
+-- name: ListOpenGroupsOfTeamAfter :many
+SELECT g.id
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.status <> 'resolved' AND g.id > @after_id
+  AND EXISTS (SELECT 1
+              FROM alert_group_teams t
+              WHERE t.org_id = @org_id AND t.alert_group_id = g.id AND t.team_id = @team_id)
 ORDER BY g.id
 LIMIT @lim;
 

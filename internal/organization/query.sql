@@ -169,14 +169,17 @@ RETURNING p.previous;
 -- InsertOrganizationUpdate requests that a change of the Organization reach its open Alert Groups, with a row of
 -- @kind without a scope: organization_buttons for the open Root messages of the Destinations that follow the
 -- Organization's button set (C-28.FR-9), team_evaluation for the Teams of the open Alert Groups after a new Team label
--- (C-25.FR-13). The open_group_updates worker of any replica claims the row. A row team_evaluation that no worker has
--- claimed yet already covers the change, since its run classifies with the Teams as they are then: it is locked, so
--- that no worker claims it before this transaction commits, and no second one is inserted.
+-- (C-25.FR-13), organization_message_settings for every open Root message after a change of a setting it shows
+-- (C-29.FR-1 to FR-3). The open_group_updates worker of any replica claims the row. A row team_evaluation or
+-- organization_message_settings that no worker has claimed yet already covers the change, since its run classifies
+-- with the Teams and renders with the settings as they are then: it is locked, so that no worker claims it before this
+-- transaction commits, and no second one is inserted.
 -- name: InsertOrganizationUpdate :exec
 WITH pending AS (
     SELECT u.id
     FROM open_group_updates u
-    WHERE u.org_id = @org_id AND u.kind = 'team_evaluation' AND u.leased_by IS NULL AND @kind::text = 'team_evaluation'
+    WHERE u.org_id = @org_id AND u.kind = @kind::text AND u.leased_by IS NULL
+      AND @kind::text IN ('team_evaluation', 'organization_message_settings')
     FOR UPDATE
 )
 INSERT INTO open_group_updates (org_id, kind, requested_at)

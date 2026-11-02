@@ -67,7 +67,10 @@
   `open_group_updates`, and `alert_groups.description`, C-29.FR-1, FR-2, S-125) and
   [`0030_identity_provider_claims_and_team_entries`](../../internal/db/migrations/0030_identity_provider_claims_and_team_entries.up.sql)
   (the claim of every entry of the Role mapping, the claims seen, missing and listed, the Team entries of the identity
-  provider and the membership they give, C-03.FR-5 to FR-7 revised for L2, C-25.FR-4, S-117), in
+  provider and the membership they give, C-03.FR-5 to FR-7 revised for L2, C-25.FR-4, S-117) and
+  [`0031_message_settings_updates`](../../internal/db/migrations/0031_message_settings_updates.up.sql)
+  (the kinds `organization_message_settings` and `team_name` of `open_group_updates`, the re-render of the open Root
+  messages after a change of the Organization's message settings or a rename of a Team, C-29.FR-1 to FR-3), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -695,6 +698,9 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   Route list first — and an update of the Organization that changes the Team label raises it in the same `UPDATE`
   and inserts a row `team_evaluation` of `open_group_updates` without a Team in the same transaction
   ([section 5](#5-queues-and-claims)).
+  An update that changes `severity_label`, `team_label`, `instance_labels` or `time_zone`, which the Root messages
+  show (C-29.FR-1 to FR-3), inserts a row `organization_message_settings` of `open_group_updates` without a scope in
+  the same transaction (migration 0031, [section 5](#5-queues-and-claims)).
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.
@@ -1473,7 +1479,9 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   enough on its own: an Alert that any one picks belongs to the Team.
 - Creating a Team, and saving one with a changed slug or changed Team matchers, inserts in the transaction of the save a
   row `team_evaluation` of `open_group_updates` with the Team in `team_id` ([section 5](#5-queues-and-claims)); a save
-  of the name, the description, the Working hours or the people inserts none.
+  of the name, the description, the Working hours or the people inserts none. A save with a changed name inserts a row
+  `team_name` with the Team in `team_id` (migration 0031), which re-renders the Root messages of the open Alert Groups
+  that have the Team, whose field Teams shows its name (C-29.FR-1).
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
@@ -1607,8 +1615,10 @@ Organization (`organization_buttons`) from 0.2.0, the evaluation of the Teams of
 save of a Team or of the Team label (`team_evaluation`, with the saved Team in `team_id`, null for the Team label;
 `ON DELETE SET NULL`, as Teams are deleted softly), and "Labels in the message" of a Route (`route_message_labels`,
 with its Route in `route_id`, which `open_group_updates_route_scope_check` requires; it also covers a rename of the
-Route, which the field Route of the messages shows), more kinds as later stories add them to the kind `CHECK`,
-versioned `open_group_updates_kind_v4_check` since migration 0029 — is one row of `open_group_updates`, inserted in the
+Route, which the field Route of the messages shows), the Severity label, Team label, Instance labels or time zone of
+the Organization, which the Root messages show (`organization_message_settings`, without a scope), and the name of a
+Team (`team_name`, with the Team in `team_id`) from migration 0031, more kinds as later stories add them to the kind
+`CHECK`, versioned `open_group_updates_kind_v5_check` since migration 0031 — is one row of `open_group_updates`, inserted in the
 transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
 at start, by that notification and by the development clock, and claims one row at a time:
 
@@ -1640,13 +1650,22 @@ messages Quietly — the rendering is marked as a change of configuration, so de
 and releases a held Urgent Alert Group Quietly; it records no `unknown_team_value`, starts nothing, and leaves an Alert
 Group without a new Team as it is, so a second run records nothing. Of an Alert Group a person resolved that is still
 in its Grace period it only adds the `alert_teams` rows of the firing tails, which the end of the Grace period groups
-again with them. The Alert Groups of a batch are changed in the order (Route, id), as those of a button set are. Each
+again with them. The Alert Groups of a batch are changed in the order (Route, id), as those of a button set are. A
+row `organization_message_settings` walks the Alert Groups that `team_evaluation` walks, and a row `team_name` the
+open Alert Groups with an `alert_group_teams` row of its Team; each batch of either first evaluates the Teams of its
+Alert Groups as a batch of `team_evaluation` does, under the same lock, then runs the re-render step without a lifecycle
+event on the open ones, marked as a change of configuration. The evaluation goes first so that a save that also
+writes a row `team_evaluation` — a new Team label, or a new name with new Team matchers — edits each Root message
+once, whichever row runs first: a Team that joins re-renders its Alert Group with the Quiet `team_joined`, and the
+re-render that follows finds the hash unchanged. Each
 batch takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by
 `hashint8` of the Organization) exclusively before it locks its Alert Groups, and routing takes it shared before a
 Snapshot reads the stamp of the classification: a Snapshot that classified with the Teams before a save commits its
 Alert Groups before the batch reads them. A save inserts no second row while one `team_evaluation` row of the
 Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so no worker claims it before
-the save commits, and its run classifies with every save before it.
+the save commits, and its run classifies with every save before it. A row `organization_message_settings` is
+inserted the same way while one of the Organization is still unclaimed, and a row `team_name` while one of the same
+Team is: the run renders with the settings and the name as they are then.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

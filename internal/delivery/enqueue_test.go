@@ -252,3 +252,43 @@ func TestTeamsEvaluatedIsQuiet(t *testing.T) {
 		t.Errorf("released by the teams evaluated %+v", p)
 	}
 }
+
+// TestMessageSettingsRerenderIsQuiet is C-29.FR-1 to FR-3 and ADR-0018 in delivery: the re-render of the open Root
+// messages after a change of the Organization's Severity label, Team label, Instance labels or time zone, or of a
+// Team's name, has no lifecycle event and is marked as a change of configuration; when it changes the Desired state of
+// a Not delivered Publication that was never published, it publishes it Quietly, once. When the evaluation of the
+// Teams that runs before it already brought the Desired state with a Quiet team_joined, the re-render that follows
+// finds the hash unchanged and changes nothing, so that the Root message is published once.
+func TestMessageSettingsRerenderIsQuiet(t *testing.T) {
+	joined := groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Variant: groups.VariantAny,
+		Loudness: groups.Quiet}
+	for _, c := range []struct {
+		name   string
+		events [][]groups.Recorded
+	}{
+		{"the re-render alone", [][]groups.Recorded{nil}},
+		{"a team joined first", [][]groups.Recorded{{joined}, nil}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+			d := e.only(t)
+			d.state, d.publishedAt = "not_delivered", nil
+			version := d.version
+			for _, events := range c.events {
+				if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring,
+					"disk full in Europe/Berlin"), Actor: groups.System, Events: events,
+					Configuration: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if d := e.only(t); d.state != "pending" || d.loud.Bool || d.version != version+1 {
+				t.Fatalf("the delivery is %s, loud %+v, version %d after %d", d.state, d.loud, d.version, version)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+}

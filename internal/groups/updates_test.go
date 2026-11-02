@@ -111,7 +111,11 @@ func TestUpdateNames(t *testing.T) {
 		organization.KindTeamEvaluation != KindTeamEvaluation {
 		t.Error("organization and groups name the open alert group updates differently")
 	}
-	if teams.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || teams.KindTeamEvaluation != KindTeamEvaluation {
+	if organization.KindMessageSettings != KindOrganizationMessageSettings {
+		t.Error("organization and groups name the open alert group updates of the message settings differently")
+	}
+	if teams.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || teams.KindTeamEvaluation != KindTeamEvaluation ||
+		teams.KindTeamName != KindTeamName {
 		t.Error("teams and groups name the open alert group updates differently")
 	}
 }
@@ -139,7 +143,7 @@ func (f *fakeDB) LockOpenGroupUpdate(_ context.Context, arg dbgen.LockOpenGroupU
 	}
 	return dbgen.LockOpenGroupUpdateRow{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
 		Valid: u.routeID != 0}, DestinationID: pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
-		AfterAlertGroupID: u.after}, nil
+		TeamID: pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0}, AfterAlertGroupID: u.after}, nil
 }
 
 func (f *fakeDB) AdvanceOpenGroupUpdate(_ context.Context, arg dbgen.AdvanceOpenGroupUpdateParams) error {
@@ -239,6 +243,24 @@ func (f *fakeDB) ListEvaluatedGroupsAfter(_ context.Context, arg dbgen.ListEvalu
 	var out []int64
 	for _, g := range f.sortedGroups() {
 		if (g.Status != "resolved" || g.GraceDeadline.Valid) && g.ID > arg.AfterID && arg.OrgID == orgID {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(arg.Lim))], nil
+}
+
+func (f *fakeDB) ListOpenGroupsOfTeamAfter(_ context.Context, arg dbgen.ListOpenGroupsOfTeamAfterParams) ([]int64,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsOfTeamAfter"); err != nil {
+		return nil, err
+	}
+	ts := f.teamsOf()
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID &&
+			slices.ContainsFunc(ts.groups[g.ID], func(t fakeGroupTeam) bool { return t.team == arg.TeamID }) {
 			out = append(out, g.ID)
 		}
 	}
@@ -1065,5 +1087,194 @@ func TestMessageLabelsUpdate(t *testing.T) {
 	u.round(t, u.worker)
 	if !strings.Contains(u.log.String(), `"event":"open_group_update_failed","kind":"route_message_labels"`) {
 		t.Errorf("a failing list: %s", u.log)
+	}
+}
+
+// renders records the renderings the dispatcher hands over as group:events, and reports a changed Desired state only
+// on the first rendering of each Alert Group, as delivery does with a Root message whose hash is then unchanged.
+type renders struct {
+	got  []string
+	seen map[int64]bool
+	fail error
+}
+
+func (r *renders) install(t *testing.T, svc *Service) {
+	t.Helper()
+	r.seen = map[int64]bool{}
+	svc.SetRerender(func(_ context.Context, _ DBTX, rd Rendering) error {
+		if r.fail != nil {
+			return r.fail
+		}
+		if rd.Actor != System || !rd.Configuration {
+			t.Errorf("a rendering as %+v, configuration %v", rd.Actor, rd.Configuration)
+		}
+		events := make([]string, len(rd.Events))
+		for i, e := range rd.Events {
+			events[i] = string(e.Event) + "/" + string(e.Loudness)
+		}
+		r.got = append(r.got, fmt.Sprintf("%d:%s", rd.Group.ID, strings.Join(events, ",")))
+		if !r.seen[rd.Group.ID] {
+			r.seen[rd.Group.ID] = true
+			rd.Changed()
+		}
+		return nil
+	})
+}
+
+// TestMessageSettingsUpdate is C-29.FR-1 to FR-3 on the worker: a row organization_message_settings, which a changed
+// Severity label, Team label, Instance labels or time zone writes, first evaluates the Teams of every open Alert Group,
+// as team_evaluation does, then runs the re-render step without a lifecycle event on each, by id in batches and in the
+// order (Route, id), marked as a change of configuration, so that delivery edits each Root message Quietly. A Team the
+// evaluation brings joins before the re-render, so that its Alert Group is rendered with the Quiet team_joined first
+// and its Root message is not changed again by the re-render. A resolved Alert Group is not rendered. Nothing is saved
+// for the re-render, no Timeline entry is recorded but the team_joined, and the row is deleted with its last batch and
+// logged with the number of Alert Groups a Team joined or whose Desired state changed, none on a second run.
+func TestMessageSettingsUpdate(t *testing.T) {
+	e := newEvaluation(t)
+	var r renders
+	_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+	_, other := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "b", "team": "nobody"})
+	gone, resolved := e.fire(t, 2, map[string]string{"alertname": "Gone", "cluster": "c"})
+	e.resolve(t, gone)
+	if resolved.Status != string(StatusResolved) {
+		t.Fatalf("the alert group is %s", resolved.Status)
+	}
+	r.install(t, e.svc)
+	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
+	e.worker.Batch = 1
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindOrganizationMessageSettings,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	want := []string{fmt.Sprintf("%d:team_joined/quiet", g.ID), fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", other.ID)}
+	if !slices.Equal(r.got, want) {
+		t.Errorf("rendered %v, want %v", r.got, want)
+	}
+	if got := e.teamEntries(g); !slices.Equal(got, []string{"team_joined/alerts/quiet//search/label//"}) {
+		t.Errorf("timeline %v", got)
+	}
+	if len(e.db.entries) != entries+1 || e.db.calls["SaveGroup"] != saves+1 || len(e.db.updates) != 0 ||
+		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"organization_message_settings",`+
+			`"alert_groups":2`) {
+		t.Errorf("%d entries, %d saves, rows %d, log %s", len(e.db.entries)-entries, e.db.calls["SaveGroup"]-saves,
+			len(e.db.updates), e.log)
+	}
+
+	// A second run renders each open Alert Group again, changes no Desired state and records nothing.
+	r.got = nil
+	entries, saves = len(e.db.entries), e.db.calls["SaveGroup"]
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindOrganizationMessageSettings,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", other.ID)}; !slices.Equal(r.got, want) ||
+		len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || !strings.Contains(e.log.String(),
+		`"kind":"organization_message_settings","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, %d entries, %d saves, log %s", r.got, len(e.db.entries)-entries,
+			e.db.calls["SaveGroup"]-saves, e.log)
+	}
+
+	// A failing evaluation, list or re-render fails the batch and leaves the row for any replica.
+	for _, fail := range []string{"LockTeamEvaluation", "ListEvaluatedGroupsAfter", "render"} {
+		e.log.Reset()
+		if fail == "render" {
+			r.fail = errBoom
+		} else {
+			e.db.fail[fail] = errBoom
+		}
+		e.db.updates = []*fakeUpdate{{id: e.db.id(), kind: KindOrganizationMessageSettings, requested: e.clock.Now()}}
+		e.round(t, e.worker)
+		if len(e.db.updates) != 1 || !strings.Contains(e.log.String(),
+			`"event":"open_group_update_failed","kind":"organization_message_settings"`) {
+			t.Errorf("%s fails: rows %d, log %s", fail, len(e.db.updates), e.log)
+		}
+		delete(e.db.fail, fail)
+		r.fail = nil
+		e.real.Advance(UpdateLease)
+	}
+}
+
+// TestTeamNameUpdate is C-29.FR-1 on the worker: a row team_name, which a rename of a Team writes, re-renders, Quietly
+// and without a lifecycle event, the open Alert Groups that have the Team, whose field Teams shows its name, and no
+// other: not one of another Team, not one without a Team, not a resolved one. It is deleted with its last batch and
+// logged with its Team; a second run changes no Desired state; a row of a Team no open Alert Group has renders
+// nothing.
+func TestTeamNameUpdate(t *testing.T) {
+	e := newEvaluation(t)
+	var r renders
+	_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+	_, paid := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "b", "team": "payments"})
+	_, none := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "c"})
+	gone, resolved := e.fire(t, 3, map[string]string{"alertname": "Gone", "cluster": "d", "team": "search"})
+	e.save(0)
+	e.round(t, e.worker)
+	e.resolve(t, gone)
+	if !slices.Equal(e.groupTeamSlugs(t, g), []string{"search:label"}) ||
+		!slices.Equal(e.groupTeamSlugs(t, paid), []string{"payments:label"}) ||
+		!slices.Equal(e.groupTeamSlugs(t, resolved), []string{"search:label"}) || len(e.groupTeamSlugs(t, none)) != 0 {
+		t.Fatalf("teams %v %v %v", e.groupTeamSlugs(t, g), e.groupTeamSlugs(t, paid), e.groupTeamSlugs(t, resolved))
+	}
+	ts := e.db.teamsOf()
+	ref := ts.refs[search]
+	ref.Name = "Search and discovery"
+	ts.refs[search] = ref
+	r.install(t, e.svc)
+	entries, saves := len(e.db.entries), e.db.calls["SaveGroup"]
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID)}; !slices.Equal(r.got, want) {
+		t.Errorf("rendered %v, want %v", r.got, want)
+	}
+	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 ||
+		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"team_name",`+
+			`"team":"TMSEARCHAAAAAA","alert_groups":1`) {
+		t.Errorf("%d entries, %d saves, rows %d, log %s", len(e.db.entries)-entries, e.db.calls["SaveGroup"]-saves,
+			len(e.db.updates), e.log)
+	}
+
+	r.got = nil
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
+		requested: e.clock.Now()})
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: checkout,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID)}; !slices.Equal(r.got, want) || len(e.db.updates) != 0 ||
+		!strings.Contains(e.log.String(), `"kind":"team_name","team":"TMSEARCHAAAAAA","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, rows %d, log %s", r.got, len(e.db.updates), e.log)
+	}
+
+	e.db.fail["ListOpenGroupsOfTeamAfter"] = errBoom
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if len(e.db.updates) != 1 || !strings.Contains(e.log.String(),
+		`"event":"open_group_update_failed","kind":"team_name","team":"TMSEARCHAAAAAA"`) {
+		t.Errorf("a failing list: rows %d, log %s", len(e.db.updates), e.log)
+	}
+}
+
+// TestUpdateKindsOfOlderVersions is the rolling update for the kinds of 0031: a replica of a version that does not
+// know organization_message_settings and team_name — whose kinds end with team_evaluation — never claims a row of
+// them nor waits for one, and a replica of this version claims both.
+func TestUpdateKindsOfOlderVersions(t *testing.T) {
+	e := newEvaluation(t)
+	known := updateKinds
+	t.Cleanup(func() { updateKinds = known })
+	updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
+		KindOrganizationButtons, KindTeamEvaluation}
+	e.db.updates = append(e.db.updates,
+		&fakeUpdate{id: e.db.id(), kind: KindOrganizationMessageSettings, requested: e.clock.Now()},
+		&fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search, requested: e.clock.Now()})
+	if _, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease); ok || err != nil {
+		t.Errorf("an older replica claimed a row of a newer kind: %v, %v", ok, err)
+	}
+	if next, err := e.svc.nextUpdate(t.Context(), e.worker.Lease, time.Hour); next != time.Hour || err != nil {
+		t.Errorf("an older replica waits %v for a row of a newer kind, %v", next, err)
+	}
+	updateKinds = known
+	for _, kind := range []string{KindOrganizationMessageSettings, KindTeamName} {
+		u, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease)
+		if !ok || err != nil || u.kind != kind {
+			t.Errorf("claimed %+v, %v, %v; want %s", u, ok, err, kind)
+		}
 	}
 }

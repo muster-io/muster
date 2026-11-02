@@ -19,7 +19,8 @@ The defaults below are what a new installation has.
 **Time zone of messages** (`organization.time_zone`, `UTC`)
 :   The time zone of every time in a message in a messenger. It is `UTC` until you change it, so a new installation
     shows times such as "started 07:12" in UTC. Times in messages are absolute, never "5 minutes ago". Each User sees the
-    web UI in their own time zone, which they set in their profile.
+    web UI in their own time zone, which they set in their profile. A change edits the open Root messages within
+    seconds, as edits that notify nobody, so that their start time is in the new time zone.
 
 **Start of the working day** (`organization.workday_start`, `09:00`) and **First day of the week** (`organization.week_start`, `monday`)
 :   The Snooze presets "Until tomorrow 09:00" and "Until Monday 09:00" end at this time of day and on this day, in the
@@ -79,7 +80,10 @@ From 0.2.0 the page has no **Critical is Urgent** switch: an Alert Group is
 
 Changes to Severity levels and Instance labels apply to Alerts evaluated from then on. Open Alert Groups keep their
 status. A change of **Buttons of Root messages** updates the open Root messages of the Destinations that follow the
-Organization within seconds, as edits that notify nobody.
+Organization within seconds, as edits that notify nobody. So does a change of the severity label, the Team label or the
+Instance labels for every open Root message, which shows them in its
+[key labels and Alerts](messages-and-templates.md#the-default-message): each is edited once, and one that the change
+does not alter is left as it is.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
