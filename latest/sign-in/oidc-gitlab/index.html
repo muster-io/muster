@@ -2995,11 +2995,11 @@
 <h1 id="sign-in-with-gitlab">Sign-in with GitLab<a class="headerlink" href="#sign-in-with-gitlab" title="Permanent link">&para;</a></h1>
 <p>This page sets up sign-in through GitLab with OpenID Connect (OIDC), on <code>https://gitlab.com</code> or on GitLab
 self-managed. GitLab is an OIDC provider for its own users: a person signs in to Muster with their GitLab account, and
-the groups they belong to in GitLab decide their Role.</p>
+the groups they belong to in GitLab, and their role in them, decide their Role.</p>
 <p>GitLab differs from <a href="../oidc-keycloak/">Keycloak</a> in two ways that matter here:</p>
 <ul>
-<li>it puts group <strong>paths</strong> such as <code>platform/sre</code> into the groups claims, and it has two of them, <code>groups</code> and
-  <code>groups_direct</code>;</li>
+<li>it puts group <strong>paths</strong> such as <code>platform/sre</code> into its claims: two groups claims, <code>groups</code> and <code>groups_direct</code>,
+  and one claim per GitLab role — Owner, Maintainer and Developer;</li>
 <li>it does not offer the scope <code>offline_access</code>, so Muster cannot
   <a href="#no-offline-access">re-check its users in the background</a>.</li>
 </ul>
@@ -3100,7 +3100,7 @@ now; <strong>Renew secret</strong> makes a new one later.</p>
 </tr>
 <tr>
 <td>Group mapping</td>
-<td>group paths to Roles, see <a href="#3-map-groups-to-roles">step 3</a></td>
+<td>group paths, each of a claim, to Roles, see <a href="#3-map-groups-to-roles">step 3</a></td>
 </tr>
 </tbody>
 </table>
@@ -3109,19 +3109,62 @@ scope with <code>invalid_scope</code>, so never add <code>offline_access</code> 
 matching group</strong> stays <strong>None</strong>, as the warning in <a href="#1-create-the-application">step 1</a> says. The other settings — Role
 sync, skipping TOTP and the proxy — work as on the <a href="../oidc-keycloak/#4-configure-muster">Keycloak page</a>.</p>
 <h2 id="3-map-groups-to-roles">3. Map groups to Roles<a class="headerlink" href="#3-map-groups-to-roles" title="Permanent link">&para;</a></h2>
-<p>GitLab names each group by its full path, such as <code>platform</code> or <code>platform/sre</code>, and offers two claims:</p>
+<p>GitLab names each group by its full path, such as <code>platform</code> or <code>platform/sre</code>, and offers these claims:</p>
 <dl>
 <dt><code>groups</code></dt>
 <dd>The paths of every group the person is a member of, directly or through an ancestor group: a member of
-<code>platform</code> is listed with <code>platform</code> and with each of its subgroups, such as <code>platform/sre</code>. GitLab puts it in
-the userinfo answer, not in the ID token, and Muster reads it from there.</dd>
+<code>platform</code> is listed with <code>platform</code> and with each of its subgroups, such as <code>platform/sre</code>, but a member of
+<code>platform/sre</code> alone is not listed with <code>platform</code>: the groups above a person's own never appear. GitLab puts it
+in the userinfo answer, not in the ID token, and Muster reads it from there.</dd>
 <dt><code>groups_direct</code></dt>
 <dd>The paths of the groups the person is a direct member of, without the subgroups they reach through an ancestor.
 GitLab puts it in the ID token.</dd>
+<dt><code>https://gitlab.org/claims/groups/owner</code>, <code>…/maintainer</code> and <code>…/developer</code></dt>
+<dd>The role claims: each lists the groups where the person holds that GitLab role <strong>directly</strong> — never the subgroups
+they reach through an ancestor — and a person has only the claims of the roles they hold, so an Owner of
+<code>platform</code> has the owner claim <code>["platform"]</code> and no maintainer claim. GitLab lists all three in discovery and puts
+them in the userinfo answer, where Muster reads them.</dd>
 </dl>
-<p>Choose <code>groups</code> when membership of a parent group should count for its subgroups, as it does in GitLab itself;
-choose <code>groups_direct</code> when a Role should follow only the groups a person was added to by name. For example, with the
-groups claim <code>groups</code>:</p>
+<p>Every entry of the mapping names a group and, optionally, the claim it reads; without a claim it reads the <strong>Groups
+claim</strong> of the settings. A group is matched exactly, letter case included, so copy it from the group's URL, except a
+<strong>subtree</strong> <code>a/b/*</code>, which matches <code>a/b</code> and every group below it at <code>/</code> boundaries: <code>platform/*</code> matches <code>platform</code>
+and <code>platform/sre</code>, never <code>platformx</code>. There are no other wildcards. When the entries map a person to several Roles,
+the highest wins.</p>
+<p>For Admin, map the owner claim to your top group <strong>exactly</strong>. For example, to make the Owners of the group <code>corp</code>
+Admins and everyone else in it a Responder:</p>
+<dl>
+<dt><code>groups</code> <code>corp/*</code></dt>
+<dd>Responder: every member of <code>corp</code> or of any group below it. <code>groups</code> lists the groups a person is a member of
+and those below them, never the groups above, so a Developer of <code>corp/team-a</code> alone has <code>groups</code>
+<code>["corp/team-a"]</code>, which <code>corp/*</code> matches.</dd>
+<dt><code>https://gitlab.org/claims/groups/owner</code> <code>corp</code></dt>
+<dd>Admin: the people who hold Owner on <code>corp</code> itself.</dd>
+</dl>
+<p>A Developer of <code>corp/team-a</code> alone is a Responder, and a person outside <code>corp</code> matches no entry and is refused while
+<strong>Role for users without a matching group</strong> is <strong>None</strong>.</p>
+<div class="admonition danger">
+<p class="admonition-title">A subtree entry of a role claim also matches the Owners of new subgroups</p>
+<p>A role claim lists the groups where the person holds the role directly, and GitLab makes whoever creates a
+subgroup its direct Owner. A subtree entry such as the owner claim <code>corp/*</code> → Admin therefore makes an Admin of
+everyone allowed to create a subgroup below <code>corp</code> — by default its Maintainers too — once they create one. Map
+the owner claim, and the other role claims, to exact groups for Roles; if you do use a subtree entry, restrict
+<strong>Roles allowed to create subgroups</strong> in the settings of the top group (<strong>Settings → General → Permissions and
+group features</strong>) to Owners. An exact entry <code>corp/sre</code> does not match an Owner of <code>corp</code>, who holds that role in
+<code>corp/sre</code> only through its parent: add an entry for each group whose Owners should have the Role.</p>
+<p>Subtree entries are harmless in the identity provider entries of a Team: a Team grants no Permission and no Role
+(<a href="../../concepts/teams/#membership-from-the-identity-provider">Teams</a>).</p>
+</div>
+<p>The OIDC page of Muster shows the claim of each entry under its group, read-only, by a short name such as <code>owner</code>
+with the full claim in a tooltip, and keeps it when you save there; to add or change an entry of another claim, use
+<code>PUT /api/v1/oidc-settings</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"group_mappings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"corp/*"</span><span class="p">,</span><span class="w"> </span><span class="nt">"role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"responder"</span><span class="p">},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"claim"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://gitlab.org/claims/groups/owner"</span><span class="p">,</span><span class="w"> </span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"corp"</span><span class="p">,</span><span class="w"> </span><span class="nt">"role"</span><span class="p">:</span><span class="w"> </span><span class="s2">"admin"</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>With only the groups claims, choose <code>groups</code> when membership of a parent group should count for its subgroups, as it
+does in GitLab itself, and <code>groups_direct</code> when a Role should follow only the groups a person was added to by name.
+For example, with the groups claim <code>groups</code>:</p>
 <table>
 <thead>
 <tr>
@@ -3145,19 +3188,21 @@ groups claim <code>groups</code>:</p>
 </tbody>
 </table>
 <p>Every member of <code>platform</code> is a Viewer at least, and also a member of <code>platform/sre</code> through it, so a Responder. To keep
-<code>platform</code> members Viewers, use <code>groups_direct</code>: then only the people added to <code>platform/sre</code> itself are Responders.
-When a person's groups map to several Roles, the highest wins.</p>
-<p>A group path is matched exactly, letter case included, so copy it from the group's URL.</p>
+<code>platform</code> members Viewers, use <code>groups_direct</code>: then only the people added to <code>platform/sre</code> itself are Responders.</p>
+<p>Teams take their people from GitLab the same way: see
+<a href="../../concepts/teams/#membership-from-the-identity-provider">Membership from the identity provider</a>.</p>
 <h2 id="4-check-the-connection">4. Check the connection<a class="headerlink" href="#4-check-the-connection" title="Permanent link">&para;</a></h2>
 <p>Press <strong>Check connection</strong>. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled, how long it took, the endpoints GitLab announced, the <strong>Requested scopes</strong> of a sign-in
 (<code>openid profile email</code> with the scopes above) and that <strong>Offline access</strong> is not offered. That is expected for GitLab
-and is not a problem: it only means the rules of <a href="#no-offline-access">No offline access</a> apply.</p>
+and is not a problem: it only means the rules of <a href="#no-offline-access">No offline access</a> apply. The check also keeps
+the claims GitLab lists, the role claims among them, and warns about each claim of the mapping that GitLab does not
+list, until a sign-in carries it.</p>
 <h2 id="5-sign-in">5. Sign in<a class="headerlink" href="#5-sign-in" title="Permanent link">&para;</a></h2>
 <p>Open Muster and press <strong>Sign in with {display name}</strong>. GitLab asks the person to authorize Muster once, unless the
 application is trusted, and the first sign-in creates their Muster user with the Role of their groups. The login is
 GitLab's username (<code>preferred_username</code>). As with any provider, Muster never merges accounts by login or email, and
-a person whose groups map to no Role is refused; the <a href="../oidc-keycloak/#5-sign-in">Keycloak page</a> lists the errors of
+a person whom no entry matches is refused; the <a href="../oidc-keycloak/#5-sign-in">Keycloak page</a> lists the errors of
 the sign-in page.</p>
 <h2 id="no-offline-access">No offline access<a class="headerlink" href="#no-offline-access" title="Permanent link">&para;</a></h2>
 <p>GitLab's discovery does not list <code>offline_access</code> in <code>scopes_supported</code>, so Muster does not request it. GitLab still
@@ -3178,8 +3223,11 @@ signs in through GitLab:</p>
 <dd>GitLab refused a scope Muster asked for: a scope in Muster's <strong>Scopes</strong> that the application does not have, or
 <code>offline_access</code> typed into that list. Remove it from the list, or add it to the application in GitLab.</dd>
 <dt>The Role is not the one you expect</dt>
-<dd>Check the groups claim: with <code>groups_direct</code>, membership through a parent group does not count. The Audit log
-entry <code>session.oidc_refused</code> of a refused sign-in lists the groups GitLab sent.</dd>
+<dd>Check the claim of each entry: with <code>groups_direct</code>, membership through a parent group does not count, and a role
+claim lists only the groups where the role is held directly, so an exact entry of a subgroup does not match an
+Owner of its parent: add an exact entry for the parent rather than a subtree entry, which would also match the
+Owner of any new subgroup (see <a href="#3-map-groups-to-roles">step 3</a>). The Audit log entry <code>session.oidc_refused</code> of a
+refused sign-in lists the values GitLab sent for every claim the mapping read.</dd>
 </dl>
 
 

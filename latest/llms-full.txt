@@ -1089,6 +1089,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       of an Alert Group, `alert_groups.description`, set once like its summary. An Alert Group created before the
       upgrade, or by a 0.1 replica during it, has none until a new Alert with a description joins it on 0.2.0, which
       sets it; until then its Root messages show no description.
+    - Migration 0030 adds the claim of every entry of the Role mapping, with
+      [subtrees](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
+      [identity provider entries of Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider). The Role mapping
+      reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1145,7 +1149,18 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     footer, buttons and links — no fields, key labels, description or Alerts, which 0.1 does not know — and stays so
     until the next change of its Alert Group, since its Desired state, and so its hash, is the one 0.2.0 stored. Keep
     the overlap of the two versions short. An Alert Group that a 0.1 replica creates during the rollout has no
-    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0.
+    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0. A 0.1 replica reads
+    the Role mapping against the groups claim alone, so 0.2.0 shows it only the entries it reads the same way — the
+    groups claim and an exact group: while the rollout lasts, a sign-in on a 0.1 replica ignores the entries of another
+    claim, such as GitLab's role claims, and the subtrees `a/b/*`, which may refuse it or give a lower Role, never a
+    higher one, and it changes no Team membership. Do not save the OIDC settings until every replica runs 0.2.0: a save
+    on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
+    mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
+
+    **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
+    that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
+    anywhere else still matches only that exact group name, but saving the OIDC settings is refused with `422`
+    `invalid_format` at that entry until it is changed or removed.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -1297,6 +1312,31 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v4_check;
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_scope_check;
         ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0030 adds the claims of the Role mapping and the identity provider entries of Teams in two
+    transactions: the first adds the columns and the table and fills the Role mapping, the second validates the new
+    CHECKs. A failure leaves the schema recorded as dirty at version 30. To recover, with the same database role as
+    Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'oidc_settings' AND column_name = 'role_mappings';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 29, dirty = false;`.
+    3. If it returns 1, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_role_mappings_check;
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_claims_seen_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_source_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_idp_matches_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 
@@ -7407,6 +7447,12 @@ Muster reads the groups from the ID token, and from the userinfo endpoint when t
 userinfo answer must be plain JSON, not a signed JWT. The name of the claim is the **Groups claim** of the OIDC
 settings; it is `groups` unless you change both.
 
+An entry of the mapping may also read **another claim**, named in the entry, such as a claim of client roles added
+by another mapper; Muster reads it the same way, from the ID token and then from userinfo. Without a claim, an entry
+reads the groups claim. A group in an entry is matched exactly, or as a subtree `a/b/*`, which matches `a/b` and every
+group below it at `/` boundaries — useful with **Full group path** on, where `/platform/*` matches `/platform` and
+`/platform/sre`.
+
 ## 3. Allow `offline_access`
 
 Muster asks for the scope `offline_access` at every sign-in, besides the scopes of the settings, from every identity
@@ -7451,9 +7497,9 @@ Sign in to Muster as an Admin and open **OIDC settings**, or use `PUT /api/v1/oi
 | Display name | the name on the button "Sign in with {name}"; by default the host of the issuer URL |
 | Scopes | `profile email`; `openid` is always added, and `offline_access` because Keycloak offers it |
 | Groups claim | `groups` |
-| Group mapping | for example `muster-admins` → Admin, `oncall` → Responder; when a person's groups map to several Roles, the highest wins |
+| Group mapping | for example `muster-admins` → Admin, `oncall` → Responder; each entry reads the groups claim unless it names another claim; when the entries map a person to several Roles, the highest wins |
 | Role for users without a matching group | none (the default) refuses their sign-in; Viewer or Responder lets them in |
-| Sync Role at sign-in | on (the default): Keycloak decides the Role at every sign-in and re-check; off: the mapping applies only when the user is created |
+| Sync Role at sign-in | on (the default): Keycloak decides the Role at every sign-in and re-check; off: the mapping applies only when the user is created. A re-check reads the refreshed ID token: once a refreshed ID token has carried a claim, one that lacks it counts as no groups, so a person removed from every group is refused; a claim no refreshed ID token has carried yet is not decided then |
 | Skip TOTP when the IdP asserted MFA | off by default; on skips Muster's own TOTP step when the ID token's `amr` claim says that Keycloak used multi-factor authentication. Keycloak sends `amr` only when the client has an *Authentication Method Reference (AMR)* mapper |
 | Proxy | the HTTP, HTTPS or SOCKS5 proxy through which Muster reaches Keycloak, if it needs one |
 
@@ -7490,7 +7536,14 @@ token or userinfo carries the groups claim, and later checks no longer raise it;
 the client ID or the scopes starts over. A sign-in without the claim changes nothing: Keycloak leaves it out for a user
 in no group. If the warning stays after a sign-in of a user in a group, the mapper is missing or not added to the ID
 token. A mapper removed after it worked raises no warning: you notice it through refused sign-ins, whose Audit log
-entry `session.oidc_refused` lists no groups.
+entry `session.oidc_refused` lists no groups; it lists the values of every claim the mapping read.
+
+An entry that names another claim gets the same warning for its claim, which names it, until a sign-in carries that
+claim. The check also keeps the claims Keycloak lists, for the editor to suggest.
+
+The **Roles** section shows the claim of each entry under its group, read-only, by a short name with the full claim in
+a tooltip; set an entry of another claim through `PUT /api/v1/oidc-settings`, as
+`{"claim": "…", "group": "…", "role": "…"}` in `group_mappings`. A save on the page keeps the claim of every entry.
 
 The settings also warn when the mapping is empty and users without a matching group get no Role
 (`nobody_can_sign_in`), and two weeks before the client secret expires.
@@ -7527,12 +7580,12 @@ Local sign-in is always available, also next to OIDC, and the bootstrap Admin or
 
 This page sets up sign-in through GitLab with OpenID Connect (OIDC), on `https://gitlab.com` or on GitLab
 self-managed. GitLab is an OIDC provider for its own users: a person signs in to Muster with their GitLab account, and
-the groups they belong to in GitLab decide their Role.
+the groups they belong to in GitLab, and their role in them, decide their Role.
 
 GitLab differs from [Keycloak](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md) in two ways that matter here:
 
-- it puts group **paths** such as `platform/sre` into the groups claims, and it has two of them, `groups` and
-  `groups_direct`;
+- it puts group **paths** such as `platform/sre` into its claims: two groups claims, `groups` and `groups_direct`,
+  and one claim per GitLab role — Owner, Maintainer and Developer;
 - it does not offer the scope `offline_access`, so Muster cannot
   [re-check its users in the background](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#no-offline-access).
 
@@ -7593,7 +7646,7 @@ Sign in to Muster as an Admin and open **Access → OIDC**, or use `PUT /api/v1/
 | Display name | the name on the button "Sign in with {name}", for example `GitLab`; by default the host of the issuer URL |
 | Scopes | `profile email`; `openid` is always added, and `offline_access` is not, because GitLab does not offer it |
 | Groups claim | `groups` or `groups_direct`, see [step 3](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles) |
-| Group mapping | group paths to Roles, see [step 3](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles) |
+| Group mapping | group paths, each of a claim, to Roles, see [step 3](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles) |
 
 Every scope in the list must be one of the application's scopes: GitLab refuses a sign-in that asks for any other
 scope with `invalid_scope`, so never add `offline_access` to the list for GitLab. The **Role for users without a
@@ -7602,20 +7655,70 @@ sync, skipping TOTP and the proxy — work as on the [Keycloak page](https://mus
 
 ## 3. Map groups to Roles
 
-GitLab names each group by its full path, such as `platform` or `platform/sre`, and offers two claims:
+GitLab names each group by its full path, such as `platform` or `platform/sre`, and offers these claims:
 
 `groups`
 :   The paths of every group the person is a member of, directly or through an ancestor group: a member of
-    `platform` is listed with `platform` and with each of its subgroups, such as `platform/sre`. GitLab puts it in
-    the userinfo answer, not in the ID token, and Muster reads it from there.
+    `platform` is listed with `platform` and with each of its subgroups, such as `platform/sre`, but a member of
+    `platform/sre` alone is not listed with `platform`: the groups above a person's own never appear. GitLab puts it
+    in the userinfo answer, not in the ID token, and Muster reads it from there.
 
 `groups_direct`
 :   The paths of the groups the person is a direct member of, without the subgroups they reach through an ancestor.
     GitLab puts it in the ID token.
 
-Choose `groups` when membership of a parent group should count for its subgroups, as it does in GitLab itself;
-choose `groups_direct` when a Role should follow only the groups a person was added to by name. For example, with the
-groups claim `groups`:
+`https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`
+:   The role claims: each lists the groups where the person holds that GitLab role **directly** — never the subgroups
+    they reach through an ancestor — and a person has only the claims of the roles they hold, so an Owner of
+    `platform` has the owner claim `["platform"]` and no maintainer claim. GitLab lists all three in discovery and puts
+    them in the userinfo answer, where Muster reads them.
+
+Every entry of the mapping names a group and, optionally, the claim it reads; without a claim it reads the **Groups
+claim** of the settings. A group is matched exactly, letter case included, so copy it from the group's URL, except a
+**subtree** `a/b/*`, which matches `a/b` and every group below it at `/` boundaries: `platform/*` matches `platform`
+and `platform/sre`, never `platformx`. There are no other wildcards. When the entries map a person to several Roles,
+the highest wins.
+
+For Admin, map the owner claim to your top group **exactly**. For example, to make the Owners of the group `corp`
+Admins and everyone else in it a Responder:
+
+`groups` `corp/*`
+:   Responder: every member of `corp` or of any group below it. `groups` lists the groups a person is a member of
+    and those below them, never the groups above, so a Developer of `corp/team-a` alone has `groups`
+    `["corp/team-a"]`, which `corp/*` matches.
+
+`https://gitlab.org/claims/groups/owner` `corp`
+:   Admin: the people who hold Owner on `corp` itself.
+
+A Developer of `corp/team-a` alone is a Responder, and a person outside `corp` matches no entry and is refused while
+**Role for users without a matching group** is **None**.
+
+!!! danger "A subtree entry of a role claim also matches the Owners of new subgroups"
+    A role claim lists the groups where the person holds the role directly, and GitLab makes whoever creates a
+    subgroup its direct Owner. A subtree entry such as the owner claim `corp/*` → Admin therefore makes an Admin of
+    everyone allowed to create a subgroup below `corp` — by default its Maintainers too — once they create one. Map
+    the owner claim, and the other role claims, to exact groups for Roles; if you do use a subtree entry, restrict
+    **Roles allowed to create subgroups** in the settings of the top group (**Settings → General → Permissions and
+    group features**) to Owners. An exact entry `corp/sre` does not match an Owner of `corp`, who holds that role in
+    `corp/sre` only through its parent: add an entry for each group whose Owners should have the Role.
+
+    Subtree entries are harmless in the identity provider entries of a Team: a Team grants no Permission and no Role
+    ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider)).
+
+The OIDC page of Muster shows the claim of each entry under its group, read-only, by a short name such as `owner`
+with the full claim in a tooltip, and keeps it when you save there; to add or change an entry of another claim, use
+`PUT /api/v1/oidc-settings`:
+
+```json
+"group_mappings": [
+  {"group": "corp/*", "role": "responder"},
+  {"claim": "https://gitlab.org/claims/groups/owner", "group": "corp", "role": "admin"}
+]
+```
+
+With only the groups claims, choose `groups` when membership of a parent group should count for its subgroups, as it
+does in GitLab itself, and `groups_direct` when a Role should follow only the groups a person was added to by name.
+For example, with the groups claim `groups`:
 
 | IdP group | Role |
 |---|---|
@@ -7625,23 +7728,25 @@ groups claim `groups`:
 
 Every member of `platform` is a Viewer at least, and also a member of `platform/sre` through it, so a Responder. To keep
 `platform` members Viewers, use `groups_direct`: then only the people added to `platform/sre` itself are Responders.
-When a person's groups map to several Roles, the highest wins.
 
-A group path is matched exactly, letter case included, so copy it from the group's URL.
+Teams take their people from GitLab the same way: see
+[Membership from the identity provider](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider).
 
 ## 4. Check the connection
 
 Press **Check connection**. The check fetches discovery through the saved settings and proxy and shows how the
 request travelled, how long it took, the endpoints GitLab announced, the **Requested scopes** of a sign-in
 (`openid profile email` with the scopes above) and that **Offline access** is not offered. That is expected for GitLab
-and is not a problem: it only means the rules of [No offline access](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#no-offline-access) apply.
+and is not a problem: it only means the rules of [No offline access](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#no-offline-access) apply. The check also keeps
+the claims GitLab lists, the role claims among them, and warns about each claim of the mapping that GitLab does not
+list, until a sign-in carries it.
 
 ## 5. Sign in
 
 Open Muster and press **Sign in with {display name}**. GitLab asks the person to authorize Muster once, unless the
 application is trusted, and the first sign-in creates their Muster user with the Role of their groups. The login is
 GitLab's username (`preferred_username`). As with any provider, Muster never merges accounts by login or email, and
-a person whose groups map to no Role is refused; the [Keycloak page](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md#5-sign-in) lists the errors of
+a person whom no entry matches is refused; the [Keycloak page](https://muster-io.github.io/muster/latest/sign-in/oidc-keycloak.md#5-sign-in) lists the errors of
 the sign-in page.
 
 ## No offline access
@@ -7666,8 +7771,11 @@ The [Keycloak page](https://muster-io.github.io/muster/latest/sign-in/oidc-keycl
     `offline_access` typed into that list. Remove it from the list, or add it to the application in GitLab.
 
 The Role is not the one you expect
-:   Check the groups claim: with `groups_direct`, membership through a parent group does not count. The Audit log
-    entry `session.oidc_refused` of a refused sign-in lists the groups GitLab sent.
+:   Check the claim of each entry: with `groups_direct`, membership through a parent group does not count, and a role
+    claim lists only the groups where the role is held directly, so an exact entry of a subgroup does not match an
+    Owner of its parent: add an exact entry for the parent rather than a subtree entry, which would also match the
+    Owner of any new subgroup (see [step 3](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles)). The Audit log entry `session.oidc_refused` of a
+    refused sign-in lists the values GitLab sent for every claim the mapping read.
 
 <!-- Source: https://muster-io.github.io/muster/latest/sign-in/totp.md -->
 # TOTP
@@ -9379,7 +9487,7 @@ A Team has:
   Organization and compared exactly;
 - a **description**;
 - its **Team matchers**, which pick the Alerts that belong to it beside its slug;
-- the **people** in it, which may be nobody;
+- the **people** in it, which may be nobody, added by hand or through the groups of the identity provider;
 - its **Working hours**: its own, else the Organization's.
 
 What a Team owns
@@ -9489,10 +9597,57 @@ or change the Team label to a label your Alerts do not use for something else, t
 
 An Admin adds Users to a Team by hand and removes them, through the API (`addTeamUser`, `removeTeamUser`). A User may be
 in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — `by_hand` for a
-person an Admin added — and the messengers they linked.
+person an Admin added, `idp` for a person the identity provider put in it — and the messengers they linked.
 
 - Disabling a User keeps them in their Teams.
 - Deleting a User takes them out of every Team.
+
+## Membership from the identity provider
+
+A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
+OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
+
+The claim of an entry
+:   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster
+    reads it from the ID token, and from userinfo when the ID token lacks it, as for the Role mapping; GitLab, for
+    example, puts its role claims such as `https://gitlab.org/claims/groups/maintainer` in userinfo
+    ([Sign-in with GitLab](https://muster-io.github.io/muster/latest/sign-in/oidc-gitlab.md#3-map-groups-to-roles)).
+
+Exact groups and subtrees
+:   An entry `teams/payments` matches that group exactly, letter case included. A subtree `teams/payments/*` matches
+    `teams/payments` and every group below it, such as `teams/payments/oncall`, at `/` boundaries only: never
+    `teams/paymentsx`. There are no other wildcards; a `*` anywhere else is refused.
+
+Sign-in and re-checks
+:   At every OIDC sign-in, and at every successful background re-check, a person joins each Team with an entry that
+    matches them and leaves each Team they are in only through entries that no longer match. This happens whether or
+    not **Sync Role at sign-in** is on, and never changes a Role. A re-check reads only the refreshed ID token: a claim
+    it lacks counts as no groups once an earlier re-check found it in a refreshed ID token, and until then — as for a
+    claim found only in userinfo — an entry of that claim keeps the person as the last sign-in left them. A refused or failed re-check changes no membership.
+
+People added by hand
+:   The identity provider never takes out a person an Admin added. A person added by hand whom an entry matches has
+    both sources, `by_hand` and `idp`, and the entries that matched them. Removing such a person by hand takes away
+    only `by_hand`: they stay in the Team through the identity provider until a sign-in finds that no entry matches
+    them; removing by hand a person who is in the Team only through the identity provider is refused with `404`.
+
+Identity providers without an offline token
+:   GitLab, and any provider that grants no offline token, cannot be re-checked in the background, so its people join
+    and leave Teams only when they sign in.
+
+A change of a Team's entries changes nobody's membership at once: each person follows the new entries at their next
+sign-in or re-check. Every change the identity provider makes is recorded in the Audit log as `team.user_added` or
+`team.user_removed` by the system, with the source `idp` and the entry that matched.
+
+For example, a Team whose people are the members of the GitLab group `corp/payments` and its subgroups:
+
+```json
+"idp_entries": [{"group": "corp/payments/*"}]
+```
+
+With the groups claim `groups`, which GitLab fills with a person's groups and the groups below them, this takes in a
+person of `corp/payments/oncall` and nobody of `corp/paymentsx`. Subtree entries are safe here, also with a role claim:
+a Team grants no Permission and no Role.
 
 ## Working hours
 

@@ -1700,6 +1700,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#membership-from-the-identity-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Membership from the identity provider
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#working-hours" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2918,6 +2929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#membership-from-the-identity-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Membership from the identity provider
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#working-hours" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2961,7 +2983,7 @@ Alert Groups. Teams are managed through the API under <code>/api/v1/teams</code>
   Organization and compared exactly;</li>
 <li>a <strong>description</strong>;</li>
 <li>its <strong>Team matchers</strong>, which pick the Alerts that belong to it beside its slug;</li>
-<li>the <strong>people</strong> in it, which may be nobody;</li>
+<li>the <strong>people</strong> in it, which may be nobody, added by hand or through the groups of the identity provider;</li>
 <li>its <strong>Working hours</strong>: its own, else the Organization's.</li>
 </ul>
 <dl>
@@ -3059,11 +3081,48 @@ or change the Team label to a label your Alerts do not use for something else, t
 <h2 id="people">People<a class="headerlink" href="#people" title="Permanent link">&para;</a></h2>
 <p>An Admin adds Users to a Team by hand and removes them, through the API (<code>addTeamUser</code>, <code>removeTeamUser</code>). A User may be
 in several Teams. The list of a Team's people shows each person's Role, how they are in the Team — <code>by_hand</code> for a
-person an Admin added — and the messengers they linked.</p>
+person an Admin added, <code>idp</code> for a person the identity provider put in it — and the messengers they linked.</p>
 <ul>
 <li>Disabling a User keeps them in their Teams.</li>
 <li>Deleting a User takes them out of every Team.</li>
 </ul>
+<h2 id="membership-from-the-identity-provider">Membership from the identity provider<a class="headerlink" href="#membership-from-the-identity-provider" title="Permanent link">&para;</a></h2>
+<p>A Team may name groups of the identity provider in <code>idp_entries</code>; the people in those groups who sign in through
+OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:</p>
+<dl>
+<dt>The claim of an entry</dt>
+<dd>An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster
+reads it from the ID token, and from userinfo when the ID token lacks it, as for the Role mapping; GitLab, for
+example, puts its role claims such as <code>https://gitlab.org/claims/groups/maintainer</code> in userinfo
+(<a href="../../sign-in/oidc-gitlab/#3-map-groups-to-roles">Sign-in with GitLab</a>).</dd>
+<dt>Exact groups and subtrees</dt>
+<dd>An entry <code>teams/payments</code> matches that group exactly, letter case included. A subtree <code>teams/payments/*</code> matches
+<code>teams/payments</code> and every group below it, such as <code>teams/payments/oncall</code>, at <code>/</code> boundaries only: never
+<code>teams/paymentsx</code>. There are no other wildcards; a <code>*</code> anywhere else is refused.</dd>
+<dt>Sign-in and re-checks</dt>
+<dd>At every OIDC sign-in, and at every successful background re-check, a person joins each Team with an entry that
+matches them and leaves each Team they are in only through entries that no longer match. This happens whether or
+not <strong>Sync Role at sign-in</strong> is on, and never changes a Role. A re-check reads only the refreshed ID token: a claim
+it lacks counts as no groups once an earlier re-check found it in a refreshed ID token, and until then — as for a
+claim found only in userinfo — an entry of that claim keeps the person as the last sign-in left them. A refused or failed re-check changes no membership.</dd>
+<dt>People added by hand</dt>
+<dd>The identity provider never takes out a person an Admin added. A person added by hand whom an entry matches has
+both sources, <code>by_hand</code> and <code>idp</code>, and the entries that matched them. Removing such a person by hand takes away
+only <code>by_hand</code>: they stay in the Team through the identity provider until a sign-in finds that no entry matches
+them; removing by hand a person who is in the Team only through the identity provider is refused with <code>404</code>.</dd>
+<dt>Identity providers without an offline token</dt>
+<dd>GitLab, and any provider that grants no offline token, cannot be re-checked in the background, so its people join
+and leave Teams only when they sign in.</dd>
+</dl>
+<p>A change of a Team's entries changes nobody's membership at once: each person follows the new entries at their next
+sign-in or re-check. Every change the identity provider makes is recorded in the Audit log as <code>team.user_added</code> or
+<code>team.user_removed</code> by the system, with the source <code>idp</code> and the entry that matched.</p>
+<p>For example, a Team whose people are the members of the GitLab group <code>corp/payments</code> and its subgroups:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"idp_entries"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"corp/payments/*"</span><span class="p">}]</span>
+</code></pre></div>
+<p>With the groups claim <code>groups</code>, which GitLab fills with a person's groups and the groups below them, this takes in a
+person of <code>corp/payments/oncall</code> and nobody of <code>corp/paymentsx</code>. Subtree entries are safe here, also with a role claim:
+a Team grants no Permission and no Role.</p>
 <h2 id="working-hours">Working hours<a class="headerlink" href="#working-hours" title="Permanent link">&para;</a></h2>
 <p>Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The end is later than
 the start on the same day: Working hours never span midnight. Holidays are not part of them.</p>
