@@ -8,11 +8,20 @@ depends_on: [S-113, S-118]
 covers: [C-29.FR-1, C-29.FR-2, C-29.FR-3, C-29.FR-4, C-29.FR-5, C-29.FR-6, C-29.FR-7, C-29.FR-9, C-29.AC-1, C-29.AC-2, C-29.AC-3, C-29.AC-4, C-29.AC-5, C-25.FR-6, C-12.FR-1, C-12.FR-2, C-12.FR-3, C-12.FR-11, C-13.FR-3, C-14.FR-16, C-24.FR-4, C-16.FR-4, C-08.FR-1]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0028_route_message_labels.up.sql
-  - internal/db/migrations/0028_route_message_labels.down.sql
+  - internal/db/migrations/0029_route_message_labels.up.sql
+  - internal/db/migrations/0029_route_message_labels.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
+  - internal/delivery/live_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
+  - internal/groups/grouping.go
+  - internal/groups/grouping_test.go
+  - internal/groups/query.sql
+  - internal/groups/title.go
+  - internal/delivery/render_test.go
+  - api/README.md
   - internal/routing/routes.go
   - internal/routing/labelsuggestions.go
   - internal/routing/labelsuggestions_test.go
@@ -20,6 +29,7 @@ files_touched:
   - internal/routing/routes_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
+  - internal/api/server.go
   - internal/messages/message.go
   - internal/messages/default.go
   - internal/messages/default_test.go
@@ -27,12 +37,14 @@ files_touched:
   - internal/messages/render_test.go
   - internal/messages/shorten.go
   - internal/messages/shorten_test.go
+  - internal/messages/fallback.go
   - internal/messages/preview.go
   - internal/messages/query.sql
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/api/templates.go
   - internal/api/templates_test.go
+  - internal/mattermost/client.go
   - internal/mattermost/layout.go
   - internal/mattermost/layout_test.go
   - internal/mattermost/adapter_test.go
@@ -40,6 +52,16 @@ files_touched:
   - internal/slack/layout.go
   - internal/slack/layout_test.go
   - internal/slack/testmsg_test.go
+  - internal/slack/testdata/layout/final_edit.json
+  - internal/slack/testdata/layout/plain_root.json
+  - internal/slack/testdata/layout/root_acknowledged_edit.json
+  - internal/slack/testdata/layout/root_firing_loud.json
+  - internal/slack/testdata/layout/root_firing_quiet.json
+  - internal/slack/testdata/layout/root_resolved.json
+  - internal/slack/testdata/layout/root_snoozed.json
+  - internal/slack/testdata/layout/test_message.json
+  - internal/fakes/fakeslack/messages.go
+  - internal/fakes/fakeslack/fakeslack_test.go
   - internal/telegram/layout.go
   - internal/telegram/layout_test.go
   - internal/telegram/adapter_test.go
@@ -51,7 +73,10 @@ files_touched:
   - test/e2e/telegram_test.go
   - test/e2e/slack_test.go
   - test/e2e/bridge_test.go
+  - test/e2e/account_links_test.go
+  - test/e2e/several_connections_test.go
   - web/e2e/destination-preview.spec.ts
+  - web/e2e/route-message.spec.ts
   - docs/configure/messages-and-templates.md
   - docs/install/versions.md
 acceptance:
@@ -94,21 +119,28 @@ issue: 414
 ## Contracts
 
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
-  - `RouteInput` gains `own_message_labels` (boolean, optional, default false) and `message_labels` (string[],
-    required when `own_message_labels`); `Route` requires both, `message_labels` being the effective list (computed
-    while not own).
+  - `RouteInput` gains `own_message_labels` (boolean, optional: a create without it is false, an update without it
+    keeps the stored value) and `message_labels` (string[], read only when the list is own, and then required unless
+    the Route already has a list of its own, which an update without it keeps); `Route` requires both,
+    `message_labels` being the effective list (computed while not own). Only a list of its own is checked, with the
+    rule of the Group key — no empty or repeated name — so that a Route read and sent back unchanged is taken.
   - `listRouteLabelSuggestions` (`GET /routes/{route_id}/label-suggestions`, tag Routes, `routes:read`) →
-    `RouteLabelSuggestionList` {`items` — {`label`, `example_value`, `alert_group_count`}}, from the common labels of
-    the Route's Alert Groups of `routing.group_key_preview_period`, most frequent first, at most 50.
+    `RouteLabelSuggestionList` {`items` — {`label`, `example_value`, `alert_group_count`}}, from the labels of the
+    Alerts of the Route's Alert Groups created within `routing.group_key_preview_period`, each with its most frequent
+    value, most frequent first, at most 50.
   - New schema `MessageLayout` — `number`, `title`, `status` {`key`, `word`}, `fields` ({`name`, `value`}[], `summary`,
     `description`, `labels` ({`key`, `value`}[]), `alerts` {`label`, `values` ({`value`, `resolved`}[]), `total`},
     `notices` (string[]), `assignees` and `owner` (people {`name`, `ref`, and the optional `team` {`name`}}), `links`
     ({`label`, `url`}[]) — the same content S-126 puts into `api/bridge.yaml`; `TemplatePreviewResult` gains the
     optional `layout` (for `root_message`), `length` and `messenger_limit`, so that the web tests that build a preview
     result by hand (`template-preview.test.tsx`) stay valid until S-129 uses them.
-- **Schema** (migration `0028_route_message_labels`, expand only; `schema.md` §4.8): `routes.message_labels text[]`
-  (null = computed); `open_group_updates_kind_v5_check` lists every kind of `_v4` and `route_message_labels` (`NOT
-  VALID`, validated, the old one dropped).
+- **Schema** (migration `0029_route_message_labels`, expand only; `schema.md` §4.8, §4.9, §5):
+  `routes.message_labels text[]` (null = computed); `alert_groups.description text`, the `description` annotation of
+  the first Alert that has one, set once by `internal/groups` like the summary (C-09.FR-23), null for an Alert Group
+  created before the migration, which then shows no description; `open_group_updates_kind_v4_check` lists every kind
+  of `_v3` (`route_minimum_severity`, `destination_buttons`, `organization_buttons`, `team_evaluation`) and
+  `route_message_labels`, and `open_group_updates_route_scope_check` gives a row of `route_message_labels` its Route
+  (`NOT VALID`, validated, the old one dropped, in three transactions as 0023).
 - **Messages** (`internal/messages`): `Message` gains `StatusWord`, `Fields`, `Description`, `KeyLabels`, `AlertsLine`
   (the distinguishing label, its values with their state, the total) and keeps `Footer`, `Notices`, `Buttons`,
   `Links`; the default body no longer fills `Environment`, `GroupLabels`, `CommonLabels` and `CommonAnnotations`, which
@@ -133,9 +165,9 @@ issue: 414
   `section`'s `fields`, the key labels and the people as `context` blocks, the buttons as `actions`; Telegram — one HTML
   message with the fields as lines "{name}: {value}" and the keyboard of C-14.FR-3. Each keeps the status colour of
   C-12.FR-1 (or its emoji where it has no colour) and escapes values for its markup.
-- **Re-render**: a change of `message_labels` (or of the Group key while the list is computed) inserts an
-  `open_group_updates` row `route_message_labels`, whose handler re-renders the Route's open Alert Groups without a
-  lifecycle event, as S-113's kinds do.
+- **Re-render**: a change of `message_labels` (or of the Group key while the list is computed), or a rename of the
+  Route, which the field Route shows, inserts an `open_group_updates` row `route_message_labels`, whose handler
+  re-renders the Route's open Alert Groups without a lifecycle event, as S-113's kinds do.
 - **Settings**: `route.message_labels`, `message.compact_alerts_listed` (P-83), `organization.instance_labels`,
   `organization.severity_label`, `organization.team_label`, `organization.time_zone`, `message.value_cap`; the limits
   of the adapters (C-13, C-14, C-24).
@@ -205,15 +237,69 @@ None.
 - The status emoji of L1 stays beside the word in Telegram (L2.md §5.2).
 - The distinguishing label (P-67) and the count of values (P-83) stay provisional; the test environment confirms them,
   not this story.
-- With 47 files the story is at the edge of the size signal: eleven of them are tests of L1 that assert the old layout
-  — four Go end-to-end tests, the destination preview spec, two adapter tests and three test-message tests — which the
-  reviews added. Moving the preview's `layout`, `length` and `messenger_limit` to S-129 would save three files but
-  split one renderer change over two pull requests, so it stays here.
+- With 72 hand-written files the story is above the size signal of about 30 to 40 files. It stays one pull request
+  because the layout changes at once in every messenger: more than half of the files are tests of L1 and goldens that
+  assert the old layout — Go end-to-end tests, Playwright specs, adapter, test-message and integration tests, and the
+  eight Slack goldens — and a split would leave `master` with a renderer whose adapters, tests or upgrade note do not
+  match it. Moving the preview's `layout`, `length` and `messenger_limit` to S-129 would save three files but split
+  one renderer change over two pull requests.
 - `MessageLayout` in `openapi.yaml` is the content S-126 sends to bridges, so the preview shows a bridge author the same
   structure.
-- Migration `0028` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request and re-versions the CHECKs it replaces, listing every value present
-  when it merges (S-131's Notes).
+- Migration `0028` of the story map is `0029` here, the number the coordinator assigned after S-133 took `0028`; a
+  story merged out of that order renumbers its migration to the next free number in its own pull request and
+  re-versions the CHECKs it replaces, listing every value present when it merges (S-131's Notes).
+- Changes made while implementing (the pull request lists them):
+  - The migration is `0029`, after `0028_schedule_gap_alert` (S-133) on `master`, which leaves the queue alone; the
+    kind CHECK it replaces is `open_group_updates_kind_v3_check` of 0027, so the new one is `_v4`, with the scope CHECK
+    `open_group_updates_route_scope_check` beside it. The migration also adds `alert_groups.description`.
+  - The suggestions read at most the 200 most recent Alert Groups of the Route within the period and 5,000 of their
+    Alerts, so that the read stays bounded; the Alerts of an Alert Group are counted once by fingerprint, so an Alert
+    that fired again is one Alert.
+  - The suggestions come from the labels of the Alerts of the Route's recent Alert Groups, not from their common
+    labels: the Verification expects `pod`, which differs per Alert and so is never a common label.
+  - `files_touched` adds `internal/api/server.go` (the Routes interface and the list of implemented operations),
+    `internal/mattermost/client.go` (the attachment's `fields`), `internal/messages/fallback.go` (it clears the compact
+    items), the Slack goldens under `internal/slack/testdata/layout/` (the new blocks), `internal/fakes/fakeslack`
+    (the fake checks the limits of a section's `fields`: at most ten, each at most 2,000 characters),
+    `internal/delivery/live_test.go` (it read the environment line of L1), `test/e2e/account_links_test.go` and `test/e2e/several_connections_test.go`
+    (they expected the footer as the last line, which the links now are), `web/e2e/route-message.spec.ts` (it
+    expected the built-in Root message template of L1), the files of `internal/groups` that write the summary
+    (`dispatcher.go`, `grouping.go`, `title.go`, `query.sql` and their tests), which now write the description too,
+    `internal/delivery/render_test.go` (a re-render of the labels publishes a never-published delivery Quietly) and
+    `api/README.md` (the list of unpaginated operations).
+- Decisions within the sources, for the maintainer to confirm:
+  - The status emoji stands right before the word, "#N title — 🔴 Firing", in Telegram and in the preview's markups;
+    Mattermost and Slack show the colour of the attachment and the word alone.
+  - Decided by the orchestrator: the description is set once, like the summary (C-29.FR-1, C-09.FR-23), in
+    `alert_groups.description`, written by `internal/groups` when an Alert with a `description` annotation first joins
+    the Alert Group; the renderer reads it from there. An Alert Group created before migration 0029, or by a 0.1
+    replica during the rollout, has none until a new Alert with a description joins it on 0.2.0, which sets it; there
+    is no fallback to a read of the Alerts.
+  - The Teams field lists the names of the Alert Group's Teams in the order they joined, deleted ones included, as
+    the outgoing webhook bodies do.
+  - A key label counts the distinct values of the firing Alerts that have it, of every Alert when none fires, and of
+    the Group key and common labels when no Alert was read; an Alert without the distinguishing label is not listed by
+    value but counts in "…and K more"; the values are firing first, then in natural order.
+  - With a line template, the line template renders the listed Alerts — up to `message.compact_alerts_listed` — and
+    "…and K more" follows; an Alert Group of one Alert has no Alerts line with or without one.
+  - The fields are never cut, nor the notices before the description, Alerts, summary and key labels went; the links
+    of a bridge's CommonMark body keep their place of L1, before the notices and the footer, and a Desired state of
+    an earlier version without the status word keeps the heading and italic summary of L1, until S-126 gives bridges
+    the layout.
+  - In Slack the attachment holds the heading, one `section` with the fields, a `section` with the summary and the
+    description (or the template's body), a `context` with the key labels, a `section` with the Alerts and the
+    notices, a `context` with the footer and a `section` with the links, laid out together within 3,000 code points.
+  - `length` of a preview counts UTF-16 code units for `html` and characters otherwise; `messenger_limit` is null for
+    `commonmark`, since each bridge declares its own.
+  - Q2, out of this story: a change of the Organization's severity label, Team label, Instance labels or time zone,
+    or a rename of a Team, does not re-render the open Root messages, though it changes what they show; they follow at
+    the next change of each Alert Group. A follow-up issue is opened for it. Only a change of the Route — its list, its
+    Group key while the list is computed, or its name — re-renders them here.
+  - Q4: the limits of a section's `fields` in Slack — at most ten, each at most 2,000 characters — are the ones Slack
+    documents; they were not measured, unlike those of F-076, and are a fact to probe later; the fake server checks
+    them as documented.
+- Decided by the orchestrator: the size of the pull request, the status emoji beside the word in Telegram, the Severity
+  levels left in English in the Russian texts, and the counting of a preview's length, which S-129 refines.
 
 ## Coverage
 

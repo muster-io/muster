@@ -69,7 +69,8 @@ func TestTelegramTest(t *testing.T) {
 		t.Fatalf("steps %+v", steps)
 	}
 	m := only(t, e.fake)
-	if !strings.HasPrefix(m.Text, "🧪 Test message\n🔴 <b>") || !m.DisableNotification || m.ParseMode != "HTML" {
+	if !strings.HasPrefix(m.Text, "🧪 Test message\n<b>") || !strings.Contains(m.Text, "</b> — 🔴 Firing\n"+
+		"Severity: warning\nRoute: db\nStarted: ") || !m.DisableNotification || m.ParseMode != "HTML" {
 		t.Errorf("post %+v", m)
 	}
 	var kb inlineKeyboard
@@ -140,7 +141,8 @@ func TestTelegramPreview(t *testing.T) {
 	e := newTesterEnv(t)
 	items, err := e.tester.Preview(t.Context(), delivery.TestInput{Destination: testDest, Source: e.src})
 	if err != nil || len(items) != 1 || items[0].Name != "message" || items[0].Format != "html" ||
-		!strings.HasPrefix(*items[0].Text, "🔴 <b>") || strings.Contains(*items[0].Request.Body, testToken) ||
+		!strings.HasPrefix(*items[0].Text, "<b>") || !strings.Contains(*items[0].Text, "— 🔴 Firing\nSeverity: ") ||
+		strings.Contains(*items[0].Request.Body, testToken) ||
 		!strings.Contains(*items[0].Request.Body, `"inline_keyboard"`) {
 		t.Fatalf("preview %+v %v", items, err)
 	}

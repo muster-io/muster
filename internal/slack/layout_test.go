@@ -78,8 +78,9 @@ func newLayoutEnv(t *testing.T) layoutEnv {
 		Business: c, Real: c, Keys: layoutKeys{}, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo)})}
 }
 
-// layoutSource is Alert Group #12 in a status, with the label value of C-24.AC-6, one firing and one resolved Alert, a
-// runbook link, a Reopen and a Route with three Snooze durations.
+// layoutSource is Alert Group #12 of the Team sl in a status, with the label value of C-24.AC-6 among the labels of
+// "Labels in the message", one firing and one resolved Alert, a description, a runbook link, a Reopen and a Route with
+// three Snooze durations.
 func layoutSource(status string) *messages.Source {
 	until := layoutNow.Add(4 * time.Hour)
 	alert := func(pod string, firing bool) messages.SourceAlert {
@@ -88,14 +89,14 @@ func layoutSource(status string) *messages.Source {
 			Firing: firing}
 	}
 	return &messages.Source{ID: 1, PublicID: layoutGroup, Number: 12, Title: "DiskFull", Summary: "Disk almost full",
-		Status: status, SeverityLevel: "critical", TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday",
+		Description: "The disk of cluster a fills up.", Teams: []string{"sl"}, Status: status, SeverityLevel: "critical", TimeZone: "UTC", WorkdayStart: "09:00", WeekStart: "monday",
 		StartedAt: layoutNow.Add(-10 * time.Minute), KeyLabels: []string{"alertname"},
 		KeyValues:         map[string]string{"alertname": "DiskFull"},
 		CommonLabels:      map[string]string{"alertname": "DiskFull", "team": "sl", "cluster": "a", "note": acLabel},
 		CommonAnnotations: map[string]string{"summary": "Disk almost full"},
 		FiringCount:       1, ReopenCount: 1, TotalAlerts: 2,
 		Route: messages.RouteRef{ID: 1, PublicID: "RT0000000000R1", Name: "sl", Language: "en",
-			SnoozeDurations: []int64{3600, 14400, 86400}},
+			SnoozeDurations: []int64{3600, 14400, 86400}, MessageLabels: []string{"team", "note", "namespace"}},
 		Owner: "Alice Smith", SnoozedBy: "Alice Smith", SnoozeUntil: &until, ResolvedByKind: "user",
 		ResolvedBy: "Alice Smith",
 		Alerts:     []messages.SourceAlert{alert("i1", true), alert("i2", false)},
@@ -196,8 +197,15 @@ func allBlocks(o outgoing) []block {
 func sections(o outgoing) map[string]string {
 	out := map[string]string{}
 	for _, b := range allBlocks(o) {
-		if b.Type == typeSection && b.Text != nil {
+		switch {
+		case b.Type == typeSection && b.Text != nil:
 			out[b.BlockID] = b.Text.Text
+		case b.Type == typeContext:
+			for _, e := range b.Elements {
+				if tx, ok := e.(*textObject); ok {
+					out[b.BlockID] = tx.Text
+				}
+			}
 		}
 	}
 	return out
@@ -255,8 +263,18 @@ func slackRules(t *testing.T, name string, o outgoing) {
 		ids[b.BlockID] = true
 		switch b.Type {
 		case typeSection:
+			if b.Text == nil && b.BlockID == blockFields && len(b.Fields) > 0 && len(b.Fields) <= maxFields {
+				for _, f := range b.Fields {
+					if f.Type != typeMrkdwn || f.Text == "" || utf8.RuneCountInString(f.Text) > fieldLimit ||
+						!unbroken(f.Text) {
+						t.Errorf("%s: field %+v", name, f)
+					}
+				}
+				break
+			}
 			if b.Text == nil || b.Text.Type != typeMrkdwn || b.Text.Text == "" ||
-				utf8.RuneCountInString(b.Text.Text) > LengthLimit || !unbroken(b.Text.Text) || len(b.Elements) > 0 {
+				utf8.RuneCountInString(b.Text.Text) > LengthLimit || !unbroken(b.Text.Text) || len(b.Elements) > 0 ||
+				len(b.Fields) > 0 {
 				t.Errorf("%s: section %+v", name, b)
 			}
 		case typeContext:
@@ -264,7 +282,17 @@ func slackRules(t *testing.T, name string, o outgoing) {
 				t.Errorf("%s: context %+v", name, b)
 			}
 			for _, e := range b.Elements {
-				if tx, ok := e.(textObject); !ok || tx.Type != typePlainText {
+				switch tx := e.(type) {
+				case textObject:
+					if tx.Type != typePlainText {
+						t.Errorf("%s: a context element %#v", name, e)
+					}
+				case *textObject:
+					if tx.Type != typeMrkdwn || tx.Text == "" || utf8.RuneCountInString(tx.Text) > LengthLimit ||
+						!unbroken(tx.Text) {
+						t.Errorf("%s: a context element %#v", name, e)
+					}
+				default:
 					t.Errorf("%s: a context element %#v", name, e)
 				}
 			}
@@ -362,9 +390,11 @@ func layoutCases(t *testing.T) []layoutCase {
 	}
 }
 
-// TestRootStructure is C-24.FR-4 and C-24.AC-5: `text` and the top section are the summary line with the Mentions of
-// a Loud message; one attachment in the colour of the status holds the heading linked to the Alert Group page, the
-// body whose line of links starts with "Open in Muster" and ends it with the notices and the footer, the context
+// TestRootStructure is C-24.FR-4, C-29.FR-4, C-29.AC-1 and C-24.AC-5: `text` and the top section are the summary line
+// with the Mentions of a Loud message; one attachment in the colour of the status holds the heading linked to the
+// Alert Group page with the status as a word, one section with the fields Severity, Route, Teams and Started as its
+// `fields`, a section with the summary and the description, a context with the key labels, a section with the Alerts
+// and the notices, a context with the footer, a section with the links starting with "Open in Muster", the context
 // "Muster v<version>" with no image, and the actions; unfurling is off, and blocks and attachments are always named.
 func TestRootStructure(t *testing.T) {
 	e := newLayoutEnv(t)
@@ -379,19 +409,36 @@ func TestRootStructure(t *testing.T) {
 		types[i] = b.Type
 	}
 	if a.Color != "#d32f2f" || a.Fallback != "🔴 #12 DiskFull" ||
-		!slices.Equal(types, []string{typeSection, typeSection, typeContext, typeActions}) {
-		t.Errorf("attachment = %+v", a)
+		!slices.Equal(types, []string{typeSection, typeSection, typeSection, typeContext, typeSection, typeSection,
+			typeContext, typeActions}) {
+		t.Errorf("attachment = %s", requestJSON(t, o))
 	}
-	if h := a.Blocks[0].Text.Text; h != "*<"+layoutGroupURL+"|#12 DiskFull>*" {
+	if h := a.Blocks[0].Text.Text; h != "*<"+layoutGroupURL+"|#12 DiskFull>* — Firing" {
 		t.Errorf("heading = %q", h)
 	}
-	body := strings.Split(a.Blocks[1].Text.Text, "\n")
-	n := len(body)
-	if n < 3 || body[n-2] != "<"+layoutGroupURL+"|Open in Muster> · "+
-		"<https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>" || body[n-1] != "🔁 Reopened ×1" {
-		t.Errorf("body = %q", body)
+	fields := make([]string, len(a.Blocks[1].Fields))
+	for i, f := range a.Blocks[1].Fields {
+		fields[i] = f.Text
 	}
-	if ctx := a.Blocks[2].Elements; len(ctx) != 1 || ctx[0] != plainText("Muster v1.2.3") {
+	if !slices.Equal(fields, []string{"*Severity*\ncritical", "*Route*\nsl", "*Teams*\nsl",
+		"*Started*\n2026-10-20 11:50 UTC"}) || a.Blocks[1].Text != nil {
+		t.Errorf("fields = %q", fields)
+	}
+	got := sections(o)
+	for id, want := range map[string]string{
+		blockBody:   "Disk almost full\nThe disk of cluster a fills up.",
+		blockLabels: "team=sl · note=" + acEscaped,
+		blockAlerts: "pod: i1, ~i2~\n🔁 Reopened ×1",
+		blockLinks:  "<" + layoutGroupURL + "|Open in Muster> · <https://runbooks.example.org/disk?a=1&amp;b=2|Runbook>",
+	} {
+		if got[id] != want {
+			t.Errorf("%s = %q, want %q", id, got[id], want)
+		}
+	}
+	if _, ok := got[blockPeople]; ok {
+		t.Errorf("a firing message names people: %q", got[blockPeople])
+	}
+	if ctx := a.Blocks[6].Elements; len(ctx) != 1 || ctx[0] != plainText("Muster v1.2.3") {
 		t.Errorf("context = %#v", ctx)
 	}
 	args := o.args()
@@ -434,8 +481,7 @@ func TestRootStructure(t *testing.T) {
 	// The footer names a user without a user id of Slack's form by their display name, escaped (C-12.FR-12).
 	src := layoutSource(messages.ColourAcknowledged)
 	src.Owner, src.FooterUsers = "alice_s", map[string]mentions.User{"slack:3": {Name: "alice_s", ExternalID: "u-1"}}
-	body = strings.Split(sections(layout(e.root(t, src), testLook(), nil))[blockBody], "\n")
-	if got := body[len(body)-1]; got != "Acknowledged by alice_\u200bs" {
+	if got := sections(layout(e.root(t, src), testLook(), nil))[blockPeople]; got != "Acknowledged by alice_\u200bs" {
 		t.Errorf("footer = %q", got)
 	}
 }
@@ -630,8 +676,7 @@ func TestLimits(t *testing.T) {
 	e := newLayoutEnv(t)
 	src := layoutSource(messages.ColourAcknowledged)
 	src.ReopenCount, src.TotalAlerts = 2, 40
-	src.CommonAnnotations = map[string]string{"summary": "Disk almost full", "details": strings.Repeat("d", 1200),
-		"impact": strings.Repeat("i", 1200), "notes": strings.Repeat("n", 1200)}
+	src.Description = strings.Repeat("d", 3600)
 	src.Alerts = nil
 	for i := range 40 {
 		src.Alerts = append(src.Alerts, messages.SourceAlert{Fingerprint: fmt.Sprint("f", i),
@@ -644,17 +689,11 @@ func TestLimits(t *testing.T) {
 	}
 	o := layout(m, testLook(), nil)
 	slackRules(t, "40 alerts", o)
-	body := sections(o)[blockBody]
-	lines := strings.Split(body, "\n")
-	n := len(lines)
-	if utf8.RuneCountInString(body) > LengthLimit || n < 4 ||
-		!strings.HasPrefix(lines[n-3], "<"+layoutGroupURL+"|Open in Muster> · ") ||
-		lines[n-2] != "🔁 Reopened ×2" || lines[n-1] != "Acknowledged by Alice Smith" {
-		t.Errorf("body (%d code points) =\n%s", utf8.RuneCountInString(body), body)
-	}
-	if !slices.Contains(lines, "pod: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 +30 more") ||
-		!slices.Contains(lines, "<"+layoutGroupURL+"|Full list in Muster>") || strings.Contains(body, "ddd") {
-		t.Errorf("alerts in the body =\n%s", body)
+	s := sections(o)
+	if s[blockBody] != "Disk almost full" || s[blockAlerts] != "pod: p1, p2, p3, p4, p5 …and 35 more\n🔁 Reopened ×2" ||
+		s[blockPeople] != "Acknowledged by Alice Smith" ||
+		!strings.HasPrefix(s[blockLinks], "<"+layoutGroupURL+"|Open in Muster> · ") || strings.Contains(s[blockBody], "ddd") {
+		t.Errorf("the description is not cut first: %q", s)
 	}
 
 	// The title of 200 emoji.
@@ -702,7 +741,7 @@ func TestLimits(t *testing.T) {
 		strings.Repeat("m", 2680)) || strings.Contains(top, "<!here>") || utf8.RuneCountInString(top) > LengthLimit {
 		t.Errorf("top = %.80q … %.40q", top, top[len(top)-40:])
 	}
-	if h := sections(o)[blockHeading]; !strings.HasSuffix(h, "&amp;…>*") {
+	if h := sections(o)[blockHeading]; !strings.HasSuffix(h, "&amp;…>* — Firing") {
 		t.Errorf("heading ends %q", h[len(h)-20:])
 	}
 
@@ -712,11 +751,11 @@ func TestLimits(t *testing.T) {
 		Heading: &messages.Heading{Number: 12, Title: "DiskFull", URL: layoutGroupURL},
 		Alerts:  &messages.AlertList{FullList: &messages.Link{Text: "Full list in Muster", URL: layoutGroupURL}},
 		Notices: []string{strings.Repeat("n", 2990)}}
-	if body := sections(layout(m, testLook(), nil))[blockBody]; body != m.Notices[0] {
+	if body := sections(layout(m, testLook(), nil))[blockAlerts]; body != m.Notices[0] {
 		t.Errorf("no room: %.40q", body)
 	}
 	m.Notices = []string{strings.Repeat("n", 3500)}
-	if body := sections(layout(m, testLook(), nil))[blockBody]; body != strings.Repeat("n", 2999)+ellipsis {
+	if body := sections(layout(m, testLook(), nil))[blockAlerts]; body != strings.Repeat("n", 2999)+ellipsis {
 		t.Errorf("a long tail: %.40q (%d)", body, utf8.RuneCountInString(body))
 	}
 }
@@ -735,7 +774,7 @@ func TestEscapingInLayout(t *testing.T) {
 		for _, s := range sections(o) {
 			all += "\n" + s
 		}
-		if !strings.Contains(all, "note: "+acEscaped) {
+		if !strings.Contains(all, "note="+acEscaped) && !strings.Contains(all, "note: "+acEscaped) {
 			t.Errorf("%s: the label value is not escaped:\n%s", name, all)
 		}
 		for _, banned := range []string{"<!", "<@", "<https://evil", "*y*", "@channel"} {
@@ -808,7 +847,7 @@ func TestMentions(t *testing.T) {
 	if o.Text != "🔴 #12 DiskFull <!here> Alice *\u200bSmith*\u200b <!channel>" {
 		t.Errorf("template mentions = %q", o.Text)
 	}
-	b := sections(o)[blockBody]
+	b := sections(o)[blockBody] + "\n" + sections(o)[blockAlerts]
 	for _, want := range []string{"Paging @\u200bchannel &lt;!here> &lt;@U123> <https://wiki.example.org/x|wiki>",
 		"• line @\u200bdba &lt;!channel>"} {
 		if !strings.Contains(b, want) {
@@ -881,17 +920,16 @@ func TestLinkedMentions(t *testing.T) {
 		src.FooterUsers = users
 		m := e.root(t, src)
 		quiet := delivery.Call{Destination: loud.Destination, Loudness: groups.Quiet}
-		body := strings.Split(sections(layout(m, testLook(), callMentions(quiet, m)))[blockBody], "\n")
-		if got := body[len(body)-1]; got != tc.want {
+		if got := sections(layout(m, testLook(), callMentions(quiet, m)))[blockPeople]; got != tc.want {
 			t.Errorf("%s footer = %q", tc.status, got)
 		}
-		if lines := strings.Split(layout(m, plainLook(), nil).Text, "\n"); lines[len(lines)-1] != tc.want {
-			t.Errorf("%s plain footer = %q", tc.status, lines[len(lines)-1])
+		if lines := strings.Split(layout(m, plainLook(), nil).Text, "\n"); lines[len(lines)-2] != tc.want {
+			t.Errorf("%s plain footer = %q", tc.status, lines[len(lines)-2])
 		}
 		other := testLook()
 		other.space = "slack:5"
-		body = strings.Split(sections(layout(m, other, nil))[blockBody], "\n")
-		if got := body[len(body)-1]; got != strings.Replace(tc.want, "<@U0FAKEALICE>", "Alice Smith", 1) {
+		if got := sections(layout(m, other, nil))[blockPeople]; got != strings.Replace(tc.want, "<@U0FAKEALICE>",
+			"Alice Smith", 1) {
 			t.Errorf("%s footer without a link = %q", tc.status, got)
 		}
 	}
@@ -907,13 +945,16 @@ func TestPlain(t *testing.T) {
 		src.Alerts = append(src.Alerts, messages.SourceAlert{Fingerprint: fmt.Sprint("f", i),
 			Labels: map[string]string{"pod": fmt.Sprint("я-pod-", i+1)}, Firing: true})
 	}
-	src.CommonAnnotations = map[string]string{"details": strings.Repeat("я", 2000)}
+	src.Description = strings.Repeat("я", 2000)
 	o := layout(e.root(t, src), plainLook(), []string{"<!here>"})
 	slackRules(t, "plain", o)
 	lines := strings.Split(o.Text, "\n")
 	if len(o.Text) > plainLimit || len(o.Blocks) != 0 || len(o.Attachments) != 0 || lines[0] != "🟠 #12 DiskFull" ||
-		lines[1] != "<!here>" || lines[len(lines)-1] != "Acknowledged by Alice Smith" ||
-		!strings.Contains(o.Text, "note: "+acEscaped) || strings.Contains(o.Text, "яяя") {
+		lines[1] != "<!here>" || lines[len(lines)-2] != "Acknowledged by Alice Smith" ||
+		!strings.HasPrefix(lines[len(lines)-1], "<"+layoutGroupURL+"|Open in Muster> · ") ||
+		!strings.Contains(o.Text, "\nSeverity: critical\n") ||
+		!strings.Contains(o.Text, "\npod: я-pod-1, я-pod-2, я-pod-3, я-pod-4, я-pod-5 …and 35 more\n") ||
+		strings.Contains(o.Text, "яяя") {
 		t.Errorf("plain (%d bytes) =\n%s", len(o.Text), o.Text)
 	}
 	if a := o.args(); fmt.Sprint(a["blocks"], a["attachments"]) != "[] []" {

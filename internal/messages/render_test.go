@@ -66,7 +66,8 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		return pgtype.Text{String: *p, Valid: true}
 	}
 	row := dbgen.GetRenderGroupRow{ID: s.ID, PublicID: s.PublicID, Number: s.Number, Title: s.Title,
-		Summary: pgtype.Text{String: s.Summary, Valid: s.Summary != ""}, Status: s.Status,
+		Summary:     pgtype.Text{String: s.Summary, Valid: s.Summary != ""},
+		Description: pgtype.Text{String: s.Description, Valid: s.Description != ""}, Status: s.Status,
 		SeverityLevel: s.SeverityLevel, GroupKeyLabels: s.KeyLabels, GroupKeyValues: js(s.KeyValues),
 		CommonLabels: js(s.CommonLabels), CommonAnnotations: js(s.CommonAnnotations), FiringAlertCount: s.FiringCount,
 		ReopenCount: s.ReopenCount, ResolvedByKind: pgtype.Text{String: s.ResolvedByKind, Valid: s.ResolvedByKind != ""},
@@ -76,11 +77,16 @@ func (f *fakeQueries) GetRenderGroup(_ context.Context, arg dbgen.GetRenderGroup
 		TemplateLine: text(s.Route.Line), TemplateAckTimeoutNotice: text(s.Route.AckTimeoutNotice),
 		TemplateErrorTemplate: pgtype.Text{String: f.routeErr,
 			Valid: f.routeErr != ""}, TimeZone: s.TimeZone, WorkdayStart: s.WorkdayStart, WeekStart: s.WeekStart,
-		OwnerName: s.Owner}
+		OwnerName: s.Owner, RouteGroupKey: s.KeyLabels, MessageLabels: s.Route.MessageLabels, SeverityLabel: "severity",
+		TeamLabel: "team", InstanceLabels: s.InstanceLabels}
 	if s.SnoozeUntil != nil {
 		row.SnoozeUntil = pgtype.Timestamptz{Time: *s.SnoozeUntil, Valid: true}
 	}
 	return row, nil
+}
+
+func (f *fakeQueries) ListRenderTeams(context.Context, dbgen.ListRenderTeamsParams) ([]string, error) {
+	return f.group.Teams, f.err("ListRenderTeams")
 }
 
 func (f *fakeQueries) GetGroupIDByPublicID(_ context.Context, arg dbgen.GetGroupIDByPublicIDParams) (int64, error) {
@@ -229,40 +235,64 @@ func withFake(t *testing.T, f *fakeQueries) *Renderer {
 
 func ptr(s string) *string { return &s }
 
-// TestRouteTemplates is C-12.FR-2: a Route's root_message template replaces only the body — the heading, links,
-// notices, footer and buttons stay Muster's — and its line template replaces the default line of each Alert, with
-// alert data escaped for the markup; muster_template_render_duration_seconds is observed for every render.
+// TestRouteTemplates is C-29.FR-5, C-29.AC-5 and C-12.FR-2: a Route's root_message template replaces items 3 to 5 —
+// the summary, the description, the key labels and the Alerts — and keeps Muster's heading with the status word, the
+// fields, the notices, the footer, the links and the buttons around its body; its line template renders each listed
+// Alert on a line of its own, firing ones first, with "…and K more" for the rest, alert data escaped for the markup;
+// muster_template_render_duration_seconds is observed for every render.
 func TestRouteTemplates(t *testing.T) {
 	r := newRenderer(t)
 	before := histogramCount(t, "root_message") + histogramCount(t, "line")
 	src := source("acknowledged", 3)
-	src.Owner = "Alice"
+	src.Owner, src.ReopenCount = "Alice", 1
 	src.Route.RootMessage = ptr(`{{ .AlertGroup.Title }} has {{ len .Alerts.Firing }} firing; ` +
 		`owner {{ .CommonLabels.owner }} {{ .CommonLabels.team }}`)
 	src.CommonLabels["team"] = "web_ops"
 	out := r.Root(src, MarkupMarkdown)
 	m := out.Message
 	if out.Failure != nil || m.Body == nil || m.Body.Text != "PodDown has 2 firing; owner @\u200bchannel web\\_ops" ||
-		m.Environment != "" || m.GroupLabels != nil || m.Alerts != nil || m.Footer != "Acknowledged by Alice" ||
-		len(m.Buttons) != 7 || len(m.Links) != 1 || m.Heading.Title != "PodDown" || len(out.Rendered) != 1 {
+		m.Summary != "" || m.Description != "" || m.KeyLabels != nil || m.AlertsLine != nil || m.Alerts != nil ||
+		m.Footer != "Acknowledged by Alice" || len(m.Buttons) != 7 || len(m.Links) != 1 || m.Heading.Title != "PodDown" ||
+		len(m.Fields) != 4 || len(out.Rendered) != 1 {
 		t.Errorf("root template %+v", out)
+	}
+	want := strings.Join([]string{
+		"[#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA) — 🟠 Acknowledged",
+		"Severity: critical", "Route: db", "Teams: payments", "Started: 2026-10-04 14:05 UTC",
+		"PodDown has 2 firing; owner @\u200bchannel web\\_ops",
+		"🔁 Reopened ×1",
+		"Acknowledged by Alice",
+		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
+	}, "\n")
+	if got := Layout(m, MarkupMarkdown); !strings.HasPrefix(got, want+"\n[Unack]") {
+		t.Errorf("layout\n%s\nwant\n%s", got, want)
 	}
 	src = source("firing", 3)
 	src.Route.Line = ptr(`{{ .Labels.pod }} on {{ .Labels.cluster }} of #{{ .AlertGroup.Number }}`)
 	out = r.Root(src, MarkupHTML)
-	lines := out.Message.Alerts.Lines
-	if out.Failure != nil || len(lines) != 3 || lines[0].Text != "p1 on prod of #12" || lines[0].Markup != MarkupHTML ||
-		out.Message.Environment == "" || len(out.Rendered) != 1 || out.Rendered[0] != "line" {
+	a := out.Message.AlertsLine
+	if out.Failure != nil || a == nil || len(a.Lines) != 3 || a.Lines[0].Text != "p1 on prod of #12" ||
+		a.Lines[0].Markup != MarkupHTML || !a.Lines[2].Resolved || len(a.Values) != 3 || out.Message.Summary == "" ||
+		len(out.Rendered) != 1 || out.Rendered[0] != "line" {
 		t.Errorf("line template %+v", out)
 	}
-	if !strings.Contains(Layout(out.Message, MarkupHTML), "• <s>p2 on prod of #12</s>") {
-		t.Errorf("layout %s", Layout(out.Message, MarkupHTML))
+	if got := Layout(out.Message, MarkupHTML); !strings.Contains(got, "\n• p1 on prod of #12\n• p3 on prod of #12\n"+
+		"• <s>p2 on prod of #12</s>\n") {
+		t.Errorf("layout %s", got)
 	}
-	// Above message.alerts_listed the distinct values stand in: the line template does not render.
+	// Above message.compact_alerts_listed the line template renders the listed Alerts, then "…and K more"; one Alert
+	// renders no line.
 	src = source("firing", 11)
 	src.Route.Line = ptr(`{{ .Labels.pod }}`)
-	if out := r.Root(src, MarkupMarkdown); len(out.Rendered) != 0 || out.Message.Alerts.FullList == nil {
-		t.Errorf("many alerts %+v", out)
+	out = r.Root(src, MarkupMarkdown)
+	if got := Layout(out.Message, MarkupMarkdown); len(out.Rendered) != 1 ||
+		!strings.Contains(got, "\n- p1\n- p3\n- p4\n- p5\n- p6\n…and 6 more\n") {
+		t.Errorf("many alerts %+v\n%s", out.Rendered, got)
+	}
+	src = source("firing", 1)
+	src.Route.Line = ptr(`{{ .Labels.pod }}`)
+	if out := r.Root(src, MarkupMarkdown); len(out.Rendered) != 0 || out.Message.AlertsLine != nil {
+		t.Errorf("one alert %+v", out)
 	}
 	if after := histogramCount(t, "root_message") + histogramCount(t, "line"); after < before+3+3 {
 		t.Errorf("render durations observed %d times", after-before)
@@ -298,7 +328,8 @@ func TestFallbackTemplate(t *testing.T) {
 		t.Fatalf("failure %+v", out.Failure)
 	}
 	text := Layout(out.Message, MarkupMarkdown)
-	for _, want := range []string{"🔴 [#12 PodDown]", "The message template of this Route failed",
+	for _, want := range []string{"[#12 PodDown](", "— 🔴 Firing\nSeverity: critical\n",
+		"The message template of this Route failed",
 		"prometheus: mon/k8s", "severity: critical", `- alertname=PodDown, cluster=prod, namespace=shop, owner=@`,
 		"pod=p1", "~~alertname=PodDown", "[Open in Muster]", "[Ack] [Resolve] [Snooze 1 h]"} {
 		if !strings.Contains(text, want) {
@@ -561,7 +592,7 @@ func webhook(pods ...string) []byte {
 // example.
 func TestPreview(t *testing.T) {
 	f := &fakeQueries{group: source("firing", 25)}
-	f.group.CommonAnnotations["details"] = strings.Repeat("d", 4000)
+	f.group.Description = strings.Repeat("d", 4000)
 	r := withFake(t, f)
 	ctx := t.Context()
 	res, err := r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: `{{ env "HOME" }}`})
@@ -574,8 +605,12 @@ func TestPreview(t *testing.T) {
 		res.Format != MarkupMarkdown || res.Source != BuiltinSource("root_message", "en") {
 		t.Fatalf("group = %+v, %v", res, err)
 	}
-	mustKeep(t, res.Output, "🔴 [#12 PodDown](", "pod: p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 +15 more",
-		"Full list in Muster", "Open in Muster", "[Ack] [Resolve] [Snooze 1 h]", "owner: @\u200bchannel")
+	mustKeep(t, res.Output, "[#12 PodDown](", "— 🔴 Firing\nSeverity: critical", "Pods are down",
+		"pod: p1, p3, p4, p5, p6 …and 20 more", "namespace=shop · cluster=prod", "Open in Muster",
+		"[Ack] [Resolve] [Snooze 1 h]")
+	if strings.Contains(res.Output, "ddd") {
+		t.Errorf("the description is not cut first:\n%s", res.Output)
+	}
 	f.group.Status, f.group.ResolvedByKind, f.group.ResolveReason = "resolved", "system", "resolved"
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", AlertGroupID: "AGK7M3QX9P2RTA", Language: "ru",
 		Format: MarkupHTML})
@@ -615,7 +650,8 @@ func TestPreview(t *testing.T) {
 	// Without Stored Snapshots, the example.
 	f.snapshots = nil
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", RouteID: "RTAAAAAAAAAAA1", Language: "ru"})
-	if err != nil || !res.Valid || res.Sample != "example" || res.Output != "- pod: checkout-1\n- pod: checkout-2" ||
+	if err != nil || !res.Valid || res.Sample != "example" || res.Output != "- cluster: prod namespace: shop pod: checkout-1 \n"+
+		"- cluster: prod namespace: shop pod: checkout-2 " ||
 		res.Source != BuiltinSource("line", "ru") {
 		t.Errorf("example = %+v, %v", res, err)
 	}
@@ -776,7 +812,7 @@ func TestLinksMentionsAndFooters(t *testing.T) {
 	}
 	mention := func(u mentions.User) string { return "@" + u.Username }
 	if f := m.WithFooterIn("mattermost:3", mention); Layout(f, MarkupMarkdown) == Layout(m, MarkupMarkdown) ||
-		!strings.Contains(Layout(f, MarkupMarkdown), "\nAcknowledged by @alice.mm\n[Unack] [Resolve]") {
+		!strings.Contains(Layout(f, MarkupMarkdown), "\nAcknowledged by @alice.mm\n[Open in Muster]") {
 		t.Errorf("mattermost footer\n%s", Layout(f, MarkupMarkdown))
 	}
 	if tokens := templates.Tokens(m.Body.Text); len(tokens) != 3 || tokens[0].Name != "all" ||
@@ -828,7 +864,7 @@ func TestLinksMentionsAndFooters(t *testing.T) {
 	// A line template is neutralized the same way.
 	f.group.Route.RootMessage, f.group.Route.Line = nil, ptr("@here {{ .Labels.pod }}")
 	src, _ = r.Load(ctx, nil, 9)
-	if line := r.Root(src, MarkupMarkdown).Message.Alerts.Lines[0].Text; line != "@\u200bhere p1" {
+	if line := r.Root(src, MarkupMarkdown).Message.AlertsLine.Lines[0].Text; line != "@\u200bhere p1" {
 		t.Errorf("line %q", line)
 	}
 	// Failing links or names fail the load.
@@ -1090,25 +1126,28 @@ func TestButtonStyleNotStored(t *testing.T) {
 	}
 }
 
-// TestLayoutCommonMark is C-22.FR-4 on the renderer: the default Root message in CommonMark is one block per section
-// — the label sections as block quotes of bold names, the summary in italics, the Alerts as a bullet list with
-// resolved ones struck through — with alert data escaped for CommonMark and `@` neutralized; a Route's root_message and
-// line templates write CommonMark around alert data escaped for it; text lines, distinct values, links, notices and
+// TestLayoutCommonMark is C-22.FR-4 and C-29.FR-1 on the renderer: the default Root message in CommonMark is one block
+// per item — the heading with the status word, the fields joined by hard line breaks, the summary, the description,
+// the key labels and the Alerts line with resolved ones struck through — with alert data escaped for CommonMark and
+// `@` neutralized; a Route's root_message and line templates write CommonMark around alert data escaped for it; the
+// label sections of the Fallback template are block quotes of bold names; text lines, distinct values, links — still
+// before the notices and the footer, where L1 put them, until the Bridge protocol carries the layout — notices and
 // buttons have their blocks too.
 func TestLayoutCommonMark(t *testing.T) {
 	r := newRenderer(t)
 	src := source("acknowledged", 3)
 	src.Owner, src.ReopenCount = "Alice", 2
-	src.CommonLabels["team"] = "web_*ops*"
+	for i := range src.Alerts {
+		src.Alerts[i].Labels["team"] = "web_*ops*"
+	}
 	out := r.Root(src, MarkupCommonMark)
 	want := strings.Join([]string{
-		"🟠 [#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
-		"prod · production · Started 2026-10-04 14:05 UTC",
-		"> **namespace** shop",
-		"> **cluster** prod\\\n> **owner** @\u200bchannel\\\n> **team** web\\_\\*ops\\*",
-		"> **dashboard** https://grafana/d",
-		"*Pods are down*",
-		"- pod: p1\n- ~~pod: p2~~\n- pod: p3",
+		"[#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA) — 🟠 Acknowledged",
+		"Severity: critical\\\nRoute: db\\\nTeams: payments\\\nStarted: 2026-10-04 14:05 UTC",
+		"Pods are down",
+		"The pods of the shop do not answer.",
+		"namespace=shop · team=web\\_\\*ops\\* · cluster=prod",
+		"pod: p1, p3, ~~p2~~",
 		"[Open in Muster](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)",
 		"🔁 Reopened ×2",
 		"Acknowledged by Alice",
@@ -1124,14 +1163,14 @@ func TestLayoutCommonMark(t *testing.T) {
 	src.Alerts[0].Labels["pod"] = "<p1>"
 	src.Route.Line = ptr(`{{ .Labels.pod }} *on* {{ .Labels.cluster }} `)
 	out = r.Root(src, MarkupCommonMark)
-	if l := out.Message.Alerts.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != `\<p1\> *on* prod ` ||
+	if l := out.Message.AlertsLine.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != `\<p1\> *on* prod ` ||
 		l[0].Markup != MarkupCommonMark {
 		t.Fatalf("line template %+v", out)
 	}
-	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- \\<p1\\> *on* prod \n- ~~p2 *on* prod~~\n- p3 *on* prod \n\n")
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- \\<p1\\> *on* prod \n- p3 *on* prod \n- ~~p2 *on* prod~~\n\n")
 
-	// A later line of alert data, indented by spaces or a tab, stays text inside its list item: no heading, nested list,
-	// ordered list or setext underline forms, from the default line or from a line template.
+	// A later line of alert data, indented by spaces or a tab, stays text inside its paragraph or list item: no
+	// heading, nested list, ordered list or setext underline forms, from the Alerts line or from a line template.
 	src = source("firing", 4)
 	src.Alerts[0].Labels["pod"] = "a\n    # head"
 	src.Alerts[1].Labels["pod"] = "b\n\t- x"
@@ -1139,7 +1178,7 @@ func TestLayoutCommonMark(t *testing.T) {
 	src.Alerts[3].Labels["pod"] = "d\n    ==="
 	out = r.Root(src, MarkupCommonMark)
 	mustKeep(t, Layout(out.Message, MarkupCommonMark),
-		"\n\n- pod: a\n    \\# head\n- ~~pod: b\n\t\\- x~~\n- pod: c\n    1\\. x\n- pod: d\n    \\===\n\n")
+		"\n\npod: a\n    \\# head, c\n    1\\. x, d\n    \\===, ~~b\n\t\\- x~~\n\n")
 	src.Route.Line = ptr(`{{ .Annotations.description }}`)
 	src.Alerts[0].Annotations["description"] = "x\n\t# y\n  \t1) z"
 	src.Alerts[1].Annotations["description"] = "w"
@@ -1147,15 +1186,21 @@ func TestLayoutCommonMark(t *testing.T) {
 	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\n- x\n\t\\# y\n  \t1\\) z\n- ")
 
 	// A blank line of alert data starts no indented code block and ends no block quote: the rest of the value continues
-	// its list item, the Environment and its quoted label, from the default line or from a line template.
+	// its paragraph, the summary and the description, the key labels, the Alerts line and the quoted labels of the
+	// Fallback template, from the default layout or from a line template.
 	src = source("firing", 3)
 	src.Alerts[0].Labels["pod"] = "a\n\n      code *x*"
-	src.CommonLabels["environment"] = "env\n\n    code"
-	src.CommonLabels["team"] = "web\n \t\n\nrest *x*"
-	src.CommonLabels["zone"] = "z"
+	src.Summary, src.Description = "sum\n\n    code", "desc\n \t\n\nrest *x*"
+	src.Route.MessageLabels = []string{"zone"}
+	for i := range src.Alerts {
+		src.Alerts[i].Labels["zone"] = "z\n\n    code"
+	}
 	out = r.Root(src, MarkupCommonMark)
-	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\nprod · env\n    code · Started 2026-10-04 14:05 UTC\n\n",
-		"> **team** web\nrest \\*x\\*\\\n> **zone** z\n\n", "\n\n- pod: a\n      code \\*x\\*\n- ")
+	mustKeep(t, Layout(out.Message, MarkupCommonMark), "\n\nsum\n    code\n\ndesc\nrest \\*x\\*\n\n",
+		"\n\nzone=z\n    code\n\n", "\n\npod: a\n      code \\*x\\*, p3, ~~p2~~\n\n")
+	fallback := Message{Language: "en", CommonLabels: []Label{{Name: "team", Value: "web\n \t\n\nrest *x*"},
+		{Name: "zone", Value: "z"}}}
+	mustKeep(t, Layout(fallback, MarkupCommonMark), "> **team** web\nrest \\*x\\*\\\n> **zone** z")
 	src.Route.Line = ptr(`{{ .Annotations.description }}`)
 	src.Alerts[0].Annotations["description"] = "\n\n\tcode"
 	src.Alerts[1].Annotations["description"] = "w"
@@ -1213,6 +1258,9 @@ func TestPreviewCommonMark(t *testing.T) {
 	f := &fakeQueries{group: source("firing", 3)}
 	f.group.Alerts[0].Labels["pod"] = "*p1*"
 	f.group.CommonLabels["team"] = "<b>web</b>"
+	for i := range f.group.Alerts {
+		f.group.Alerts[i].Labels["team"] = "<b>web</b>"
+	}
 	r := withFake(t, f)
 	ctx := t.Context()
 	res, err := r.Preview(ctx, PreviewRequest{Kind: "root_message", AlertGroupID: "AGK7M3QX9P2RTA",
@@ -1220,9 +1268,9 @@ func TestPreviewCommonMark(t *testing.T) {
 	if err != nil || !res.Valid || res.Format != MarkupCommonMark {
 		t.Fatalf("default = %+v, %v", res, err)
 	}
-	mustKeep(t, res.Output, "🔴 [#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA)\n\n",
-		"\n\n> **namespace** shop\n\n", "> **owner** @\u200bchannel\\\n> **team** \\<b\\>web\\</b\\>",
-		"\n\n- pod: \\*p1\\*\n- ~~pod: p2~~\n- pod: p3\n\n", "\\[Ack\\] \\[Resolve\\] \\[Snooze 1 h\\]")
+	mustKeep(t, res.Output, "[#12 PodDown](https://muster.example.org/alert-groups/AGK7M3QX9P2RTA) — 🔴 Firing\n\n",
+		"\n\nSeverity: critical\\\nRoute: db\\\n", "\n\nnamespace=shop · team=\\<b\\>web\\</b\\> · cluster=prod\n\n",
+		"\n\npod: \\*p1\\*, p3, ~~p2~~\n\n", "\\[Ack\\] \\[Resolve\\] \\[Snooze 1 h\\]")
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: "team **{{ .CommonLabels.team }}**",
 		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupCommonMark})
 	if err != nil || !res.Valid || res.Format != MarkupCommonMark ||
@@ -1232,7 +1280,7 @@ func TestPreviewCommonMark(t *testing.T) {
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "{{ .Labels.pod }} **{{ .Labels.cluster }}**",
 		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupCommonMark})
 	if err != nil || !res.Valid || res.Format != MarkupCommonMark ||
-		res.Output != "- \\*p1\\* **prod**\n- ~~p2 **prod**~~\n- p3 **prod**" {
+		res.Output != "- \\*p1\\* **prod**\n- p3 **prod**\n- ~~p2 **prod**~~" {
 		t.Errorf("line template = %+v, %v", res, err)
 	}
 }
@@ -1270,32 +1318,33 @@ func TestSnoozeSecondsOnlyInCommonMark(t *testing.T) {
 	}
 }
 
-// TestLayoutMrkdwn is C-24.FR-4 and C-24.FR-7 on the renderer: the default Root message in Slack's mrkdwn — the
-// heading as a link `<url|#N title>`, the summary in `_…_`, the Alerts as bullets with resolved ones struck through in
-// `~…~`, the links as `<url|text>` — with alert data escaped for mrkdwn and `@` neutralized; a Route's line template
-// writes mrkdwn around alert data escaped for it; distinct values, the full list, text lines, links with the characters
-// that break a link's URL, notices and buttons have their lines too.
+// TestLayoutMrkdwn is C-24.FR-4, C-24.FR-7 and C-29.FR-1 on the renderer: the default Root message in Slack's mrkdwn —
+// the heading as a link `<url|#N title>` with the status word, the fields, the summary and the description as plain
+// text, the key labels, the Alerts line with resolved ones struck through in `~…~`, the links as `<url|text>` — with
+// alert data escaped for mrkdwn and `@` neutralized; a Route's line template writes mrkdwn around alert data escaped
+// for it; distinct values, the full list, text lines, links with the characters that break a link's URL, notices and
+// buttons have their lines too.
 func TestLayoutMrkdwn(t *testing.T) {
 	r := newRenderer(t)
 	src := source("acknowledged", 3)
 	src.Owner, src.ReopenCount = "Alice", 2
-	src.CommonLabels["team"] = "web_*ops*"
+	for i := range src.Alerts {
+		src.Alerts[i].Labels["team"] = "web_*ops*"
+	}
 	out := r.Root(src, MarkupMrkdwn)
 	want := strings.Join([]string{
-		"🟠 <https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown>",
-		"prod · production · Started 2026-10-04 14:05 UTC",
-		"namespace: shop",
-		"cluster: prod",
-		"owner: @\u200bchannel",
-		"team: web_\u200b*\u200bops*\u200b",
-		"dashboard: https://grafana/d",
-		"_Pods are down_",
-		"• pod: p1",
-		"• ~pod: p2~",
-		"• pod: p3",
-		"<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>",
+		"<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown> — 🟠 Acknowledged",
+		"Severity: critical",
+		"Route: db",
+		"Teams: payments",
+		"Started: 2026-10-04 14:05 UTC",
+		"Pods are down",
+		"The pods of the shop do not answer.",
+		"namespace=shop · team=web_\u200b*\u200bops*\u200b · cluster=prod",
+		"pod: p1, p3, ~p2~",
 		"🔁 Reopened ×2",
 		"Acknowledged by Alice",
+		"<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>",
 		"[Unack] [Resolve] [Snooze 1 h] [Snooze 4 h] [Snooze 24 h] [Until tomorrow 09:00] [Until Monday 09:00]",
 	}, "\n")
 	if got := Layout(out.Message, MarkupMrkdwn); out.Failure != nil || got != want {
@@ -1307,11 +1356,11 @@ func TestLayoutMrkdwn(t *testing.T) {
 	src.Alerts[0].Labels["pod"] = "<p1>"
 	src.Route.Line = ptr(`{{ .Labels.pod }} *on* {{ .Labels.cluster }} `)
 	out = r.Root(src, MarkupMrkdwn)
-	if l := out.Message.Alerts.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != "&lt;p1&gt; *on* prod " ||
+	if l := out.Message.AlertsLine.Lines; out.Failure != nil || len(l) != 3 || l[0].Text != "&lt;p1&gt; *on* prod " ||
 		l[0].Markup != MarkupMrkdwn {
 		t.Fatalf("line template %+v", out)
 	}
-	mustKeep(t, Layout(out.Message, MarkupMrkdwn), "\n• &lt;p1&gt; *on* prod \n• ~p2 *on* prod~\n• p3 *on* prod \n")
+	mustKeep(t, Layout(out.Message, MarkupMrkdwn), "\n• &lt;p1&gt; *on* prod \n• p3 *on* prod \n• ~p2 *on* prod~\n")
 
 	// The other sections: a padded summary, distinct values above message.alerts_listed and the full list whose URL
 	// holds `&`, `<`, `>`, `|` and a space, text lines, a link text with `>`, a link without a URL and the notices.
@@ -1323,14 +1372,14 @@ func TestLayoutMrkdwn(t *testing.T) {
 			{Text: "no_url"}},
 		Notices: []string{"⚠ one", "* two"}}
 	want = strings.Join([]string{
-		"_padded_\u200bx_",
+		"padded_\u200bx",
 		"pod: p1, p_\u200b2 +30 more",
 		"<https://muster.example.org/a%20b?x=1&amp;y=%3C2%3E%7Cz|Full list in Muster>",
 		"New alerts (2):",
 		"&lt;!here&gt; *\u200bx*\u200b",
-		"<https://runbooks.example.org/x|Runbook> · <https://x.org|a&gt;b> · no_\u200burl",
 		"⚠ one",
 		"*\u200b two",
+		"<https://runbooks.example.org/x|Runbook> · <https://x.org|a&gt;b> · no_\u200burl",
 	}, "\n")
 	if got := Layout(m, MarkupMrkdwn); got != want {
 		t.Errorf("sections\n%s\nwant\n%s", got, want)
@@ -1344,6 +1393,10 @@ func TestLayoutMrkdwn(t *testing.T) {
 func TestPreviewMrkdwn(t *testing.T) {
 	f := &fakeQueries{group: source("firing", 3)}
 	f.group.CommonLabels["note"] = ac6
+	f.group.Route.MessageLabels = []string{"note"}
+	for i := range f.group.Alerts {
+		f.group.Alerts[i].Labels["note"] = ac6
+	}
 	f.group.Alerts[0].Labels["pod"] = "*p1*"
 	r := withFake(t, f)
 	ctx := t.Context()
@@ -1352,8 +1405,8 @@ func TestPreviewMrkdwn(t *testing.T) {
 	if err != nil || !res.Valid || res.Format != MarkupMrkdwn {
 		t.Fatalf("default = %+v, %v", res, err)
 	}
-	mustKeep(t, res.Output, "🔴 <https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown>\n",
-		"\nnote: "+ac6Mrkdwn+"\n", "\n• pod: *\u200bp1*\u200b\n• ~pod: p2~\n• pod: p3\n",
+	mustKeep(t, res.Output, "<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|#12 PodDown> — 🔴 Firing\n",
+		"\nnote="+ac6Mrkdwn+"\n", "\npod: *\u200bp1*\u200b, p3, ~p2~\n",
 		"\n<https://muster.example.org/alert-groups/AGK7M3QX9P2RTA|Open in Muster>\n", "[Ack] [Resolve] [Snooze 1 h]")
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "root_message", Template: "*Note:* {{ .CommonLabels.note }}",
 		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
@@ -1365,7 +1418,7 @@ func TestPreviewMrkdwn(t *testing.T) {
 	res, err = r.Preview(ctx, PreviewRequest{Kind: "line", Template: "{{ .Labels.pod }} *{{ .Labels.cluster }}*",
 		AlertGroupID: "AGK7M3QX9P2RTA", Format: MarkupMrkdwn})
 	if err != nil || !res.Valid || res.Format != MarkupMrkdwn ||
-		res.Output != "• "+ac6Mrkdwn+" *prod*\n• ~p2 *prod*~\n• p3 *prod*" {
+		res.Output != "• "+ac6Mrkdwn+" *prod*\n• p3 *prod*\n• ~p2 *prod*~" {
 		t.Errorf("line template = %+v, %v", res, err)
 	}
 	f.group.Alerts[0].GeneratorURL = hostileURL
@@ -1449,7 +1502,7 @@ func TestShortenMrkdwnCountsEntities(t *testing.T) {
 	}
 	r := newRenderer(t)
 	src := source("firing", 3)
-	src.CommonAnnotations["details"] = strings.Repeat("&", 500)
+	src.Description = strings.Repeat("&", 500)
 	m := r.Root(src, MarkupMrkdwn).Message
 	limit := Length(m, MarkupMrkdwn) - 100
 	short, cut := Shorten(m, limit, MarkupMrkdwn)
@@ -1526,5 +1579,50 @@ func TestCommandsLine(t *testing.T) {
 		if got := commandDuration(tc.lang, tc.seconds); got != tc.want {
 			t.Errorf("%s %d = %q, want %q", tc.lang, tc.seconds, got, tc.want)
 		}
+	}
+}
+
+// TestPreviewLayout is C-29.FR-7 and C-16.FR-4 for previewTemplate: the preview of a Root message carries its layout —
+// the number and the title apart, the status by its key and word, the fields, the key labels with "N values", the
+// Alerts with their total, the notices with the footer last and the links — with the length of its output as its
+// messenger counts it, UTF-16 for Telegram, and the limit of that messenger; a line preview carries none.
+func TestPreviewLayout(t *testing.T) {
+	f := &fakeQueries{group: source("acknowledged", 12)}
+	f.group.Owner = "Alice"
+	f.group.ReopenCount = 1
+	f.group.Alerts[0].Labels["namespace"] = "checkout"
+	r := withFake(t, f)
+	res, err := r.Preview(t.Context(), PreviewRequest{Kind: "root_message", AlertGroupID: "AGK7M3QX9P2RTA",
+		Format: MarkupHTML, LengthLimit: 4096})
+	l := res.Layout
+	if err != nil || l == nil || l.Number != 12 || l.Title != "PodDown" || l.Status != "acknowledged" ||
+		l.StatusWord != "Acknowledged" || len(l.Fields) != 4 || l.Fields[2] != (Label{Name: "Teams", Value: "payments"}) ||
+		l.Summary != "Pods are down" || l.Description != "The pods of the shop do not answer." ||
+		!slices.Equal(l.Labels, []Label{{Name: "namespace", Value: "2 values"}, {Name: "cluster", Value: "prod"}}) ||
+		l.Alerts == nil || l.Alerts.Label != "pod" || l.Alerts.Total != 12 || len(l.Alerts.Values) != 5 ||
+		!slices.Equal(l.Notices, []string{"🔁 Reopened ×1", "Acknowledged by Alice"}) ||
+		l.Links[0].Text != "Open in Muster" {
+		t.Fatalf("layout = %+v, %v", l, err)
+	}
+	if res.MessengerLimit != 4096 || res.Length != MessengerLength(res.Output, MarkupHTML) ||
+		res.Length <= utf8.RuneCountInString(res.Output) {
+		t.Errorf("length %d of %d", res.Length, res.MessengerLimit)
+	}
+	for markup, limit := range map[Markup]int{MarkupMarkdown: 16383, MarkupMrkdwn: 3000, MarkupCommonMark: 0} {
+		if MessengerLimit(markup) != limit {
+			t.Errorf("%s: %d", markup, MessengerLimit(markup))
+		}
+	}
+	if MessengerLength("🔴a", MarkupHTML) != 3 || MessengerLength("🔴a", MarkupMarkdown) != 2 {
+		t.Error("messenger length")
+	}
+	res, _ = r.Preview(t.Context(), PreviewRequest{Kind: "line", AlertGroupID: "AGK7M3QX9P2RTA"})
+	if res.Layout != nil || res.Length != 0 || res.MessengerLimit != 0 {
+		t.Errorf("line %+v", res)
+	}
+	one := LayoutOf(Message{Heading: &Heading{Number: 3, Title: "x"}, AlertsLine: &AlertsLine{Lines: []AlertLine{
+		{Text: "t"}}, Total: 2}})
+	if one.Alerts != nil || one.Notices != nil {
+		t.Errorf("without a label %+v", one)
 	}
 }

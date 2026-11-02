@@ -61,7 +61,10 @@
   (`open_group_updates.team_id` and the kind `team_evaluation`, the evaluation of the open Alert Groups when a Team or
   the Team label is saved, C-25.FR-13, S-163) and
   [`0028_schedule_gap_alert`](../../internal/db/migrations/0028_schedule_gap_alert.up.sql)
-  (`schedules.gap_alert`, C-27.FR-7, S-133), in
+  (`schedules.gap_alert`, C-27.FR-7, S-133) and
+  [`0029_route_message_labels`](../../internal/db/migrations/0029_route_message_labels.up.sql)
+  ("Labels in the message" of a Route, `routes.message_labels`, the re-render of its open Root messages through
+  `open_group_updates`, and `alert_groups.description`, C-29.FR-1, FR-2, S-125), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1039,6 +1042,14 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
 - **`route_suggestion_dismissals`** — suggestions (`heartbeat_lost`, `internal_alerts`) dismissed per user (C-08.FR-11).
 - **`routes.owning_team_id`** — the Team that owns the Route (C-25.FR-2, migration 0022), which only organizes and
   filters and never adds delivery, with the partial index `routes_owning_team_idx` on `(org_id, owning_team_id)`.
+- **`routes.message_labels`** — "Labels in the message" (`route.message_labels`, C-29.FR-2, migration 0029), the label
+  names of the line of key labels of the Route's Root messages, in their order; null while the list is computed from
+  the current Group key and the Organization's settings — the Group key without `alertname` and
+  `organizations.severity_label`, then `organizations.team_label` and `namespace` — which the application does on every
+  read, so that a change of the Group key or of a setting is followed. A change of the list, or of the Group key while
+  it is computed, on a Route with open Alert Groups inserts a row of `open_group_updates` of the kind
+  `route_message_labels` in the same transaction, whose run re-renders their Root messages Quietly
+  ([section 5](#5-queues-and-claims)).
 
 ### 4.9 Alert Groups, Alerts inside them and the Timeline
 
@@ -1063,7 +1074,7 @@ Columns by concern:
 | Concern | Columns |
 |---|---|
 | Identity | `number` (`#N`, unique per Organization), `public_id`, `route_id`, `moved_from_route_id` (set when the Alert Group was moved to the Default route), `group_key_labels` and `group_key_values` (the key as it was at creation), `group_key_sha256` |
-| Display and search | `title`, `title_from_group_key` (the single allowed title switch, C-09.FR-23), `summary`, `common_labels`, `common_annotations`, `integration_ids` |
+| Display and search | `title`, `title_from_group_key` (the single allowed title switch, C-09.FR-23), `summary`, `description` (the `description` annotation of the first Alert that has one, set once like `summary`, C-29.FR-1, migration 0029; null for an Alert Group created before it), `common_labels`, `common_annotations`, `integration_ids` |
 | Status | `status`, `severity_level`, `urgent`, `owner_user_id` and `acknowledged_at`, `first_acknowledged_at`, `snooze_until`, `snooze_no_end`, `snoozed_while_urgent`, `snoozed_by_user_id` or `snoozed_by_service_account_id` |
 | Resolution | `resolved_at`, `resolved_by_kind` (`user` or `system`), `resolved_by_user_id` or `resolved_by_service_account_id` (the `ActorRef` kinds), `resolve_reason` and `resolve_reason_text` |
 | Reopen window | `reopen_deadline`, `prior_status`, `prior_owner_user_id`, `prior_snooze_until`, `prior_snooze_no_end`, `prior_snoozed_while_urgent`, `prior_snoozed_by_user_id`, `prior_snoozed_by_service_account_id` |
@@ -1554,10 +1565,12 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 **Open Alert Group updates** (C-26.FR-9): a change of configuration that must reach the open Alert Groups of its
 scope after the save — the Minimum severity of a Route (`route_minimum_severity`, with its Route in `route_id`), the
 button set of a Destination (`destination_buttons`, with its Destination in `destination_id`) and that of the
-Organization (`organization_buttons`) from 0.2.0, and the evaluation of the Teams of the open Alert Groups after a
+Organization (`organization_buttons`) from 0.2.0, the evaluation of the Teams of the open Alert Groups after a
 save of a Team or of the Team label (`team_evaluation`, with the saved Team in `team_id`, null for the Team label;
-`ON DELETE SET NULL`, as Teams are deleted softly), more kinds as later stories add them to the kind `CHECK`, versioned
-`open_group_updates_kind_v3_check` since migration 0027 — is one row of `open_group_updates`, inserted in the
+`ON DELETE SET NULL`, as Teams are deleted softly), and "Labels in the message" of a Route (`route_message_labels`,
+with its Route in `route_id`, which `open_group_updates_route_scope_check` requires; it also covers a rename of the
+Route, which the field Route of the messages shows), more kinds as later stories add them to the kind `CHECK`,
+versioned `open_group_updates_kind_v4_check` since migration 0029 — is one row of `open_group_updates`, inserted in the
 transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
 at start, by that notification and by the development clock, and claims one row at a time:
 

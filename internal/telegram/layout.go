@@ -16,12 +16,14 @@ import (
 	"github.com/muster-io/muster/internal/templates"
 )
 
-// The layout of messages (C-12.FR-1, C-14.FR-13, FR-16): a Root message is a regular message in Telegram HTML — the
-// status emoji and `<b><a href="{Alert Group page}">#N title</a></b>`, on a Loud message its Mentions, the environment
-// and start, the group labels, common labels and common annotations inside one `<blockquote expandable>`, the summary
-// in `<i>`, the Alerts as one line each (resolved ones struck through), never a table (F-020), the line of links that
-// starts with "Open in Muster", the notices and the footer, which names a user with a Telegram Account link by a
-// `tg://user` link (C-12.FR-12) — with an inline keyboard of its buttons. Alert data are
+// The layout of messages (C-29.FR-1, FR-4, C-14.FR-13, FR-16): a Root message is a regular message in Telegram HTML —
+// `<b><a href="{Alert Group page}">#N title</a></b>` and the status as a word with its emoji beside it, on a Loud
+// message its Mentions, the fields as lines "{name}: {value}", the summary, the description, the key labels, the Alerts
+// on one line by their distinguishing label (resolved ones struck through) or one line each by a line template, never
+// a table (F-020), the notices, the footer, which names a user with a Telegram Account link by a `tg://user` link
+// (C-12.FR-12), and the line of links that starts with "Open in Muster" — with an inline keyboard of its buttons. The
+// Fallback template, and a Desired state of an earlier version, keep the label sections of L1 inside one
+// `<blockquote expandable>` and the Alerts one per line. Alert data are
 // escaped for HTML and their `@` neutralized; the trusted Mention tokens of template output stay text that notifies
 // nobody. A Thread reply carries its Mentions and its text. Rich Messages are not used (F-019). After the messenger
 // rejected the markup, the same sections are sent as plain text.
@@ -35,12 +37,6 @@ const space = "telegram"
 
 // zeroWidthSpace follows the `@` of a Mention that must not notify.
 const zeroWidthSpace = "\u200b"
-
-// statusEmoji starts the heading, by the colour of the message (C-12.FR-1 item 1).
-var statusEmoji = map[string]string{
-	messages.ColourFiring: "🔴", messages.ColourAcknowledged: "🟠", messages.ColourResolved: "🟢",
-	messages.ColourSnoozed: "⚪", messages.ColourStorm: "⛈",
-}
 
 // userID is a Telegram user id, which a `tg://user` link names.
 var userID = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
@@ -87,9 +83,12 @@ func (w writer) text(m messages.Message, mentions string) string {
 	esc := func(s string) string { return w.esc(templates.StripTokens(s)) }
 	if h := m.Heading; h != nil {
 		title := "#" + strconv.FormatInt(h.Number, 10) + " " + templates.StripTokens(h.Title)
-		add(strings.TrimSpace(statusEmoji[m.Colour] + " " + w.tag("b", w.link(title, h.URL))))
+		add(messages.HeadingLine(m, w.tag("b", w.link(title, h.URL))))
 	}
 	add(mentions)
+	for _, f := range m.Fields {
+		add(esc(f.Name + ": " + f.Value))
+	}
 	add(esc(m.Environment))
 	var labels []string
 	for _, section := range [][]messages.Label{m.GroupLabels, m.CommonLabels, m.CommonAnnotations} {
@@ -104,11 +103,15 @@ func (w writer) text(m messages.Message, mentions string) string {
 		}
 		add(quote)
 	}
-	if m.Summary != "" {
-		add(w.tag("i", esc(m.Summary)))
-	}
+	add(esc(strings.TrimSpace(m.Summary)))
+	add(esc(strings.TrimSpace(m.Description)))
 	if m.Body != nil {
 		add(w.output(strings.TrimRight(m.Body.Text, "\n"), m.Body.Markup))
+	}
+	add(esc(messages.KeyLabelsLine(m)))
+	for _, l := range messages.AlertsLines(m, esc, func(l messages.AlertLine) string { return w.output(l.Text, l.Markup) },
+		func(s string) string { return w.tag("s", s) }, "• ") {
+		add(l)
 	}
 	if a := m.Alerts; a != nil {
 		for _, l := range a.Lines {
@@ -137,6 +140,10 @@ func (w writer) text(m messages.Message, mentions string) string {
 	for _, l := range m.Lines {
 		add(esc(l))
 	}
+	for _, n := range m.Notices {
+		add(esc(n))
+	}
+	add(m.FooterText(w.esc))
 	if len(m.Links) > 0 {
 		links := make([]string, len(m.Links))
 		for i, l := range m.Links {
@@ -144,10 +151,6 @@ func (w writer) text(m messages.Message, mentions string) string {
 		}
 		add(strings.Join(links, " · "))
 	}
-	for _, n := range m.Notices {
-		add(esc(n))
-	}
-	add(m.FooterText(w.esc))
 	return strings.Join(out, "\n")
 }
 
@@ -189,9 +192,9 @@ func length(s string) int {
 	return n
 }
 
-// fit lays m out within limit (C-12.FR-11): the sections of m are shortened by messages.Shorten for a budget that
-// shrinks by what the layout of Telegram adds, until the text fits. A message that still does not fit keeps its
-// heading, its Mentions, its line of links and its footer only.
+// fit lays m out within limit (C-29.FR-6, C-12.FR-11): the sections of m are shortened by messages.Shorten for a
+// budget that shrinks by what the layout of Telegram adds, until the text fits. A message that still does not fit
+// keeps its heading with the status word, its Mentions, its fields, its line of links and its footer only.
 func fit(m messages.Message, w writer, mentions string, limit int) string {
 	markup := messages.MarkupHTML
 	if w.plain {
@@ -209,8 +212,18 @@ func fit(m messages.Message, w writer, mentions string, limit int) string {
 		budget -= max(n-limit, 1)
 	}
 	short, _ := messages.Shorten(messages.Message{Language: m.Language, Colour: m.Colour, Heading: m.Heading,
-		Links: m.Links, Footer: m.Footer, FooterMention: m.FooterMention, FooterName: m.FooterName},
+		StatusWord: m.StatusWord, Fields: m.Fields, Links: m.Links, Footer: m.Footer, FooterMention: m.FooterMention,
+		FooterName: m.FooterName},
 		max(limit/2-length(mentions), 1), markup)
+	// The line of links goes whole after the cut rest, so that "Open in Muster" keeps its link.
+	links := short
+	links.Heading, links.StatusWord, links.Fields, links.Footer, links.FooterMention = nil, "", nil, "", ""
+	tail := w.text(links, "")
+	head := short
+	head.Links = nil
+	if room := limit - length(tail) - 1; tail != "" && room > 0 {
+		return cutEnd(w.text(head, mentions), room, w.plain) + "\n" + tail
+	}
 	return cutEnd(w.text(short, mentions), limit, w.plain)
 }
 

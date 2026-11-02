@@ -149,7 +149,7 @@ test("edits the message templates with live previews and refuses an unknown func
   const root = template(page, "root_message");
   await root.getByRole("radio", { name: "Custom" }).check();
   const rootEditor = root.getByRole("textbox", { name: "Root message" });
-  await expect(rootEditor).toHaveValue(/Started \{\{ \.AlertGroup\.StartedAt/);
+  await expect(rootEditor).toHaveValue(/^\{\{ with \.AlertGroup\.Summary \}\}/);
   await root.getByRole("radio", { name: "Telegram" }).check();
   const rootOutput = root.getByTestId("template-preview-output");
   await expect(rootOutput).toContainText("Error rate above 5%");

@@ -5,17 +5,20 @@
 -- re-render step — the samples of dry runs and previews, and the template error state of a Route.
 
 -- GetRenderGroup reads what a message of an Alert Group shows: the Alert Group, its Route with the Route's
--- templates, language, Snooze durations and template error, the Organization's time zone, start of the working day and
--- first day of the week, which the labels of the Snooze presets name, and the names of its Owner, of who snoozed it
--- and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
+-- templates, language, Snooze durations, template error, Group key and own "Labels in the message", the Organization's
+-- time zone, start of the working day and first day of the week, which the labels of the Snooze presets name, its
+-- severity and Team labels, from which the computed "Labels in the message" are made, and its Instance labels, and the
+-- names of its Owner, of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
 -- before it commits.
 -- name: GetRenderGroup :one
-SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level, g.urgent, g.group_key_labels,
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status, g.severity_level, g.urgent,
+       g.group_key_labels,
        g.group_key_values, g.common_labels, g.common_annotations, g.firing_alert_count, g.reopen_count,
        g.resolved_by_kind, g.resolve_reason, g.snooze_until, g.snooze_no_end, g.unclaimed, g.created_at,
        r.id AS route_id, r.public_id AS route_public_id, r.name AS route_name, r.language,
        r.snooze_durations_seconds, r.template_root_message, r.template_line, r.template_error_template,
-       r.template_ack_timeout_notice, o.time_zone, o.workday_start, o.week_start,
+       r.template_ack_timeout_notice, r.group_key AS route_group_key, r.message_labels, o.time_zone, o.workday_start,
+       o.week_start, o.severity_label, o.team_label, o.instance_labels,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
        coalesce(ru.name, rs.name, '')::text AS resolved_by_name
@@ -28,6 +31,15 @@ LEFT JOIN service_accounts ss ON ss.org_id = g.org_id AND ss.id = g.snoozed_by_s
 LEFT JOIN users ru ON ru.org_id = g.org_id AND ru.id = g.resolved_by_user_id
 LEFT JOIN service_accounts rs ON rs.org_id = g.org_id AND rs.id = g.resolved_by_service_account_id
 WHERE g.org_id = @org_id AND g.id = @id;
+
+-- ListRenderTeams lists the names of the Teams of an Alert Group, which its Root message shows in the field Teams
+-- (C-25.FR-6), in the order they joined, deleted ones included with their name.
+-- name: ListRenderTeams :many
+SELECT t.name
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = @org_id AND gt.alert_group_id = @alert_group_id
+ORDER BY gt.joined_at, gt.team_id;
 
 -- GetGroupIDByPublicID reads the internal id of an Alert Group by its public_id, for a preview.
 -- name: GetGroupIDByPublicID :one
@@ -66,16 +78,19 @@ LEFT JOIN users u ON u.org_id = e.org_id AND u.id = e.owner_user_id
 WHERE e.org_id = @org_id AND e.alert_group_id = @alert_group_id AND e.event_seq = @event_seq::bigint
 LIMIT 1;
 
--- GetPreviewRoute reads a Route that is not deleted by public_id, for a preview.
+-- GetPreviewRoute reads a Route that is not deleted by public_id, for a preview, with its Group key and own "Labels in
+-- the message".
 -- name: GetPreviewRoute :one
-SELECT id, public_id, name, language, snooze_durations_seconds
+SELECT id, public_id, name, language, snooze_durations_seconds, group_key, message_labels
 FROM routes
 WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
--- GetRenderSettings reads the Organization's time zone, start of the working day and first day of the week, and the
--- Default route's language and Snooze durations, for a preview without a Route.
+-- GetRenderSettings reads the Organization's time zone, start of the working day, first day of the week, severity and
+-- Team labels and Instance labels, and the Default route's language, Snooze durations, Group key and own "Labels in the
+-- message", for a preview without a Route.
 -- name: GetRenderSettings :one
-SELECT o.time_zone, o.workday_start, o.week_start, r.name, r.language, r.snooze_durations_seconds
+SELECT o.time_zone, o.workday_start, o.week_start, o.severity_label, o.team_label, o.instance_labels, r.name,
+       r.language, r.snooze_durations_seconds, r.group_key, r.message_labels
 FROM organizations o
 JOIN routes r ON r.org_id = @org_id AND r.is_default AND r.deleted_at IS NULL
 WHERE o.id = @org_id;

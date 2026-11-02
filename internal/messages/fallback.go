@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// The Fallback template (C-12.FR-6, ADR-0012): built in and always valid, it stands in for a Route template that
-// failed — under Muster's heading, links, notices, footer and buttons, it shows every label of the Alert Group and of
-// each of its Alerts. It runs no template, so nothing in the data can make it fail.
+// The Fallback template (C-12.FR-6, C-29.FR-5, ADR-0012): built in and always valid, it stands in for a Route template
+// that failed — under Muster's heading, fields, links, notices, footer and buttons, it shows every label of the Alert
+// Group and of each of its Alerts. It runs no template, so nothing in the data can make it fail.
 
 // fallback is the Fallback message of src in the frame m: the notice that the Route's template failed, the common
 // labels of the Alert Group and one line per Alert with all its labels; the distinct values of the labels that differ
@@ -19,6 +19,7 @@ import (
 func (r *Renderer) fallback(m Message, src *Source, lang string) Message {
 	m.Notices = append([]string{T(lang, "fallback.notice", nil)}, m.Notices...)
 	m.Environment, m.GroupLabels, m.CommonLabels, m.CommonAnnotations, m.Summary, m.Body = "", nil, nil, nil, "", nil
+	m.Description, m.KeyLabels, m.AlertsLine = "", nil, nil
 	labels := map[string]string{}
 	maps.Copy(labels, src.KeyValues)
 	maps.Copy(labels, src.CommonLabels)

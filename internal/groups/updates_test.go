@@ -102,7 +102,8 @@ func (f *fakeDB) ListFiringLevels(_ context.Context, arg dbgen.ListFiringLevelsP
 // claims them, name the kinds and the channel alike; destinations checks its own names against groups
 // (write_test.go).
 func TestUpdateNames(t *testing.T) {
-	if routing.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || routing.KindMinimumSeverity != KindRouteMinimumSeverity {
+	if routing.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || routing.KindMinimumSeverity != KindRouteMinimumSeverity ||
+		routing.KindMessageLabels != KindRouteMessageLabels {
 		t.Error("routing and groups name the open alert group updates differently")
 	}
 	if organization.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel ||
@@ -1013,5 +1014,56 @@ func TestTeamEvaluationGracePeriod(t *testing.T) {
 	e.round(t, e.worker)
 	if len(e.db.updates) != 1 || !strings.Contains(e.log.String(), `"event":"open_group_update_failed"`) {
 		t.Errorf("a failing write of the tails: rows %d, log %s", len(e.db.updates), e.log)
+	}
+}
+
+// TestMessageLabelsUpdate is C-29.FR-2 and C-29.AC-4 on the worker: a row route_message_labels runs the dispatcher's
+// re-render step, without a lifecycle event, on each open Alert Group of its Route, by id in batches, and on none of
+// another Route, so that delivery edits their Root messages Quietly to show the new labels. It saves no Alert Group,
+// records no Timeline entry and sends no live-update hint; it is deleted with its last batch and logged as
+// open_group_update_done with its Route and the number of Alert Groups whose Desired state changed, none on a second
+// run.
+func TestMessageLabelsUpdate(t *testing.T) {
+	u := newUpdates(t)
+	var rendered []int64
+	changed := true
+	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		if len(r.Events) != 0 || r.Actor != System || !r.Configuration {
+			t.Errorf("a re-render with events %+v as %+v, configuration %v", r.Events, r.Actor, r.Configuration)
+		}
+		rendered = append(rendered, r.Group.ID)
+		if changed {
+			r.Changed()
+		}
+		return nil
+	})
+	entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
+	u.worker.Batch = 2
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if want := []int64{u.acked.ID, u.snoozed.ID, u.firing.ID}; !slices.Equal(rendered, want) {
+		t.Errorf("rendered %v, want %v", rendered, want)
+	}
+	if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
+		len(u.db.hints) != hints || u.db.calls["ListOpenGroupsOfRouteAfter"] != 2 || !strings.Contains(u.log.String(),
+		`"event":"open_group_update_done","kind":"route_message_labels","route":"RTDBAAAAAAAAAA","alert_groups":3`) {
+		t.Errorf("rows %d, entries %d, saves %d, hints %d, calls %v, log %s", len(u.db.updates),
+			len(u.db.entries)-entries, u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.db.calls, u.log)
+	}
+	rendered, changed = nil, false
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if len(rendered) != 3 || !strings.Contains(u.log.String(),
+		`"kind":"route_message_labels","route":"RTDBAAAAAAAAAA","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
+	}
+	u.db.fail["ListOpenGroupsOfRouteAfter"] = errBoom
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
+		requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if !strings.Contains(u.log.String(), `"event":"open_group_update_failed","kind":"route_message_labels"`) {
+		t.Errorf("a failing list: %s", u.log)
 	}
 }

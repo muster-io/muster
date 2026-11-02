@@ -71,7 +71,7 @@ func (q *Queries) GetGroupIDByPublicID(ctx context.Context, arg GetGroupIDByPubl
 }
 
 const getPreviewRoute = `-- name: GetPreviewRoute :one
-SELECT id, public_id, name, language, snooze_durations_seconds
+SELECT id, public_id, name, language, snooze_durations_seconds, group_key, message_labels
 FROM routes
 WHERE org_id = $1 AND public_id = $2 AND deleted_at IS NULL
 `
@@ -87,9 +87,12 @@ type GetPreviewRouteRow struct {
 	Name                   string
 	Language               string
 	SnoozeDurationsSeconds []int64
+	GroupKey               []string
+	MessageLabels          []string
 }
 
-// GetPreviewRoute reads a Route that is not deleted by public_id, for a preview.
+// GetPreviewRoute reads a Route that is not deleted by public_id, for a preview, with its Group key and own "Labels in
+// the message".
 func (q *Queries) GetPreviewRoute(ctx context.Context, arg GetPreviewRouteParams) (GetPreviewRouteRow, error) {
 	row := q.db.QueryRow(ctx, getPreviewRoute, arg.OrgID, arg.PublicID)
 	var i GetPreviewRouteRow
@@ -99,6 +102,8 @@ func (q *Queries) GetPreviewRoute(ctx context.Context, arg GetPreviewRouteParams
 		&i.Name,
 		&i.Language,
 		&i.SnoozeDurationsSeconds,
+		&i.GroupKey,
+		&i.MessageLabels,
 	)
 	return i, err
 }
@@ -106,12 +111,14 @@ func (q *Queries) GetPreviewRoute(ctx context.Context, arg GetPreviewRouteParams
 const getRenderGroup = `-- name: GetRenderGroup :one
 
 
-SELECT g.id, g.public_id, g.number, g.title, g.summary, g.status, g.severity_level, g.urgent, g.group_key_labels,
+SELECT g.id, g.public_id, g.number, g.title, g.summary, g.description, g.status, g.severity_level, g.urgent,
+       g.group_key_labels,
        g.group_key_values, g.common_labels, g.common_annotations, g.firing_alert_count, g.reopen_count,
        g.resolved_by_kind, g.resolve_reason, g.snooze_until, g.snooze_no_end, g.unclaimed, g.created_at,
        r.id AS route_id, r.public_id AS route_public_id, r.name AS route_name, r.language,
        r.snooze_durations_seconds, r.template_root_message, r.template_line, r.template_error_template,
-       r.template_ack_timeout_notice, o.time_zone, o.workday_start, o.week_start,
+       r.template_ack_timeout_notice, r.group_key AS route_group_key, r.message_labels, o.time_zone, o.workday_start,
+       o.week_start, o.severity_label, o.team_label, o.instance_labels,
        coalesce(ou.name, '')::text AS owner_name,
        coalesce(su.name, ss.name, '')::text AS snoozed_by_name,
        coalesce(ru.name, rs.name, '')::text AS resolved_by_name
@@ -137,6 +144,7 @@ type GetRenderGroupRow struct {
 	Number                   int64
 	Title                    string
 	Summary                  pgtype.Text
+	Description              pgtype.Text
 	Status                   string
 	SeverityLevel            string
 	Urgent                   bool
@@ -161,9 +169,14 @@ type GetRenderGroupRow struct {
 	TemplateLine             pgtype.Text
 	TemplateErrorTemplate    pgtype.Text
 	TemplateAckTimeoutNotice pgtype.Text
+	RouteGroupKey            []string
+	MessageLabels            []string
 	TimeZone                 string
 	WorkdayStart             string
 	WeekStart                string
+	SeverityLabel            string
+	TeamLabel                string
+	InstanceLabels           []string
 	OwnerName                string
 	SnoozedByName            string
 	ResolvedByName           string
@@ -174,9 +187,10 @@ type GetRenderGroupRow struct {
 // Messages (C-12): the reads a message is rendered from — through the caller's transaction at the dispatcher's
 // re-render step — the samples of dry runs and previews, and the template error state of a Route.
 // GetRenderGroup reads what a message of an Alert Group shows: the Alert Group, its Route with the Route's
-// templates, language, Snooze durations and template error, the Organization's time zone, start of the working day and
-// first day of the week, which the labels of the Snooze presets name, and the names of its Owner, of who snoozed it
-// and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
+// templates, language, Snooze durations, template error, Group key and own "Labels in the message", the Organization's
+// time zone, start of the working day and first day of the week, which the labels of the Snooze presets name, its
+// severity and Team labels, from which the computed "Labels in the message" are made, and its Instance labels, and the
+// names of its Owner, of who snoozed it and of who resolved it. It reads through the caller's transaction, so that a change the dispatcher made is seen
 // before it commits.
 func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) (GetRenderGroupRow, error) {
 	row := q.db.QueryRow(ctx, getRenderGroup, arg.OrgID, arg.ID)
@@ -187,6 +201,7 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.Number,
 		&i.Title,
 		&i.Summary,
+		&i.Description,
 		&i.Status,
 		&i.SeverityLevel,
 		&i.Urgent,
@@ -211,9 +226,14 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 		&i.TemplateLine,
 		&i.TemplateErrorTemplate,
 		&i.TemplateAckTimeoutNotice,
+		&i.RouteGroupKey,
+		&i.MessageLabels,
 		&i.TimeZone,
 		&i.WorkdayStart,
 		&i.WeekStart,
+		&i.SeverityLabel,
+		&i.TeamLabel,
+		&i.InstanceLabels,
 		&i.OwnerName,
 		&i.SnoozedByName,
 		&i.ResolvedByName,
@@ -222,7 +242,8 @@ func (q *Queries) GetRenderGroup(ctx context.Context, arg GetRenderGroupParams) 
 }
 
 const getRenderSettings = `-- name: GetRenderSettings :one
-SELECT o.time_zone, o.workday_start, o.week_start, r.name, r.language, r.snooze_durations_seconds
+SELECT o.time_zone, o.workday_start, o.week_start, o.severity_label, o.team_label, o.instance_labels, r.name,
+       r.language, r.snooze_durations_seconds, r.group_key, r.message_labels
 FROM organizations o
 JOIN routes r ON r.org_id = $1 AND r.is_default AND r.deleted_at IS NULL
 WHERE o.id = $1
@@ -232,13 +253,19 @@ type GetRenderSettingsRow struct {
 	TimeZone               string
 	WorkdayStart           string
 	WeekStart              string
+	SeverityLabel          string
+	TeamLabel              string
+	InstanceLabels         []string
 	Name                   string
 	Language               string
 	SnoozeDurationsSeconds []int64
+	GroupKey               []string
+	MessageLabels          []string
 }
 
-// GetRenderSettings reads the Organization's time zone, start of the working day and first day of the week, and the
-// Default route's language and Snooze durations, for a preview without a Route.
+// GetRenderSettings reads the Organization's time zone, start of the working day, first day of the week, severity and
+// Team labels and Instance labels, and the Default route's language, Snooze durations, Group key and own "Labels in the
+// message", for a preview without a Route.
 func (q *Queries) GetRenderSettings(ctx context.Context, orgID int64) (GetRenderSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getRenderSettings, orgID)
 	var i GetRenderSettingsRow
@@ -246,9 +273,14 @@ func (q *Queries) GetRenderSettings(ctx context.Context, orgID int64) (GetRender
 		&i.TimeZone,
 		&i.WorkdayStart,
 		&i.WeekStart,
+		&i.SeverityLabel,
+		&i.TeamLabel,
+		&i.InstanceLabels,
 		&i.Name,
 		&i.Language,
 		&i.SnoozeDurationsSeconds,
+		&i.GroupKey,
+		&i.MessageLabels,
 	)
 	return i, err
 }
@@ -425,6 +457,41 @@ func (q *Queries) ListRenderAlerts(ctx context.Context, arg ListRenderAlertsPara
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRenderTeams = `-- name: ListRenderTeams :many
+SELECT t.name
+FROM alert_group_teams gt
+JOIN teams t ON t.org_id = gt.org_id AND t.id = gt.team_id
+WHERE gt.org_id = $1 AND gt.alert_group_id = $2
+ORDER BY gt.joined_at, gt.team_id
+`
+
+type ListRenderTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// ListRenderTeams lists the names of the Teams of an Alert Group, which its Root message shows in the field Teams
+// (C-25.FR-6), in the order they joined, deleted ones included with their name.
+func (q *Queries) ListRenderTeams(ctx context.Context, arg ListRenderTeamsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRenderTeams, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

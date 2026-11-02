@@ -46,8 +46,9 @@ func newTitle(a *alertRow, key []string, values map[string]string) (string, bool
 }
 
 // joined updates what an Alert joining g changes besides its counts (C-09.FR-23): the one allowed title switch, when
-// an Alert with another alertname joins and the Group key gives a title; the summary, from the first Alert with a
-// summary annotation; the common labels and annotations; and the Integrations.
+// an Alert with another alertname joins and the Group key gives a title; the summary and the description (C-29.FR-1),
+// each from the first Alert with that annotation and set once; the common labels and annotations; and the
+// Integrations.
 func (g *Group) joined(a *alertRow) {
 	if !g.TitleFromKey && a.Labels["alertname"] != g.Title {
 		if t := keyText(g.KeyLabels, g.KeyValues); t != "" {
@@ -57,6 +58,11 @@ func (g *Group) joined(a *alertRow) {
 	if g.Summary == nil {
 		if s := a.Annotations["summary"]; s != "" {
 			g.Summary = &s
+		}
+	}
+	if g.Description == nil {
+		if s := a.Annotations["description"]; s != "" {
+			g.Description = &s
 		}
 	}
 	g.CommonLabels = common(g.CommonLabels, a.Labels)

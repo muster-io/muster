@@ -36,6 +36,53 @@ export const PreviewTemplateResponse = zod.object({
   "format": zod.union([zod.literal('markdown'),zod.literal('html'),zod.literal('commonmark'),zod.literal('mrkdwn'),zod.literal(null)]).nullish().describe('The markup of `output`; null for kinds without markup.'),
   "source": zod.string().nullish().describe('The source of the rendered template — the request\'s `template`, or for an empty one the built-in template of the kind in the preview\'s language, for an editor to start from; null for `link_rule` and `webhook_request`, which have no built-in template.'),
   "sample": zod.union([zod.literal('stored_snapshot'),zod.literal('alert_group'),zod.literal('example'),zod.literal(null)]).nullish(),
+  "layout": zod.union([zod.object({
+  "number": zod.int().describe('The Alert Group\'s number alone, without `#`.'),
+  "title": zod.string().describe('The title without the number.'),
+  "status": zod.object({
+  "key": zod.enum(['firing', 'acknowledged', 'snoozed', 'resolved']),
+  "word": zod.string().describe('The status as a word in the Route\'s language.')
+}),
+  "fields": zod.array(zod.object({
+  "name": zod.string(),
+  "value": zod.string()
+})).describe('Severity, Route, Teams (left out when the Alert Group has none) and Started.'),
+  "summary": zod.string().describe('Empty when there is none.'),
+  "description": zod.string().describe('The `description` annotation of the first Alert that has one; empty when there is none.'),
+  "labels": zod.array(zod.object({
+  "key": zod.string(),
+  "value": zod.string()
+})).describe('The key labels of "Labels in the message"; the value of a label whose values differ among the firing Alerts is "N values" in the Route\'s language.'),
+  "alerts": zod.union([zod.object({
+  "label": zod.string().describe('The distinguishing label.'),
+  "values": zod.array(zod.object({
+  "value": zod.string(),
+  "resolved": zod.boolean()
+})).describe('Up to `message.compact_alerts_listed` values, firing Alerts first.'),
+  "total": zod.int().describe('How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.')
+}),zod.null()]).describe('The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.'),
+  "notices": zod.array(zod.string()).describe('The notices that apply, then the footer as a line.'),
+  "assignees": zod.array(zod.object({
+  "name": zod.string(),
+  "ref": zod.string().nullable().describe('The `ref` of the person\'s entry in the envelope\'s `mentions` where the message carries their Mention, otherwise null.'),
+  "team": zod.object({
+  "name": zod.string()
+}).optional()
+})).describe('The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people.'),
+  "owner": zod.union([zod.object({
+  "name": zod.string(),
+  "ref": zod.string().nullable().describe('The `ref` of the person\'s entry in the envelope\'s `mentions` where the message carries their Mention, otherwise null.'),
+  "team": zod.object({
+  "name": zod.string()
+}).optional()
+}),zod.null()]).describe('Who acknowledged the Alert Group, with their Team; null while the footer names them.'),
+  "links": zod.array(zod.object({
+  "label": zod.string(),
+  "url": zod.string()
+})).describe('The links, "Open in Muster" first.')
+}).describe('The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.'),zod.null()]).optional().describe('For `root_message`, the content of the rendered message as structured data; null when the template failed.'),
+  "length": zod.int().optional().describe('For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.'),
+  "messenger_limit": zod.int().nullish().describe('For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost, 4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.'),
   "errors": zod.array(zod.object({
   "pointer": zod.string().describe('RFC 6901 JSON Pointer to the offending field in the request body, or `` for the whole body. Query and path parameters use `/query/<name>` and `/path/<name>`.'),
   "code": zod.string().describe('Stable code such as `required`, `invalid_format`, `unknown_id`, `too_long`, `too_short`, `out_of_range`, `invalid_regex`, `template_syntax`, `unknown_function`, `duplicate`, `unsupported`.'),

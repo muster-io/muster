@@ -179,17 +179,21 @@ func TestTelegram(t *testing.T) {
 	}
 	e.route("tg", "tg", []string{dest}, nil)
 
-	// C-14.AC-17, AC-8, FR-6: a Loud channel post in HTML, its labels in an expandable quote, alert data literal.
+	// C-14.AC-17, AC-8, FR-6, C-29.FR-4: a Loud channel post in HTML in the compact layout — the fields as lines and
+	// one line of key labels instead of the expandable quote of L1 — alert data literal.
 	e.group("t1", "CertExpiry")
-	e.alert("t1", "a", `{"team":"tg","cluster":"a","domain":"a.example.org","note":"@channel <b>x</b>"}`, "")
+	e.alert("t1", "a", `{"team":"tg","cluster":"a","domain":"a.example.org","note":"@channel <b>x</b>"}`,
+		`,"annotations":{"description":"@channel <b>x</b>"}`)
 	e.notify("t1", "first notification")
 	g := e.groupOf("a")
 	eventually(t, "the channel post", func() bool { return len(e.messages(faketelegram.ChannelID)) == 1 })
 	post := e.messages(faketelegram.ChannelID)[0]
-	if post.ParseMode != "HTML" || !strings.Contains(post.Text, "<blockquote expandable>") ||
+	if post.ParseMode != "HTML" || strings.Contains(post.Text, "<blockquote") ||
 		strings.Contains(post.Text, "<table") || strings.Contains(post.Text, "<pre>") ||
-		!strings.Contains(post.Text, "@\u200bchannel &lt;b&gt;x&lt;/b&gt;") || post.DisableNotification ||
-		!strings.Contains(post.Text, "Open in Muster") {
+		!strings.Contains(post.Text, "</a></b> — 🔴 Firing\n") ||
+		!strings.Contains(post.Text, "\nSeverity: info\nRoute: tg\nStarted: ") ||
+		!strings.Contains(post.Text, "\n@\u200bchannel &lt;b&gt;x&lt;/b&gt;\ncluster=a · team=tg\n") ||
+		post.DisableNotification || !strings.HasSuffix(post.Text, ">Open in Muster</a>") {
 		t.Errorf("post %+v\n%s", post, post.Text)
 	}
 	t.Logf("keyboard %v", buttons(t, post.ReplyMarkup))

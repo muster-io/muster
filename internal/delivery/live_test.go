@@ -2834,7 +2834,8 @@ func (l *live) russianReplies(t *testing.T) {
 		t.Fatalf("calls %s", methods(l.rec.Calls()))
 	}
 	root, reply := pubs[0].Message, replies[0].Message
-	if !strings.Contains(root.Environment, "Начало: ") || root.Buttons[0].Label != "Подтвердить" ||
+	if root.StatusWord != "Горит" || len(root.Fields) == 0 || root.Fields[len(root.Fields)-1].Name != "Начало" ||
+		root.Buttons[0].Label != "Подтвердить" ||
 		root.Links[0].Text != "Открыть в Muster" || reply.Lines[0] != "Новые алерты (2):" ||
 		!strings.HasPrefix(reply.Lines[1], "• disk: Ru/") {
 		t.Fatalf("root %q, reply %q", root.Text(), reply.Lines)
@@ -2845,7 +2846,7 @@ func (l *live) russianReplies(t *testing.T) {
 	if len(updates) == 0 || updates[len(updates)-1].Message.Footer != "Закрыл(а): alice" {
 		t.Fatalf("updates %+v", updates)
 	}
-	t.Logf("thread reply: %q; root message: %q; footer %q", strings.Join(reply.Lines, " "), root.Environment,
+	t.Logf("thread reply: %q; root message: %q; footer %q", strings.Join(reply.Lines, " "), root.Text(),
 		updates[len(updates)-1].Message.Footer)
 }
 

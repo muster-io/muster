@@ -29,5 +29,12 @@ export interface RouteInput {
   destination_ids: PublicId[];
   /** The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`. */
   owning_team_id?: NullablePublicId | null;
+  /** Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization's settings and ignores `message_labels`; an update that omits it keeps it. */
+  own_message_labels?: boolean;
+  /**
+     * The label names of the line of key labels of the Route's Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route's own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization's settings as they are now, and a change of them does not change the Route's ETag; sent back with `own_message_labels` false, it is ignored.
+     * @maxItems 50
+     */
+  message_labels?: string[];
   policy: RoutePolicy;
 }

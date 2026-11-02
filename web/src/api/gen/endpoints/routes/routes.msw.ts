@@ -14,6 +14,7 @@ import type {
   GroupKeyPreview,
   MovedAlertGroups,
   Route,
+  RouteLabelSuggestionList,
   RouteList,
   RouteProfileList,
   RouteSuggestionList
@@ -23,6 +24,7 @@ import {
   getAcceptRouteSuggestionResponseMock,
   getCreateRouteResponseMock,
   getGetRouteResponseMock,
+  getListRouteLabelSuggestionsResponseMock,
   getListRouteProfilesResponseMock,
   getListRouteSuggestionsResponseMock,
   getListRoutesResponseMock,
@@ -32,7 +34,7 @@ import {
   getUpdateRouteResponseMock
 } from './routes.faker';
 
-export { getListRoutesResponseMock, getCreateRouteResponseMock, getGetRouteResponseMock, getUpdateRouteResponseMock, getReorderRoutesResponseMock, getMoveOpenAlertGroupsResponseMock, getListRouteProfilesResponseMock, getPreviewGroupKeyResponseMock, getListRouteSuggestionsResponseMock, getAcceptRouteSuggestionResponseMock } from './routes.faker';
+export { getListRoutesResponseMock, getCreateRouteResponseMock, getGetRouteResponseMock, getUpdateRouteResponseMock, getReorderRoutesResponseMock, getListRouteLabelSuggestionsResponseMock, getMoveOpenAlertGroupsResponseMock, getListRouteProfilesResponseMock, getPreviewGroupKeyResponseMock, getListRouteSuggestionsResponseMock, getAcceptRouteSuggestionResponseMock } from './routes.faker';
 
 
 export const getListRoutesMockHandler = (overrideResponse?: RouteList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<RouteList> | RouteList), options?: RequestHandlerOptions) => {
@@ -100,6 +102,18 @@ export const getReorderRoutesMockHandler = (overrideResponse?: RouteList | ((inf
     return HttpResponse.json(overrideResponse !== undefined
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getReorderRoutesResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getListRouteLabelSuggestionsMockHandler = (overrideResponse?: RouteLabelSuggestionList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<RouteLabelSuggestionList> | RouteLabelSuggestionList), options?: RequestHandlerOptions) => {
+  return http.get('*/routes/:routeId/label-suggestions', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListRouteLabelSuggestionsResponseMock(),
       { status: 200
       })
   }, options)
@@ -181,6 +195,7 @@ export const getRoutesMock = () => [
   getUpdateRouteMockHandler(),
   getDeleteRouteMockHandler(),
   getReorderRoutesMockHandler(),
+  getListRouteLabelSuggestionsMockHandler(),
   getMoveOpenAlertGroupsMockHandler(),
   getListRouteProfilesMockHandler(),
   getPreviewGroupKeyMockHandler(),

@@ -40,6 +40,9 @@ type fakeRoutes struct {
 	suggestionOK bool
 	// owned are the filters of listRoutes by Team.
 	owned []routing.OwnerFilter
+	// labels are the label suggestions of the Route payments, and labelReads the Routes they were read for.
+	labels     []routing.LabelSuggestion
+	labelReads []string
 }
 
 func newFakeRoutes() *fakeRoutes {
@@ -48,7 +51,7 @@ func newFakeRoutes() *fakeRoutes {
 		{ID: 2, PublicID: routeID, Name: "payments", Description: "Payments", Position: 0,
 			MinimumSeverity: routing.MinimumCritical, Urgent: true,
 			Matchers: []routing.Matcher{{Label: "team", Op: "=", Value: "payments"}}, GroupKey: []string{"alertname"},
-			Policy: p.Policy, CreatedAt: t0, Version: 3},
+			Policy: p.Policy, CreatedAt: t0, Version: 3, MessageLabels: []string{"team", "namespace"}},
 		{ID: 1, PublicID: defaultRouteID, Name: "Default", Position: 1, IsDefault: true,
 			MinimumSeverity: routing.MinimumNone, GroupKey: p.GroupKey, Policy: p.Policy, CreatedAt: t0, Version: 1},
 	}}}
@@ -164,6 +167,14 @@ func (f *fakeRoutes) AcceptSuggestion(_ context.Context, r routing.Requester, id
 	out := f.list.Routes[0]
 	out.Name, out.Version = routing.HeartbeatLostRouteName, 1
 	return out, f.err
+}
+
+func (f *fakeRoutes) LabelSuggestions(_ context.Context, id string) ([]routing.LabelSuggestion, error) {
+	f.labelReads = append(f.labelReads, id)
+	if _, err := f.Get(context.Background(), id); err != nil {
+		return nil, err
+	}
+	return f.labels, f.err
 }
 
 func (f *fakeRoutes) DismissSuggestion(_ context.Context, user int64, id string) error {
@@ -632,5 +643,74 @@ func TestRouteStormAPI(t *testing.T) {
 	if p, d := list.Items[0], list.Items[1]; a.status != http.StatusOK || !p.StormActive || p.Storm == nil ||
 		!p.Storm.Since.Equal(t0) || p.Storm.AlertGroupCount != 21 || d.StormActive || d.Storm != nil {
 		t.Errorf("list = %d %s", a.status, a.body)
+	}
+}
+
+// TestRouteMessageLabelsAPI is C-29.FR-2 at the API: a Route reads with own_message_labels and the effective
+// message_labels; a request passes the choice and the list on only when it gives them, an update without them keeping
+// the stored ones; listRouteLabelSuggestions answers routes:read with the labels of the Route's recent Alert Groups,
+// 404 for an unknown Route and 403 without routes:read.
+func TestRouteMessageLabelsAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	a := x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+routeID, "")
+	var rt gen.Route
+	decodeInto(t, a, &rt)
+	if a.status != http.StatusOK || rt.OwnMessageLabels || !slices.Equal(rt.MessageLabels, []string{"team", "namespace"}) {
+		t.Errorf("read = %d %s", a.status, a.body)
+	}
+	a = x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+defaultRouteID, "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), `"message_labels":[]`) ||
+		!strings.Contains(string(a.body), `"own_message_labels":false`) {
+		t.Errorf("default route = %d %s", a.status, a.body)
+	}
+	own := strings.Replace(routeBody, `"group_key"`, `"own_message_labels":true,"message_labels":["system","cluster"],
+		"group_key"`, 1)
+	if a := x.as(t, routesWriter, http.MethodPut, "/api/v1/routes/"+routeID, own, "If-Match", "*"); a.status !=
+		http.StatusOK || len(fr.inputs) != 1 || fr.inputs[0].OwnMessageLabels == nil || !*fr.inputs[0].OwnMessageLabels ||
+		!slices.Equal(fr.inputs[0].MessageLabels, []string{"system", "cluster"}) {
+		t.Errorf("update with its own list = %d %s %+v", a.status, a.body, fr.inputs)
+	}
+	if a := x.as(t, routesWriter, http.MethodPut, "/api/v1/routes/"+routeID, routeBody, "If-Match", "*"); a.status !=
+		http.StatusOK || len(fr.inputs) != 2 || fr.inputs[1].OwnMessageLabels != nil || fr.inputs[1].MessageLabels != nil {
+		t.Errorf("update without them = %d %s %+v", a.status, a.body, fr.inputs)
+	}
+	empty := strings.Replace(routeBody, `"group_key"`, `"own_message_labels":true,"message_labels":[],"group_key"`, 1)
+	if a := x.as(t, routesWriter, http.MethodPost, "/api/v1/routes", empty); a.status != http.StatusCreated ||
+		len(fr.inputs) != 3 || fr.inputs[2].MessageLabels == nil || len(fr.inputs[2].MessageLabels) != 0 {
+		t.Errorf("create with an empty list = %d %s", a.status, a.body)
+	}
+	in := routeInputFor(routing.Input{Name: "x", OwnMessageLabels: new(true), MessageLabels: []string{"pod"}})
+	if in.OwnMessageLabels == nil || !*in.OwnMessageLabels || in.MessageLabels == nil ||
+		!slices.Equal(*in.MessageLabels, []string{"pod"}) {
+		t.Errorf("input for %+v", in)
+	}
+	if in := routeInputFor(routing.Input{Name: "x"}); in.OwnMessageLabels != nil || in.MessageLabels != nil {
+		t.Errorf("input without labels %+v", in)
+	}
+
+	fr.labels = []routing.LabelSuggestion{{Label: "pod", ExampleValue: "checkout-api-7d9f4", AlertGroupCount: 3}}
+	a = x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+routeID+"/label-suggestions", "")
+	if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) !=
+		`{"items":[{"alert_group_count":3,"example_value":"checkout-api-7d9f4","label":"pod"}]}` ||
+		!slices.Equal(fr.labelReads, []string{routeID}) {
+		t.Errorf("suggestions = %d %s", a.status, a.body)
+	}
+	fr.labels = nil
+	if a := x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+routeID+"/label-suggestions", ""); a.status !=
+		http.StatusOK || strings.TrimSpace(string(a.body)) != `{"items":[]}` {
+		t.Errorf("no suggestions = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, routesReader, http.MethodGet, "/api/v1/routes/RTZZZZZZZZZZZZ/label-suggestions", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("unknown route = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, fullToken, http.MethodGet, "/api/v1/routes/"+routeID+"/label-suggestions", ""); a.status !=
+		http.StatusForbidden {
+		t.Errorf("without routes:read = %d %s", a.status, a.body)
+	}
+	fr.err = errBoom
+	if a := x.as(t, routesReader, http.MethodGet, "/api/v1/routes/"+routeID+"/label-suggestions", ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("failing = %d %s", a.status, a.body)
 	}
 }

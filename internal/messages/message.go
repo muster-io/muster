@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/mentions"
@@ -57,11 +59,15 @@ const (
 	ColourStorm        = "storm"
 )
 
-// Message is a rendered message, neutral of any markup, in the sections of C-12.FR-1: the colour of its status, the
-// heading with #N and the title linked to the Alert Group page, the environment and start time, the group labels,
-// common labels and common annotations, the summary, the Alerts, the links, the notices, the footer and the buttons.
-// A Route's root_message template replaces the sections from Environment to Alerts with its Body; Lines are the text
-// of a Thread reply, a Storm summary or the Fallback template. Each adapter lays a Message out for its messenger and
+// Message is a rendered message, neutral of any markup. A Root message has the compact layout of C-29.FR-1: the colour
+// of its status, the heading with #N and the title linked to the Alert Group page with the status as a word, the
+// fields, the summary and the description, the key labels of the Route's "Labels in the message", the Alerts by their
+// distinguishing label, the notices, the footer, the buttons and the links. A Route's root_message template replaces
+// the summary, the description, the key labels and the Alerts with its Body (C-29.FR-5); the Fallback template shows
+// every label in the sections of L1 — the group labels, common labels and the Alerts one per line — which a Desired
+// state stored by an earlier version may also have, with its environment and common annotations (C-12.FR-1 of L1);
+// Lines are the text of a Thread reply, a Storm summary or the Fallback template. Each adapter lays a Message out for
+// its messenger and
 // escapes its neutral text (C-13.FR-8, C-14.FR-13); a Body and the template lines of Alerts are already written in
 // their Markup, where a trusted Mention token of the `mention` function stands for the adapter to render
 // (C-12.FR-8). Footers are the footer per identity space where the user it names has an Account link, with a trusted
@@ -77,12 +83,17 @@ type Message struct {
 	TimeZone          string                `json:"time_zone"`
 	Colour            string                `json:"colour"`
 	Heading           *Heading              `json:"heading,omitempty"`
+	StatusWord        string                `json:"status_word,omitempty"`
+	Fields            []Label               `json:"fields,omitempty"`
 	Environment       string                `json:"environment,omitempty"`
 	GroupLabels       []Label               `json:"group_labels,omitempty"`
 	CommonLabels      []Label               `json:"common_labels,omitempty"`
 	CommonAnnotations []Label               `json:"common_annotations,omitempty"`
 	Summary           string                `json:"summary,omitempty"`
+	Description       string                `json:"description,omitempty"`
 	Body              *Body                 `json:"body,omitempty"`
+	KeyLabels         []KeyLabel            `json:"key_labels,omitempty"`
+	AlertsLine        *AlertsLine           `json:"alerts_line,omitempty"`
 	Alerts            *AlertList            `json:"alerts,omitempty"`
 	Lines             []string              `json:"lines,omitempty"`
 	Links             []Link                `json:"links,omitempty"`
@@ -176,6 +187,188 @@ type Label struct {
 	Value string `json:"value"`
 }
 
+// KeyLabel is a label of the line of key labels (C-29.FR-2): its value when every firing Alert has the same one, or
+// with Count above 1 how many values they have.
+type KeyLabel struct {
+	Name  string `json:"name"`
+	Value string `json:"value,omitempty"`
+	Count int    `json:"count,omitempty"`
+}
+
+// Text is the key label as the line shows it in lang: `name=value`, or "name: 2 values".
+func (k KeyLabel) Text(lang string) string {
+	if k.Count > 1 {
+		return k.Name + ": " + k.ValueText(lang)
+	}
+	return k.Name + "=" + k.Value
+}
+
+// ValueText is the value of the key label in lang: its value, or "2 values" when they differ.
+func (k KeyLabel) ValueText(lang string) string {
+	if k.Count > 1 {
+		return N(lang, "labels.values", int64(k.Count), nil)
+	}
+	return k.Value
+}
+
+// KeyLabelsLine is the line of key labels of m as neutral text, `system=kubernetes · namespace: 2 values`; empty when
+// it has none.
+func KeyLabelsLine(m Message) string {
+	parts := make([]string, len(m.KeyLabels))
+	for i, k := range m.KeyLabels {
+		parts[i] = k.Text(m.Language)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// AlertsLine is the Alerts of a Root message by their distinguishing label (C-29.FR-3): the label, the values of the
+// Alerts listed with whether each is resolved, firing ones first, the output of the Route's line template for each
+// listed Alert when it has one, and how many Alerts the Alert Group has.
+type AlertsLine struct {
+	Label  string       `json:"label,omitempty"`
+	Values []AlertValue `json:"values,omitempty"`
+	Lines  []AlertLine  `json:"lines,omitempty"`
+	Total  int64        `json:"total"`
+}
+
+// AlertValue is the value of the distinguishing label of a listed Alert.
+type AlertValue struct {
+	Value    string `json:"value"`
+	Resolved bool   `json:"resolved,omitempty"`
+}
+
+// More is how many Alerts the line does not list, which "…and K more" counts.
+func (a AlertsLine) More() int64 {
+	listed := len(a.Values)
+	if len(a.Lines) > 0 {
+		listed = len(a.Lines)
+	}
+	return max(a.Total-int64(listed), 0)
+}
+
+// AlertsLines lays out the Alerts line of m (C-29.FR-3): "pod: a, b, c …and 7 more" as one line, or with a line
+// template one line per listed Alert after bullet and then "…and K more"; esc escapes neutral text, output writes the
+// output of a line template and strike strikes a resolved Alert through. None without an Alerts line.
+func AlertsLines(m Message, esc func(string) string, output func(AlertLine) string, strike func(string) string,
+	bullet string) []string {
+	a := m.AlertsLine
+	if a == nil {
+		return nil
+	}
+	more := ""
+	if k := a.More(); k > 0 {
+		more = esc(T(m.Language, "alerts.andMore", Args{"count": strconv.FormatInt(k, 10)}))
+	}
+	var out []string
+	if len(a.Lines) > 0 {
+		for _, l := range a.Lines {
+			text := output(l)
+			if l.Resolved {
+				text = strike(text)
+			}
+			if text != "" {
+				out = append(out, bullet+text)
+			}
+		}
+		if more != "" {
+			out = append(out, more)
+		}
+		return out
+	}
+	values := make([]string, 0, len(a.Values))
+	for _, v := range a.Values {
+		text := esc(v.Value)
+		if v.Resolved {
+			text = strike(text)
+		}
+		values = append(values, text)
+	}
+	line := esc(a.Label+": ") + strings.Join(values, ", ")
+	if more != "" {
+		line += " " + more
+	}
+	return []string{line}
+}
+
+// HeadingLine is the heading of m around linked, the number and the title as its markup links them (C-29.FR-1 item 1):
+// "#12 PodDown — 🔴 Firing", the status emoji beside the word; a message without the word, a Desired state stored by
+// an earlier version, keeps the heading of L1, "🔴 #12 PodDown".
+func HeadingLine(m Message, linked string) string {
+	emoji := statusEmoji[m.Colour]
+	if m.StatusWord == "" {
+		return strings.TrimSpace(emoji + " " + linked)
+	}
+	return linked + " — " + strings.TrimSpace(emoji+" "+m.StatusWord)
+}
+
+// MessageLayout is the content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the MessageLayout of
+// the API: the number and the title apart, the status by its key and word, the fields, the summary and the
+// description, the key labels with their values — "2 values" where they differ — the Alerts by their distinguishing
+// label with the total, the notices with the footer as their last line, and the links. The Assignees and the Owner
+// come with the Escalation chains (C-32.FR-12); until then the footer names the Owner.
+type MessageLayout struct {
+	Number      int64
+	Title       string
+	Status      string
+	StatusWord  string
+	Fields      []Label
+	Summary     string
+	Description string
+	Labels      []Label
+	Alerts      *LayoutAlerts
+	Notices     []string
+	Links       []Link
+}
+
+// LayoutAlerts are the Alerts of a MessageLayout: the distinguishing label, the values listed and the total.
+type LayoutAlerts struct {
+	Label  string
+	Values []AlertValue
+	Total  int64
+}
+
+// LayoutOf is the MessageLayout of the Root message m, its values as neutral text; the footer names its user by their
+// Muster display name.
+func LayoutOf(m Message) MessageLayout {
+	out := MessageLayout{Status: m.Colour, StatusWord: m.StatusWord, Fields: slices.Clone(m.Fields),
+		Summary: m.Summary, Description: m.Description, Notices: slices.Clone(m.Notices), Links: slices.Clone(m.Links)}
+	if h := m.Heading; h != nil {
+		out.Number, out.Title = h.Number, h.Title
+	}
+	for _, k := range m.KeyLabels {
+		out.Labels = append(out.Labels, Label{Name: k.Name, Value: k.ValueText(m.Language)})
+	}
+	if a := m.AlertsLine; a != nil && a.Label != "" {
+		out.Alerts = &LayoutAlerts{Label: a.Label, Values: slices.Clone(a.Values), Total: a.Total}
+	}
+	if f := m.WithFooterIn("", nil); f.Footer != "" {
+		out.Notices = append(out.Notices, templates.StripTokens(f.Footer))
+	}
+	return out
+}
+
+// The length limits the adapters declare (C-12.FR-11), by the markup each writes: a Mattermost post (F-057), a
+// Telegram message (C-14.FR-13) and a section of a Slack message (F-076); a bridge declares its own.
+var messengerLimits = map[Markup]int{MarkupMarkdown: 16_383, MarkupHTML: 4096, MarkupMrkdwn: 3000}
+
+// MessengerLimit is the length limit of the adapter that writes markup, 0 for a bridge's CommonMark and plain text.
+func MessengerLimit(markup Markup) int {
+	return messengerLimits[markup]
+}
+
+// MessengerLength is the length of s as the messenger of markup counts it: UTF-16 code units for Telegram's HTML,
+// characters otherwise.
+func MessengerLength(s string, markup Markup) int {
+	if markup != MarkupHTML {
+		return utf8.RuneCountInString(s)
+	}
+	n := 0
+	for _, r := range s {
+		n += utf16.RuneLen(r)
+	}
+	return n
+}
+
 // Body is the output of a Route's root_message template, in the markup it was rendered for.
 type Body struct {
 	Text   string `json:"text"`
@@ -255,9 +448,11 @@ func StatusEmoji(colour string) string {
 	return statusEmoji[colour]
 }
 
-// Layout lays m out as text in a markup, as the preview shows it: one section per line, neutral text escaped for the
-// markup and without Mention tokens, template output as written with its tokens shown as `@` names — in mrkdwn with its
-// literal Mentions neutralized, as a Slack message carries it — and the buttons as a last line of bracketed labels.
+// Layout lays m out as text in a markup, as the preview shows it: one section per line in the order of C-29.FR-1 — the
+// heading with the status word, the fields as "{name}: {value}", the summary, the description, the body, the key
+// labels, the Alerts, then the notices, the footer and the links — neutral text escaped for the markup and without
+// Mention tokens, template output as written with its tokens shown as `@` names — in mrkdwn with its literal Mentions
+// neutralized, as a Slack message carries it — and the buttons as a last line of bracketed labels.
 // The adapters lay messages out for their messengers, a Slack message's body section with this layout in mrkdwn.
 // CommonMark has a layout of its own, which a bridge's envelope body takes.
 func Layout(m Message, markup Markup) string {
@@ -281,8 +476,10 @@ func Layout(m Message, markup Markup) string {
 		}
 	}
 	if h := m.Heading; h != nil {
-		title := fmt.Sprintf("#%d %s", h.Number, h.Title)
-		add(strings.TrimSpace(statusEmoji[m.Colour] + " " + link(markup, title, h.URL)))
+		add(HeadingLine(m, link(markup, fmt.Sprintf("#%d %s", h.Number, h.Title), h.URL)))
+	}
+	for _, f := range m.Fields {
+		add(esc(f.Name + ": " + f.Value))
 	}
 	add(esc(m.Environment))
 	for _, section := range [][]Label{m.GroupLabels, m.CommonLabels, m.CommonAnnotations} {
@@ -290,11 +487,15 @@ func Layout(m Message, markup Markup) string {
 			add(esc(l.Name + ": " + l.Value))
 		}
 	}
-	if m.Summary != "" {
-		add(italic(markup, esc(m.Summary)))
-	}
+	add(esc(strings.TrimSpace(m.Summary)))
+	add(esc(strings.TrimSpace(m.Description)))
 	if m.Body != nil {
 		add(tmpl(strings.TrimRight(m.Body.Text, "\n")))
+	}
+	add(esc(KeyLabelsLine(m)))
+	for _, l := range AlertsLines(m, esc, func(l AlertLine) string { return tmpl(l.Text) },
+		func(s string) string { return struck(markup, s) }, bullet(markup)) {
+		add(l)
 	}
 	if a := m.Alerts; a != nil {
 		for _, l := range a.Lines {
@@ -324,6 +525,10 @@ func Layout(m Message, markup Markup) string {
 	for _, l := range m.Lines {
 		add(esc(l))
 	}
+	for _, n := range m.Notices {
+		add(esc(n))
+	}
+	add(m.FooterText(escape))
 	if len(m.Links) > 0 {
 		links := make([]string, len(m.Links))
 		for i, l := range m.Links {
@@ -331,10 +536,6 @@ func Layout(m Message, markup Markup) string {
 		}
 		add(strings.Join(links, " · "))
 	}
-	for _, n := range m.Notices {
-		add(esc(n))
-	}
-	add(m.FooterText(escape))
 	if len(m.Buttons) > 0 {
 		labels := make([]string, len(m.Buttons))
 		for i, b := range m.Buttons {
@@ -391,22 +592,7 @@ func commonMarkLink(text, url string) string {
 	return "[" + text + "](" + commonMarkURL.Replace(url) + ")"
 }
 
-// italic and struck trim s in CommonMark and mrkdwn, where a delimiter next to a space opens or closes nothing.
-func italic(markup Markup, s string) string {
-	switch markup {
-	case MarkupMarkdown:
-		return "_" + s + "_"
-	case MarkupHTML:
-		return "<i>" + s + "</i>"
-	case MarkupCommonMark:
-		return around("*", strings.TrimSpace(s))
-	case MarkupMrkdwn:
-		return around("_", strings.TrimSpace(s))
-	case MarkupPlain:
-	}
-	return s
-}
-
+// struck trims s in CommonMark and mrkdwn, where a delimiter next to a space opens or closes nothing.
 func struck(markup Markup, s string) string {
 	switch markup {
 	case MarkupMarkdown:
@@ -441,10 +627,12 @@ func bullet(markup Markup) string {
 const hardBreak = "\\\n"
 
 // layoutCommonMark lays m out in CommonMark with strikethrough, as a bridge's envelope body (C-22.FR-4): one block per
-// section, separated by blank lines — the heading, the environment, each label section as a block quote of bold names
-// and their values, the summary in italics, the body, the Alerts as a bullet list with resolved ones struck through,
-// the distinct values, the link to the full list, the text lines, the links, each notice, the footer and the buttons —
-// with the lines of a block joined by hard line breaks. Neutral text is escaped and template output kept as written.
+// section, separated by blank lines — the heading, the fields, the environment and each label
+// section of the Fallback template as a block quote of bold names and their values, the summary, the description, the
+// body, the key labels, the Alerts line, the Alerts of the Fallback template as a bullet list with resolved ones struck
+// through, the distinct values, the link to the full list, the text lines, the links, each notice, the footer and the
+// buttons — with the lines of a block joined by hard line breaks. Neutral text is escaped and template output kept as
+// written.
 func layoutCommonMark(m Message) string {
 	esc := func(s string) string { return EscapeCommonMark(templates.StripTokens(s)) }
 	var out []string
@@ -463,8 +651,13 @@ func layoutCommonMark(m Message) string {
 	}
 	if h := m.Heading; h != nil {
 		title := "#" + strconv.FormatInt(h.Number, 10) + " " + esc(h.Title)
-		add(strings.TrimSpace(statusEmoji[m.Colour] + " " + commonMarkLink(title, h.URL)))
+		add(HeadingLine(m, commonMarkLink(title, h.URL)))
 	}
+	fields := make([]string, len(m.Fields))
+	for i, f := range m.Fields {
+		fields[i] = esc(f.Name + ": " + f.Value)
+	}
+	add(lines("", fields))
 	add(esc(m.Environment))
 	for _, section := range [][]Label{m.GroupLabels, m.CommonLabels, m.CommonAnnotations} {
 		quoted := make([]string, len(section))
@@ -473,10 +666,23 @@ func layoutCommonMark(m Message) string {
 		}
 		add(lines("> ", quoted))
 	}
-	add(italic(MarkupCommonMark, esc(m.Summary)))
+	summary := esc(strings.TrimSpace(m.Summary))
+	if m.StatusWord == "" {
+		// A message without the status word, of L1, keeps its summary in italics in a bridge's body until S-126.
+		summary = around("*", summary)
+	}
+	add(summary)
+	add(esc(strings.TrimSpace(m.Description)))
 	if m.Body != nil {
 		add(templates.ReplaceTokens(strings.TrimRight(m.Body.Text, "\n"), tokenText))
 	}
+	add(esc(KeyLabelsLine(m)))
+	add(strings.Join(AlertsLines(m, esc, func(l AlertLine) string {
+		if l.Markup == "" {
+			return esc(l.Text)
+		}
+		return templates.ReplaceTokens(l.Text, tokenText)
+	}, func(s string) string { return struck(MarkupCommonMark, s) }, bullet(MarkupCommonMark)), "\n"))
 	if a := m.Alerts; a != nil {
 		items := make([]string, 0, len(a.Lines))
 		for _, l := range a.Lines {
@@ -512,6 +718,7 @@ func layoutCommonMark(m Message) string {
 		text[i] = esc(l)
 	}
 	add(lines("", text))
+	// The links keep their place of L1 in a bridge's body until the Bridge protocol carries the layout (S-126).
 	links := make([]string, len(m.Links))
 	for i, l := range m.Links {
 		links[i] = link(MarkupCommonMark, l.Text, l.URL)

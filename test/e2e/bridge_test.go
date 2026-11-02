@@ -323,10 +323,11 @@ func TestBridgeTransientInvalidGone(t *testing.T) {
 	}
 }
 
-// TestBridgeBodyLimit is C-22.AC-10 against `muster dev` and the fake bridge: with max_body_length 1,000 read again by
-// the Connection check, an Alert Group of 40 Alerts with four long labels that differ per Alert, about 1,450 code
-// points laid out in full, posts a body of at most 1,000 code points with the link to Muster, shortened down to its
-// distinct values, and keeps its title, link and buttons in the envelope.
+// TestBridgeBodyLimit is C-22.AC-10 and C-29.FR-6 against `muster dev` and the fake bridge: with max_body_length 1,000
+// read again by the Connection check, an Alert Group of 40 Alerts with four long labels that differ per Alert and a
+// description of 1,500 code points posts a body of at most 1,000 code points in the compact layout — the fields, the
+// key labels and the Alerts by their distinguishing label pod with "…and 35 more" — with the link to Muster, its
+// description cut first, and keeps its title, link and buttons in the envelope.
 func TestBridgeBodyLimit(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -342,7 +343,8 @@ func TestBridgeBodyLimit(t *testing.T) {
 	for i := 1; i <= 40; i++ {
 		e.alert("l1", fmt.Sprintf("m%d", i), fmt.Sprintf(`{"team":"long","cluster":"many","pod":"m%d",
 			"instance":"node-%d.region-a.example.org:9100","host":"host-%d.rack-b.datacenter-c.example.org",
-			"disk":"/dev/disk/by-id/nvme-sample-serial-0000%d"}`, i, i, i, i), "")
+			"disk":"/dev/disk/by-id/nvme-sample-serial-0000%d"}`, i, i, i, i),
+			`,"annotations":{"description":"`+strings.Repeat("d", 1500)+`"}`)
 	}
 	e.notify("l1", "first notification")
 	m := e.waitPosted("Many", 1)[0]
@@ -350,11 +352,12 @@ func TestBridgeBodyLimit(t *testing.T) {
 	if n := utf8.RuneCountInString(body); n > 1000 || m.Truncated {
 		t.Fatalf("the body has %d code points, truncated %v", n, m.Truncated)
 	}
-	if !strings.Contains(body, "Open in Muster") || strings.Count(body, "\n- ") >= 40 {
+	if !strings.Contains(body, "Open in Muster") || !strings.Contains(body, "Severity: info\\\nRoute: long\\\n") ||
+		!strings.Contains(body, "\n\ncluster=many · team=long\n\npod: m1, m2, m3, m4, m5 …and 35 more\n\n") {
 		t.Errorf("body %q", body)
 	}
-	// Laid out in full, each of the four labels lists ten values and "+30 more"; only shortening removes them.
-	if strings.Contains(body, "+30 more") {
+	// Laid out in full, the description alone is longer than the limit; shortening cuts it first.
+	if strings.Contains(body, "ddd") {
 		t.Errorf("the body was not shortened: %q", body)
 	}
 	if !strings.HasPrefix(m.Envelope.Title, "#") || m.Envelope.Link.Label != "Open in Muster" ||

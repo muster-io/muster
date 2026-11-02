@@ -2568,18 +2568,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (28)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (29)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":28`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":29`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":28`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":29`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2595,10 +2595,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (28)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (29)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":28`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":29`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -2649,6 +2649,119 @@ func TestIntegrationVersions(t *testing.T) {
 		d := openFresh(t, s)
 		if err := CheckVersion(t.Context(), d.Pool); err != nil {
 			t.Errorf("PostgreSQL %s: %v", s.Version, err)
+		}
+	})
+}
+
+// TestIntegrationRouteMessageLabels runs 0029 over a database with a Route, an Alert Group and rows of the kinds of
+// 0027: up leaves the Route's list computed (null) and the Alert Group without a description, keeps the rows,
+// validates the new CHECKs and drops the kind CHECK of 0027, so that a Route takes its own list, an Alert Group a
+// description, and a row of route_message_labels with its Route or of team_evaluation is taken while one of
+// route_message_labels without a Route and an unknown kind are not; a Route written as an earlier version writes it
+// keeps the computed list. Down deletes the rows of the new kind, keeps the older ones, drops the columns and restores
+// the kind CHECK of 0027, validated; up again works. The versions are reached by number.
+func TestIntegrationRouteMessageLabels(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 28)
+		route := func(publicID, name string) string {
+			return `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+				grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+				storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+				reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+				SELECT id, '` + publicID + `', '` + name + `', 1, false, '{alertname,system}', 0, 0, true, '{3600}',
+					0, 10, 'en', false, 60, false, 60, 60, false, '2026-11-01', '2026-11-01'
+				FROM organizations`
+		}
+		e.exec(t, route("RT0000000000C1", "r"))
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000C1', 1, id, '{alertname}', '{}', sha256('c1'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-11-01', '2026-11-01'
+			FROM routes WHERE public_id = 'RT0000000000C1'`)
+		for _, kind := range []string{"route_minimum_severity", "organization_buttons", "team_evaluation"} {
+			e.exec(t, `INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+				SELECT id, '`+kind+`', CASE WHEN '`+kind+`' = 'route_minimum_severity' THEN (SELECT id FROM routes
+					WHERE public_id = 'RT0000000000C1') END, '2026-11-01' FROM organizations`)
+		}
+		insert := func(t *testing.T, kind string, withRoute bool) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+				SELECT id, $1, CASE WHEN $2::boolean THEN (SELECT id FROM routes WHERE public_id = 'RT0000000000C1') END,
+					'2026-11-01'
+				FROM organizations`, kind, withRoute)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+
+		if err := e.mm.Migrate(29); err != nil {
+			t.Fatalf("up to 29: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_groups WHERE description IS NULL`); n != 1 {
+			t.Errorf("after up: %d alert groups without a description, want 1", n)
+		}
+		e.exec(t, `UPDATE alert_groups SET description = 'The disk fills up.'`)
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE message_labels IS NULL`); n != 1 {
+			t.Errorf("after up: %d routes with the computed list, want 1", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 3 {
+			t.Errorf("after up: %d rows, want the 3 of 0027", n)
+		}
+		want := "open_group_updates.open_group_updates_kind_v4_check:true " +
+			"open_group_updates.open_group_updates_route_scope_check:true"
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind") + " " +
+			e.constraints(t, []string{"open_group_updates"}, "open_group_updates_route_scope"); got != want {
+			t.Errorf("after up: constraints\n%s\nwant\n%s", got, want)
+		}
+		e.exec(t, `UPDATE routes SET message_labels = '{system,cluster}' WHERE public_id = 'RT0000000000C1'`)
+		if err := insert(t, "route_message_labels", true); err != nil {
+			t.Errorf("a row of route_message_labels: %v", err)
+		}
+		refused(t, "a row of route_message_labels without a route", insert(t, "route_message_labels", false),
+			"open_group_updates_route_scope_check")
+		refused(t, "a row of an unknown kind", insert(t, "message_labels", false), "open_group_updates_kind_v4_check")
+		e.exec(t, route("RT0000000000C2", "r of 0.2.0"))
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE public_id = 'RT0000000000C2'
+			AND message_labels IS NULL`); n != 1 {
+			t.Error("after up: a route written as 0.2.0 writes it does not compute its list")
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 29 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'routes' AND column_name = 'message_labels'`); n != 0 {
+			t.Error("after down: routes.message_labels is left")
+		}
+		if n := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'alert_groups' AND column_name = 'description'`); n != 0 {
+			t.Error("after down: alert_groups.description is left")
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'route_message_labels'`); n != 0 {
+			t.Errorf("after down: %d rows of route_message_labels are left", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 3 {
+			t.Errorf("after down: %d rows, want the 3 of 0027", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind") + " " +
+			e.constraints(t, []string{"open_group_updates"}, "open_group_updates_route_scope"); got !=
+			"open_group_updates.open_group_updates_kind_v3_check:true " {
+			t.Errorf("after down: the kind checks %q", got)
+		}
+		refused(t, "a row of route_message_labels after down", insert(t, "route_message_labels", true),
+			"open_group_updates_kind_v3_check")
+
+		if err := e.mm.Migrate(29); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM routes WHERE message_labels IS NULL`); n != 2 {
+			t.Errorf("up again: %d routes with the computed list, want 2", n)
 		}
 	})
 }

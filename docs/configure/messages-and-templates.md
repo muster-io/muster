@@ -1,21 +1,94 @@
 # Messages and templates
 
 Muster shows every Alert Group as one **Root message** in each Destination, and edits it as the Alert Group changes.
-Without any setup the message is complete: the status, the number and title, the environment and start time, the
-labels, the summary, the Alerts, the links and the buttons. This page is for the Admin who wants to change what it
-says: the template of a Route, whom a message mentions, and the links it carries.
+Without any setup the message is complete and compact, so that a phone shows what a person needs to act: the number
+and title with the status as a word, a few fields, the summary and the description, one line of key labels, the
+Alerts by the label that tells them apart, the notices, who has it, the buttons and the links. This page is for the
+Admin who wants to change what it says: [the labels it shows](#labels-in-the-message), the template of a Route, whom
+a message mentions, and the links it carries.
+
+## The default message
+
+From 0.2.0 every Root message has this layout, here as Telegram shows it; each messenger lays it out in its own form:
+
+```text
+#1287 KubernetesContainerOOMKilled — 🟠 Acknowledged
+Severity: warning
+Route: Infrastructure
+Teams: payments
+Started: 2026-10-04 03:12 UTC
+Container killed for memory
+The container exceeded its limit.
+system=kubernetes · team=payments · namespace=checkout
+pod: checkout-api-5b2c1, checkout-api-7d9f4, checkout-worker-8e6a0
+Acknowledged by Olga
+Open in Muster · Runbook · Source
+[Unack] [Resolve] [Snooze 1 h] …
+```
+
+1. **The title**: `#N` and the Alert Group's title, linked to its page, and the status as a word — Firing,
+   Acknowledged, Snoozed or Resolved. The status colour stays: as the colour of the message in Mattermost and Slack,
+   and as an emoji beside the word in Telegram.
+2. **The fields**: Severity, the Alert Group's Severity level; Route; Teams, left out when the Alert Group has none;
+   and Started, absolute in the Organization's time zone.
+3. **The summary and the description**: the `summary` and `description` annotations of the first Alert that has each,
+   as plain text, each left out when no Alert has it.
+4. **The key labels**: the labels of the Route's [Labels in the message](#labels-in-the-message), on one line.
+5. **The Alerts**, when the Alert Group has more than one: named by the label that tells them apart — the first of
+   the Organization's Instance labels whose values differ (`pod`, `instance`, `container`, `endpoint` by default),
+   otherwise the first label, by name, whose values differ — with up to five values (`message.compact_alerts_listed`),
+   firing Alerts first and resolved ones struck through, then "…and K more".
+6. **The notices** that apply, such as "Nobody has taken this" or the Reopen count.
+7. **The footer**: who acknowledged, snoozed or resolved the Alert Group, or why Muster resolved it.
+8. **The buttons** of the Destination's set.
+9. **The links**: "Open in Muster" first, then the runbook, the source and the links of Link rules.
+
+Every other label and annotation is on the Alert Group page, one click away through "Open in Muster".
+
+**Mattermost**
+:   One attachment in the colour of the status: the title of item 1 as its title, the fields as short fields, items 3
+    to 7 as its text with the links as its last line, and the buttons under it.
+
+**Slack**
+:   One attachment in the colour of the status: a section with the title, one section with the fields, a section with
+    the summary and the description, the key labels as a context, a section with the Alerts and the notices, the
+    footer as a context, a section with the links, and the buttons.
+
+**Telegram**
+:   One message: the title with the status emoji beside the word, the fields as lines `Severity: warning`, then the
+    items in order, with the buttons as its inline keyboard.
+
+A message longer than its messenger allows — 4,096 characters in Telegram, 3,000 in a Slack section, 16,383 in
+Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
+status, the fields, the footer, the buttons and the link to Muster always stay.
+
+## Labels in the message
+
+"Labels in the message" (`route.message_labels`) chooses the labels of item 4. Set it through the API: give the Route
+`own_message_labels: true` and its list as `message_labels` in `updateRoute`, or `own_message_labels: false` to go back
+to the default. The field of the Route form, **Routes → a Route → Message → Labels in the message**, comes in a later
+release. By default the list is the Route's Group key without `alertname` and the Organization's severity label, which
+the field Severity already shows, then the Team label and `namespace`; it follows the Group key and the
+Organization's settings until the Route has a list of its own.
+
+A label shows as `name=value` when every firing Alert has the same value, as `name: N values` when their values
+differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
+example value (`listRouteLabelSuggestions`). A change of the list, or of the Group key while the list is the default,
+edits the open Root messages of the Route, Quietly, to show the new labels.
 
 ## What you can change, and what you cannot
 
 A Route has three templates, under **Routes → a Route → Message**. Each is **Built-in** or **Custom**.
 
 **Root message**
-:   The body of the message: the environment, the start time, the labels, the summary and the Alerts. The status
-    colour, the heading, the links, the notices, the footer and the buttons always come from Muster, so no template can
-    lose the buttons or the link to the Alert Group.
+:   The body of the message: items 3 to 5 of [the default message](#the-default-message), the summary, the
+    description, the key labels and the Alerts. The title with the status, the fields, the notices, the footer, the
+    buttons and the links always come from Muster, so no template can lose the buttons or the link to the Alert Group.
+    When a template fails, the Fallback template shows every label of the Alert Group and of each Alert instead.
 
 **Alert line**
-:   The line of each Alert in the list of Alerts. It is also called the **Line template**.
+:   The line of each listed Alert, which then stands on a line of its own instead of the value of the label that tells
+    the Alerts apart. It is also called the **Line template**.
 
 **Ack timeout notice**
 :   The reply Muster sends when nobody acknowledges an Alert Group in time.

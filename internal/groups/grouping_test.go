@@ -104,8 +104,16 @@ func TestTitleAndSummary(t *testing.T) {
 	}
 	m := h.alert(3, "info", map[string]string{"cluster": "y"}, "summary", "later")
 	h.changes(t, ingest.ChangeFired, m)
-	if g := h.groupOf(t, n); g.Summary.String != "later" {
-		t.Errorf("summary %q", g.Summary.String)
+	if g := h.groupOf(t, n); g.Summary.String != "later" || g.Description.Valid {
+		t.Errorf("summary %q, description %+v", g.Summary.String, g.Description)
+	}
+	// The description arrives with the first Alert that has one and is set once, like the summary (C-29.FR-1).
+	d := h.alert(3, "info", map[string]string{"cluster": "y", "if": "d1"}, "description", "first words")
+	h.changes(t, ingest.ChangeFired, d)
+	e := h.alert(3, "info", map[string]string{"cluster": "y", "if": "d2"}, "description", "second words")
+	h.changes(t, ingest.ChangeFired, e)
+	if g := h.groupOf(t, n); g.Description.String != "first words" || g.Summary.String != "later" {
+		t.Errorf("description %+v", g.Description)
 	}
 	h.db.routes[3].GroupKey = []string{}
 	f := h.alert(3, "info", map[string]string{"x": "1"})

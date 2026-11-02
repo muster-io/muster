@@ -262,8 +262,9 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
           AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
        s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
        r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
 FROM routes r
+JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = $1 AND r.public_id = $2 AND r.deleted_at IS NULL
@@ -311,10 +312,13 @@ type GetRouteRow struct {
 	OwningTeamName                 pgtype.Text
 	OwningTeamSlug                 pgtype.Text
 	OwningTeamDeleted              bool
+	MessageLabels                  []string
+	SeverityLabel                  string
+	TeamLabel                      string
 }
 
-// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error and its
-// active Storm.
+// GetRoute reads a Route that is not deleted with its place in evaluation order, zero-based, its template error, its
+// active Storm and the Organization's severity and Team labels, as ListRoutes does.
 func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow, error) {
 	row := q.db.QueryRow(ctx, getRoute, arg.OrgID, arg.PublicID)
 	var i GetRouteRow
@@ -355,6 +359,9 @@ func (q *Queries) GetRoute(ctx context.Context, arg GetRouteParams) (GetRouteRow
 		&i.OwningTeamName,
 		&i.OwningTeamSlug,
 		&i.OwningTeamDeleted,
+		&i.MessageLabels,
+		&i.SeverityLabel,
+		&i.TeamLabel,
 	)
 	return i, err
 }
@@ -490,7 +497,7 @@ INSERT INTO routes (
     thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-    reminders_cap_seconds, auto_unacknowledge, owning_team_id, created_at, updated_at
+    reminders_cap_seconds, auto_unacknowledge, owning_team_id, message_labels, created_at, updated_at
 )
 SELECT $1, $2, $3, $4,
        coalesce((SELECT CASE WHEN $5::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -502,7 +509,7 @@ SELECT $1, $2, $3, $4,
        $15, $16, $17,
        $18, $19, $20,
        $21, $22, $23,
-       $24::bigint, $25, $25
+       $24::bigint, $25::text[], $26, $26
 RETURNING id
 `
 
@@ -531,6 +538,7 @@ type InsertRouteParams struct {
 	RemindersCapSeconds            int64
 	AutoUnacknowledge              bool
 	OwningTeamID                   pgtype.Int8
+	MessageLabels                  []string
 	Now                            time.Time
 }
 
@@ -562,6 +570,7 @@ func (q *Queries) InsertRoute(ctx context.Context, arg InsertRouteParams) (int64
 		arg.RemindersCapSeconds,
 		arg.AutoUnacknowledge,
 		arg.OwningTeamID,
+		arg.MessageLabels,
 		arg.Now,
 	)
 	var id int64
@@ -916,6 +925,76 @@ func (q *Queries) ListRouteInfo(ctx context.Context, orgID int64) ([]ListRouteIn
 	return items, nil
 }
 
+const listRouteLabelSuggestions = `-- name: ListRouteLabelSuggestions :many
+WITH recent AS (
+    SELECT g.id
+    FROM alert_groups g
+    WHERE g.org_id = $1 AND g.route_id = $3 AND g.created_at >= $4::timestamptz
+    ORDER BY g.created_at DESC, g.id DESC
+    LIMIT $5::int
+), members AS (
+    SELECT m.alert_group_id, m.alert_id
+    FROM alert_group_alerts m
+    WHERE m.org_id = $1 AND m.alert_group_id IN (SELECT r.id FROM recent r)
+    ORDER BY m.id DESC
+    LIMIT $6::int
+)
+SELECT l.name::text AS label, (mode() WITHIN GROUP (ORDER BY l.value))::text AS example_value,
+       count(DISTINCT x.alert_group_id)::bigint AS alert_group_count
+FROM members x
+JOIN alerts a ON a.org_id = $1 AND a.id = x.alert_id
+CROSS JOIN LATERAL jsonb_each_text(a.labels) AS l(name, value)
+GROUP BY l.name
+ORDER BY count(DISTINCT x.alert_group_id) DESC, l.name
+LIMIT $2
+`
+
+type ListRouteLabelSuggestionsParams struct {
+	OrgID    int64
+	Lim      int32
+	RouteID  int64
+	Since    time.Time
+	GroupLim int32
+	AlertLim int32
+}
+
+type ListRouteLabelSuggestionsRow struct {
+	Label           string
+	ExampleValue    string
+	AlertGroupCount int64
+}
+
+// ListRouteLabelSuggestions lists the labels of the Alerts of the Route's Alert Groups created since @since — the
+// @group_lim most recent of them and at most @alert_lim of their Alerts, the most recent first, so that the read stays
+// bounded — each with its most frequent value, the smallest of equally frequent ones, and the number of those Alert
+// Groups whose Alerts carry it, most frequent first, at most @lim, for "Labels in the message" (C-29.FR-2).
+func (q *Queries) ListRouteLabelSuggestions(ctx context.Context, arg ListRouteLabelSuggestionsParams) ([]ListRouteLabelSuggestionsRow, error) {
+	rows, err := q.db.Query(ctx, listRouteLabelSuggestions,
+		arg.OrgID,
+		arg.Lim,
+		arg.RouteID,
+		arg.Since,
+		arg.GroupLim,
+		arg.AlertLim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRouteLabelSuggestionsRow{}
+	for rows.Next() {
+		var i ListRouteLabelSuggestionsRow
+		if err := rows.Scan(&i.Label, &i.ExampleValue, &i.AlertGroupCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteMatchers = `-- name: ListRouteMatchers :many
 SELECT route_id, label, op, value
 FROM route_matchers
@@ -1003,8 +1082,9 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
        s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
        t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
 FROM routes r
+JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
 LEFT JOIN teams t ON t.org_id = r.org_id AND t.id = r.owning_team_id
 WHERE r.org_id = $1 AND r.deleted_at IS NULL
@@ -1047,12 +1127,16 @@ type ListRoutesRow struct {
 	OwningTeamName                 pgtype.Text
 	OwningTeamSlug                 pgtype.Text
 	OwningTeamDeleted              bool
+	MessageLabels                  []string
+	SeverityLabel                  string
+	TeamLabel                      string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 // ListRoutes lists the Routes that are not deleted in evaluation order, the Default route last, with their template
-// error and their active Storm.
+// error and their active Storm, and the Organization's severity and Team labels, from which a Route's "Labels in the
+// message" are computed while it has no list of its own.
 func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow, error) {
 	rows, err := q.db.Query(ctx, listRoutes, orgID)
 	if err != nil {
@@ -1098,6 +1182,9 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 			&i.OwningTeamName,
 			&i.OwningTeamSlug,
 			&i.OwningTeamDeleted,
+			&i.MessageLabels,
+			&i.SeverityLabel,
+			&i.TeamLabel,
 		); err != nil {
 			return nil, err
 		}
@@ -1382,8 +1469,9 @@ SET name = $1, description = $2, minimum_severity = $3,
     ack_timeout_enabled = $15, ack_timeout_first_interval_seconds = $16,
     reminders_enabled = $17, reminders_first_interval_seconds = $18,
     reminders_cap_seconds = $19, auto_unacknowledge = $20,
-    owning_team_id = $21::bigint, updated_at = $22, version = version + 1
-WHERE org_id = $23 AND id = $24
+    owning_team_id = $21::bigint, message_labels = $22::text[],
+    updated_at = $23, version = version + 1
+WHERE org_id = $24 AND id = $25
 `
 
 type UpdateRouteParams struct {
@@ -1408,6 +1496,7 @@ type UpdateRouteParams struct {
 	RemindersCapSeconds            int64
 	AutoUnacknowledge              bool
 	OwningTeamID                   pgtype.Int8
+	MessageLabels                  []string
 	Now                            time.Time
 	OrgID                          int64
 	ID                             int64
@@ -1438,6 +1527,7 @@ func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error 
 		arg.RemindersCapSeconds,
 		arg.AutoUnacknowledge,
 		arg.OwningTeamID,
+		arg.MessageLabels,
 		arg.Now,
 		arg.OrgID,
 		arg.ID,

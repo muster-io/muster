@@ -176,7 +176,7 @@ func TestMattermostTest(t *testing.T) {
 		t.Fatalf("posts %+v", posts)
 	}
 	att := attachmentOf(t, posts[0])
-	if !strings.HasPrefix(att["title"].(string), "🧪 Test message · #7 disk full") || posts[0].Message != "" ||
+	if att["title"] != "🧪 Test message · #7 disk full — Firing" || posts[0].Message != "" ||
 		strings.Contains(att["text"].(string), "🧪") || att["fallback"] != "🧪 Test message · 🔴 #7 disk full" {
 		t.Errorf("mark %q, message %q, text %q, fallback %q", att["title"], posts[0].Message, att["text"],
 			att["fallback"])
@@ -313,7 +313,8 @@ func TestMattermostPreview(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].Name != "message" || items[0].Format != "markdown" ||
 		items[0].Text == nil || *items[0].Text != "" || !strings.Contains(*items[0].Request.Body, `"attachments"`) ||
 		!strings.Contains(*items[0].Request.Body, `"message":""`) ||
-		!strings.Contains(*items[0].Request.Body, `"title":"#7 disk full"`) ||
+		!strings.Contains(*items[0].Request.Body, `"title":"#7 disk full — Firing"`) ||
+		!strings.Contains(*items[0].Request.Body, `{"title":"Severity","value":"warning","short":true}`) ||
 		!strings.Contains(*items[0].Request.Body, `"fallback":"🔴 #7 disk full"`) ||
 		strings.Contains(*items[0].Request.Body, "🧪") || strings.Contains(*items[0].Request.Body, token) {
 		t.Fatalf("preview %+v %v", items, err)

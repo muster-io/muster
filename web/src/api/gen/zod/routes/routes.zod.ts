@@ -17,6 +17,8 @@ export const ListRoutesQueryParams = zod.object({
 
 export const listRoutesResponseItemsItemOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listRoutesResponseItemsItemOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listRoutesResponseItemsItemOneMessageLabelsMax = 50;
+
 export const listRoutesResponseItemsItemOnePolicyReopenWindowSecondsMin = 0;
 
 export const listRoutesResponseItemsItemOnePolicyGracePeriodSecondsMin = 0;
@@ -47,6 +49,8 @@ export const ListRoutesResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(listRoutesResponseItemsItemOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(listRoutesResponseItemsItemOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(listRoutesResponseItemsItemOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(listRoutesResponseItemsItemOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(listRoutesResponseItemsItemOnePolicyGracePeriodSecondsMin),
@@ -115,6 +119,8 @@ export const ListRoutesResponse = zod.object({
 
 export const createRouteBodyDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createRouteBodyOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const createRouteBodyMessageLabelsMax = 50;
+
 export const createRouteBodyPolicyReopenWindowSecondsMin = 0;
 
 export const createRouteBodyPolicyGracePeriodSecondsMin = 0;
@@ -141,6 +147,8 @@ export const CreateRouteBody = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(createRouteBodyDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(createRouteBodyOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().optional().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(createRouteBodyMessageLabelsMax).optional().describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(createRouteBodyPolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(createRouteBodyPolicyGracePeriodSecondsMin),
@@ -171,6 +179,8 @@ export const CreateRouteBody = zod.object({
 
 export const createRouteResponseOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createRouteResponseOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const createRouteResponseOneMessageLabelsMax = 50;
+
 export const createRouteResponseOnePolicyReopenWindowSecondsMin = 0;
 
 export const createRouteResponseOnePolicyGracePeriodSecondsMin = 0;
@@ -200,6 +210,8 @@ export const CreateRouteResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(createRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(createRouteResponseOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(createRouteResponseOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(createRouteResponseOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(createRouteResponseOnePolicyGracePeriodSecondsMin),
@@ -273,6 +285,8 @@ export const GetRouteParams = zod.object({
 
 export const getRouteResponseOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getRouteResponseOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getRouteResponseOneMessageLabelsMax = 50;
+
 export const getRouteResponseOnePolicyReopenWindowSecondsMin = 0;
 
 export const getRouteResponseOnePolicyGracePeriodSecondsMin = 0;
@@ -302,6 +316,8 @@ export const GetRouteResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(getRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(getRouteResponseOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(getRouteResponseOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(getRouteResponseOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(getRouteResponseOnePolicyGracePeriodSecondsMin),
@@ -380,6 +396,8 @@ export const UpdateRouteHeader = zod.object({
 
 export const updateRouteBodyDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateRouteBodyOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateRouteBodyMessageLabelsMax = 50;
+
 export const updateRouteBodyPolicyReopenWindowSecondsMin = 0;
 
 export const updateRouteBodyPolicyGracePeriodSecondsMin = 0;
@@ -406,6 +424,8 @@ export const UpdateRouteBody = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(updateRouteBodyDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(updateRouteBodyOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().optional().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(updateRouteBodyMessageLabelsMax).optional().describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(updateRouteBodyPolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(updateRouteBodyPolicyGracePeriodSecondsMin),
@@ -436,6 +456,8 @@ export const UpdateRouteBody = zod.object({
 
 export const updateRouteResponseOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateRouteResponseOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const updateRouteResponseOneMessageLabelsMax = 50;
+
 export const updateRouteResponseOnePolicyReopenWindowSecondsMin = 0;
 
 export const updateRouteResponseOnePolicyGracePeriodSecondsMin = 0;
@@ -465,6 +487,8 @@ export const UpdateRouteResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(updateRouteResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(updateRouteResponseOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(updateRouteResponseOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(updateRouteResponseOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(updateRouteResponseOnePolicyGracePeriodSecondsMin),
@@ -560,6 +584,8 @@ export const ReorderRoutesBody = zod.object({
 
 export const reorderRoutesResponseItemsItemOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const reorderRoutesResponseItemsItemOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const reorderRoutesResponseItemsItemOneMessageLabelsMax = 50;
+
 export const reorderRoutesResponseItemsItemOnePolicyReopenWindowSecondsMin = 0;
 
 export const reorderRoutesResponseItemsItemOnePolicyGracePeriodSecondsMin = 0;
@@ -590,6 +616,8 @@ export const ReorderRoutesResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(reorderRoutesResponseItemsItemOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(reorderRoutesResponseItemsItemOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(reorderRoutesResponseItemsItemOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(reorderRoutesResponseItemsItemOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(reorderRoutesResponseItemsItemOnePolicyGracePeriodSecondsMin),
@@ -649,6 +677,29 @@ export const ReorderRoutesResponse = zod.object({
   "etag": zod.string().describe('The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.')
 })))
 }).describe('All Routes in evaluation order, the Default route last. The list ETag covers the order.')
+
+/**
+ * The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+ * @summary List the labels to suggest for "Labels in the message"
+ */
+export const listRouteLabelSuggestionsPathRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ListRouteLabelSuggestionsParams = zod.object({
+  "route_id": zod.string().regex(listRouteLabelSuggestionsPathRouteIdRegExp).describe('Route `public_id`.')
+})
+
+export const listRouteLabelSuggestionsResponseItemsMax = 50;
+
+
+
+export const ListRouteLabelSuggestionsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "label": zod.string(),
+  "example_value": zod.string().describe('The most frequent value of the label among the Alerts of those Alert Groups, the smallest of equally frequent ones.'),
+  "alert_group_count": zod.int().describe('How many of the Route\'s recent Alert Groups have an Alert with the label.')
+})).max(listRouteLabelSuggestionsResponseItemsMax)
+})
 
 /**
  * Adds a `moved_to_default_route` Timeline entry to each moved Alert Group. Afterwards the Route can be deleted. A moved Alert Group keeps its Group key values but takes no new Alerts and never reopens; it stays open until its Alerts resolve or a person resolves it.
@@ -763,6 +814,8 @@ export const PreviewGroupKeyResponse = zod.object({
 
 export const listRouteSuggestionsResponseItemsItemRouteDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const listRouteSuggestionsResponseItemsItemRouteOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listRouteSuggestionsResponseItemsItemRouteMessageLabelsMax = 50;
+
 export const listRouteSuggestionsResponseItemsItemRoutePolicyReopenWindowSecondsMin = 0;
 
 export const listRouteSuggestionsResponseItemsItemRoutePolicyGracePeriodSecondsMin = 0;
@@ -792,6 +845,8 @@ export const ListRouteSuggestionsResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(listRouteSuggestionsResponseItemsItemRouteDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(listRouteSuggestionsResponseItemsItemRouteOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().optional().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(listRouteSuggestionsResponseItemsItemRouteMessageLabelsMax).optional().describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(listRouteSuggestionsResponseItemsItemRoutePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(listRouteSuggestionsResponseItemsItemRoutePolicyGracePeriodSecondsMin),
@@ -839,6 +894,8 @@ export const AcceptRouteSuggestionBody = zod.object({
 
 export const acceptRouteSuggestionResponseOneDestinationIdsItemRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const acceptRouteSuggestionResponseOneOwningTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const acceptRouteSuggestionResponseOneMessageLabelsMax = 50;
+
 export const acceptRouteSuggestionResponseOnePolicyReopenWindowSecondsMin = 0;
 
 export const acceptRouteSuggestionResponseOnePolicyGracePeriodSecondsMin = 0;
@@ -868,6 +925,8 @@ export const AcceptRouteSuggestionResponse = zod.object({
   "group_key": zod.array(zod.string()).describe('Label names whose values split the Route\'s Alerts into Alert Groups. A missing label counts as an empty value.'),
   "destination_ids": zod.array(zod.string().regex(acceptRouteSuggestionResponseOneDestinationIdsItemRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.')),
   "owning_team_id": zod.string().regex(acceptRouteSuggestionResponseOneOwningTeamIdRegExp).nullish().describe('The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.'),
+  "own_message_labels": zod.boolean().describe('Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization\'s settings and ignores `message_labels`; an update that omits it keeps it.'),
+  "message_labels": zod.array(zod.string()).max(acceptRouteSuggestionResponseOneMessageLabelsMax).describe('The label names of the line of key labels of the Route\'s Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route\'s own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization\'s settings as they are now, and a change of them does not change the Route\'s ETag; sent back with `own_message_labels` false, it is ignored.'),
   "policy": zod.object({
   "reopen_window_seconds": zod.int().min(acceptRouteSuggestionResponseOnePolicyReopenWindowSecondsMin),
   "grace_period_seconds": zod.int().min(acceptRouteSuggestionResponseOnePolicyGracePeriodSecondsMin),

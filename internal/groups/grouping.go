@@ -768,6 +768,7 @@ func (e *engine) create(ctx context.Context, s *slot) error {
 	id, err := e.q.InsertGroup(ctx, dbgen.InsertGroupParams{OrgID: e.s.orgID, PublicID: g.PublicID,
 		Number: g.Number, RouteID: g.RouteID, GroupKeyLabels: g.KeyLabels, GroupKeyValues: jsonOf(g.KeyValues),
 		GroupKeySha256: g.KeySHA, Title: g.Title, TitleFromGroupKey: g.TitleFromKey, Summary: text(g.Summary),
+		Description:  text(g.Description),
 		CommonLabels: jsonOf(g.CommonLabels), CommonAnnotations: jsonOf(g.CommonAnnots),
 		IntegrationIds: g.IntegrationIDs, SeverityLevel: string(g.Severity), Urgent: g.Urgent,
 		FiringAgainAfterID: nullInt(g.FiringAgainAfterID), CreatedAt: e.now})

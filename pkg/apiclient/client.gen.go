@@ -1537,6 +1537,30 @@ func (e MentionSettingEveryone) Valid() bool {
 	}
 }
 
+// Defines values for MessageLayoutStatusKey.
+const (
+	MessageLayoutStatusKeyAcknowledged MessageLayoutStatusKey = "acknowledged"
+	MessageLayoutStatusKeyFiring       MessageLayoutStatusKey = "firing"
+	MessageLayoutStatusKeyResolved     MessageLayoutStatusKey = "resolved"
+	MessageLayoutStatusKeySnoozed      MessageLayoutStatusKey = "snoozed"
+)
+
+// Valid indicates whether the value is a known member of the MessageLayoutStatusKey enum.
+func (e MessageLayoutStatusKey) Valid() bool {
+	switch e {
+	case MessageLayoutStatusKeyAcknowledged:
+		return true
+	case MessageLayoutStatusKeyFiring:
+		return true
+	case MessageLayoutStatusKeyResolved:
+		return true
+	case MessageLayoutStatusKeySnoozed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Messenger.
 const (
 	MessengerBridge     Messenger = "bridge"
@@ -5799,6 +5823,104 @@ type MentionSettings struct {
 	SnoozeEnded MentionSetting `json:"snooze_ended"`
 }
 
+// MessageLayout The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.
+type MessageLayout struct {
+	// Alerts The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.
+	Alerts nullable.Nullable[MessageLayoutAlerts] `json:"alerts"`
+
+	// Assignees The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people.
+	Assignees []MessageLayoutPerson `json:"assignees"`
+
+	// Description The `description` annotation of the first Alert that has one; empty when there is none.
+	Description string `json:"description"`
+
+	// Fields Severity, Route, Teams (left out when the Alert Group has none) and Started.
+	Fields []MessageLayoutField `json:"fields"`
+
+	// Labels The key labels of "Labels in the message"; the value of a label whose values differ among the firing Alerts is "N values" in the Route's language.
+	Labels []MessageLayoutLabel `json:"labels"`
+
+	// Links The links, "Open in Muster" first.
+	Links []MessageLayoutLink `json:"links"`
+
+	// Notices The notices that apply, then the footer as a line.
+	Notices []string `json:"notices"`
+
+	// Number The Alert Group's number alone, without `#`.
+	Number int `json:"number"`
+
+	// Owner Who acknowledged the Alert Group, with their Team; null while the footer names them.
+	Owner  nullable.Nullable[MessageLayoutPerson] `json:"owner"`
+	Status MessageLayoutStatus                    `json:"status"`
+
+	// Summary Empty when there is none.
+	Summary string `json:"summary"`
+
+	// Title The title without the number.
+	Title string `json:"title"`
+}
+
+// MessageLayoutAlertValue defines model for MessageLayoutAlertValue.
+type MessageLayoutAlertValue struct {
+	Resolved bool   `json:"resolved"`
+	Value    string `json:"value"`
+}
+
+// MessageLayoutAlerts defines model for MessageLayoutAlerts.
+type MessageLayoutAlerts struct {
+	// Label The distinguishing label.
+	Label string `json:"label"`
+
+	// Total How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.
+	Total int `json:"total"`
+
+	// Values Up to `message.compact_alerts_listed` values, firing Alerts first.
+	Values []MessageLayoutAlertValue `json:"values"`
+}
+
+// MessageLayoutField defines model for MessageLayoutField.
+type MessageLayoutField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// MessageLayoutLabel defines model for MessageLayoutLabel.
+type MessageLayoutLabel struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// MessageLayoutLink defines model for MessageLayoutLink.
+type MessageLayoutLink struct {
+	Label string `json:"label"`
+	Url   string `json:"url"`
+}
+
+// MessageLayoutPerson defines model for MessageLayoutPerson.
+type MessageLayoutPerson struct {
+	Name string `json:"name"`
+
+	// Ref The `ref` of the person's entry in the envelope's `mentions` where the message carries their Mention, otherwise null.
+	Ref  nullable.Nullable[string] `json:"ref"`
+	Team *MessageLayoutTeam        `json:"team,omitempty"`
+}
+
+// MessageLayoutStatus defines model for MessageLayoutStatus.
+type MessageLayoutStatus struct {
+	Key MessageLayoutStatusKey `json:"key"`
+
+	// Word The status as a word in the Route's language.
+	Word string `json:"word"`
+}
+
+// MessageLayoutStatusKey defines model for MessageLayoutStatus.Key.
+type MessageLayoutStatusKey string
+
+// MessageLayoutTeam defines model for MessageLayoutTeam.
+type MessageLayoutTeam struct {
+	Name string `json:"name"`
+}
+
 // Messenger defines model for Messenger.
 type Messenger string
 
@@ -6857,12 +6979,18 @@ type Route struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MessageLabels The label names of the line of key labels of the Route's Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route's own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization's settings as they are now, and a change of them does not change the Route's ETag; sent back with `own_message_labels` false, it is ignored.
+	MessageLabels []string `json:"message_labels"`
+
 	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
 	MinimumSeverity MinimumSeverity `json:"minimum_severity"`
 
 	// Name Unique in the Organization.
 	Name                string `json:"name"`
 	OpenAlertGroupCount int    `json:"open_alert_group_count"`
+
+	// OwnMessageLabels Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization's settings and ignores `message_labels`; an update that omits it keeps it.
+	OwnMessageLabels bool `json:"own_message_labels"`
 
 	// OwningTeam The Team that owns the Route, null when none does.
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
@@ -6897,11 +7025,17 @@ type RouteInput struct {
 	// Matchers Combined with AND. The Default route has none.
 	Matchers []Matcher `json:"matchers"`
 
+	// MessageLabels The label names of the line of key labels of the Route's Root messages, in their order, each shown as `name=value` when every firing Alert has the same value, as `name: N values` when they differ, and not at all when no Alert has it. Read only when `own_message_labels` is true, and then required unless the Route already has a list of its own, which an update that omits it keeps; an empty name is refused with `422` `invalid_format`, one given twice with `duplicate`, and the names a Group key takes are taken. A change, a change of the Group key while the list is computed, or a rename of the Route re-renders its open Root messages Quietly. A read gives the effective list: the Route's own, or while `own_message_labels` is false the list computed from the Group key without `alertname` and `organization.severity_label`, then `organization.team_label` and `namespace`. The computed list follows the Organization's settings as they are now, and a change of them does not change the Route's ETag; sent back with `own_message_labels` false, it is ignored.
+	MessageLabels *[]string `json:"message_labels,omitempty"`
+
 	// MinimumSeverity Omitted on a create, `none`; omitted on an update, kept. A change applies at once to the Route's open Alert Groups, Quietly and without removing an acknowledgement or a Snooze.
 	MinimumSeverity *MinimumSeverity `json:"minimum_severity,omitempty"`
 
 	// Name Unique in the Organization.
 	Name string `json:"name"`
+
+	// OwnMessageLabels Whether the Route has a list of "Labels in the message" of its own (`route.message_labels`, C-29.FR-2). False, the default of a create, computes the list from the current Group key and the Organization's settings and ignores `message_labels`; an update that omits it keeps it.
+	OwnMessageLabels *bool `json:"own_message_labels,omitempty"`
 
 	// OwningTeamId The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
@@ -6910,6 +7044,21 @@ type RouteInput struct {
 	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Urgent *bool `json:"urgent,omitempty"`
+}
+
+// RouteLabelSuggestion defines model for RouteLabelSuggestion.
+type RouteLabelSuggestion struct {
+	// AlertGroupCount How many of the Route's recent Alert Groups have an Alert with the label.
+	AlertGroupCount int `json:"alert_group_count"`
+
+	// ExampleValue The most frequent value of the label among the Alerts of those Alert Groups, the smallest of equally frequent ones.
+	ExampleValue string `json:"example_value"`
+	Label        string `json:"label"`
+}
+
+// RouteLabelSuggestionList defines model for RouteLabelSuggestionList.
+type RouteLabelSuggestionList struct {
+	Items []RouteLabelSuggestion `json:"items"`
 }
 
 // RouteList All Routes in evaluation order, the Default route last. The list ETag covers the order.
@@ -8198,6 +8347,15 @@ type TemplatePreviewResult struct {
 
 	// Format The markup of `output`; null for kinds without markup.
 	Format nullable.Nullable[TemplatePreviewResultFormat] `json:"format,omitempty"`
+
+	// Layout For `root_message`, the content of the rendered message as structured data; null when the template failed.
+	Layout nullable.Nullable[MessageLayout] `json:"layout,omitempty"`
+
+	// Length For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.
+	Length *int `json:"length,omitempty"`
+
+	// MessengerLimit For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost, 4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.
+	MessengerLimit nullable.Nullable[int] `json:"messenger_limit,omitempty"`
 
 	// Output Rendered text; null when the template failed.
 	Output nullable.Nullable[string]                      `json:"output,omitempty"`
@@ -13427,6 +13585,13 @@ type ClientInterface interface {
 	// Corresponds with PUT /routes/{route_id} (the `UpdateRoute` operationId).
 	UpdateRoute(ctx context.Context, routeId RouteId, params *UpdateRouteParams, body UpdateRouteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListRouteLabelSuggestions List the labels to suggest for "Labels in the message"
+	//
+	// The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+	//
+	// Corresponds with GET /routes/{route_id}/label-suggestions (the `ListRouteLabelSuggestions` operationId).
+	ListRouteLabelSuggestions(ctx context.Context, routeId RouteId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// MoveOpenAlertGroups Move open Alert Groups to the Default route
 	//
 	// Adds a `moved_to_default_route` Timeline entry to each moved Alert Group. Afterwards the Route can be deleted. A moved Alert Group keeps its Group key values but takes no new Alerts and never reopens; it stays open until its Alerts resolve or a person resolves it.
@@ -17065,6 +17230,23 @@ func (c *Client) UpdateRouteWithBody(ctx context.Context, routeId RouteId, param
 // Corresponds with PUT /routes/{route_id} (the `UpdateRoute` operationId).
 func (c *Client) UpdateRoute(ctx context.Context, routeId RouteId, params *UpdateRouteParams, body UpdateRouteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpdateRouteRequest(c.Server, routeId, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListRouteLabelSuggestions List the labels to suggest for "Labels in the message"
+//
+// The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+//
+// Corresponds with GET /routes/{route_id}/label-suggestions (the `ListRouteLabelSuggestions` operationId).
+func (c *Client) ListRouteLabelSuggestions(ctx context.Context, routeId RouteId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRouteLabelSuggestionsRequest(c.Server, routeId)
 	if err != nil {
 		return nil, err
 	}
@@ -24591,6 +24773,40 @@ func NewUpdateRouteRequestWithBody(server string, routeId RouteId, params *Updat
 	return req, nil
 }
 
+// NewListRouteLabelSuggestionsRequest constructs an http.Request for the ListRouteLabelSuggestions method
+func NewListRouteLabelSuggestionsRequest(server string, routeId RouteId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "route_id", routeId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/routes/%s/label-suggestions", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewMoveOpenAlertGroupsRequest constructs an http.Request for the MoveOpenAlertGroups method
 func NewMoveOpenAlertGroupsRequest(server string, routeId RouteId) (*http.Request, error) {
 	var err error
@@ -28861,6 +29077,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /routes/{route_id} (the `UpdateRoute` operationId).
 	UpdateRouteWithResponse(ctx context.Context, routeId RouteId, params *UpdateRouteParams, body UpdateRouteJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateRouteResponse, error)
+
+	// ListRouteLabelSuggestionsWithResponse List the labels to suggest for "Labels in the message"
+	//
+	// The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /routes/{route_id}/label-suggestions (the `ListRouteLabelSuggestions` operationId).
+	ListRouteLabelSuggestionsWithResponse(ctx context.Context, routeId RouteId, reqEditors ...RequestEditorFn) (*ListRouteLabelSuggestionsResponse, error)
 
 	// MoveOpenAlertGroupsWithResponse Move open Alert Groups to the Default route
 	//
@@ -39981,6 +40206,82 @@ func (r UpdateRouteResponse) ContentType() string {
 	return ""
 }
 
+// ListRouteLabelSuggestionsResponse429Headers the declared response headers of an HTTP 429 response for ListRouteLabelSuggestions
+type ListRouteLabelSuggestionsResponse429Headers struct {
+	RetryAfter *int
+}
+
+type ListRouteLabelSuggestionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RouteLabelSuggestionList
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ListRouteLabelSuggestionsResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListRouteLabelSuggestionsResponse) GetJSON200() *RouteLabelSuggestionList {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListRouteLabelSuggestionsResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ListRouteLabelSuggestionsResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r ListRouteLabelSuggestionsResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ListRouteLabelSuggestionsResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r ListRouteLabelSuggestionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRouteLabelSuggestionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRouteLabelSuggestionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRouteLabelSuggestionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // MoveOpenAlertGroupsResponse429Headers the declared response headers of an HTTP 429 response for MoveOpenAlertGroups
 type MoveOpenAlertGroupsResponse429Headers struct {
 	RetryAfter *int
@@ -47202,6 +47503,21 @@ func (c *ClientWithResponses) UpdateRouteWithResponse(ctx context.Context, route
 		return nil, err
 	}
 	return ParseUpdateRouteResponse(rsp)
+}
+
+// ListRouteLabelSuggestionsWithResponse List the labels to suggest for "Labels in the message"
+//
+// The labels of the Alerts of the Route's Alert Groups created within `routing.group_key_preview_period` (the last 24 hours), each with an example value — its most frequent value — and the number of those Alert Groups whose Alerts carry it, most frequent first, at most 50 (C-29.FR-2). The Route form offers them as "From recent Alert Groups of the Route".
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /routes/{route_id}/label-suggestions (the `ListRouteLabelSuggestions` operationId).
+func (c *ClientWithResponses) ListRouteLabelSuggestionsWithResponse(ctx context.Context, routeId RouteId, reqEditors ...RequestEditorFn) (*ListRouteLabelSuggestionsResponse, error) {
+	rsp, err := c.ListRouteLabelSuggestions(ctx, routeId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRouteLabelSuggestionsResponse(rsp)
 }
 
 // MoveOpenAlertGroupsWithResponse Move open Alert Groups to the Default route
@@ -57778,6 +58094,73 @@ func ParseUpdateRouteResponse(rsp *http.Response) (*UpdateRouteResponse, error) 
 		response.Headers200 = &headers
 	case rsp.StatusCode == 429:
 		var headers UpdateRouteResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseListRouteLabelSuggestionsResponse parses an HTTP response from a ListRouteLabelSuggestionsWithResponse call
+func ParseListRouteLabelSuggestionsResponse(rsp *http.Response) (*ListRouteLabelSuggestionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRouteLabelSuggestionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RouteLabelSuggestionList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers ListRouteLabelSuggestionsResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

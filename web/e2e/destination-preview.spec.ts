@@ -3,7 +3,8 @@
 
 // The Preview panel of the Destination page against `muster dev` and its fake Telegram server and fake receiver:
 // Verification step 5 of its story. "tg-alerts" → "Preview" → "Example" shows the example Alert Group's heading without
-// the 🧪 mark, the expandable label section and the buttons in a frame with sandbox=""; the template-mode webhook
+// the 🧪 mark, the fields as lines, the key labels and the Alerts line of the compact layout (C-29.FR-4) and the
+// buttons in a frame with sandbox=""; the template-mode webhook
 // "chat" shows "Create", "Update", "Open thread" and "Reply in thread" with their URLs and bodies; the fakes record no
 // new message. A reader of Russian previews at phone width. No page scrolls sideways at 360 px; no Content Security
 // Policy violation.
@@ -167,7 +168,8 @@ test("previews a Telegram Root message and the requests of an outgoing webhook w
   const chatBefore = await chatMessages();
   await signInAdmin(page);
 
-  // 5. "tg-alerts" → "Preview" → "Example": the heading without the test mark, the expandable labels and the buttons.
+  // 5. "tg-alerts" → "Preview" → "Example": the heading without the test mark, the fields as lines, the key labels
+  // and the Alerts line of the compact layout instead of the expandable quote of L1, and the buttons.
   await page.goto(`/destinations/${ids.telegram}`);
   await expect(page.getByRole("heading", { name: "tg-alerts", level: 1 })).toBeVisible();
   const panel = page.getByTestId("destination-test-preview");
@@ -180,8 +182,13 @@ test("previews a Telegram Root message and the requests of an outgoing webhook w
   await expect(frame.locator("b").first()).toContainText("#1 HighErrorRate");
   await expect(frame.locator("body")).not.toContainText("🧪");
   await expect(frame.locator("body")).not.toContainText("Test message");
-  await expect(frame.getByText("Expandable quote")).toBeVisible();
-  await expect(frame.locator("blockquote")).toContainText("cluster: prod");
+  await expect(frame.locator("blockquote")).toHaveCount(0);
+  const body = frame.locator("body");
+  await expect(body).toContainText("Firing");
+  await expect(body).toContainText("Severity: warning");
+  await expect(body).toContainText("Route: Default");
+  await expect(body).toContainText("cluster=prod · namespace=shop");
+  await expect(body).toContainText("pod: checkout-1, checkout-2, checkout-3");
   for (const name of ["Ack", "Resolve", "Snooze 1 h"]) {
     await expect(frame.getByRole("button", { name })).toBeVisible();
   }
@@ -253,7 +260,7 @@ async function russianPreview(browser: Browser): Promise<void> {
   await panel.getByRole("tab", { name: "Предпросмотр" }).click();
   await expect(panel.getByRole("heading", { name: "Корневое сообщение" })).toBeVisible();
   const frame = panel.frameLocator('iframe[title="Корневое сообщение в tg-alerts"]');
-  await expect(frame.getByText("Раскрывающаяся цитата")).toBeVisible();
+  await expect(frame.locator("body")).toContainText("cluster=prod · namespace=shop");
   await expect(frame.getByRole("button", { name: "Ack" })).toBeVisible();
   await expect(
     panel.getByText(

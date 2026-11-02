@@ -65,12 +65,54 @@ func (s *Server) PreviewTemplate(ctx context.Context, req gen.PreviewTemplateReq
 	} else {
 		out.Output = nullable.NewNullNullable[string]()
 	}
+	if b.Kind == gen.TemplateKindRootMessage {
+		out.Layout = nullable.NewNullNullable[gen.MessageLayout]()
+		if res.Layout != nil {
+			out.Layout = nullable.NewNullableWithValue(messageLayoutOf(*res.Layout))
+			length := res.Length
+			out.Length = &length
+		}
+		out.MessengerLimit = nullable.NewNullNullable[int]()
+		if res.MessengerLimit > 0 {
+			out.MessengerLimit = nullable.NewNullableWithValue(res.MessengerLimit)
+		}
+	}
 	if res.Sample != "" {
 		out.Sample = nullable.NewNullableWithValue(gen.TemplatePreviewResultSample(res.Sample))
 	} else {
 		out.Sample = nullable.NewNullNullable[gen.TemplatePreviewResultSample]()
 	}
 	return gen.PreviewTemplate200JSONResponse(out), nil
+}
+
+// messageLayoutOf is the MessageLayout of a previewed Root message (C-29.FR-1): the Assignees and the Owner come with
+// the Escalation chains, and until then the footer, among the notices, names the Owner.
+func messageLayoutOf(l messages.MessageLayout) gen.MessageLayout {
+	out := gen.MessageLayout{Number: int(l.Number), Title: l.Title,
+		Status:  gen.MessageLayoutStatus{Key: gen.MessageLayoutStatusKey(l.Status), Word: l.StatusWord},
+		Summary: l.Summary, Description: l.Description, Fields: make([]gen.MessageLayoutField, 0, len(l.Fields)),
+		Labels: make([]gen.MessageLayoutLabel, 0, len(l.Labels)), Notices: append([]string{}, l.Notices...),
+		Assignees: []gen.MessageLayoutPerson{}, Links: make([]gen.MessageLayoutLink, 0, len(l.Links))}
+	out.Owner = nullable.NewNullNullable[gen.MessageLayoutPerson]()
+	out.Alerts = nullable.NewNullNullable[gen.MessageLayoutAlerts]()
+	for _, f := range l.Fields {
+		out.Fields = append(out.Fields, gen.MessageLayoutField{Name: f.Name, Value: f.Value})
+	}
+	for _, k := range l.Labels {
+		out.Labels = append(out.Labels, gen.MessageLayoutLabel{Key: k.Name, Value: k.Value})
+	}
+	if a := l.Alerts; a != nil {
+		values := make([]gen.MessageLayoutAlertValue, 0, len(a.Values))
+		for _, v := range a.Values {
+			values = append(values, gen.MessageLayoutAlertValue{Value: v.Value, Resolved: v.Resolved})
+		}
+		out.Alerts = nullable.NewNullableWithValue(gen.MessageLayoutAlerts{Label: a.Label, Values: values,
+			Total: int(a.Total)})
+	}
+	for _, k := range l.Links {
+		out.Links = append(out.Links, gen.MessageLayoutLink{Label: k.Text, Url: k.URL})
+	}
+	return out
 }
 
 // problemErrorOf is a template error as the API shows it: its code, its position and what failed, at the template.
