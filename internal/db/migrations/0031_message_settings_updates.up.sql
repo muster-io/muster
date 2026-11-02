@@ -9,8 +9,8 @@
 -- team_evaluation does, in one transaction, so that a new Team label, which also writes that evaluation, edits each
 -- Root message once; team_name evaluates nothing, since the classification is per Team. Each batch of either kind waits
 -- for the Snapshots in flight under the lock of the evaluation before it lists its Alert Groups. team_name has no scope
--- CHECK: team_id is ON DELETE SET NULL, and a row whose Team is gone is simply done. The kind CHECK is replaced by open_group_updates_kind_v5_check with every kind
--- of _v4 and the two new ones.
+-- CHECK: team_id is ON DELETE SET NULL, and a row whose Team is gone is simply done. The kind CHECK is replaced by
+-- open_group_updates_kind_v5_check with every kind of _v4 and the two new ones.
 -- Expand only: a replica of 0.1, or of a development image of 0.2 without this migration, that still runs during a
 -- rolling update never writes or claims rows of the new kinds — a save it makes re-renders nothing, and its messages
 -- catch up at each Alert Group's next change — and a row a newer replica writes waits for a replica that knows its

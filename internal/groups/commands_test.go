@@ -926,6 +926,41 @@ func TestSnoozePresetCheck(t *testing.T) {
 	}
 }
 
+// TestSnoozePresetPressAfterSettingsChange is C-10.FR-18 for a button rendered before a change of the settings: a press
+// on a Snooze preset button carries the preset alone — every adapter dispatches SnoozeEnd{Preset} without a time, as
+// TestPressSnoozePresets of internal/mattermost checks — so a press made after the start of the working day or the
+// first day of the week changed, on a Root message still showing the old labels, ends at the new start, computed when
+// the command runs; a Snooze set before the change keeps its end.
+func TestSnoozePresetPressAfterSettingsChange(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	before, after := h.firing(t, "a"), h.firing(t, "b")
+	h.clock.Set(thursday2am)
+	h.db.timeZone, h.db.workdayStart, h.db.weekStart = "UTC", "09:00", "monday"
+	press := func(g *dbgen.LockGroupsRow, p SnoozePreset) time.Time {
+		t.Helper()
+		res, err := h.svc.Snooze(t.Context(), alice, g.PublicID, SnoozeEnd{Preset: p})
+		if err != nil || res.Group.SnoozeUntil == nil {
+			t.Fatalf("snooze %s = %v %+v", p, err, res.Group.SnoozeUntil)
+		}
+		return *res.Group.SnoozeUntil
+	}
+	if until := press(before, PresetTomorrow); !until.Equal(instant(t, "2026-10-08T09:00:00Z")) {
+		t.Errorf("before the change: %v", until)
+	}
+	// The settings change; the button of the Root message rendered before still reads "Until tomorrow 09:00".
+	h.db.workdayStart, h.db.weekStart = "08:30", "sunday"
+	if until := press(after, PresetTomorrow); !until.Equal(instant(t, "2026-10-08T08:30:00Z")) {
+		t.Errorf("tomorrow after the change: %v, want the new start", until)
+	}
+	if until := press(after, PresetWeekStart); !until.Equal(instant(t, "2026-10-11T08:30:00Z")) {
+		t.Errorf("the first day of the week after the change: %v, want sunday at the new start", until)
+	}
+	if before.SnoozeUntil != ts(instant(t, "2026-10-08T09:00:00Z")) {
+		t.Errorf("a change of the settings moved a Snooze to %v", before.SnoozeUntil)
+	}
+}
+
 // TestSnoozePreset is C-10.FR-17, C-10.FR-18 and C-10.AC-22 in the command layer, at 02:00 UTC: the time zone of the
 // request; else the profile time zone of the User the caller acts as, also through a Personal access token; else the
 // Organization's, for a Service account, a User whose profile follows the browser and one whose profile names a zone

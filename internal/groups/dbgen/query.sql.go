@@ -4500,8 +4500,9 @@ type LockTeamEvaluationParams struct {
 }
 
 // LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
-// keyed by the Organization) exclusively, before a batch of the evaluation locks its Alert Groups: it waits for every
-// Snapshot that read the stamp of the classification before, which routing takes it shared for.
+// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings or
+// team_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared for before it
+// reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created or changed.
 func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
 	_, err := q.db.Exec(ctx, lockTeamEvaluation, arg.LockClass, arg.OrgID)
 	return err
