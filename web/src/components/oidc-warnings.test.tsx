@@ -79,6 +79,24 @@ describe("OIDC warnings", () => {
       .toBeVisible();
   });
 
+  test("groups_claim_missing names its own claim, one warning per claim", async () => {
+    const owner = "https://gitlab.org/claims/groups/owner";
+    const screen = await render(
+      inProviders(
+        <OidcWarnings
+          warnings={[
+            { kind: "groups_claim_missing", claim: "groups" },
+            { kind: "groups_claim_missing", claim: owner },
+          ]}
+          groupsClaim="groups"
+        />,
+      ),
+    );
+    const warnings = screen.getByTestId("oidc-warning");
+    expect(warnings.elements()).toHaveLength(2);
+    await expect.element(warnings.filter({ hasText: `‘${owner}’` })).toBeVisible();
+  });
+
   test("in Russian", async () => {
     await i18n.changeLanguage("ru");
     const screen = await render(

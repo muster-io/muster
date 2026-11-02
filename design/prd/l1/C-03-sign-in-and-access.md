@@ -249,6 +249,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   tokens follow the grace rule of C-04.FR-8, which applies only to such users.
   _Revised for L2 (2026-10-26):_ on success, the people in Teams also follow the identity provider entries of the Teams
   (C-25.FR-4), with or without `oidc.sync_role`; without an offline token they follow them only at sign-in.
+  _Revised for L2 (2026-10-31):_ a re-check reads the claims of the mapping and of the Teams from the refreshed ID token
+  alone. A claim it lacks counts as carrying no values once an earlier re-check found it in a refreshed ID token, so
+  that a person removed from every group at the IdP is demoted or refused; until then, as for a claim that sign-ins
+  have seen only in their own ID token or in userinfo (GitLab's role claims), the re-check does not decide it and it
+  keeps what the last sign-in gave, as in L1. The Role follows only when every claim the entries of the mapping read
+  is decided.
 - **C-03.FR-31** The Organization always keeps an active Admin: disabling, deleting or giving a lower Role to the last
   active User with the Admin Role is refused with `409` and the code `last_admin`, whoever asks, that Admin included.
 - **C-03.FR-32** Role sync from the identity provider (`oidc.sync_role`, at an OIDC sign-in or a background re-check,
@@ -360,10 +366,11 @@ Permissions); `oidc-settings` (read, update); `oidc-settings/checks` (create →
   timeout starts over; enabling the user again leaves it firing. Deleting a user does the same with `owner_deleted` and
   "The owner was deleted — this Alert Group has no owner now."
 - **C-03.AC-28** _Added for L2 (2026-10-26)._ Against the fake OIDC server in its GitLab mode, the entries
-  `https://gitlab.org/claims/groups/owner` `example/platform/infra` → Admin and `groups` `example/platform/*` → Viewer
-  make an Owner of `example/platform/infra` an Admin and a person in `example/platform/apps` a Viewer, whether the claim
-  comes in the ID token or in userinfo; `example/platformx` matches neither, and a person whom they refuse gets a
-  `session.oidc_refused` entry with the values of both claims.
+  `https://gitlab.org/claims/groups/owner` `example/platform/*` → Admin and `groups` `example/platform/*` → Viewer make
+  an Owner of `example/platform` and an Owner of `example/platform/infra` Admins, although the role claim lists only the
+  groups where a person holds the role directly, and a person in `example/platform/apps` a Viewer. The claims are read
+  from the ID token, then from userinfo, where GitLab puts them; `example/platformx` matches neither, and a person whom
+  they refuse gets a `session.oidc_refused` entry with the values of both claims.
 
 ## Related ADRs
 

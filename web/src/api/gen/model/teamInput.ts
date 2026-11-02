@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { Matcher } from './matcher';
+import type { TeamIdpEntry } from './teamIdpEntry';
 import type { WorkingHours } from './workingHours';
 
 export interface TeamInput {
@@ -32,4 +33,9 @@ export interface TeamInput {
      * @maxItems 50
      */
   matchers?: Matcher[];
+  /**
+     * The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
+     * @maxItems 100
+     */
+  idp_entries?: TeamIdpEntry[];
 }

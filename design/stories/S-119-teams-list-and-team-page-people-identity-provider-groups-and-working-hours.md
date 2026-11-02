@@ -156,6 +156,9 @@ None.
 - The claim combobox lets an Admin type a claim that discovery does not list, because the list is optional
   (C-03.FR-6); suggestions come from the last connection check.
 - Depends on S-112 for the Route form's section "Severity, Escalation chains and owner", which this story extends.
+- The warning `groups_claim_missing` covers the claims of the Role mapping only (S-117); a claim that only the
+  identity provider entries of Teams name gets none yet. The Team page's "Identity provider groups" decides
+  whether to warn about it too.
 
 ## Coverage
 

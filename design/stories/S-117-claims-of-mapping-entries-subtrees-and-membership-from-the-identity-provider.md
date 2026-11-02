@@ -8,8 +8,8 @@ depends_on: [S-115, S-116]
 covers: [C-25.FR-1, C-25.FR-4, C-25.FR-11, C-25.FR-12, C-25.AC-3, C-25.AC-4, C-03.FR-5, C-03.FR-6, C-03.FR-7, C-03.FR-30, C-03.AC-28]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0024_identity_provider_claims_and_team_entries.up.sql
-  - internal/db/migrations/0024_identity_provider_claims_and_team_entries.down.sql
+  - internal/db/migrations/0030_identity_provider_claims_and_team_entries.up.sql
+  - internal/db/migrations/0030_identity_provider_claims_and_team_entries.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -31,6 +31,7 @@ files_touched:
   - internal/teams/idp.go
   - internal/teams/idp_test.go
   - internal/teams/query.sql
+  - internal/teams/teams_test.go
   - internal/teams/teams_integration_test.go
   - internal/api/teams.go
   - internal/api/teams_test.go
@@ -42,17 +43,26 @@ files_touched:
   - web/src/components/group-mapping-editor.tsx
   - web/src/components/group-mapping-editor.test.tsx
   - web/src/test/fixtures/teams.ts
+  - web/src/components/oidc-warnings.tsx
+  - web/src/locales/en.json
+  - web/src/locales/ru.json
+  - design/stories/S-119-teams-list-and-team-page-people-identity-provider-groups-and-working-hours.md
+  - web/src/components/oidc-warnings.test.tsx
+  - internal/archlint/secretleak.go
   - docs/sign-in/oidc-gitlab.md
   - docs/sign-in/oidc-keycloak.md
   - docs/concepts/teams.md
   - docs/install/versions.md
   - AGENTS.md
+  - design/prd/l1/C-03-sign-in-and-access.md
+  - design/prd/l2/C-25-teams.md
 acceptance:
   - "[C-03.FR-5, C-03.AC-28] Every entry of the Role mapping (`OidcGroupMapping`) takes an optional `claim`, by default `groups_claim`; a claim is read from the ID token, then from userinfo; an entry `a/b/*` matches `a/b` and every group below it at `/` boundaries only, any other entry matches exactly, and the highest Role found over all entries wins: against the fake OIDC server in its GitLab mode, which puts the role claims and `groups` in userinfo only (F-117), `https://gitlab.org/claims/groups/owner` `example/platform/*` → Admin and `groups` `example/platform/*` → Viewer make an Owner of `example/platform` (whose direct-only claim lists just `example/platform`, F-118) and an Owner of `example/platform/infra` Admins and a person in `example/platform/apps` a Viewer, and `example/platformx` matches neither; a claim found in the ID token (the Keycloak flavor) is read the same way (`claims_test.go`, `oidc_test.go`)."
   - "[C-03.FR-6] `getOidcSettings` carries one warning `groups_claim_missing` per claim that an entry names, the groups claim included, each with `claim`; a connection check that finds a claim not listed in discovery's `claims_supported` raises its warning, one that finds it listed clears it, and a sign-in whose tokens carry it clears it for good; `claims_supported` of the last check is read back on the settings for the editors to suggest (`settings_test.go`)."
   - "[C-03.FR-7, C-03.AC-28] A refused sign-in writes `session.oidc_refused` with `claims`, the values of every claim the mapping read, by claim (`signin_test.go`)."
   - "[C-25.FR-4, C-25.AC-3] A Team takes `idp_entries` (`{claim, group}`, the claim optional), matched as the Role mapping's; at every OIDC sign-in and every successful background re-check, with or without `oidc.sync_role`, a User joins each Team with an entry that matches them and leaves each Team they are in only through entries that no longer match; a person added by hand stays and, when an entry also matches, has both sources: against the fake OIDC server, `teams/payments/*` takes in a User with `teams/payments` and one with `teams/payments/oncall`, not one with `teams/paymentsx`; after the second User's group is removed, their next sign-in takes them out; the Audit log has `team.user_added` and `team.user_removed` by the system with the source `idp` and the entry; the Roles of all three are unchanged (`idp_test.go`, `team_membership_test.go`)."
   - "[C-25.FR-4, C-25.AC-4, C-03.FR-30] An entry naming `https://gitlab.org/claims/groups/maintainer` matches a User whose userinfo carries that claim with the group, where GitLab puts it (F-117), and also a User whose ID token carries it, with a provider that does; with an identity provider that grants no offline token, membership changes only at sign-in; a refused or unavailable re-check changes no membership (`idp_test.go`, `recheck_test.go`)."
+  - "[C-25.FR-4] `removeTeamUser` takes away only the source `by_hand`: a person also in the Team through the identity provider stays in it with the source `idp`, and `team.user_removed` records the sources before and after; a person in the Team only through the identity provider, with no source `by_hand` to take away, is `404` (`teams_test.go`, `team_membership_test.go`)."
   - "[C-25.FR-1, C-25.FR-11] `idp_entries` are part of `TeamInput`, saved with `If-Match` and recorded in the diff of `team.updated`; `listTeamUsers` gives a person the source `idp` with the entries that matched them; a change of a Team's entries changes nobody's membership until their next sign-in or re-check (`teams_test.go`)."
   - "[C-03.FR-5] Until S-119 gives the Role mapping editor its claim column, the L1 editor of the OIDC settings keeps the `claim` of every entry it loads and sends it back unchanged on save, so an entry of another claim is never saved against the groups claim (`group-mapping-editor.test.tsx`)."
   - "[C-25.FR-12] The documentation of GitLab sign-in maps Roles with GitLab's role claims and subtrees as the facts of S-116 say, the Keycloak page names the claim of an entry, and Concepts → Teams has the section \"Membership from the identity provider\"; `make docs-check` passes."
@@ -72,6 +82,10 @@ issue: 406
   claim read.
 - Team entries of the identity provider with the same matching, and Team membership that follows them at every OIDC
   sign-in and successful re-check (C-25.FR-4, C-03.FR-30 revised).
+- `removeTeamUser` taking away only the source `by_hand`, so that removing a person by hand never removes the membership
+  the identity provider gives them (C-25.FR-4).
+- The rewording of C-03.AC-28 and C-25.AC-4 by the facts of S-116 (a subtree entry against a direct-only role claim,
+  the claim found in userinfo for GitLab), which the maintainer settled for this pull request.
 - The GitLab mode of the fake OIDC server with GitLab's role claims where the facts of S-116 put them.
 - The documentation of both.
 
@@ -97,8 +111,11 @@ issue: 406
     the entries that matched the person at their last sign-in or re-check; `TeamUser.sources` takes `idp`.
   - Refusals: an empty `group`, or `*` anywhere but a trailing `/*`, is `422` `invalid_format` at the entry's pointer,
     in both mappings.
-- **Schema** (migration `0024_identity_provider_claims_and_team_entries`, expand only; `schema.md` §4.3 and §4.15):
-  - `oidc_settings.claims_seen jsonb NOT NULL DEFAULT '{}'` (claim → when a sign-in first carried it),
+  - `removeTeamUser` clears the source `by_hand`; the row stays while `by_idp` is set. Its `404` is a User with no
+    source `by_hand` in the Team, including a person who is in it only through the identity provider.
+- **Schema** (migration `0030_identity_provider_claims_and_team_entries`, expand only; `schema.md` §4.3 and §4.15):
+  - `oidc_settings.claims_seen jsonb NOT NULL DEFAULT '{}'` (claim → `{"at": when a sign-in first carried it,
+    "id_token": whether the refreshed ID token of a re-check ever carried it}`, which a re-check reads),
     `oidc_settings.claims_missing text[] NOT NULL DEFAULT '{}'` (claims the last check found not advertised) and
     `oidc_settings.claims_supported text[] NOT NULL DEFAULT '{}'`; `groups_claim_seen_at` and
     `groups_claim_missing_since` stay and are written in step for the groups claim, so a 0.1 replica shows the same
@@ -118,7 +135,10 @@ issue: 406
   entries and keeps "the highest Role wins"; sign-in, linking and the background re-check use it; `session.oidc_refused`
   details carry `claims` {claim: values}; the warnings per claim follow C-03.FR-6 for each claim; the check stores
   `claims_supported`. On a successful sign-in or re-check the service calls the membership hook with the User and the
-  claims, in the same transaction.
+  claims, in the same transaction. A re-check reads the refreshed ID token alone and records the claims it carries: a
+  claim it lacks counts as carrying no values once an earlier refreshed ID token carried it, and is not decided before
+  that, as for a claim seen only at sign-in or in userinfo (C-03.FR-30 revised on 2026-10-31); the Role follows only
+  when every claim the entries of the mapping read is decided.
 - **Teams** (`internal/teams/idp.go`): `SyncMembership(ctx, tx, user, claims)` — for each Team with a matching entry,
   add the User with `by_idp` (or set `by_idp` on a person added by hand) and record the matches; for each Team where
   the User is `by_idp` and no entry matches any more, clear `by_idp` and delete the row when not `by_hand`; each change
@@ -214,12 +234,20 @@ curl -s "${A[@]}" "$API/users?q=petr" | jq -r '.items[0].role'                  
 Keycloak flavor and an offline token, the IdP's groups change and an advance of the development clock by
 `auth.oidc_recheck_interval` (`curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 900}'`, after the
 Personal access token A was made) makes the re-check due, since `oidc_checks.deadline` is on the business clock; the
-User leaves the Team without signing in.
+User leaves the Team without signing in. `team_membership_test.go` also removes by hand a person who has both sources
+and finds them still in the Team with the source `idp`.
+
+The maintainer's own setup is checked live as well: `groups` `corp/*` → Responder and
+`https://gitlab.org/claims/groups/owner` `corp` → Admin make an Owner of `corp` an Admin, a Developer of `corp/team-a`
+only (whose `groups` is `["corp/team-a"]`, since GitLab's `groups` never lists the groups above a person's own, F-118)
+a Responder through `corp/*`, and refuse someone outside `corp` with `unmatched_role` `none`; a Team with the entry
+`corp/payments/*` takes in a person of `corp/payments/oncall`.
 
 ## Open questions
 
-None. S-116's facts (F-116 to F-120) do not contradict C-03.FR-5 or C-25.FR-4; the pull request of S-116 proposes the
-rewording of C-03.AC-28 and C-25.AC-4, which still name an exact entry and the ID token, for the maintainer to decide.
+None. S-116's facts (F-116 to F-120) do not contradict C-03.FR-5 or C-25.FR-4. The pull request of S-116 proposed the
+rewording of C-03.AC-28 and C-25.AC-4, which still named an exact entry and the ID token; the maintainer settled it,
+and this pull request rewords both.
 
 ## Notes
 
@@ -233,8 +261,10 @@ rewording of C-03.AC-28 and C-25.AC-4, which still name an exact entry and the I
   added (C-25.FR-4).
 - A change of a Team's entries is not applied to everyone at once: membership changes at each User's next sign-in or
   re-check, as the Role mapping does (C-25.FR-4).
-- Migration `0024` follows the story map; a story merged out of that order renumbers its migration to the next free
-  number in its own pull request (S-131's Notes).
+- Migration `0030`: the story map gave this story `0024`, but S-118, S-131, S-134, S-163, S-133 and S-125, merged
+  first, took `0024` to `0029` (`0024_team_label_and_matchers`, `0025_schedules`, `0026_ical_feeds`,
+  `0027_team_evaluation`, `0028_schedule_gap_alert`, `0029_route_message_labels`), so this story renumbered its
+  migration to the next free number, as S-131's Notes say.
 
 ## Coverage
 

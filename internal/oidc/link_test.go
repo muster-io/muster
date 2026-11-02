@@ -264,3 +264,43 @@ func TestLinkNoAccess(t *testing.T) {
 		t.Errorf("a link with a Role for unmatched users = %+v", out)
 	}
 }
+
+// TestLinkReadsEntryClaims is C-03.FR-5 and C-25.FR-4 at a link: against GitLab, which puts its role claims in
+// userinfo, an Owner whose groups map to no Role links through the owner claim, and the Teams follow the claims; a
+// person no entry matches is refused with every claim the mapping read.
+func TestLinkReadsEntryClaims(t *testing.T) {
+	e := newEnv(t)
+	e.configureGitLab(t)
+	m := e.withMembership(maintainerClaim)
+	ivy, sess := e.local(9, "Ivy")
+	who := fakeoidc.User{Subject: "g-9", PreferredUsername: "ivy", Groups: []string{"example/platform/infra"},
+		RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"example/platform/infra"},
+			fakeoidc.RoleMaintainer: {"teams/payments"}}}
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = []GroupMapping{{Claim: ownerClaim, Group: "example/platform/*", Role: auth.RoleAdmin}}
+	})
+	if out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, who)); out.Redirect != ProfilePage ||
+		ivy.subject != "g-9" {
+		t.Fatalf("a link through the owner claim = %+v; log %s", out, e.log)
+	}
+	calls := m.taken()
+	if len(calls) != 1 || calls[0].userID != ivy.id ||
+		fmt.Sprint(calls[0].claims[maintainerClaim]) != "[teams/payments]" {
+		t.Errorf("the teams at the link: %+v", calls)
+	}
+	jo, sess := e.local(10, "Jo")
+	out := e.svc.CompleteLink(t.Context(), sess, e.startLink(t, sess, fakeoidc.User{Subject: "g-10",
+		PreferredUsername: "jo", Groups: []string{"example/platform"}}))
+	r := e.store.audited(ActionLinkRefused)
+	claims := ""
+	if len(r) == 1 {
+		claims = fmt.Sprint(r[0]["details"].(map[string]any)["claims"])
+	}
+	if out.Error != ErrorNoAccess || jo.subject != "" ||
+		claims != "map[groups:[example/platform] https://gitlab.org/claims/groups/owner:[]]" {
+		t.Errorf("a link no entry matches = %+v, %v", out, r)
+	}
+	if calls := m.taken(); len(calls) != 0 {
+		t.Errorf("a refused link followed the teams: %+v", calls)
+	}
+}

@@ -132,6 +132,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       of an Alert Group, `alert_groups.description`, set once like its summary. An Alert Group created before the
       upgrade, or by a 0.1 replica during it, has none until a new Alert with a description joins it on 0.2.0, which
       sets it; until then its Root messages show no description.
+    - Migration 0030 adds the claim of every entry of the Role mapping, with
+      [subtrees](../sign-in/oidc-gitlab.md#3-map-groups-to-roles), and the
+      [identity provider entries of Teams](../concepts/teams.md#membership-from-the-identity-provider). The Role mapping
+      reads as before: every entry reads the groups claim, and an entry ending in `/*` now matches its subtree.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -188,7 +192,18 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     footer, buttons and links — no fields, key labels, description or Alerts, which 0.1 does not know — and stays so
     until the next change of its Alert Group, since its Desired state, and so its hash, is the one 0.2.0 stored. Keep
     the overlap of the two versions short. An Alert Group that a 0.1 replica creates during the rollout has no
-    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0.
+    description, which 0.1 does not write, until a new Alert with a description joins it on 0.2.0. A 0.1 replica reads
+    the Role mapping against the groups claim alone, so 0.2.0 shows it only the entries it reads the same way — the
+    groups claim and an exact group: while the rollout lasts, a sign-in on a 0.1 replica ignores the entries of another
+    claim, such as GitLab's role claims, and the subtrees `a/b/*`, which may refuse it or give a lower Role, never a
+    higher one, and it changes no Team membership. Do not save the OIDC settings until every replica runs 0.2.0: a save
+    on a 0.1 replica keeps only the entries it knows, so the entries of another claim and the subtrees are lost; that
+    mapping applies from then on, and the lost entries must be added again on a 0.2.0 replica after the rollout.
+
+    **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
+    that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
+    anywhere else still matches only that exact group name, but saving the OIDC settings is refused with `422`
+    `invalid_format` at that entry until it is changed or removed.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -340,6 +355,31 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v4_check;
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_scope_check;
         ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0030 adds the claims of the Role mapping and the identity provider entries of Teams in two
+    transactions: the first adds the columns and the table and fills the Role mapping, the second validates the new
+    CHECKs. A failure leaves the schema recorded as dirty at version 30. To recover, with the same database role as
+    Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'oidc_settings' AND column_name = 'role_mappings';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 29, dirty = false;`.
+    3. If it returns 1, finish the second transaction and clear the mark:
+
+        ```sql
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_role_mappings_check;
+        ALTER TABLE oidc_settings VALIDATE CONSTRAINT oidc_settings_claims_seen_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_source_check;
+        ALTER TABLE team_users VALIDATE CONSTRAINT team_users_idp_matches_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 

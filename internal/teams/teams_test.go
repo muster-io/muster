@@ -25,6 +25,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/teams/dbgen"
 )
 
@@ -78,10 +79,15 @@ type fakeStore struct {
 	label       string
 	values      []dbgen.ListTeamLabelValuesRow
 	valueArgs   []dbgen.ListTeamLabelValuesParams
+	// lockedThen runs after LockTeamMember read the row, as what another transaction would have done to it had the lock
+	// not held it off.
+	lockedThen func()
+	// entries are the identity provider entries of each Team, in their order.
+	entries map[int64][]dbgen.ListTeamIdpEntriesRow
 }
 
 func newStore() *fakeStore {
-	return &fakeStore{people: map[int64][]dbgen.GetTeamUserRow{},
+	return &fakeStore{people: map[int64][]dbgen.GetTeamUserRow{}, entries: map[int64][]dbgen.ListTeamIdpEntriesRow{},
 		users: map[string]dbgen.LockTeamUserRow{
 			"SR0000000000BB": {ID: 2, PublicID: "SR0000000000BB", Name: "bob", Login: "bob", Role: "responder",
 				Status: "active"},
@@ -330,6 +336,18 @@ func (s *fakeStore) GetTeamUser(_ context.Context, arg dbgen.GetTeamUserParams) 
 	return dbgen.GetTeamUserRow{}, pgx.ErrNoRows
 }
 
+func (s *fakeStore) LockTeamMember(ctx context.Context, arg dbgen.LockTeamMemberParams) (dbgen.LockTeamMemberRow,
+	error) {
+	if err := s.fail["LockTeamMember"]; err != nil {
+		return dbgen.LockTeamMemberRow{}, err
+	}
+	r, err := s.GetTeamUser(ctx, dbgen.GetTeamUserParams(arg))
+	if s.lockedThen != nil {
+		s.lockedThen()
+	}
+	return dbgen.LockTeamMemberRow(r), err
+}
+
 func (s *fakeStore) InsertTeamUser(_ context.Context, arg dbgen.InsertTeamUserParams) (int64, error) {
 	if err := s.fail["InsertTeamUser"]; err != nil {
 		return 0, err
@@ -373,7 +391,7 @@ func (s *fakeStore) DeleteUserTeams(_ context.Context, arg dbgen.DeleteUserTeams
 		for _, m := range s.people[t.ID] {
 			if m.ID == arg.UserID {
 				out = append(out, dbgen.DeleteUserTeamsRow{PublicID: t.PublicID, Name: t.Name,
-					UserPublicID: m.PublicID, UserName: "deleted-user-" + m.PublicID, ByHand: m.ByHand})
+					UserPublicID: m.PublicID, UserName: "deleted-user-" + m.PublicID, ByHand: m.ByHand, ByIdp: m.ByIdp})
 			}
 		}
 		s.people[t.ID] = slices.DeleteFunc(s.people[t.ID], func(m dbgen.GetTeamUserRow) bool {
@@ -437,6 +455,168 @@ func (s *fakeStore) ListTeamLabelValues(_ context.Context, arg dbgen.ListTeamLab
 	[]dbgen.ListTeamLabelValuesRow, error) {
 	s.valueArgs = append(s.valueArgs, arg)
 	return s.values, s.fail["ListTeamLabelValues"]
+}
+
+func (s *fakeStore) ClearByHand(_ context.Context, arg dbgen.ClearByHandParams) (int64, error) {
+	if err := s.fail["ClearByHand"]; err != nil {
+		return 0, err
+	}
+	if m := s.member(arg.TeamID, arg.UserID); m != nil && m.ByHand && m.ByIdp {
+		m.ByHand = false
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// member is the row of the User in the Team, nil when they are not in it.
+func (s *fakeStore) member(teamID, userID int64) *dbgen.GetTeamUserRow {
+	for i := range s.people[teamID] {
+		if s.people[teamID][i].ID == userID {
+			return &s.people[teamID][i]
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) ListTeamIdpEntries(_ context.Context, arg dbgen.ListTeamIdpEntriesParams) (
+	[]dbgen.ListTeamIdpEntriesRow, error) {
+	if err := s.fail["ListTeamIdpEntries"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListTeamIdpEntriesRow
+	for _, id := range arg.TeamIds {
+		out = append(out, s.entries[id]...)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteTeamIdpEntries(_ context.Context, arg dbgen.DeleteTeamIdpEntriesParams) error {
+	if err := s.fail["DeleteTeamIdpEntries"]; err != nil {
+		return err
+	}
+	delete(s.entries, arg.TeamID)
+	return nil
+}
+
+func (s *fakeStore) InsertTeamIdpEntries(_ context.Context, arg dbgen.InsertTeamIdpEntriesParams) error {
+	if err := s.fail["InsertTeamIdpEntries"]; err != nil {
+		return err
+	}
+	for i, g := range arg.GroupNames {
+		s.entries[arg.TeamID] = append(s.entries[arg.TeamID], dbgen.ListTeamIdpEntriesRow{TeamID: arg.TeamID,
+			Claim: pgtype.Text{String: arg.Claims[i], Valid: arg.Claims[i] != ""}, GroupName: g})
+	}
+	return nil
+}
+
+func (s *fakeStore) ListIdpEntryClaims(context.Context, int64) ([]string, error) {
+	if err := s.fail["ListIdpEntryClaims"]; err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, t := range s.live() {
+		for _, e := range s.entries[t.ID] {
+			if !slices.Contains(out, e.Claim.String) {
+				out = append(out, e.Claim.String)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (s *fakeStore) ListIdpEntries(context.Context, int64) ([]dbgen.ListIdpEntriesRow, error) {
+	if err := s.fail["ListIdpEntries"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListIdpEntriesRow
+	for _, t := range s.live() {
+		for _, e := range s.entries[t.ID] {
+			out = append(out, dbgen.ListIdpEntriesRow{TeamID: t.ID, PublicID: t.PublicID, Name: t.Name,
+				Claim: e.Claim, GroupName: e.GroupName})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) LockUserMemberships(_ context.Context, arg dbgen.LockUserMembershipsParams) (
+	[]dbgen.LockUserMembershipsRow, error) {
+	if err := s.fail["LockUserMemberships"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.LockUserMembershipsRow
+	for _, t := range s.live() {
+		if m := s.member(t.ID, arg.UserID); m != nil {
+			out = append(out, dbgen.LockUserMembershipsRow{TeamID: t.ID, PublicID: t.PublicID, Name: t.Name,
+				ByHand: m.ByHand, ByIdp: m.ByIdp, IdpMatches: m.IdpMatches})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteUserRowsOfDeletedTeams(_ context.Context, arg dbgen.DeleteUserRowsOfDeletedTeamsParams) (
+	int64, error) {
+	if err := s.fail["DeleteUserRowsOfDeletedTeams"]; err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, t := range s.teams {
+		if t.deleted && s.member(t.ID, arg.UserID) != nil {
+			s.people[t.ID] = slices.DeleteFunc(s.people[t.ID], func(m dbgen.GetTeamUserRow) bool {
+				return m.ID == arg.UserID
+			})
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (s *fakeStore) GetMember(_ context.Context, arg dbgen.GetMemberParams) (dbgen.GetMemberRow, error) {
+	if err := s.fail["GetMember"]; err != nil {
+		return dbgen.GetMemberRow{}, err
+	}
+	for _, u := range s.users {
+		if u.ID == arg.ID && u.Status != "deleted" {
+			return dbgen.GetMemberRow{PublicID: u.PublicID, Name: u.Name}, nil
+		}
+	}
+	return dbgen.GetMemberRow{}, pgx.ErrNoRows
+}
+
+func (s *fakeStore) JoinThroughIdp(_ context.Context, arg dbgen.JoinThroughIdpParams) error {
+	if err := s.fail["JoinThroughIdp"]; err != nil {
+		return err
+	}
+	if m := s.member(arg.TeamID, arg.UserID); m != nil {
+		m.ByIdp, m.IdpMatches = true, arg.IdpMatches
+		return nil
+	}
+	for _, u := range s.users {
+		if u.ID == arg.UserID {
+			s.people[arg.TeamID] = append(s.people[arg.TeamID], dbgen.GetTeamUserRow{ID: u.ID,
+				PublicID: u.PublicID, Name: u.Name, Login: u.Login, Role: u.Role, Status: u.Status, ByIdp: true,
+				IdpMatches: arg.IdpMatches})
+		}
+	}
+	return nil
+}
+
+func (s *fakeStore) SetIdpMatches(_ context.Context, arg dbgen.SetIdpMatchesParams) error {
+	if err := s.fail["SetIdpMatches"]; err != nil {
+		return err
+	}
+	s.member(arg.TeamID, arg.UserID).IdpMatches = arg.IdpMatches
+	return nil
+}
+
+func (s *fakeStore) LeaveThroughIdp(_ context.Context, arg dbgen.LeaveThroughIdpParams) error {
+	if err := s.fail["LeaveThroughIdp"]; err != nil {
+		return err
+	}
+	if m := s.member(arg.TeamID, arg.UserID); m != nil && m.ByHand {
+		m.ByIdp, m.IdpMatches = false, []byte(`[]`)
+	}
+	return nil
 }
 
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
@@ -595,7 +775,7 @@ func TestCreate(t *testing.T) {
 	var diff []audit.Change
 	_ = json.Unmarshal(e.Diff, &diff)
 	if e.Action != ActionCreated || e.ResourceType.String != ResourceTeam || e.ResourcePublicID.String !=
-		team.PublicID || len(diff) != 9 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
+		team.PublicID || len(diff) != 10 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
 		t.Errorf("audit %+v %s", e, e.Diff)
 	}
 	if len(store.hints) != 1 || store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {
@@ -1284,5 +1464,125 @@ func TestEvaluationRows(t *testing.T) {
 			t.Errorf("update, %s fails = %v", name, err)
 		}
 		delete(store.fail, name)
+	}
+}
+
+// TestIdpEntries is C-25.FR-1 and FR-11: the entries are part of the Team, validated at their pointers, saved with
+// If-Match, recorded in the diff of team.updated and replaced as a whole; omitted on an update they are kept.
+func TestIdpEntries(t *testing.T) {
+	svc, s := newService(t)
+	for _, tc := range []struct {
+		entries []IdpEntry
+		pointer string
+		code    string
+	}{
+		{[]IdpEntry{{Group: " "}}, "/idp_entries/0/group", CodeInvalidFormat},
+		{[]IdpEntry{{Group: "a"}, {Group: "teams/*/x"}}, "/idp_entries/1/group", CodeInvalidFormat},
+		{[]IdpEntry{{Group: "*"}}, "/idp_entries/0/group", CodeInvalidFormat},
+		{[]IdpEntry{{Group: strings.Repeat("g", 201)}}, "/idp_entries/0/group", CodeTooLong},
+		{[]IdpEntry{{Claim: strings.Repeat("c", 201), Group: "g"}}, "/idp_entries/0/claim", CodeTooLong},
+		{[]IdpEntry{{Group: "a"}, {Group: " a "}}, "/idp_entries/1", CodeDuplicate},
+		{make([]IdpEntry, MaxIdpEntries+1), "/idp_entries", CodeTooLong},
+	} {
+		_, err := svc.Create(t.Context(), by, Input{Name: "X", Slug: "x", IdpEntries: &tc.entries})
+		if fe := fieldError(t, err); fe.Pointer != tc.pointer || fe.Code != tc.code {
+			t.Errorf("%v: %+v", tc.entries, fe)
+		}
+	}
+	team := idpTeamOf(t, svc, "Payments", IdpEntry{Claim: " " + maintainer + " ", Group: " teams/payments/* "})
+	if !slices.Equal(team.IdpEntries, []IdpEntry{{Claim: maintainer, Group: "teams/payments/*"}}) {
+		t.Fatalf("created entries = %+v", team.IdpEntries)
+	}
+	got, err := svc.Get(t.Context(), team.PublicID)
+	if err != nil || !slices.Equal(got.IdpEntries, team.IdpEntries) {
+		t.Errorf("read entries = %+v, %v", got.IdpEntries, err)
+	}
+	page, err := svc.List(t.Context(), ListFilter{Limit: 10})
+	if err != nil || len(page.Teams) != 1 || !slices.Equal(page.Teams[0].IdpEntries, team.IdpEntries) {
+		t.Errorf("listed entries = %+v, %v", page, err)
+	}
+	stale := team.Version + 5
+	if _, err := svc.Update(t.Context(), by, team.PublicID, &stale, Input{Name: team.Name, Slug: team.Slug,
+		IdpEntries: &[]IdpEntry{}}); !errors.Is(err, ErrVersionMismatch) {
+		t.Errorf("a stale If-Match = %v", err)
+	}
+	updated, err := svc.Update(t.Context(), by, team.PublicID, &team.Version, Input{Name: team.Name,
+		Slug: team.Slug, IdpEntries: &[]IdpEntry{{Group: "teams/payments"}, {Group: "teams/billing/*"}}})
+	if err != nil || updated.Version != team.Version+1 || len(updated.IdpEntries) != 2 {
+		t.Fatalf("update = %+v, %v", updated, err)
+	}
+	last := s.audit[len(s.audit)-1]
+	if last.Action != ActionUpdated || !strings.Contains(string(last.Diff), `"pointer":"/idp_entries"`) ||
+		!strings.Contains(string(last.Diff), `"teams/billing/*"`) {
+		t.Errorf("team.updated = %s %s", last.Action, last.Diff)
+	}
+	kept, err := svc.Update(t.Context(), by, team.PublicID, nil, Input{Name: "Payments 2", Slug: team.Slug})
+	if err != nil || len(kept.IdpEntries) != 2 {
+		t.Errorf("an update without entries = %+v, %v", kept.IdpEntries, err)
+	}
+	for _, q := range []string{"InsertTeamIdpEntries", "DeleteTeamIdpEntries", "ListTeamIdpEntries"} {
+		s.fail[q] = errBoom
+		if _, err := svc.Update(t.Context(), by, team.PublicID, nil, Input{Name: "P", Slug: team.Slug,
+			IdpEntries: &[]IdpEntry{{Group: q}}}); !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", q, err)
+		}
+		delete(s.fail, q)
+	}
+	s.fail["ListTeamIdpEntries"] = errBoom
+	if _, err := svc.List(t.Context(), ListFilter{Limit: 10}); !errors.Is(err, errBoom) {
+		t.Errorf("list = %v", err)
+	}
+}
+
+// TestRemoveByHandKeepsIdp is C-25.FR-4: removeTeamUser takes away only by_hand, so a person also in the Team through
+// the identity provider stays with idp, and team.user_removed records the sources before and after; a person in it only
+// through the identity provider is ErrNotInTeam. Adding such a person by hand gives them both sources.
+func TestRemoveByHandKeepsIdp(t *testing.T) {
+	svc, s := newService(t)
+	team := idpTeamOf(t, svc, "Payments", IdpEntry{Group: "a"})
+	if err := svc.SyncMembership(t.Context(), nil, 2, "groups", oidc.Claims{"groups": {"a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemoveUser(t.Context(), by, team.PublicID, "SR0000000000BB"); !errors.Is(err, ErrNotInTeam) {
+		t.Errorf("removing by hand a person in it through the identity provider = %v", err)
+	}
+	p, added, err := svc.AddUser(t.Context(), by, team.PublicID, "SR0000000000BB")
+	if err != nil || !added || !slices.Equal(p.Sources, []string{SourceByHand, SourceIdp}) {
+		t.Fatalf("adding by hand = %+v %v %v", p, added, err)
+	}
+	last := s.audit[len(s.audit)-1]
+	if last.Action != ActionUserAdded || string(last.Diff) !=
+		`[{"pointer":"/users/SR0000000000BB","before":{"sources":["idp"]},"after":{"sources":["by_hand","idp"]}}]` {
+		t.Errorf("team.user_added = %s", last.Diff)
+	}
+	if err := svc.RemoveUser(t.Context(), by, team.PublicID, "SR0000000000BB"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := sources(s, team.ID, 2); !slices.Equal(got, []string{SourceIdp}) {
+		t.Errorf("after removing by hand = %v", got)
+	}
+	last = s.audit[len(s.audit)-1]
+	if last.Action != ActionUserRemoved || string(last.Diff) !=
+		`[{"pointer":"/users/SR0000000000BB","before":{"sources":["by_hand","idp"]},"after":{"sources":["idp"]}}]` {
+		t.Errorf("team.user_removed = %s", last.Diff)
+	}
+	if _, _, err := svc.AddUser(t.Context(), by, team.PublicID, "SR0000000000BB"); err != nil {
+		t.Fatal(err)
+	}
+	// A row that changed although it was locked is no removal: nothing is recorded.
+	entries := len(s.audit)
+	s.lockedThen = func() { s.member(team.ID, 2).ByIdp = false }
+	if err := svc.RemoveUser(t.Context(), by, team.PublicID, "SR0000000000BB"); err == nil ||
+		len(s.audit) != entries {
+		t.Errorf("a row that changed under the lock = %v, %d entries", err, len(s.audit)-entries)
+	}
+	s.lockedThen = nil
+	s.member(team.ID, 2).ByIdp = true
+	for _, q := range []string{"LockTeamMember", "ClearByHand"} {
+		s.fail[q] = errBoom
+		if err := svc.RemoveUser(t.Context(), by, team.PublicID, "SR0000000000BB"); !errors.Is(err, errBoom) {
+			t.Errorf("a failing %s = %v", q, err)
+		}
+		delete(s.fail, q)
 	}
 }

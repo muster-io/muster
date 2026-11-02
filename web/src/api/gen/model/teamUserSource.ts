@@ -4,11 +4,12 @@
  */
 
 /**
- * How a person is in a Team. `by_hand` is an Admin's addition; membership through the groups of the identity provider, `idp`, comes with C-25.FR-4.
+ * How a person is in a Team. `by_hand` is an Admin's addition; `idp` is an identity provider entry of the Team that matched the person at their last OIDC sign-in or re-check. A person may have both.
  */
 export type TeamUserSource = typeof TeamUserSource[keyof typeof TeamUserSource];
 
 
 export const TeamUserSource = {
   by_hand: 'by_hand',
+  idp: 'idp',
 } as const;

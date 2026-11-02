@@ -6,6 +6,7 @@ package oidc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -456,18 +457,16 @@ func TestRecheckRoleSync(t *testing.T) {
 	}
 }
 
-// TestRecheckGroups is C-03.FR-30 and D247: groups that map to no Role with no Role for unmatched users are a refusal;
-// a refreshed ID token without the groups claim leaves the Role unchanged.
+// TestRecheckGroups is C-03.FR-30 revised for L2: groups that map to no Role with no Role for unmatched users are a
+// refusal. A refreshed ID token without the groups claim decides nothing (D247) until a refreshed ID token has carried
+// the claim once — a sign-in's own ID token does not count, since a provider may leave a claim out of refreshed ones —
+// and from then on it decides the claim as carrying no groups, so that a person removed from every group is refused.
 func TestRecheckGroups(t *testing.T) {
 	e := newEnv(t)
 	e.configure(t, nil)
 	olga := e.signedInWithToken(t)
-	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"},
-		GroupsInUserinfoOnly: true})
-	e.business.Advance(RecheckInterval)
-	e.recheck(t)
-	if c := e.store.checks[olga.id]; c.outcome != CheckOK || olga.role != auth.RoleResponder {
-		t.Fatalf("no groups claim = %+v, %+v", c, olga)
+	if st, _ := e.svc.Get(t.Context()); len(st.ClaimsInIDToken) != 0 {
+		t.Fatalf("a sign-in's ID token recorded the claim for re-checks: %v", st.ClaimsInIDToken)
 	}
 	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"contractors"}})
 	e.business.Advance(RecheckInterval)
@@ -476,6 +475,147 @@ func TestRecheckGroups(t *testing.T) {
 	if len(refused) != 1 || refused[0]["details"].(map[string]any)["reason"] != reasonNoAccess ||
 		olga.refusedAt == nil || e.store.checks[olga.id] != nil {
 		t.Errorf("groups that map to nothing = %v, %+v", refused, olga)
+	}
+
+	// Seen only at sign-in: a refreshed ID token without the claim decides nothing.
+	e = newEnv(t)
+	e.configure(t, nil)
+	olga = e.signedInWithToken(t)
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", NoGroupsClaim: true})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if c := e.store.checks[olga.id]; c == nil || c.outcome != CheckOK || olga.refusedAt != nil ||
+		olga.role != auth.RoleResponder {
+		t.Fatalf("a claim no refreshed ID token carried yet = %+v, %+v", c, olga)
+	}
+	// A refreshed ID token carries it: from then on, one without it decides it as carrying no groups.
+	e.idp.SetNextUser(olgaIDP)
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if st, _ := e.svc.Get(t.Context()); !slices.Equal(st.ClaimsInIDToken, []string{"groups"}) || olga.refusedAt != nil {
+		t.Fatalf("the claim carried by a refreshed ID token: %v, %+v", st.ClaimsInIDToken, olga)
+	}
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", NoGroupsClaim: true})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if olga.refusedAt == nil || e.store.checks[olga.id] != nil {
+		t.Errorf("a claim a refreshed ID token carried, then left out = %+v", olga)
+	}
+
+	e = newEnv(t)
+	e.configure(t, nil)
+	who := fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"},
+		GroupsInUserinfoOnly: true}
+	if out := e.signIn(t, who, ""); out.Session == nil {
+		t.Fatal(out)
+	}
+	olga = e.user("olga")
+	olga.liveSessions = 1
+	if st, _ := e.svc.Get(t.Context()); len(st.ClaimsInIDToken) != 0 || !slices.Equal(st.ClaimsSeen, []string{"groups"}) {
+		t.Fatalf("the groups claim seen in userinfo only: %v, %v", st.ClaimsSeen, st.ClaimsInIDToken)
+	}
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if c := e.store.checks[olga.id]; c == nil || c.outcome != CheckOK || olga.role != auth.RoleResponder ||
+		olga.refusedAt != nil {
+		t.Errorf("a claim seen only in userinfo = %+v, %+v", c, olga)
+	}
+}
+
+// TestRecheckMembership is C-03.FR-30 and C-25.FR-4, AC-4 at a re-check: a successful re-check follows the entries of
+// the Teams with the claims of the refreshed ID token alone, with or without oidc.sync_role — a claim it lacks is not
+// decided until a refreshed ID token has carried it; the Role follows only when every claim the Role mapping reads is
+// decided; an unavailable or refused
+// re-check, and a refresh without an ID token, follow nothing.
+func TestRecheckMembership(t *testing.T) {
+	e := newEnv(t)
+	e.configure(t, func(in *Input) {
+		in.SyncRole = false
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin})
+	})
+	m := e.withMembership("", maintainerClaim)
+	olga := e.signedInWithToken(t)
+	m.taken()
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"teams/payments"},
+		RoleClaims: map[string][]string{fakeoidc.RoleMaintainer: {"teams/payments"}}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	calls := m.taken()
+	if len(calls) != 1 || calls[0].userID != olga.id || fmt.Sprint(calls[0].claims) !=
+		"map[groups:[teams/payments] https://gitlab.org/claims/groups/maintainer:[teams/payments]]" {
+		t.Fatalf("a re-check without sync_role: %+v", calls)
+	}
+	if olga.role != auth.RoleResponder {
+		t.Errorf("membership changed the Role: %s", olga.role)
+	}
+
+	e.configure(t, func(in *Input) {
+		in.GroupMappings = append(in.GroupMappings, GroupMapping{Claim: ownerClaim, Group: "corp", Role: auth.RoleAdmin})
+	})
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"contractors"}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if calls := m.taken(); len(calls) != 1 || olga.role != auth.RoleResponder || olga.refusedAt != nil {
+		t.Errorf("a token without the owner claim decided the Role: %s, %+v", olga.role, calls)
+	}
+
+	// A sign-in's ID token with the role claims decides nothing at re-checks; once a refreshed ID token carried them,
+	// one without them decides them as carrying nothing: olga's Role follows her groups, and the Teams take the
+	// maintainer claim as empty.
+	if out := e.signIn(t, fakeoidc.User{Subject: "u-2", PreferredUsername: "vic", Groups: []string{"oncall"},
+		RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"corp"}, fakeoidc.RoleMaintainer: {"corp"}}},
+		""); out.Session == nil {
+		t.Fatal(out)
+	}
+	if st, _ := e.svc.Get(t.Context()); slices.Contains(st.ClaimsInIDToken, ownerClaim) {
+		t.Errorf("a sign-in's ID token recorded the owner claim for re-checks: %v", st.ClaimsInIDToken)
+	}
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"},
+		RoleClaims: map[string][]string{fakeoidc.RoleOwner: {"x"}, fakeoidc.RoleMaintainer: {"y"}}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if st, _ := e.svc.Get(t.Context()); !slices.Contains(st.ClaimsInIDToken, ownerClaim) ||
+		!slices.Contains(st.ClaimsInIDToken, maintainerClaim) {
+		t.Errorf("the role claims a refreshed ID token carried: %v", st.ClaimsInIDToken)
+	}
+	m.taken()
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	calls = m.taken()
+	if len(calls) != 1 || fmt.Sprint(calls[0].claims) != "map[groups:[oncall] "+maintainerClaim+":[] "+ownerClaim+":[]]" ||
+		olga.role != auth.RoleResponder {
+		t.Errorf("claims seen in an ID token, left out of the refreshed one: %s, %+v", olga.role, calls)
+	}
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"contractors"}})
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if olga.refusedAt == nil || len(m.taken()) != 0 {
+		t.Errorf("a re-check that every claim decided against olga did not refuse her: %+v", olga)
+	}
+	if out := e.signIn(t, olgaIDP, ""); out.Session == nil {
+		t.Fatal(out)
+	}
+	olga.liveSessions = 1
+	m.taken()
+
+	e.idp.SetNextUser(fakeoidc.User{Subject: "u-1", PreferredUsername: "olga", Groups: []string{"oncall"}})
+	e.svc.cfg.RecheckBudget = 300 * time.Millisecond
+	if err := e.idp.SetFault(fakeserver.Fault{Path: "/token", Status: http.StatusServiceUnavailable}); err != nil {
+		t.Fatal(err)
+	}
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if c := e.store.checks[olga.id]; c.outcome != CheckUnavailable || len(m.taken()) != 0 {
+		t.Errorf("an unavailable re-check followed the teams: %+v", c)
+	}
+	e.idp.ResetFaults()
+
+	e.idp.SetDisabled("u-1", true)
+	e.business.Advance(RecheckInterval)
+	e.recheck(t)
+	if olga.refusedAt == nil || len(m.taken()) != 0 {
+		t.Errorf("a refused re-check followed the teams: %+v", olga)
 	}
 }
 
