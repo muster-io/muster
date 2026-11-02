@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
 	"github.com/muster-io/muster/internal/matchers"
@@ -19,6 +20,7 @@ import (
 
 // evalQueries are the queries of routing, run in the transaction of the Snapshot.
 type evalQueries interface {
+	ShareTeamEvaluation(ctx context.Context, arg dbgen.ShareTeamEvaluationParams) error
 	GetRoutingStamp(ctx context.Context, orgID int64) (dbgen.GetRoutingStampRow, error)
 	ListRoutes(ctx context.Context, orgID int64) ([]dbgen.ListRoutesRow, error)
 	ListRouteMatchers(ctx context.Context, arg dbgen.ListRouteMatchersParams) ([]dbgen.ListRouteMatchersRow, error)
@@ -122,6 +124,13 @@ func (r *Router) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []i
 	}
 	if len(rows) == 0 {
 		return ingest.Routed{}, nil
+	}
+	// The lock order of a Snapshot: this lock shared, then the Routes FOR SHARE and the Alert Groups (grouping), then
+	// the Routes' Destinations shared (delivery). The evaluation of a save takes it exclusively before its Alert
+	// Groups, so neither waits for a lock the other holds (internal/groups, evaluateTeams).
+	if err := q.ShareTeamEvaluation(ctx, dbgen.ShareTeamEvaluationParams{LockClass: db.TeamEvaluationLockClass,
+		OrgID: r.orgID}); err != nil {
+		return ingest.Routed{}, fmt.Errorf("wait for the evaluation of the teams: %w", err)
 	}
 	st, err := q.GetRoutingStamp(ctx, r.orgID)
 	if err != nil {

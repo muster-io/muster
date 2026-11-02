@@ -55,6 +55,15 @@ const TelegramUpdateLockClass int32 = 0x6d75_0004
 // (account_link.mattermost_code_requests).
 const AccountLinkCodeTargetLockClass int32 = 0x6d75_0005
 
+// TeamEvaluationLockClass is the first key of the transaction advisory lock between Snapshot processing and the
+// evaluation of the Teams of the open Alert Groups after a save of a Team or of the Team label (C-25.FR-13), whose
+// second key is hashint8 of the Organization's id: routing takes it shared before it reads the stamp of the
+// classification, and each batch of the evaluation exclusively before it locks its Alert Groups. A Snapshot that
+// classified its Alerts with the Teams as they were before a save so commits its Alert Groups before the evaluation
+// reads them, and one that starts after the batch took the lock reads the stamp of the save. The class 0x6d75_0007 is
+// the lock of a Bridge event (internal/connections).
+const TeamEvaluationLockClass int32 = 0x6d75_0008
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

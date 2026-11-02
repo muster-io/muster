@@ -372,7 +372,7 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	if held && g.Urgent {
 		// A change of configuration publishes Quietly (C-26.FR-9, ADR-0018).
 		if err := q.ReleaseHeld(ctx, dbgen.ReleaseHeldParams{OrgID: s.orgID, ID: row.ID, Now: now,
-			Loud: !configurationOnly(r.Events)}); err != nil {
+			Loud: !configurationOnly(r)}); err != nil {
 			return fmt.Errorf("release the urgent alert group #%d from its storm: %w", g.Number, err)
 		}
 		held = false
@@ -390,7 +390,7 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 			DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), ReceivedAt: received,
 			Open:   g.Status != groups.StatusResolved,
 			Firing: deliveryEvent(DeliveryAfterRecovery).loud(g.Status == groups.StatusFiring), Urgent: g.Urgent,
-			Quiet: configurationOnly(r.Events), Now: now}); err != nil {
+			Quiet: configurationOnly(r), Now: now}); err != nil {
 			return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
 		if r.Changed != nil {
@@ -426,10 +426,14 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 }
 
 // configurationOnly reports whether a rendering comes from a change of configuration, not from an Alert or a
-// Command: it has no lifecycle event, as the re-render of a changed button set, or only rises that the Route's Minimum
-// severity made (groups.ReasonMinimumSeverity). Such a change publishes Quietly.
-func configurationOnly(events []groups.Recorded) bool {
-	for _, e := range events {
+// Command: the dispatcher marks it so (groups.Rendering.Configuration), as the evaluation of the Teams of the open
+// Alert Groups on a save (C-25.FR-13) and the re-render of a changed button set, or it has no lifecycle event, or
+// only rises that the Route's Minimum severity made (groups.ReasonMinimumSeverity). Such a change publishes Quietly.
+func configurationOnly(r groups.Rendering) bool {
+	if r.Configuration {
+		return true
+	}
+	for _, e := range r.Events {
 		if e.Reason != groups.ReasonMinimumSeverity ||
 			(e.Event != groups.EventUrgencyRaised && e.Event != groups.EventSeverityRaised) {
 			return false

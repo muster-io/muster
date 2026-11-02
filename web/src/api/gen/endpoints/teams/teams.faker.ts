@@ -14,11 +14,14 @@ import {
 } from '../../model';
 import type {
   Team,
+  TeamLabelValueList,
   TeamList,
   TeamUser,
   TeamUserList
 } from '../../model';
 
+
+export const getListTeamLabelValuesResponseMock = (overrideResponse: Partial<Extract<TeamLabelValueList, object>> = {}): TeamLabelValueList => ({label: faker.string.alpha({length: {min: 10, max: 20}}), window_days: faker.number.int(), items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({value: faker.string.alpha({length: {min: 10, max: 20}}), last_seen_at: faker.date.past().toISOString().slice(0, 19) + 'Z', alert_count: faker.number.int(), valid_slug: faker.datatype.boolean()})), ...overrideResponse})
 
 export const getListTeamsResponseMock = (overrideResponse: Partial<Extract<TeamList, object>> = {}): TeamList => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({...{name: faker.string.alpha({length: {min: 1, max: 200}}), slug: faker.helpers.fromRegExp("^[a-z0-9][a-z0-9._-]{0,62}$"), description: faker.string.alpha({length: {min: 10, max: 2000}}), own_working_hours: faker.datatype.boolean(), working_hours: {days: faker.helpers.arrayElements(Object.values(Weekday)), start: faker.helpers.fromRegExp("^([01][0-9]|2[0-3]):[0-5][0-9]$"), end: faker.helpers.fromRegExp("^([01][0-9]|2[0-3]):[0-5][0-9]$"), time_zone: faker.string.alpha({length: {min: 10, max: 20}})}, matchers: Array.from({ length: faker.number.int({min: 1, max: 50}) }, (_, i) => i + 1).map(() => ({label: faker.string.alpha({length: {min: 1, max: 20}}), op: faker.helpers.arrayElement(['=','!=','=~','!~'] as const), value: faker.string.alpha({length: {min: 10, max: 20}})}))},...{id: faker.helpers.fromRegExp("^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$"), user_count: faker.number.int(), created_at: faker.date.past().toISOString().slice(0, 19) + 'Z', etag: faker.string.alpha({length: {min: 10, max: 20}})},})), next_cursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 

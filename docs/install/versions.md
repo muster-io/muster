@@ -101,14 +101,20 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0023 adds the [button sets](../concepts/statuses-and-commands.md#button-sets): the Organization's
       shows every button, and every Destination follows it, so the Root messages show the buttons they showed before.
     - Migration 0024 adds the [Team label and Team matchers](../concepts/teams.md#which-alerts-belong-to-a-team). The
-      Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts carry the
-      label `team` records one Quiet `unknown_team_value` per value in its Timeline, and outgoing webhooks in events
-      mode receive one extra event for each. Create the Teams, or change the Team label, to avoid it.
+      Team label is `team` by default, and no Team exists after the upgrade: each Alert Group whose Alerts start
+      firing with the label `team` after the upgrade records one Quiet `unknown_team_value` per value in its
+      Timeline, and outgoing webhooks in events mode receive one extra event for each. Create the Teams, or change the
+      Team label, to avoid it.
     - Migration 0025 adds [Schedules](../concepts/schedules.md) and the Permissions `schedules:read`,
       `schedules:write` and `schedule-overrides:write`. Roles get them at once; a Personal access token keeps the
       Permissions it was issued with, so issue a new one to reach Schedules with a token.
     - Migration 0026 adds the personal [iCal feeds](../concepts/schedules.md#ical-feed); no User has one after the
       upgrade.
+    - Migration 0027 adds the [evaluation of the open Alert Groups](../concepts/teams.md#values-without-a-team) when
+      a Team or the Team label is saved: creating a Team for a value of the Team label, or changing a Team's slug or
+      Team matchers, or the Team label, adds the Team to the open Alert Groups whose firing Alerts it now picks, with a
+      Quiet `team_joined`. It only adds, so the Alert Groups of Alerts that fired before the upgrade get their Teams
+      the first time a Team is created, its slug or Team matchers change, or the Team label changes.
 
     **Helm chart.** `ingress.app.annotations` and `ingress.ingest.annotations` set the annotations of one Ingress, over
     the shared `ingress.annotations`, so an installation that turned the chart's Ingress off to get different annotations
@@ -145,7 +151,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     processes no Teams, and the events-mode webhook bodies it sends lack `alert_group.teams`: create Teams only after
     every replica runs 0.2.0. A 0.1 replica does not serve the iCal feeds: it answers a link of a feed with the page
     of the web UI, and a User it deletes keeps the row of their feed, whose link then answers `404` as the feed of a
-    deleted User does. Issue iCal links only after every replica runs 0.2.0.
+    deleted User does. Issue iCal links only after every replica runs 0.2.0. Neither a 0.1 replica nor one of a
+    development image without migration 0027 writes the evaluation of the open Alert Groups, and neither claims one: a
+    Team or a Team label saved on such a replica during the rollout is not evaluated, so save it again once every
+    replica runs this version, which evaluates it. The open Alert Groups whose Alerts a 0.1 replica took in get their
+    Teams the first time a Team is created, its slug or Team matchers change, or the Team label changes after the
+    rollout.
 
     Run the upgrade at a quiet time: migration 0021 computes the open Alert Groups again under locks of a few seconds,
     and migration 0022 adds columns to Routes, Destinations and the Organization; each gives up after 5 seconds of
@@ -249,6 +260,29 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     dirty at version 26. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 25, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0027 runs in three transactions: the first adds `open_group_updates.team_id` and the new CHECK of the
+    kinds of `open_group_updates`, the second validates them, the third drops the old CHECK. A failure leaves the
+    schema recorded as dirty at version 27. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'open_group_updates' AND column_name = 'team_id';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 26, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_team_id_fkey;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v3_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v2_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

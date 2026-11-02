@@ -9,9 +9,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -369,6 +371,341 @@ func TestIntegrationTeamsOfAlertGroups(t *testing.T) {
 		if got := classes.Classify(map[string]string{"team": "payments", "pod": "checkout-api-1"}); len(got.Teams) != 0 ||
 			got.UnknownValue != "payments" {
 			t.Errorf("after the deletion %+v", got)
+		}
+	})
+}
+
+// fixture adds an Integration with the Static label team=infra, the Alert Group #number on the Default route and Alerts
+// in it: each with its stored labels, the Static labels applied, its status, when it was last seen and the state of its
+// membership. It returns the ids of the Alerts and of the Alert Group.
+func (e *env) fixture(t *testing.T, number int, alerts []fixtureAlert) ([]int64, int64) {
+	t.Helper()
+	ctx := t.Context()
+	var integration, route, group int64
+	if err := e.d.Pool.QueryRow(ctx, `INSERT INTO integrations (org_id, public_id, name, connection_mode,
+		static_labels, duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state,
+		created_at, updated_at) VALUES ($1, $2, $3, 'webhook_only', '{"team": "infra"}', 45, false, 300,
+		'not_configured', $4, $4) RETURNING id`, e.orgID, fmt.Sprintf("NT00000000%04d", number),
+		fmt.Sprintf("lab %d", number), t0).Scan(&integration); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.d.Pool.QueryRow(ctx, `SELECT id FROM routes WHERE org_id = $1 AND is_default`,
+		e.orgID).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.d.Pool.QueryRow(ctx, `INSERT INTO alert_groups (org_id, public_id, number, route_id,
+		group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
+		integration_ids, status, severity_level, urgent, created_at, last_changed_at)
+		VALUES ($1, $2, $3, $4, '{alertname}', '{}', sha256(convert_to($2::text, 'UTF8')), 't', '{}', '{}', '{}',
+			'firing', 'warning', false, $5, $5) RETURNING id`, e.orgID, fmt.Sprintf("AG00000000%04d", number), number, route,
+		t0).Scan(&group); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int64, len(alerts))
+	for i, a := range alerts {
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels,
+			annotations, status, starts_at, fired_at, first_seen_at, last_seen_at, updated_at, resolved_at,
+			resolve_reason)
+			VALUES ($1, $2, $3, $4, '{}', $5::text, $6, $6, $6, $6, $6,
+				CASE WHEN $5::text = 'resolved' THEN $6::timestamptz END,
+				CASE WHEN $5::text = 'resolved' THEN 'resolved' END) RETURNING id`, e.orgID, integration,
+			fmt.Sprintf("%04d%012x", number, i), a.labels, a.status, a.seen).Scan(&ids[i]); err != nil {
+			t.Fatal(err)
+		}
+		if a.member == "" {
+			continue
+		}
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode,
+			state, joined_at, starts_at, annotations, ended_at, resolve_reason)
+			VALUES ($1, $2, $3, 1, $4::text, $5, $5, '{}', CASE WHEN $4::text = 'resolved' THEN $5::timestamptz END,
+				CASE WHEN $4::text = 'resolved' THEN 'resolved' END)`, e.orgID, group, ids[i], a.member,
+			a.seen); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return ids, group
+}
+
+// fixtureAlert is an Alert of fixture; member is the state of its membership, none for an Alert in no Alert Group.
+type fixtureAlert struct {
+	labels, status, member string
+	seen                   time.Time
+}
+
+// TestIntegrationLabelValues is C-25.FR-7 and AC-1 on every supported PostgreSQL: the values of the Team label, as
+// the Alerts store them with the Static labels of their Integration applied, among the Alerts last seen within 14
+// days, without the slugs of the Teams that are not deleted — the slug of a deleted Team is listed again — the most
+// recently seen first, with the number of their Alerts and whether each is a valid slug: with the Team "payments",
+// checkout is listed as one and Payments as not one, payments not at all. Values seen earlier, empty ones and Alerts
+// without the label are left out; a new Team label lists its own values.
+func TestIntegrationLabelValues(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		if _, err := e.svc.Create(ctx, by, teams.Input{Name: "Payments", Slug: "payments"}); err != nil {
+			t.Fatal(err)
+		}
+		legacy, err := e.svc.Create(ctx, by, teams.Input{Name: "Legacy", Slug: "legacy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.svc.Delete(ctx, by, legacy.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		day := 24 * time.Hour
+		e.fixture(t, 1, []fixtureAlert{
+			{labels: `{"team": "checkout", "pod": "a"}`, status: "firing", seen: t0.Add(-2 * time.Hour)},
+			{labels: `{"team": "checkout", "pod": "b"}`, status: "resolved", seen: t0.Add(-30 * time.Minute)},
+			{labels: `{"team": "Payments"}`, status: "firing", seen: t0.Add(-time.Hour)},
+			{labels: `{"team": "payments"}`, status: "firing", seen: t0},
+			{labels: `{"team": "legacy"}`, status: "firing", seen: t0.Add(-3 * time.Hour)},
+			{labels: `{"team": "infra", "pod": "c"}`, status: "firing", seen: t0.Add(-13 * day)},
+			{labels: `{"team": "ancient"}`, status: "firing", seen: t0.Add(-15 * day)},
+			{labels: `{"team": ""}`, status: "firing", seen: t0},
+			{labels: `{"service_team": "billing"}`, status: "firing", seen: t0},
+		})
+		got, err := e.svc.LabelValues(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []teams.LabelValue{
+			{Value: "checkout", LastSeenAt: t0.Add(-30 * time.Minute), Alerts: 2, ValidSlug: true},
+			{Value: "Payments", LastSeenAt: t0.Add(-time.Hour), Alerts: 1},
+			{Value: "legacy", LastSeenAt: t0.Add(-3 * time.Hour), Alerts: 1, ValidSlug: true},
+			{Value: "infra", LastSeenAt: t0.Add(-13 * day), Alerts: 1, ValidSlug: true},
+		}
+		if got.Label != "team" || got.WindowDays != 14 || !slices.Equal(got.Items, want) {
+			t.Errorf("values %+v, want %+v", got, want)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE organizations SET team_label = 'service_team' WHERE id = $1`,
+			e.orgID); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := e.svc.LabelValues(ctx); err != nil || got.Label != "service_team" ||
+			!slices.Equal(got.Items, []teams.LabelValue{{Value: "billing", LastSeenAt: t0, Alerts: 1,
+				ValidSlug: true}}) {
+			t.Errorf("values of service_team %+v, %v", got, err)
+		}
+	})
+}
+
+// TestIntegrationTeamEvaluation is C-25.FR-13 and C-25.AC-13 on every supported PostgreSQL: creating the Team
+// "checkout" writes a row team_evaluation with the Team in the save's transaction; the worker of internal/groups
+// claims it and, in the open Alert Group of team="checkout", adds the Team to the Alert that fires in it — which had
+// no alert_teams row at all — and to the Alert Group with one Quiet team_joined by the system, leaving an Alert whose
+// own status is resolved and one whose membership resolved; the row is deleted and open_group_update_done names the
+// Team. A new slug, which no longer picks the Alert, writes a row whose run adds nothing and takes nothing away.
+func TestIntegrationTeamEvaluation(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		if _, err := e.d.Pool.Exec(ctx, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		ids, group := e.fixture(t, 2, []fixtureAlert{
+			{labels: `{"alertname": "Latency", "team": "checkout", "pod": "a"}`, status: "firing", member: "firing",
+				seen: t0},
+			{labels: `{"alertname": "Latency", "team": "checkout", "pod": "b"}`, status: "resolved",
+				member: "firing", seen: t0},
+			{labels: `{"alertname": "Latency", "team": "checkout", "pod": "c"}`, status: "resolved",
+				member: "resolved", seen: t0},
+		})
+		if n := e.count(t, `SELECT count(*) FROM alert_teams WHERE org_id = $1`, e.orgID); n != 0 {
+			t.Fatalf("%d alert_teams rows before the save", n)
+		}
+		created, err := e.svc.Create(ctx, by, teams.Input{Name: "checkout", Slug: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1 AND kind = 'team_evaluation'
+			AND team_id = $2 AND requested_at = $3 AND leased_by IS NULL`, e.orgID, created.ID, t0); n != 1 {
+			t.Fatalf("%d rows of the creation", n)
+		}
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		c := clock.NewManual(t0.Add(time.Minute))
+		gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, c), Business: c, Log: logger})
+		worker := &groups.UpdateWorker{Service: gs, Log: logger, Lease: db.Lease{Owner: "r1",
+			Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: c, Real: clock.Real{}}}}
+		if next, err := worker.Round(ctx); err != nil || next != groups.UpdateMaxWait {
+			t.Fatalf("round = %v, %v", next, err)
+		}
+		alertTeams := func(t *testing.T) []string {
+			t.Helper()
+			rows, err := e.d.Pool.Query(ctx, `SELECT alert_id, team_id, rule FROM alert_teams WHERE org_id = $1
+				ORDER BY alert_id`, e.orgID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var a, tm int64
+				var rule string
+				if err := rows.Scan(&a, &tm, &rule); err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, fmt.Sprintf("%d/%d/%s", a, tm, rule))
+			}
+			return out
+		}
+		want := []string{fmt.Sprintf("%d/%d/label", ids[0], created.ID)}
+		if got := alertTeams(t); !slices.Equal(got, want) {
+			t.Errorf("alert_teams %v, want %v", got, want)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_group_teams WHERE org_id = $1 AND alert_group_id = $2
+			AND team_id = $3 AND rule = 'label' AND matcher IS NULL AND joined_at = $4`, e.orgID, group, created.ID,
+			c.Now()); n != 1 {
+			t.Errorf("%d alert_group_teams rows", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE org_id = $1 AND alert_group_id = $2
+			AND event = 'team_joined' AND kind = 'alerts' AND loudness = 'quiet' AND team_id = $3
+			AND team_rule = 'label' AND actor_kind = 'system' AND transport = 'system' AND event_seq = 1`, e.orgID,
+			group, created.ID); n != 1 || e.count(t, `SELECT count(*) FROM timeline_entries WHERE org_id = $1`,
+			e.orgID) != 1 {
+			t.Errorf("%d team_joined entries", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID); n != 0 ||
+			!strings.Contains(log.String(), `"event":"open_group_update_done","kind":"team_evaluation","team":"`+
+				created.PublicID+`","alert_groups":1`) {
+			t.Errorf("%d rows left, log %s", n, log.String())
+		}
+
+		if _, err := e.svc.Update(ctx, by, created.PublicID, nil, teams.Input{Name: "checkout",
+			Slug: "checkout-x"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := worker.Round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := alertTeams(t); !slices.Equal(got, want) || e.count(t, `SELECT count(*) FROM timeline_entries
+			WHERE org_id = $1`, e.orgID) != 1 || e.count(t, `SELECT count(*) FROM alert_group_teams
+			WHERE org_id = $1`, e.orgID) != 1 || !strings.Contains(log.String(),
+			`"kind":"team_evaluation","team":"`+created.PublicID+`","alert_groups":0`) {
+			t.Errorf("after the new slug: alert_teams %v, log %s", got, log.String())
+		}
+	})
+}
+
+// TestIntegrationTeamEvaluationBarrier is C-25.FR-13 against the race with ingestion on every supported PostgreSQL: a
+// Snapshot that took the lock of the evaluation shared and read the stamp of the Teams before the Team "checkout" was
+// created groups an Alert of team="checkout" without the Team, and commits only after the evaluation of the save
+// started; the evaluation waits for the Snapshot instead of reading its Alert Groups before, and the Alert and its
+// Alert Group end with the Team.
+func TestIntegrationTeamEvaluationBarrier(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		if _, err := e.d.Pool.Exec(ctx, `CREATE TABLE timeline_entries_p202610 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-10-01 00:00:00+00') TO ('2026-11-01 00:00:00+00')`); err != nil {
+			t.Fatal(err)
+		}
+		_, group := e.fixture(t, 3, []fixtureAlert{{labels: `{"alertname": "Latency", "pod": "a"}`,
+			status: "firing", member: "firing", seen: t0}})
+		snapshot, err := e.d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = snapshot.Rollback(context.WithoutCancel(ctx)) }()
+		var version int64
+		if _, err := snapshot.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1, hashint8($2))`,
+			db.TeamEvaluationLockClass, e.orgID); err != nil {
+			t.Fatal(err)
+		}
+		if err := snapshot.QueryRow(ctx, `SELECT teams_version FROM organizations WHERE id = $1`,
+			e.orgID).Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		created, err := e.svc.Create(ctx, by, teams.Input{Name: "checkout", Slug: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		c := clock.NewManual(t0.Add(time.Minute))
+		gs := groups.New(groups.Config{OrgID: e.orgID, Store: groups.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, c), Business: c, Log: logger})
+		worker := &groups.UpdateWorker{Service: gs, Log: logger, Lease: db.Lease{Owner: "r1",
+			Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: c, Real: clock.Real{}}}}
+		done := make(chan error, 1)
+		go func() {
+			_, err := worker.Round(context.WithoutCancel(ctx))
+			done <- err
+		}()
+		deadline := time.Now().Add(10 * time.Second)
+		for e.count(t, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND wait_event = 'advisory'`) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the evaluation does not wait for the snapshot")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the evaluation ran before the snapshot committed: %v", err)
+		default:
+		}
+		// The Snapshot groups the Alert as routing classified it with the Teams before the save: without a Team.
+		var alert int64
+		if err := snapshot.QueryRow(ctx, `INSERT INTO alerts (org_id, integration_id, fingerprint, labels,
+			annotations, status, starts_at, fired_at, first_seen_at, last_seen_at, updated_at)
+			SELECT org_id, id, 'barrier', '{"alertname": "Latency", "team": "checkout", "pod": "b"}', '{}', 'firing',
+				$2, $2, $2, $2, $2
+			FROM integrations WHERE org_id = $1 AND public_id = 'NT000000000003' RETURNING id`, e.orgID,
+			t0).Scan(&alert); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := snapshot.Exec(ctx, `INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode,
+			state, joined_at, starts_at, annotations) VALUES ($1, $2, $3, 1, 'firing', $4, $4, '{}')`, e.orgID, group,
+			alert, t0); err != nil {
+			t.Fatal(err)
+		}
+		if err := snapshot.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM alert_teams WHERE org_id = $1 AND alert_id = $2 AND team_id = $3
+			AND rule = 'label'`, e.orgID, alert, created.ID); n != 1 ||
+			e.count(t, `SELECT count(*) FROM alert_group_teams WHERE org_id = $1 AND alert_group_id = $2
+				AND team_id = $3`, e.orgID, group, created.ID) != 1 ||
+			!strings.Contains(log.String(), `"kind":"team_evaluation","team":"`+created.PublicID+`","alert_groups":1`) {
+			t.Errorf("the alert of the snapshot has %d rows of the team, log %s", n, log.String())
+		}
+	})
+}
+
+// TestIntegrationEvaluationCoalesced is C-25.FR-13 for saves in a row: a save while the row of an earlier one is still
+// unclaimed adds no second row — the one run classifies with every save — while a save after a worker claimed the row
+// writes its own.
+func TestIntegrationEvaluationCoalesced(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		first, err := e.svc.Create(ctx, by, teams.Input{Name: "checkout", Slug: "checkout"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.svc.Create(ctx, by, teams.Input{Name: "search", Slug: "search"}); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1 AND kind = 'team_evaluation'
+			AND team_id = $2`, e.orgID, first.ID); n != 1 || e.count(t, `SELECT count(*) FROM open_group_updates
+			WHERE org_id = $1`, e.orgID) != 1 {
+			t.Errorf("%d rows of the first save, want the only one", n)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE open_group_updates SET leased_by = 'r1',
+			lease_until = now() + interval '1 minute' WHERE org_id = $1`, e.orgID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.svc.Create(ctx, by, teams.Input{Name: "payments", Slug: "payments"}); err != nil {
+			t.Fatal(err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE org_id = $1`, e.orgID); n != 2 {
+			t.Errorf("%d rows after a save beside a claimed row, want 2", n)
 		}
 	})
 }

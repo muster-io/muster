@@ -144,6 +144,8 @@ None; the conflict between the mockup's switch and the PRD is settled by L2.md Â
 ## Notes
 
 - Suggested commit: `feat(web): show the teams of alerts and alert groups and the unknown team label values`.
+- `listTeamLabelValues` (S-163) lists a value without a Team even when a Team matcher picks its Alerts; S-120
+  decides whether the Teams page hides the values that a Team matcher covers.
 - The section's name follows the Team label: with the label `service_team` it reads "Unknown values of service_team".
 
 ## Coverage

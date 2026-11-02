@@ -7769,6 +7769,28 @@ type TeamInput struct {
 	WorkingHours *WorkingHours `json:"working_hours,omitempty"`
 }
 
+// TeamLabelValue defines model for TeamLabelValue.
+type TeamLabelValue struct {
+	// AlertCount How many Alerts last seen within the window carry the value.
+	AlertCount int `json:"alert_count"`
+
+	// LastSeenAt When an Alert that carries the value was last seen.
+	LastSeenAt time.Time `json:"last_seen_at"`
+
+	// ValidSlug False when the value is not a valid slug (`team.slug_format`), so that no Team can take it as its slug.
+	ValidSlug bool   `json:"valid_slug"`
+	Value     string `json:"value"`
+}
+
+// TeamLabelValueList defines model for TeamLabelValueList.
+type TeamLabelValueList struct {
+	Items []TeamLabelValue `json:"items"`
+
+	// Label The Team label of the Organization (`organization.team_label`).
+	Label      string `json:"label"`
+	WindowDays int    `json:"window_days"`
+}
+
 // TeamList defines model for TeamList.
 type TeamList struct {
 	Items      []Team                    `json:"items"`
@@ -13603,6 +13625,13 @@ type ClientInterface interface {
 	// Corresponds with GET /system-status (the `GetSystemStatus` operationId).
 	GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListTeamLabelValues List values of the Team label without a Team
+	//
+	// The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+	//
+	// Corresponds with GET /team-label-values (the `ListTeamLabelValues` operationId).
+	ListTeamLabelValues(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListTeams List Teams
 	//
 	// The Teams that are not deleted, by name. A Team grants no access of its own; every Role reads them.
@@ -17637,6 +17666,23 @@ func (c *Client) ListSystemNotices(ctx context.Context, reqEditors ...RequestEdi
 // Corresponds with GET /system-status (the `GetSystemStatus` operationId).
 func (c *Client) GetSystemStatus(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSystemStatusRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListTeamLabelValues List values of the Team label without a Team
+//
+// The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+//
+// Corresponds with GET /team-label-values (the `ListTeamLabelValues` operationId).
+func (c *Client) ListTeamLabelValues(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTeamLabelValuesRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -25983,6 +26029,33 @@ func NewGetSystemStatusRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewListTeamLabelValuesRequest constructs an http.Request for the ListTeamLabelValues method
+func NewListTeamLabelValuesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/team-label-values")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListTeamsRequest constructs an http.Request for the ListTeams method
 func NewListTeamsRequest(server string, params *ListTeamsParams) (*http.Request, error) {
 	var err error
@@ -28954,6 +29027,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /system-status (the `GetSystemStatus` operationId).
 	GetSystemStatusWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetSystemStatusResponse, error)
+
+	// ListTeamLabelValuesWithResponse List values of the Team label without a Team
+	//
+	// The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /team-label-values (the `ListTeamLabelValues` operationId).
+	ListTeamLabelValuesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTeamLabelValuesResponse, error)
 
 	// ListTeamsWithResponse List Teams
 	//
@@ -42328,6 +42410,75 @@ func (r GetSystemStatusResponse) ContentType() string {
 	return ""
 }
 
+// ListTeamLabelValuesResponse429Headers the declared response headers of an HTTP 429 response for ListTeamLabelValues
+type ListTeamLabelValuesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type ListTeamLabelValuesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *TeamLabelValueList
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ListTeamLabelValuesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListTeamLabelValuesResponse) GetJSON200() *TeamLabelValueList {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ListTeamLabelValuesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ListTeamLabelValuesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ListTeamLabelValuesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r ListTeamLabelValuesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListTeamLabelValuesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListTeamLabelValuesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListTeamLabelValuesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // ListTeamsResponse429Headers the declared response headers of an HTTP 429 response for ListTeams
 type ListTeamsResponse429Headers struct {
 	RetryAfter *int
@@ -47371,6 +47522,21 @@ func (c *ClientWithResponses) GetSystemStatusWithResponse(ctx context.Context, r
 		return nil, err
 	}
 	return ParseGetSystemStatusResponse(rsp)
+}
+
+// ListTeamLabelValuesWithResponse List values of the Team label without a Team
+//
+// The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /team-label-values (the `ListTeamLabelValues` operationId).
+func (c *ClientWithResponses) ListTeamLabelValuesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTeamLabelValuesResponse, error) {
+	rsp, err := c.ListTeamLabelValues(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListTeamLabelValuesResponse(rsp)
 }
 
 // ListTeamsWithResponse List Teams
@@ -59724,6 +59890,66 @@ func ParseGetSystemStatusResponse(rsp *http.Response) (*GetSystemStatusResponse,
 	switch {
 	case rsp.StatusCode == 429:
 		var headers GetSystemStatusResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseListTeamLabelValuesResponse parses an HTTP response from a ListTeamLabelValuesWithResponse call
+func ParseListTeamLabelValuesResponse(rsp *http.Response) (*ListTeamLabelValuesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListTeamLabelValuesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest TeamLabelValueList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers ListTeamLabelValuesResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

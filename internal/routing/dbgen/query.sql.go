@@ -1306,6 +1306,23 @@ func (q *Queries) SetRoutePositions(ctx context.Context, arg SetRoutePositionsPa
 	return err
 }
 
+const shareTeamEvaluation = `-- name: ShareTeamEvaluation :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamEvaluationParams struct {
+	LockClass int32
+	OrgID     int64
+}
+
+// ShareTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+// keyed by the Organization) shared, before the Snapshot reads the stamp of the classification: the evaluation of a
+// save takes it exclusively, so it waits for a Snapshot that classified with the Teams before the save.
+func (q *Queries) ShareTeamEvaluation(ctx context.Context, arg ShareTeamEvaluationParams) error {
+	_, err := q.db.Exec(ctx, shareTeamEvaluation, arg.LockClass, arg.OrgID)
+	return err
+}
+
 const updateRoute = `-- name: UpdateRoute :exec
 UPDATE routes
 SET name = $1, description = $2, minimum_severity = $3,

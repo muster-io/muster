@@ -6,6 +6,21 @@ import * as zod from 'zod';
 
 
 /**
+ * The values of the Organization's Team label, with the Static labels of their Integrations, that Alerts last seen in the last `organization.team_values_window` carried and that name no Team that is not deleted, the most recently seen first and at most 500 values; `valid_slug` is false for a value outside `team.slug_format`, which reaches a Team only through a Team matcher.
+ * @summary List values of the Team label without a Team
+ */
+export const ListTeamLabelValuesResponse = zod.object({
+  "label": zod.string().describe('The Team label of the Organization (`organization.team_label`).'),
+  "window_days": zod.int(),
+  "items": zod.array(zod.object({
+  "value": zod.string(),
+  "last_seen_at": zod.iso.datetime({"offset":true}).describe('When an Alert that carries the value was last seen.'),
+  "alert_count": zod.int().describe('How many Alerts last seen within the window carry the value.'),
+  "valid_slug": zod.boolean().describe('False when the value is not a valid slug (`team.slug_format`), so that no Team can take it as its slug.')
+}))
+})
+
+/**
  * The Teams that are not deleted, by name. A Team grants no access of its own; every Role reads them.
  * @summary List Teams
  */

@@ -4,15 +4,21 @@
 package groups
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"time"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/teams"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 // The rules by which an Alert belongs to a Team (C-25.FR-5), as routing records them.
@@ -82,23 +88,8 @@ func (e *engine) teams(ctx context.Context, q Queries, g *Group, alerts []*alert
 		}
 		brought[r.TeamID] = joiningTeam{id: r.TeamID, rule: r.Rule, matcher: r.Matcher}
 	}
-	if len(brought) > 0 {
-		p := dbgen.AddGroupTeamsParams{OrgID: e.s.orgID, AlertGroupID: g.ID, JoinedAt: e.now}
-		for _, id := range slices.Sorted(maps.Keys(brought)) {
-			t := brought[id]
-			p.TeamIds = append(p.TeamIds, t.id)
-			p.Rules = append(p.Rules, t.rule)
-			p.Matchers = append(p.Matchers, t.matcher)
-		}
-		joined, err := q.AddGroupTeams(ctx, p)
-		if err != nil {
-			return fmt.Errorf("add the teams of alert group #%d: %w", g.Number, err)
-		}
-		slices.Sort(joined)
-		for _, id := range joined {
-			t := brought[id]
-			c.add(entry{Event: EventTeamJoined, TeamID: &t.id, TeamRule: t.rule, TeamMatcher: t.matcher})
-		}
+	if _, err := joinTeams(ctx, q, e.s.orgID, g, brought, e.now, c); err != nil {
+		return err
 	}
 	if len(values) == 0 {
 		return nil
@@ -113,6 +104,184 @@ func (e *engine) teams(ctx context.Context, q Queries, g *Group, alerts []*alert
 	}
 	return nil
 }
+
+// joinTeams adds the Teams brought to the Teams of g, which only grow (C-25.FR-6): each Team g lacks joins it with one
+// Quiet team_joined naming the Team and the rule that brought it, in the order of the Teams' ids; a Team g has keeps
+// its rule and when it joined. It returns how many joined.
+func joinTeams(ctx context.Context, q Queries, orgID int64, g *Group, brought map[int64]joiningTeam, now time.Time,
+	c *change) (int, error) {
+	if len(brought) == 0 {
+		return 0, nil
+	}
+	p := dbgen.AddGroupTeamsParams{OrgID: orgID, AlertGroupID: g.ID, JoinedAt: now}
+	for _, id := range slices.Sorted(maps.Keys(brought)) {
+		t := brought[id]
+		p.TeamIds = append(p.TeamIds, t.id)
+		p.Rules = append(p.Rules, t.rule)
+		p.Matchers = append(p.Matchers, t.matcher)
+	}
+	joined, err := q.AddGroupTeams(ctx, p)
+	if err != nil {
+		return 0, fmt.Errorf("add the teams of alert group #%d: %w", g.Number, err)
+	}
+	slices.Sort(joined)
+	for _, id := range joined {
+		t := brought[id]
+		c.add(entry{Event: EventTeamJoined, TeamID: &t.id, TeamRule: t.rule, TeamMatcher: t.matcher})
+	}
+	return len(joined), nil
+}
+
+// classifiedAlert is a firing Alert of an open Alert Group with the Teams it belongs to by the current classification.
+type classifiedAlert struct {
+	id    int64
+	teams []teams.Membership
+}
+
+// teamsEvaluated is the system transition TeamsEvaluated of an open Alert Group after a save of a Team or of the Team
+// label (C-25.FR-13): the Teams its firing Alerts now belong to are added to those recorded on each Alert, and each
+// Team the Alert Group lacks joins it with one Quiet team_joined, which re-renders its Root messages Quietly — by the
+// label when any of the Alerts belongs to it by the label, else with the first Team matcher by Alert, as grouping
+// records it. It only adds — a Team that an Alert no longer belongs to stays where it is — records no
+// unknown_team_value, and leaves an Alert Group without a new Team as it is, so that a second run records nothing;
+// joined says whether a Team joined.
+type teamsEvaluated struct {
+	orgID  int64
+	alerts []classifiedAlert
+	now    time.Time
+	joined bool
+}
+
+func (*teamsEvaluated) precondition(g *Group) error {
+	if g.Status == StatusResolved {
+		return errNotOpen
+	}
+	return nil
+}
+
+func (t *teamsEvaluated) apply(ctx context.Context, q Queries, g *Group, c *change) error {
+	p := dbgen.AddAlertTeamsParams{OrgID: t.orgID}
+	brought := map[int64]joiningTeam{}
+	for _, a := range t.alerts {
+		for _, m := range a.teams {
+			p.AlertIds = append(p.AlertIds, a.id)
+			p.TeamIds = append(p.TeamIds, m.TeamID)
+			p.Rules = append(p.Rules, m.Rule)
+			p.Matchers = append(p.Matchers, m.Matcher)
+			if b, ok := brought[m.TeamID]; ok && (b.rule == TeamRuleLabel || m.Rule != TeamRuleLabel) {
+				continue
+			}
+			brought[m.TeamID] = joiningTeam{id: m.TeamID, rule: m.Rule, matcher: m.Matcher}
+		}
+	}
+	if err := q.AddAlertTeams(ctx, p); err != nil {
+		return fmt.Errorf("add the teams of the alerts of alert group #%d: %w", g.Number, err)
+	}
+	n, err := joinTeams(ctx, q, t.orgID, g, brought, t.now, c)
+	t.joined, c.configuration = n > 0, true
+	return err
+}
+
+// evaluateTeams evaluates the Teams of the Alert Groups ids again (C-25.FR-13), in the transaction of q: it locks them
+// in id order, classifies the labels of the Alerts firing in each with the classification of the Teams as of the
+// transaction, and runs TeamsEvaluated through the dispatcher on each open one that has an Alert of a Team, in the
+// order (Route, id), as the re-render of a button set goes, since the re-render step takes the Routes' locks. Of an
+// Alert Group a person resolved that is still in its Grace period it only records the Teams on its firing tails,
+// which the end of the Grace period groups again with them; the Alert Group itself does not change. Only an Alert
+// whose own status is firing is classified: one that a Snapshot fires again is left to that Snapshot's routing, which
+// records its Teams in its own transaction. It returns how many Alert Groups a Team joined; after collects what runs
+// once the transaction committed.
+func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	// The lock order of a batch: the claimed open_group_updates row, this lock exclusively, the Alert Groups in id
+	// order (LockGroups), then the Routes' Destinations shared in the re-render step. A Snapshot takes this lock
+	// shared before anything of its own (routing), so the batch waits only for Snapshots in flight, which hold none of
+	// its rows, and a Snapshot that starts later waits for the batch before it locks anything.
+	if err := q.LockTeamEvaluation(ctx, dbgen.LockTeamEvaluationParams{LockClass: db.TeamEvaluationLockClass,
+		OrgID: s.orgID}); err != nil {
+		return 0, fmt.Errorf("wait for the snapshots in flight: %w", err)
+	}
+	locked, err := lock(ctx, q, s.orgID, ids)
+	if err != nil {
+		return 0, err
+	}
+	st, err := q.GetTeamsStamp(ctx, s.orgID)
+	if err != nil {
+		return 0, fmt.Errorf("read the stamp of the teams: %w", err)
+	}
+	classes, err := s.classifier.At(ctx, s.classify(q), teams.Stamp{Label: st.TeamLabel, Version: st.TeamsVersion})
+	if err != nil {
+		return 0, err
+	}
+	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: s.orgID, AlertGroupIds: ids})
+	if err != nil {
+		return 0, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
+	}
+	firing := map[int64][]classifiedAlert{}
+	for _, r := range rows {
+		if r.Status != string(StatusFiring) {
+			continue
+		}
+		var labels map[string]string
+		if err := json.Unmarshal(r.Labels, &labels); err != nil {
+			return 0, fmt.Errorf("read the labels of alert %d: %w", r.AlertID, err)
+		}
+		if c := classes.Classify(labels); len(c.Teams) > 0 {
+			firing[r.AlertGroupID] = append(firing[r.AlertGroupID], classifiedAlert{id: r.AlertID, teams: c.Teams})
+		}
+	}
+	open := make([]*Group, 0, len(firing))
+	var tails dbgen.AddAlertTeamsParams
+	for _, id := range slices.Sorted(maps.Keys(firing)) {
+		switch g := locked[id]; {
+		case g == nil:
+		case g.Status != StatusResolved:
+			open = append(open, g)
+		case g.GraceDeadline != nil:
+			for _, a := range sortedAlerts(firing[id]) {
+				for _, m := range a.teams {
+					tails.AlertIds = append(tails.AlertIds, a.id)
+					tails.TeamIds = append(tails.TeamIds, m.TeamID)
+					tails.Rules = append(tails.Rules, m.Rule)
+					tails.Matchers = append(tails.Matchers, m.Matcher)
+				}
+			}
+		}
+	}
+	if len(tails.AlertIds) > 0 {
+		tails.OrgID = s.orgID
+		if err := q.AddAlertTeams(ctx, tails); err != nil {
+			return 0, fmt.Errorf("add the teams of the alerts in grace periods: %w", err)
+		}
+	}
+	slices.SortFunc(open, func(a, b *Group) int {
+		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
+	})
+	now := s.d.clock.Now().UTC()
+	n := 0
+	for _, g := range open {
+		t := &teamsEvaluated{orgID: s.orgID, alerts: sortedAlerts(firing[g.ID]), now: now}
+		if err := s.d.dispatch(ctx, q, g, System, t, after); errors.Is(err, errNotOpen) {
+			continue
+		} else if err != nil {
+			return 0, err
+		}
+		if t.joined {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// sortedAlerts are the classified Alerts of an Alert Group by id.
+func sortedAlerts(alerts []classifiedAlert) []classifiedAlert {
+	return slices.SortedFunc(slices.Values(alerts), func(a, b classifiedAlert) int { return cmp.Compare(a.id, b.id) })
+}
+
+// classifyQueries are the queries of the classification by Teams in the transaction of q.
+func classifyQueries(q Queries) teams.ClassifyQueries { return teamsdb.New(q.DB()) }
 
 // groupTeams reads the Teams of Alert Groups by id, each Alert Group's in the order they joined.
 func (s *Service) groupTeams(ctx context.Context, ids []int64) (map[int64][]GroupTeam, error) {

@@ -325,7 +325,7 @@ var implemented = map[string]bool{
 	"ListUserAccountLinks": true, "DeleteUserAccountLink": true, "GetSystemStatus": true, "GetKeyring": true,
 	"ListRequestLog": true, "GetRequestRecord": true,
 	"ListTeams": true, "CreateTeam": true, "GetTeam": true, "UpdateTeam": true, "DeleteTeam": true,
-	"ListTeamUsers": true, "AddTeamUser": true, "RemoveTeamUser": true,
+	"ListTeamUsers": true, "AddTeamUser": true, "RemoveTeamUser": true, "ListTeamLabelValues": true,
 	"ListSchedules": true, "CreateSchedule": true, "GetSchedule": true, "UpdateSchedule": true, "DeleteSchedule": true,
 	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
 	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true,

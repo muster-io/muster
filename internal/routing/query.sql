@@ -172,6 +172,12 @@ SELECT o.route_order_version,
 FROM organizations o
 WHERE o.id = @org_id;
 
+-- ShareTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+-- keyed by the Organization) shared, before the Snapshot reads the stamp of the classification: the evaluation of a
+-- save takes it exclusively, so it waits for a Snapshot that classified with the Teams before the save.
+-- name: ShareTeamEvaluation :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@org_id::bigint));
+
 -- ListAlertLabels reads the labels of Alerts, with their Static labels applied: the Alerts ids, and the Alerts
 -- listed_ids that fire without a Route.
 -- name: ListAlertLabels :many

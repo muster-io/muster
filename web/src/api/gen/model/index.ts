@@ -459,6 +459,8 @@ export * from './systemStatus';
 export * from './systemStatusRecovery';
 export * from './team';
 export * from './teamInput';
+export * from './teamLabelValue';
+export * from './teamLabelValueList';
 export * from './teamList';
 export * from './teamMembership';
 export * from './teamRef';

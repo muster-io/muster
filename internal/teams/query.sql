@@ -234,3 +234,44 @@ FROM team_matchers m
 JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
 WHERE m.org_id = @org_id AND t.deleted_at IS NULL
 ORDER BY m.team_id, m.position;
+
+-- GetTeamLabel reads the Team label of the Organization (organization.team_label).
+-- name: GetTeamLabel :one
+SELECT team_label
+FROM organizations
+WHERE id = @org_id;
+
+-- ListTeamLabelValues lists the values of the label @label, with the Static labels applied, of the Alerts last seen at
+-- @since or later, leaving out empty values and the slugs of the Teams that are not deleted: each with when an Alert
+-- that carries it was last seen and how many such Alerts there are, the most recently seen first. At most @max_values
+-- values; the index alerts_org_last_seen_idx serves the window.
+-- name: ListTeamLabelValues :many
+SELECT (a.labels ->> @label::text)::text AS value, max(a.last_seen_at)::timestamptz AS last_seen_at,
+       count(*)::bigint AS alerts
+FROM alerts a
+WHERE a.org_id = @org_id AND a.last_seen_at >= @since::timestamptz AND a.labels ->> @label::text <> ''
+  AND NOT EXISTS (SELECT 1
+                  FROM teams t
+                  WHERE t.org_id = @org_id AND t.deleted_at IS NULL AND t.slug = a.labels ->> @label::text)
+GROUP BY 1
+ORDER BY 2 DESC, 1
+LIMIT @max_values;
+
+-- InsertTeamEvaluation requests, in the transaction of a save of the Team @team_id, the evaluation of the Teams of the
+-- open Alert Groups (C-25.FR-13): the open_group_updates worker of any replica claims the row. A row of @kind that no
+-- worker has claimed yet already covers the save, since its run classifies with the Teams as they are then: it is
+-- locked, so that no worker claims it before this transaction commits, and no second one is inserted.
+-- name: InsertTeamEvaluation :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind = @kind AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
+SELECT @org_id, @kind::text, @team_id, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

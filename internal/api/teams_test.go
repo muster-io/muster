@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oapi-codegen/nullable"
 
@@ -40,6 +41,7 @@ type fakeTeams struct {
 	deleted  []string
 	err      error
 	already  bool
+	values   teams.LabelValues
 }
 
 func newFakeTeams() *fakeTeams {
@@ -90,6 +92,8 @@ func (f *fakeTeams) RemoveUser(_ context.Context, _ teams.Requester, _, userID s
 	f.removed = append(f.removed, userID)
 	return f.err
 }
+
+func (f *fakeTeams) LabelValues(context.Context) (teams.LabelValues, error) { return f.values, f.err }
 
 // ListOwned is the filter of the Route list by Team: the fake keeps every Route and records the filter.
 func (f *fakeRoutes) ListOwned(_ context.Context, of routing.OwnerFilter) (routing.List, error) {
@@ -457,5 +461,40 @@ func TestTeamMatchersAPI(t *testing.T) {
 			`"value":"b"},{"label":"pod","op":"=~","value":"checkout-("}]}`, "If-Match", `"1"`))
 	if status != http.StatusUnprocessableEntity || ptr != "/matchers/1/value" || code != "invalid_regex" {
 		t.Errorf("invalid regex = %d %s %s", status, ptr, code)
+	}
+}
+
+// TestListTeamLabelValues is C-25.FR-7 and AC-1 at the API: the values of the Team label without a Team, each with
+// when it was last seen in UTC, its number of Alerts and whether it is a valid slug, in the order the domain gives
+// them, with the label and the window in days; every Role reads them with teams:read, a token without it gets 403, and
+// a failure of the domain is a problem.
+func TestListTeamLabelValues(t *testing.T) {
+	x, ft, _ := newTeamsAPI(t)
+	seen := t0.Add(-time.Hour)
+	ft.values = teams.LabelValues{Label: "team", WindowDays: 14, Items: []teams.LabelValue{
+		{Value: "checkout", LastSeenAt: seen.In(time.FixedZone("x", 3600)), Alerts: 2, ValidSlug: true},
+		{Value: "Payments", LastSeenAt: seen, Alerts: 1}}}
+	for _, token := range []string{teamsReader, teamsSA} {
+		a := x.as(t, token, http.MethodGet, "/api/v1/team-label-values", "")
+		want := `{"items":[{"alert_count":2,"last_seen_at":"` + seen.Format(time.RFC3339) + `","valid_slug":true,` +
+			`"value":"checkout"},{"alert_count":1,"last_seen_at":"` + seen.Format(time.RFC3339) + `",` +
+			`"valid_slug":false,"value":"Payments"}],"label":"team","window_days":14}`
+		if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) != want {
+			t.Errorf("%s: %d %s, want %s", token, a.status, a.body, want)
+		}
+	}
+	ft.values = teams.LabelValues{Label: "service_team", WindowDays: 14}
+	if a := x.as(t, teamsReader, http.MethodGet, "/api/v1/team-label-values", ""); a.status != http.StatusOK ||
+		strings.TrimSpace(string(a.body)) != `{"items":[],"label":"service_team","window_days":14}` {
+		t.Errorf("no values = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, routesReader, http.MethodGet, "/api/v1/team-label-values", ""); a.status != http.StatusForbidden ||
+		!strings.Contains(string(a.body), "teams:read") {
+		t.Errorf("without teams:read = %d %s", a.status, a.body)
+	}
+	ft.err = errors.New("db down")
+	if a := x.as(t, teamsReader, http.MethodGet, "/api/v1/team-label-values", ""); a.status !=
+		http.StatusInternalServerError {
+		t.Errorf("a failure = %d %s", a.status, a.body)
 	}
 }

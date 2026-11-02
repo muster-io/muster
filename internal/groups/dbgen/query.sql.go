@@ -12,6 +12,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAlertTeams = `-- name: AddAlertTeams :exec
+INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
+SELECT $1, t.alert_id, t.team_id, t.rule, nullif(t.matcher, '')
+FROM (SELECT unnest($2::bigint[]) AS alert_id, unnest($3::bigint[]) AS team_id,
+             unnest($4::text[]) AS rule, unnest($5::text[]) AS matcher) AS t
+ORDER BY t.alert_id, t.team_id
+ON CONFLICT (alert_id, team_id) DO NOTHING
+`
+
+type AddAlertTeamsParams struct {
+	OrgID    int64
+	AlertIds []int64
+	TeamIds  []int64
+	Rules    []string
+	Matchers []string
+}
+
+// AddAlertTeams adds Teams to the Teams of firing Alerts, with the rule that decided each and the Team matcher of the
+// rule matcher, an empty matcher being null: the evaluation on save only adds, so a Team an Alert already has keeps
+// its rule. The rows go in the order (Alert, Team); the lock of the evaluation (LockTeamEvaluation) keeps Snapshots and
+// other batches from writing the same rows meanwhile.
+func (q *Queries) AddAlertTeams(ctx context.Context, arg AddAlertTeamsParams) error {
+	_, err := q.db.Exec(ctx, addAlertTeams,
+		arg.OrgID,
+		arg.AlertIds,
+		arg.TeamIds,
+		arg.Rules,
+		arg.Matchers,
+	)
+	return err
+}
+
 const addGroupTeams = `-- name: AddGroupTeams :many
 INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, matcher, joined_at)
 SELECT $1, $2, t.team_id, t.rule, nullif(t.matcher, ''), $3
@@ -134,10 +166,13 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
           coalesce((SELECT r.public_id
                     FROM routes r
                     WHERE r.org_id = $3 AND r.id = u.route_id), '')::text AS route_public_id,
-          u.destination_id,
+          u.destination_id, u.team_id,
           coalesce((SELECT d.public_id
                     FROM destinations d
-                    WHERE d.org_id = $3 AND d.id = u.destination_id), '')::text AS destination_public_id
+                    WHERE d.org_id = $3 AND d.id = u.destination_id), '')::text AS destination_public_id,
+          coalesce((SELECT t.public_id
+                    FROM teams t
+                    WHERE t.org_id = $3 AND t.id = u.team_id), '')::text AS team_public_id
 `
 
 type ClaimOpenGroupUpdateParams struct {
@@ -156,15 +191,17 @@ type ClaimOpenGroupUpdateRow struct {
 	AfterAlertGroupID   int64
 	RoutePublicID       string
 	DestinationID       pgtype.Int8
+	TeamID              pgtype.Int8
 	DestinationPublicID string
+	TeamPublicID        string
 }
 
 // The queue of the changes of configuration that reach the open Alert Groups after the save (open_group_updates,
 // schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
 // by id in batches, and is deleted with its last batch.
 // ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
-// the public_id of its Route or its Destination, if any, for its log lines; another claimer skips the row this one
-// locked. A row of a kind that a later version adds waits for a replica that handles it.
+// the public_id of its Route, its Destination or its Team, if any, for its log lines; another claimer skips the row
+// this one locked. A row of a kind that a later version adds waits for a replica that handles it.
 func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUpdateParams) ([]ClaimOpenGroupUpdateRow, error) {
 	rows, err := q.db.Query(ctx, claimOpenGroupUpdate,
 		arg.Owner,
@@ -188,7 +225,9 @@ func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUp
 			&i.AfterAlertGroupID,
 			&i.RoutePublicID,
 			&i.DestinationID,
+			&i.TeamID,
 			&i.DestinationPublicID,
+			&i.TeamPublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -955,6 +994,26 @@ func (q *Queries) GetSnapshotReceivedAt(ctx context.Context, arg GetSnapshotRece
 	return received_at, err
 }
 
+const getTeamsStamp = `-- name: GetTeamsStamp :one
+SELECT team_label, teams_version
+FROM organizations
+WHERE id = $1
+`
+
+type GetTeamsStampRow struct {
+	TeamLabel    string
+	TeamsVersion int64
+}
+
+// GetTeamsStamp reads the stamp of the classification by Teams: the Team label and organizations.teams_version, which
+// every change of a Team or of the Team label raises.
+func (q *Queries) GetTeamsStamp(ctx context.Context, orgID int64) (GetTeamsStampRow, error) {
+	row := q.db.QueryRow(ctx, getTeamsStamp, orgID)
+	var i GetTeamsStampRow
+	err := row.Scan(&i.TeamLabel, &i.TeamsVersion)
+	return i, err
+}
+
 const getTimerPolicy = `-- name: GetTimerPolicy :one
 SELECT ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
        reminders_cap_seconds, auto_unacknowledge
@@ -1416,7 +1475,11 @@ func (q *Queries) ListAlertGroupKeys(ctx context.Context, arg ListAlertGroupKeys
 }
 
 const listAlertTeams = `-- name: ListAlertTeams :many
-SELECT a.id AS alert_id, coalesce(a.unknown_team_value, '')::text AS unknown_team_value,
+SELECT a.id AS alert_id,
+       (CASE WHEN EXISTS (SELECT 1
+                          FROM teams n
+                          WHERE n.org_id = a.org_id AND n.deleted_at IS NULL AND n.slug = a.unknown_team_value)
+             THEN '' ELSE coalesce(a.unknown_team_value, '') END)::text AS unknown_team_value,
        coalesce(t.team_id, 0)::bigint AS team_id, coalesce(t.rule, '')::text AS rule,
        coalesce(t.matcher, '')::text AS matcher
 FROM alerts a
@@ -1442,8 +1505,8 @@ type ListAlertTeamsRow struct {
 }
 
 // ListAlertTeams reads, for Alerts that join an Alert Group, the Teams routing gave each when it started firing — those
-// that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, with
-// a row of team_id 0 for an Alert without a Team.
+// that are not deleted, with the rule and the Team matcher — and the value of its Team label that named no Team, empty
+// once it is the slug of a Team that is not deleted, with a row of team_id 0 for an Alert without a Team.
 func (q *Queries) ListAlertTeams(ctx context.Context, arg ListAlertTeamsParams) ([]ListAlertTeamsRow, error) {
 	rows, err := q.db.Query(ctx, listAlertTeams, arg.OrgID, arg.AlertIds)
 	if err != nil {
@@ -1522,6 +1585,43 @@ func (q *Queries) ListChangedAlerts(ctx context.Context, arg ListChangedAlertsPa
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvaluatedGroupsAfter = `-- name: ListEvaluatedGroupsAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND (status <> 'resolved' OR grace_deadline IS NOT NULL) AND id > $2
+ORDER BY id
+LIMIT $3
+`
+
+type ListEvaluatedGroupsAfterParams struct {
+	OrgID   int64
+	AfterID int64
+	Lim     int32
+}
+
+// ListEvaluatedGroupsAfter lists, by id after a cursor, a batch of the Alert Groups whose firing Alerts the evaluation
+// on a save of a Team or of the Team label classifies again (C-25.FR-13): the open ones, and those a person resolved
+// that are still in their Grace period, whose firing tails the end of the Grace period groups again.
+func (q *Queries) ListEvaluatedGroupsAfter(ctx context.Context, arg ListEvaluatedGroupsAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listEvaluatedGroupsAfter, arg.OrgID, arg.AfterID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -4337,6 +4437,23 @@ func (q *Queries) LockRoutes(ctx context.Context, arg LockRoutesParams) ([]LockR
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTeamEvaluation = `-- name: LockTeamEvaluation :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockTeamEvaluationParams struct {
+	LockClass int32
+	OrgID     int64
+}
+
+// LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
+// keyed by the Organization) exclusively, before a batch of the evaluation locks its Alert Groups: it waits for every
+// Snapshot that read the stamp of the classification before, which routing takes it shared for.
+func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
+	_, err := q.db.Exec(ctx, lockTeamEvaluation, arg.LockClass, arg.OrgID)
+	return err
 }
 
 const moveMemberships = `-- name: MoveMemberships :exec

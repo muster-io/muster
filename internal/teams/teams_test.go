@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
@@ -70,6 +71,13 @@ type fakeStore struct {
 	locked   int
 	// schedules are the Schedules of each Team, by its id.
 	schedules map[int64][]dbgen.ListTeamSchedulesRow
+	// evaluations are the open_group_updates rows team_evaluation the saves wrote and wakes the notifications on their
+	// channel; label is the Team label, and values the values without a Team the query answers, with its arguments.
+	evaluations []dbgen.InsertTeamEvaluationParams
+	wakes       []string
+	label       string
+	values      []dbgen.ListTeamLabelValuesRow
+	valueArgs   []dbgen.ListTeamLabelValuesParams
 }
 
 func newStore() *fakeStore {
@@ -400,6 +408,35 @@ func (s *fakeStore) Notify(_ context.Context, h db.Hint) error {
 	}
 	s.hints = append(s.hints, h)
 	return nil
+}
+
+func (s *fakeStore) InsertTeamEvaluation(_ context.Context, arg dbgen.InsertTeamEvaluationParams) error {
+	if err := s.fail["InsertTeamEvaluation"]; err != nil {
+		return err
+	}
+	s.evaluations = append(s.evaluations, arg)
+	return nil
+}
+
+func (s *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	s.wakes = append(s.wakes, channel)
+	return nil
+}
+
+func (s *fakeStore) GetTeamLabel(_ context.Context, org int64) (string, error) {
+	if org != orgID {
+		return "", pgx.ErrNoRows
+	}
+	return s.label, s.fail["GetTeamLabel"]
+}
+
+func (s *fakeStore) ListTeamLabelValues(_ context.Context, arg dbgen.ListTeamLabelValuesParams) (
+	[]dbgen.ListTeamLabelValuesRow, error) {
+	s.valueArgs = append(s.valueArgs, arg)
+	return s.values, s.fail["ListTeamLabelValues"]
 }
 
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
@@ -1155,5 +1192,97 @@ func TestMatchers(t *testing.T) {
 	store.fail["ListTeamMatchers"] = errBoom
 	if _, err := svc.List(ctx, ListFilter{Limit: 10}); !errors.Is(err, errBoom) {
 		t.Errorf("list, ListTeamMatchers fails = %v", err)
+	}
+}
+
+// TestEvaluationRows is C-25.FR-13 on the saves of a Team: creating one, and changing its slug or its Team matchers,
+// write in the save's transaction one open_group_updates row team_evaluation with the Team, requested at the business
+// time of the save, and wake the workers; a save of the same fields, a new name, a description, Working hours, Team
+// matchers kept or the same again, a person added or removed and the deletion write none. A failing row or
+// notification fails the save.
+func TestEvaluationRows(t *testing.T) {
+	svc, store := newService(t)
+	ctx := t.Context()
+	team, err := svc.Create(ctx, by, Input{Name: "Checkout", Slug: "checkout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := func(id int64) dbgen.InsertTeamEvaluationParams {
+		return dbgen.InsertTeamEvaluationParams{OrgID: orgID, Kind: KindTeamEvaluation,
+			TeamID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: t0}
+	}
+	if len(store.evaluations) != 1 || store.evaluations[0] != row(team.ID) ||
+		!slices.Equal(store.wakes, []string{OpenGroupUpdatesChannel}) {
+		t.Fatalf("created: rows %+v, wakes %v", store.evaluations, store.wakes)
+	}
+	ms := []Matcher{{Label: "cluster", Op: "=", Value: "x"}}
+	none := []Matcher{}
+	for _, c := range []struct {
+		name string
+		in   Input
+	}{
+		{"the same fields", Input{Name: "Checkout", Slug: "checkout"}},
+		{"a new name", Input{Name: "Checkout team", Slug: "checkout"}},
+		{"a description", Input{Name: "Checkout team", Slug: "checkout", Description: ptr("Pays")}},
+		{"own working hours", Input{Name: "Checkout team", Slug: "checkout", OwnWorkingHours: true,
+			WorkingHours: &berlin}},
+		{"no team matchers again", Input{Name: "Checkout team", Slug: "checkout", OwnWorkingHours: true,
+			Matchers: &none}},
+	} {
+		if _, err := svc.Update(ctx, by, team.PublicID, nil, c.in); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(store.evaluations) != 1 || len(store.wakes) != 1 {
+			t.Errorf("%s wrote a row: %+v", c.name, store.evaluations)
+		}
+	}
+	if _, _, err := svc.AddUser(ctx, by, team.PublicID, "SR0000000000BB"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RemoveUser(ctx, by, team.PublicID, "SR0000000000BB"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.evaluations) != 1 {
+		t.Errorf("the people wrote a row: %+v", store.evaluations)
+	}
+	for _, c := range []struct {
+		name string
+		in   Input
+	}{
+		{"a new slug", Input{Name: "Checkout team", Slug: "checkout-x"}},
+		{"a new team matcher", Input{Name: "Checkout team", Slug: "checkout-x", Matchers: &ms}},
+		{"a removed team matcher", Input{Name: "Checkout team", Slug: "checkout-x", Matchers: &none}},
+	} {
+		n := len(store.evaluations)
+		if _, err := svc.Update(ctx, by, team.PublicID, nil, c.in); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(store.evaluations) != n+1 || store.evaluations[n] != row(team.ID) || len(store.wakes) != n+1 {
+			t.Errorf("%s: rows %+v", c.name, store.evaluations)
+		}
+	}
+	n := len(store.evaluations)
+	if _, err := svc.Update(ctx, by, team.PublicID, nil, Input{Name: "Checkout team", Slug: "checkout-x"}); err != nil ||
+		len(store.evaluations) != n {
+		t.Errorf("the matchers kept: %v, rows %+v", err, store.evaluations)
+	}
+	if err := svc.Delete(ctx, by, team.PublicID, nil); err != nil || len(store.evaluations) != n {
+		t.Errorf("the deletion: %v, rows %+v", err, store.evaluations)
+	}
+	other, err := svc.Create(ctx, by, Input{Name: "Other", Slug: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"InsertTeamEvaluation", "NotifyOpenGroupUpdates"} {
+		store.fail[name] = errBoom
+		if _, err := svc.Create(ctx, by, Input{Name: "z" + name, Slug: strings.ToLower(name)}); !errors.Is(err,
+			errBoom) {
+			t.Errorf("create, %s fails = %v", name, err)
+		}
+		if _, err := svc.Update(ctx, by, other.PublicID, nil, Input{Name: "Other", Slug: "other-" +
+			strings.ToLower(name)}); !errors.Is(err, errBoom) {
+			t.Errorf("update, %s fails = %v", name, err)
+		}
+		delete(store.fail, name)
 	}
 }

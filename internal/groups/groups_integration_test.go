@@ -321,9 +321,16 @@ func TestIntegrationOpenGroupUpdates(t *testing.T) {
 		}
 
 		// A row of a kind a later version adds, as its migration would widen the CHECK, waits: no replica of this
-		// version claims it or waits for it.
-		if _, err := e.d.Pool.Exec(ctx, `ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS
-			open_group_updates_kind_check, DROP CONSTRAINT IF EXISTS open_group_updates_kind_v2_check`); err != nil {
+		// version claims it or waits for it. Every version of the kind CHECK goes, whichever is current.
+		if _, err := e.d.Pool.Exec(ctx, `DO $$
+			DECLARE c text;
+			BEGIN
+				FOR c IN SELECT conname FROM pg_constraint
+					WHERE conrelid = 'open_group_updates'::regclass AND conname LIKE 'open_group_updates_kind%check'
+				LOOP
+					EXECUTE format('ALTER TABLE open_group_updates DROP CONSTRAINT %I', c);
+				END LOOP;
+			END $$`); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO open_group_updates (org_id, kind, requested_at)

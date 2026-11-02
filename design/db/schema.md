@@ -56,7 +56,10 @@
   [`0025_schedules`](../../internal/db/migrations/0025_schedules.up.sql)
   (Schedules, their Rotation layers with their people, and Overrides, C-27, S-131) and
   [`0026_ical_feeds`](../../internal/db/migrations/0026_ical_feeds.up.sql)
-  (the personal iCal feeds, C-27.FR-10, S-134), in
+  (the personal iCal feeds, C-27.FR-10, S-134) and
+  [`0027_team_evaluation`](../../internal/db/migrations/0027_team_evaluation.up.sql)
+  (`open_group_updates.team_id` and the kind `team_evaluation`, the evaluation of the open Alert Groups when a Team or
+  the Team label is saved, C-25.FR-13, S-163), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -166,9 +169,9 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 | API tokens | `service_accounts`, `api_tokens`, `api_token_permissions` | users / auth | — |
 | Messengers | `connections`, `destinations`, `destination_secrets`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections; `teams` clears `destinations.owning_team_id` when it deletes the Team | expired requests and handled Bridge event ids pruned |
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
-| Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing | 90 days after resolution, batched delete; `alert_teams` with its Alert |
+| Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
-| Open Alert Group updates | `open_group_updates` | routing, organization and destinations insert, `groups` claims and deletes | deleted with the last batch of its run |
+| Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers` | teams; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
@@ -458,6 +461,7 @@ erDiagram
     connections ||--o{ bridge_events_seen : "handled events"
     routes ||--o{ open_group_updates : "changed for its open Alert Groups"
     destinations |o--o{ open_group_updates : "button set changed"
+    teams |o--o{ open_group_updates : "saved, open Alert Groups evaluated"
 
     routes {
         bigint id PK
@@ -678,7 +682,9 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   replica caches for the classification of Alerts ([4.7](#47-snapshot-semantics-alertmanager-routes-and-groups-alerts-presence)):
   every creation, change or deletion of a Team raises it in its transaction, after taking the Organization's row
   `FOR NO KEY UPDATE` ahead of the Team's own — the order of a Route saved with an owning Team, which bumps the
-  Route list first — and an update of the Organization that changes the Team label raises it in the same `UPDATE`.
+  Route list first — and an update of the Organization that changes the Team label raises it in the same `UPDATE`
+  and inserts a row `team_evaluation` of `open_group_updates` without a Team in the same transaction
+  ([section 5](#5-queues-and-claims)).
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.
@@ -969,7 +975,10 @@ Serves C-06, C-07.FR-5, C-08.FR-13; [ADR-0002](../adr/0002-webhook-only-ingestio
   change — the first firing of an Alert and each firing after a resolve, a Continuation being none — replacing those of
   the previous firing; the classification reads the Teams that are not deleted and their Team matchers, compiled and
   cached per replica under `organizations.team_label` and `teams_version`, which the Snapshot reads with the Routes'
-  stamp. The rows go with their Alert (`ON DELETE CASCADE`); from S-163 the evaluation on save adds to them.
+  stamp. The rows go with their Alert (`ON DELETE CASCADE`). The evaluation on save (C-25.FR-13,
+  [section 5](#5-queues-and-claims)) adds, in the transaction of the Alert Group's change, the rows of the Teams that
+  the firing Alerts of an open Alert Group now belong to, with `INSERT ... ON CONFLICT DO NOTHING`: a row it finds keeps
+  its rule, and it deletes none.
 - **`alert_presences`** — the presence of an Alert in one `groupKey`: `state` (`listed`, `missed`, `gone`, `stale`),
   `last_seen_at`, `last_listed_window`, `last_seen_clock_ms` and `missed_since`, the receipt time of the first window
   that missed it (set only while `missed`; `CHECK` keeps them together). An Alert listed in several Alertmanager groups
@@ -1153,7 +1162,8 @@ here; the Timeline endpoint merges `delivery_events` by time as the kind `delive
 (`label` before `matcher` among the Alerts of one change), its Team matcher and `joined_at`. They only grow: the
 dispatcher adds, when Alerts join — `created`, `alerts_added`, `reopened`, a Replacement, the end of a Grace period —
 the Teams of the joining Alerts that are not deleted with `INSERT ... ON CONFLICT DO NOTHING RETURNING`, and records one
-Quiet `team_joined` per Team it returns; nothing removes a row but the deletion of its Alert Group (`ON DELETE
+Quiet `team_joined` per Team it returns, as does the evaluation on save of C-25.FR-13 for the Teams of the firing
+Alerts; nothing removes a row but the deletion of its Alert Group (`ON DELETE
 CASCADE`), so a deleted Team stays by its name (C-25.FR-10). `alert_groups.unknown_team_values` holds the values of the
 Team label without a Team already recorded, each recorded once as a Quiet `unknown_team_value`. The index
 `alert_group_teams_team_idx` `(org_id, team_id, alert_group_id)` serves the filter by Team of the list and the counts
@@ -1426,6 +1436,9 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
 - **`team_matchers`** (migration 0024, C-25.FR-1, FR-5) — the Team matchers of each Team in their order (`position`),
   in the syntax of Route Matchers; a save replaces them as a whole and the deletion of the Team removes them. Each is
   enough on its own: an Alert that any one picks belongs to the Team.
+- Creating a Team, and saving one with a changed slug or changed Team matchers, inserts in the transaction of the save a
+  row `team_evaluation` of `open_group_updates` with the Team in `team_id` ([section 5](#5-queues-and-claims)); a save
+  of the name, the description, the Working hours or the people inserts none.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3). The index `team_users_user_idx` on `(org_id, user_id)` serves "My Teams" and the deletion of a
   user, which removes their rows in its transaction; disabling a user keeps them.
@@ -1535,8 +1548,10 @@ bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC
 **Open Alert Group updates** (C-26.FR-9): a change of configuration that must reach the open Alert Groups of its
 scope after the save — the Minimum severity of a Route (`route_minimum_severity`, with its Route in `route_id`), the
 button set of a Destination (`destination_buttons`, with its Destination in `destination_id`) and that of the
-Organization (`organization_buttons`) from 0.2.0, more kinds as later stories add them to the kind `CHECK`, versioned
-`open_group_updates_kind_v2_check` since migration 0023 — is one row of `open_group_updates`, inserted in the
+Organization (`organization_buttons`) from 0.2.0, and the evaluation of the Teams of the open Alert Groups after a
+save of a Team or of the Team label (`team_evaluation`, with the saved Team in `team_id`, null for the Team label;
+`ON DELETE SET NULL`, as Teams are deleted softly), more kinds as later stories add them to the kind `CHECK`, versioned
+`open_group_updates_kind_v3_check` since migration 0027 — is one row of `open_group_updates`, inserted in the
 transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The worker of every replica — not a Leader task — is woken
 at start, by that notification and by the development clock, and claims one row at a time:
 
@@ -1547,7 +1562,7 @@ WITH due AS MATERIALIZED (
      ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
   FROM due WHERE u.org_id = $1 AND u.id = due.id
-RETURNING u.id, u.kind, u.route_id, u.destination_id, u.after_alert_group_id;
+RETURNING u.id, u.kind, u.route_id, u.destination_id, u.team_id, u.after_alert_group_id;
 ```
 
 A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows
@@ -1559,7 +1574,22 @@ Group already as the change wants it is skipped, so a batch that runs twice reco
 (ADR-0007). `requested_at` is on the business clock, the lease on the real clock. A row of a button set walks the open
 Alert Groups with a delivery in its Destination, or in any messenger Destination that follows the Organization, and
 runs the dispatcher's re-render step without a lifecycle event: a Root message whose Desired state the set changed is
-edited, Quietly, and the others keep their hashes, so a second run changes nothing.
+edited, Quietly, and the others keep their hashes, so a second run changes nothing. A row `team_evaluation` walks
+every open Alert Group: it classifies the labels of the Alerts firing in it — those whose own status is firing, so
+that an Alert a Snapshot fires again is left to that Snapshot's routing — with the classification of the Teams as
+of the batch's transaction, adds the missing `alert_teams` rows and, through the dispatcher as the system transition
+`TeamsEvaluated`, the missing `alert_group_teams` rows, each with a Quiet `team_joined` that re-renders the Root
+messages Quietly — the rendering is marked as a change of configuration, so delivery publishes a Publication it revives
+and releases a held Urgent Alert Group Quietly; it records no `unknown_team_value`, starts nothing, and leaves an Alert
+Group without a new Team as it is, so a second run records nothing. Of an Alert Group a person resolved that is still
+in its Grace period it only adds the `alert_teams` rows of the firing tails, which the end of the Grace period groups
+again with them. The Alert Groups of a batch are changed in the order (Route, id), as those of a button set are. Each
+batch takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by
+`hashint8` of the Organization) exclusively before it locks its Alert Groups, and routing takes it shared before a
+Snapshot reads the stamp of the classification: a Snapshot that classified with the Teams before a save commits its
+Alert Groups before the batch reads them. A save inserts no second row while one `team_evaluation` row of the
+Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so no worker claims it before
+the save commits, and its run classifies with every save before it.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

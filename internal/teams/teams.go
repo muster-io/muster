@@ -59,6 +59,13 @@ const (
 	hintDestination          = "destination"
 )
 
+// KindTeamEvaluation is the kind of the open_group_updates row that a save of a Team writes (C-25.FR-13), and
+// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+const (
+	KindTeamEvaluation      = "team_evaluation"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
+
 // SourceByHand is how a person an Admin added is in a Team.
 const SourceByHand = "by_hand"
 
@@ -244,6 +251,11 @@ type Queries interface {
 	InsertTeamMatchers(ctx context.Context, arg dbgen.InsertTeamMatchersParams) error
 	LockTeamsVersion(ctx context.Context, orgID int64) (int64, error)
 	BumpTeamsVersion(ctx context.Context, orgID int64) error
+	InsertTeamEvaluation(ctx context.Context, arg dbgen.InsertTeamEvaluationParams) error
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
+	GetTeamLabel(ctx context.Context, orgID int64) (string, error)
+	ListTeamLabelValues(ctx context.Context, arg dbgen.ListTeamLabelValuesParams) ([]dbgen.ListTeamLabelValuesRow,
+		error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -557,13 +569,31 @@ func (s *Service) bumpVersion(ctx context.Context, q Queries) error {
 	return nil
 }
 
+// requestEvaluation, in the transaction of a save of the Team id that can bring it Alerts it did not have — its
+// creation, a changed slug or changed Team matchers — asks the workers of internal/groups to evaluate the firing
+// Alerts of the open Alert Groups again (C-25.FR-13): one open_group_updates row team_evaluation with the Team,
+// requested at the business time of the save, and a notification that wakes them once the transaction commits, so
+// that a crash after the save loses nothing.
+func (s *Service) requestEvaluation(ctx context.Context, q Queries, id int64, now time.Time) error {
+	if err := q.InsertTeamEvaluation(ctx, dbgen.InsertTeamEvaluationParams{OrgID: s.orgID, Kind: KindTeamEvaluation,
+		TeamID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: now}); err != nil {
+		return fmt.Errorf("evaluate the open alert groups for the team: %w", err)
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
+}
+
 // missingHours is the refusal of own Working hours that are not given and not stored.
 func missingHours() *FieldError {
 	return &FieldError{Pointer: "/working_hours", Code: CodeRequired,
 		Detail: "A Team with its own Working hours needs them: days, a start, an end and a time zone."}
 }
 
-// Create creates a Team. A name or a slug another Team that is not deleted has is ErrNameTaken or ErrSlugTaken.
+// Create creates a Team, and requests in its transaction the evaluation of the open Alert Groups, which brings the
+// Team those of its Alerts (C-25.FR-13). A name or a slug another Team that is not deleted has is ErrNameTaken or
+// ErrSlugTaken.
 func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, error) {
 	in, err := check(in)
 	if err != nil {
@@ -581,8 +611,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 		if in.Description != nil {
 			description = *in.Description
 		}
+		now := s.clock.Now().UTC()
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
-			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: s.clock.Now().UTC()}
+			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: now}
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, in.WorkingHours)
 		id, err := q.InsertTeam(ctx, p)
 		if err != nil {
@@ -594,6 +625,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 			}
 		}
 		if err := s.bumpVersion(ctx, q); err != nil {
+			return err
+		}
+		if err := s.requestEvaluation(ctx, q, id, now); err != nil {
 			return err
 		}
 		if created, err = s.get(ctx, q, p.PublicID); err != nil {
@@ -625,7 +659,9 @@ func setHours(days *[]string, start, end, zone *pgtype.Text, w *WorkingHours) {
 }
 
 // Update replaces the configured fields of the Team publicID; a non-nil version must be its current one (If-Match).
-// An update that changes nothing writes nothing.
+// An update that changes nothing writes nothing. A changed slug or changed Team matchers request in the transaction
+// the evaluation of the open Alert Groups (C-25.FR-13); a change of the name, the description or the Working hours
+// does not.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Team, error) {
 	in, err := check(in)
 	if err != nil {
@@ -662,19 +698,26 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			updated = before
 			return nil
 		}
+		now := s.clock.Now().UTC()
 		p := dbgen.UpdateTeamParams{OrgID: s.orgID, ID: before.ID, Name: next.Name, Slug: next.Slug,
-			Description: next.Description, OwnWorkingHours: next.Own != nil, Now: s.clock.Now().UTC()}
+			Description: next.Description, OwnWorkingHours: next.Own != nil, Now: now}
 		setHours(&p.WorkingDays, &p.WorkingStart, &p.WorkingEnd, &p.WorkingTimeZone, next.Own)
 		if err := q.UpdateTeam(ctx, p); err != nil {
 			return fmt.Errorf("update the team %s: %w", before.PublicID, taken(err))
 		}
-		if !slices.Equal(before.Matchers, next.Matchers) {
+		matchersChanged := !slices.Equal(before.Matchers, next.Matchers)
+		if matchersChanged {
 			if err := s.writeMatchers(ctx, q, before.ID, next.Matchers); err != nil {
 				return err
 			}
 		}
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
+		}
+		if matchersChanged || next.Slug != before.Slug {
+			if err := s.requestEvaluation(ctx, q, before.ID, now); err != nil {
+				return err
+			}
 		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
 			return err
