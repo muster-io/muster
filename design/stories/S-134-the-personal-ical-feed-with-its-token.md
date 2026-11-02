@@ -206,7 +206,9 @@ None.
   and `HEAD` get `405`. A malformed token is answered `404` without a lookup. Under `/api/v1`, where the spec's path
   of the feed is no operation, `/api/v1/ical/…` answers the API's `404` `not-found` problem, without the `instance`
   that would repeat the token: `writeProblem` leaves out `instance` for every path under `/api/v1/ical/`, whatever
-  the status — the `405` of another method and the `404` of the paths around the feed's included (review H1) — and
+  the status — the `405` of another method and the `404` of the paths around the feed's included (review H1), the
+  path compared once cleaned, so `/api/v1//ical/…` and `/api/v1/./ical/…` too, and for any path that carries
+  `mstr_cal_` — and
   the probe `ical_feed` of lint 5 sends the secrets along these paths too. The SPA's generated client (orval) keeps
   `getIcalCalendar` under its base `/api/v1`, as it does the operations of the ingest and internal listeners;
   nothing calls it, and its mock stays (review L6a, accepted).

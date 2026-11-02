@@ -153,6 +153,9 @@ func TestIcalFeedOperations(t *testing.T) {
 		{http.MethodHead, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/api/v1/ical/" + icalToken, http.StatusNotFound},
 		{http.MethodGet, "/api/v1/ical/" + icalToken + ".ics/x", http.StatusNotFound},
+		{http.MethodGet, "/api/v1//ical/" + icalToken + ".ics", http.StatusNotFound},
+		{http.MethodGet, "/api/v1/./ical/" + icalToken + ".ics", http.StatusNotFound},
+		{http.MethodGet, "/api/v1/nothing/" + icalToken, http.StatusNotFound},
 		{http.MethodPost, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
 		{http.MethodDelete, "/api/v1/ical/" + icalToken + ".ics", http.StatusMethodNotAllowed},
 	} {

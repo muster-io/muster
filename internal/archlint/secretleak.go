@@ -1244,10 +1244,13 @@ func probeIcalFeed(ctx context.Context, secrets []string, log io.Writer) error {
 	}
 	for _, token := range append(slices.Clone(secrets), value) {
 		escaped := url.PathEscape(token)
-		for _, req := range [][2]string{{http.MethodGet, escaped + schedules.FeedSuffix},
-			{http.MethodPost, escaped + schedules.FeedSuffix}, {http.MethodGet, escaped},
-			{http.MethodGet, escaped + schedules.FeedSuffix + "/x"}} {
-			r, err := http.NewRequestWithContext(ctx, req[0], api.BasePath+schedules.FeedBasePath+req[1], nil)
+		feed := api.BasePath + schedules.FeedBasePath
+		for _, req := range [][2]string{{http.MethodGet, feed + escaped + schedules.FeedSuffix},
+			{http.MethodPost, feed + escaped + schedules.FeedSuffix}, {http.MethodGet, feed + escaped},
+			{http.MethodGet, feed + escaped + schedules.FeedSuffix + "/x"},
+			{http.MethodGet, api.BasePath + "/" + feed[len(api.BasePath):] + escaped + schedules.FeedSuffix},
+			{http.MethodGet, api.BasePath + "/." + feed[len(api.BasePath):] + escaped + schedules.FeedSuffix}} {
+			r, err := http.NewRequestWithContext(ctx, req[0], req[1], nil)
 			if err != nil {
 				errs = append(errs, err)
 				continue
