@@ -4,7 +4,7 @@
  */
 
 /**
- * `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`: no sign-in has carried the groups claim yet, so group mappings have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
+ * `nobody_can_sign_in`: the mapping is empty and unmatched users get no Role. `groups_claim_missing`, one per claim, named by `claim` — the groups claim and every claim an entry of the mapping names: no sign-in has carried the claim yet, so the entries that read it have not matched anyone yet: no sign-in has seen it in an ID token or userinfo since the groups claim, the issuer, the client ID or the scopes last changed, and the latest check found discovery not advertising it. `secret_expiring`: see `expires_on`. `last_admin_kept`: Role sync left `user` as Admin because they are the last active Admin, although the identity provider maps them to `role`.
  */
 export type OidcWarningKind = typeof OidcWarningKind[keyof typeof OidcWarningKind];
 

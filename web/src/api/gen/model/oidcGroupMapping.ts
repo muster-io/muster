@@ -4,8 +4,19 @@
  */
 import type { RoleName } from './roleName';
 
+/**
+ * An entry of the Role mapping. When the entries map a person to several Roles, the highest wins.
+ */
 export interface OidcGroupMapping {
-  /** @minLength 1 */
+  /**
+     * The claim the entry reads, by its exact name, from the ID token and then from userinfo; omitted or empty reads `groups_claim`. GitLab's role claims are `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer`, and GitLab puts them in userinfo.
+     * @maxLength 200
+     */
+  claim?: string;
+  /**
+     * A value of the claim, matched exactly, or a subtree `a/b/*`, which matches `a/b` and every group below it at `/` boundaries — `a/b/c`, never `a/bx`. There are no other wildcards. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422` `invalid_format` at the entry's `group`.
+     * @maxLength 200
+     */
   group: string;
   role: RoleName;
 }

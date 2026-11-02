@@ -34,4 +34,8 @@ type OidcSetting struct {
 	Version                 int64
 	UpdatedAt               time.Time
 	GroupsClaimSeenAt       pgtype.Timestamptz
+	RoleMappings            []byte
+	ClaimsSeen              []byte
+	ClaimsMissing           []string
+	ClaimsSupported         []string
 }

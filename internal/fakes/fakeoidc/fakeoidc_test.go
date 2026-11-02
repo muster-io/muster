@@ -344,3 +344,84 @@ func TestWithheldOfflineAccessGroupsInUserinfoAndKeyRotation(t *testing.T) {
 		t.Fatalf("a user without sub = %d", code)
 	}
 }
+
+// exchangeAs signs u in with scope and returns the claims of its ID token and of userinfo.
+func exchangeAs(t *testing.T, f *Fake, u User, scope string) (map[string]any, map[string]any) {
+	t.Helper()
+	f.SetNextUser(u)
+	q := authorize(t, f, scope)
+	status, body := post(t, f.URL()+"/token", url.Values{"grant_type": {"authorization_code"}, "code": {q.Get("code")},
+		"redirect_uri": {redirectURI}, "code_verifier": {verifier}, "client_id": {"muster"}}, "")
+	if status != http.StatusOK {
+		t.Fatalf("exchange = %d %v", status, body)
+	}
+	var info map[string]any
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, f.URL()+"/userinfo", nil)
+	req.Header.Set("Authorization", "Bearer "+body["access_token"].(string))
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&info)
+	_ = resp.Body.Close()
+	return verify(t, f, body["id_token"].(string)), info
+}
+
+// TestRoleClaims is the GitLab mode of S-116's facts: discovery lists the three role claims with groups and
+// groups_direct (F-116); a scripted user's role claims and groups come in userinfo alone, the ID token carrying
+// groups_direct (F-117); only the claims of the roles a user holds are present (F-119). The flavor keycloak puts them in
+// the ID token too, and /_fake/next-user takes role_claims and refuses an unknown role.
+func TestRoleClaims(t *testing.T) {
+	f := start(t)
+	f.Configure(Config{Flavor: new(FlavorGitLab)})
+	var d map[string]any
+	getJSON(t, f.URL()+"/.well-known/openid-configuration", &d)
+	claims := d["claims_supported"].([]any)
+	for _, c := range []string{RoleClaim(RoleOwner), RoleClaim(RoleMaintainer), RoleClaim(RoleDeveloper), GroupsClaim,
+		GroupsDirectClaim} {
+		if !slices.Contains(claims, any(c)) {
+			t.Errorf("discovery does not list %s: %v", c, claims)
+		}
+	}
+	owner := RoleClaim(RoleOwner)
+	alice := User{Subject: "g-1", Groups: []string{"example/platform", "example/platform/infra"},
+		GroupsDirect: []string{"example/platform"}, RoleClaims: map[string][]string{RoleOwner: {"example/platform"}}}
+	idt, info := exchangeAs(t, f, alice, "openid profile email")
+	if _, ok := idt[owner]; ok || idt[GroupsClaim] != nil || fmt.Sprint(idt[GroupsDirectClaim]) != "[example/platform]" {
+		t.Errorf("gitlab ID token = %v", idt)
+	}
+	if fmt.Sprint(info[owner]) != "[example/platform]" ||
+		fmt.Sprint(info[GroupsClaim]) != "[example/platform example/platform/infra]" {
+		t.Errorf("gitlab userinfo = %v", info)
+	}
+	for _, role := range []string{RoleMaintainer, RoleDeveloper} {
+		if _, ok := info[RoleClaim(role)]; ok {
+			t.Errorf("userinfo carries %s for an Owner only", role)
+		}
+	}
+
+	f.Configure(Config{Flavor: new(FlavorKeycloak)})
+	getJSON(t, f.URL()+"/.well-known/openid-configuration", &d)
+	if slices.Contains(d["claims_supported"].([]any), any(owner)) {
+		t.Errorf("keycloak discovery lists a role claim: %v", d["claims_supported"])
+	}
+	bob := User{Subject: "k-1", Groups: []string{"teams/payments"},
+		RoleClaims: map[string][]string{RoleMaintainer: {"teams/payments"}, RoleOwner: {}}}
+	idt, info = exchangeAs(t, f, bob, "openid")
+	maintainer := RoleClaim(RoleMaintainer)
+	if fmt.Sprint(idt[maintainer]) != "[teams/payments]" || fmt.Sprint(info[maintainer]) != "[teams/payments]" {
+		t.Errorf("keycloak: ID token %v, userinfo %v", idt, info)
+	}
+	if _, ok := idt[owner]; ok {
+		t.Error("a role without groups has a claim")
+	}
+
+	if code, _ := post(t, f.URL()+"/_fake/next-user", nil,
+		`{"sub":"x","role_claims":{"guest":["a"]}}`); code != http.StatusBadRequest {
+		t.Errorf("an unknown role = %d", code)
+	}
+	if code, _ := post(t, f.URL()+"/_fake/next-user", nil,
+		`{"sub":"x","role_claims":{"developer":["corp/team-a"]}}`); code != http.StatusNoContent {
+		t.Errorf("role_claims = %d", code)
+	}
+}
