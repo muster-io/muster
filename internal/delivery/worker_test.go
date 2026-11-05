@@ -32,6 +32,7 @@ import (
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 const orgID = 1
@@ -78,6 +79,8 @@ type (
 		name      string
 		threshold int64
 		snooze    []int64
+		// toTeams is "Also to the Teams from the label" (C-26.FR-2).
+		toTeams bool
 	}
 	fakeGroup struct {
 		id         int64
@@ -89,8 +92,9 @@ type (
 		route      int64
 		created    time.Time
 		resolvedAt *time.Time
-		// published is set once its first Publication was marked (first_published_at).
+		// published is set once its first Publication was marked (first_published_at); teams are its Teams.
 		published bool
+		teams     []int64
 	}
 	fakeDelivery struct {
 		id, dest, group                     int64
@@ -133,6 +137,8 @@ type (
 		restarted      *time.Time
 		superseded     []string
 		supersededKeys []string
+		// entries are the entries that reached the delivery, as deliveries.entries stores them.
+		entries []byte
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -207,6 +213,11 @@ type fakeDB struct {
 	// replyLocks are the rows the transactions of Thread replies locked, in order: "delivery" for LockReplyDelivery,
 	// "reply" for GetLeasedReply, "sent" for RecordReplySent.
 	replyLocks []string
+	// The reach (enqueue_test.go): the Severity conditions of the Route Destinations by Route and Destination, any when
+	// missing, the Destinations of each Team and the Teams by id.
+	conditions map[int64]map[int64]string
+	teamDests  map[int64][]routing.Entry
+	teamRefs   map[int64]dbgen.ListEntryTeamsRow
 }
 
 // sqlBool is a boolean of SQL — true, false or NULL — with its three-valued logic, so that the fake meets a NULL where
@@ -360,7 +371,7 @@ func (f *fakeDB) ListRouteDestinations(_ context.Context, arg dbgen.ListRouteDes
 				Type: d.typ, ConnectionID: nullInt(d.connection), Health: d.health,
 				WebhookMode:    pgtype.Text{String: d.mode, Valid: d.mode != ""},
 				WebhookReplies: d.typ == delivery.TypeWebhook && !d.noReplies, Buttons: d.buttons,
-				OrganizationButtons: f.orgButtons})
+				OrganizationButtons: f.orgButtons, SeverityCondition: cmp.Or(f.conditions[arg.RouteID][id], "any")})
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListRouteDestinationsRow) int { return cmp.Compare(a.ID, b.ID) })
@@ -379,7 +390,7 @@ func (f *fakeDB) GetRouteDelivery(_ context.Context, arg dbgen.GetRouteDeliveryP
 		return dbgen.GetRouteDeliveryRow{}, pgx.ErrNoRows
 	}
 	return dbgen.GetRouteDeliveryRow{PublicID: r.publicID, Name: r.name, Language: r.language,
-		ThreadBatchingWindowSeconds: r.window, StormThreshold: r.threshold}, nil
+		ThreadBatchingWindowSeconds: r.window, StormThreshold: r.threshold, DeliverToTeams: r.toTeams}, nil
 }
 
 func (f *fakeDB) ShareRouteMembership(_ context.Context, arg dbgen.ShareRouteMembershipParams) error {
@@ -398,15 +409,23 @@ func (f *fakeDB) EnsureDelivery(_ context.Context, arg dbgen.EnsureDeliveryParam
 	if err := f.call("EnsureDelivery"); err != nil {
 		return dbgen.EnsureDeliveryRow{}, err
 	}
+	if arg.Entries == nil {
+		return dbgen.EnsureDeliveryRow{}, errors.New(`null value in column "entries"`)
+	}
 	for _, d := range f.deliveries {
 		if d.group == arg.AlertGroupID.Int64 && d.dest == arg.DestinationID {
+			entries, err := appendEntries(d.entries, arg.Entries)
+			if err != nil {
+				return dbgen.EnsureDeliveryRow{}, err
+			}
+			d.entries = entries
 			return dbgen.EnsureDeliveryRow{ID: d.id, DesiredVersion: d.version, DesiredHash: d.hash,
 				ThreadBatchUntil: tz(d.batchUntil), State: d.state, HeldByStormID: heldOf(d)}, nil
 		}
 	}
 	d := &fakeDelivery{id: f.id(), dest: arg.DestinationID, group: arg.AlertGroupID.Int64, state: "pending",
 		urgent: arg.Urgent, loud: arg.PublicationLoud, next: arg.Now, threadState: "none", updated: arg.Now,
-		heldBy: arg.HeldByStormID.Int64}
+		heldBy: arg.HeldByStormID.Int64, entries: arg.Entries}
 	f.deliveries = append(f.deliveries, d)
 	return dbgen.EnsureDeliveryRow{ID: d.id, State: d.state, HeldByStormID: heldOf(d), Inserted: true}, nil
 }
@@ -725,7 +744,8 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	ended := endedRow(d)
 	raced := ended && d.publishedAt == nil && arg.Published
 	g := f.groups[d.group]
-	left := f.dests[d.dest].deleted || g == nil || !slices.Contains(f.routeDests[g.route], d.dest)
+	left := f.dests[d.dest].deleted || g == nil || (!slices.Contains(f.routeDests[g.route], d.dest) &&
+		!f.teamReaches(g, d.dest))
 	// desired_retire = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination)
 	retire, err := notNull("desired_retire", sqlIs(d.desiredRetire).or(sqlIs(raced).and(sqlIs(d.storm == 0)).and(
 		sqlIs(left))))
@@ -1233,7 +1253,11 @@ func (f *fakeDB) ListGroupDeliveries(_ context.Context, arg dbgen.ListGroupDeliv
 			continue
 		}
 		ds := f.dests[d.dest]
-		out = append(out, dbgen.ListGroupDeliveriesRow{State: d.state, ThreadState: d.threadState,
+		entries := d.entries
+		if entries == nil {
+			entries = []byte("[]")
+		}
+		out = append(out, dbgen.ListGroupDeliveriesRow{State: d.state, ThreadState: d.threadState, Entries: entries,
 			PossibleDuplicate: d.possibleDuplicate, PastEditWindow: d.pastEditWindow, MessageUrl: txt(d.messageURL),
 			LastError: txt(d.lastError),
 			UpdatedAt: d.updated, DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,

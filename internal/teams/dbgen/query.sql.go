@@ -66,6 +66,23 @@ func (q *Queries) DeleteTeam(ctx context.Context, arg DeleteTeamParams) error {
 	return err
 }
 
+const deleteTeamDestinations = `-- name: DeleteTeamDestinations :exec
+DELETE FROM team_destinations
+WHERE org_id = $1 AND team_id = $2 AND destination_id = ANY($3::bigint[])
+`
+
+type DeleteTeamDestinationsParams struct {
+	OrgID          int64
+	TeamID         int64
+	DestinationIds []int64
+}
+
+// DeleteTeamDestinations removes Destinations from a Team.
+func (q *Queries) DeleteTeamDestinations(ctx context.Context, arg DeleteTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, deleteTeamDestinations, arg.OrgID, arg.TeamID, arg.DestinationIds)
+	return err
+}
+
 const deleteTeamIdpEntries = `-- name: DeleteTeamIdpEntries :exec
 DELETE FROM team_idp_entries
 WHERE org_id = $1 AND team_id = $2
@@ -792,6 +809,66 @@ func (q *Queries) ListLinkedMessengers(ctx context.Context, arg ListLinkedMessen
 	return items, nil
 }
 
+const listTeamDestinations = `-- name: ListTeamDestinations :many
+
+SELECT td.team_id, td.destination_id, td.severity_condition, d.public_id, d.name, d.type, d.health, d.broken_since,
+       d.broken_reason
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+WHERE td.org_id = $1 AND td.team_id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, d.public_id
+`
+
+type ListTeamDestinationsParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamDestinationsRow struct {
+	TeamID            int64
+	DestinationID     int64
+	SeverityCondition string
+	PublicID          string
+	Name              string
+	Type              string
+	Health            string
+	BrokenSince       pgtype.Timestamptz
+	BrokenReason      pgtype.Text
+}
+
+// The Destinations of the Teams (C-26.FR-1).
+// ListTeamDestinations lists the Destinations that are not deleted of the Teams with their Severity conditions and
+// their health, by Team, then by public_id.
+func (q *Queries) ListTeamDestinations(ctx context.Context, arg ListTeamDestinationsParams) ([]ListTeamDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamDestinations, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamDestinationsRow{}
+	for rows.Next() {
+		var i ListTeamDestinationsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.DestinationID,
+			&i.SeverityCondition,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.Health,
+			&i.BrokenSince,
+			&i.BrokenReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamIdpEntries = `-- name: ListTeamIdpEntries :many
 SELECT team_id, claim, group_name
 FROM team_idp_entries
@@ -1421,6 +1498,44 @@ func (q *Queries) ReleaseOwnedRoutes(ctx context.Context, arg ReleaseOwnedRoutes
 	return items, nil
 }
 
+const resolveTeamDestinations = `-- name: ResolveTeamDestinations :many
+SELECT id, public_id
+FROM destinations
+WHERE org_id = $1 AND public_id = ANY($2::text[]) AND deleted_at IS NULL
+`
+
+type ResolveTeamDestinationsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveTeamDestinationsRow struct {
+	ID       int64
+	PublicID string
+}
+
+// ResolveTeamDestinations reads the Destinations that are not deleted among the public_ids, for the Destinations of
+// a Team.
+func (q *Queries) ResolveTeamDestinations(ctx context.Context, arg ResolveTeamDestinationsParams) ([]ResolveTeamDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, resolveTeamDestinations, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveTeamDestinationsRow{}
+	for rows.Next() {
+		var i ResolveTeamDestinationsRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setIdpMatches = `-- name: SetIdpMatches :exec
 UPDATE team_users
 SET idp_matches = $1
@@ -1482,6 +1597,34 @@ func (q *Queries) UpdateTeam(ctx context.Context, arg UpdateTeamParams) error {
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertTeamDestinations = `-- name: UpsertTeamDestinations :exec
+INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+SELECT $1, $2, d.id, d.condition, $3
+FROM (SELECT unnest($4::bigint[]) AS id, unnest($5::text[]) AS condition) AS d
+ON CONFLICT (team_id, destination_id) DO UPDATE SET severity_condition = excluded.severity_condition
+`
+
+type UpsertTeamDestinationsParams struct {
+	OrgID          int64
+	TeamID         int64
+	Now            time.Time
+	DestinationIds []int64
+	Conditions     []string
+}
+
+// UpsertTeamDestinations adds Destinations to a Team with their Severity conditions, added now, and changes the
+// condition of those it keeps, which keep when they were added.
+func (q *Queries) UpsertTeamDestinations(ctx context.Context, arg UpsertTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, upsertTeamDestinations,
+		arg.OrgID,
+		arg.TeamID,
+		arg.Now,
+		arg.DestinationIds,
+		arg.Conditions,
 	)
 	return err
 }

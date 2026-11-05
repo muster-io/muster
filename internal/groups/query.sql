@@ -127,6 +127,22 @@ FROM alert_group_counters
 WHERE org_id = @org_id
 FOR UPDATE;
 
+-- LockRouteStorm locks the active Storm of a Route that grouping creates an Alert Group in FOR NO KEY UPDATE, and
+-- ShareRouteStorm the active Storm of any other Route whose Alert Groups it changes FOR SHARE: both before the first
+-- change of an Alert Group, in Route id order, so that every grouping transaction takes its Storms in one order and
+-- none upgrades a Storm it shares (delivery's JoinStorm after its LockActiveStorm, the same predicate).
+-- name: LockRouteStorm :many
+SELECT id
+FROM storms
+WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL
+FOR NO KEY UPDATE;
+
+-- name: ShareRouteStorm :many
+SELECT id
+FROM storms
+WHERE org_id = @org_id AND route_id = @route_id AND ended_at IS NULL
+FOR SHARE;
+
 -- NextNumber takes the next #N; a rollback returns it, so no gap appears.
 -- name: NextNumber :one
 UPDATE alert_group_counters
@@ -241,7 +257,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -251,7 +267,8 @@ VALUES (
     sqlc.narg('previous_owner_user_id'), sqlc.narg('snooze_until'), sqlc.narg('fingerprints')::text[],
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
     sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count'),
-    sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value')
+    sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value'),
+    sqlc.narg('destination_id')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -483,7 +500,7 @@ ORDER BY p.alert_id, g.group_key;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -497,7 +514,7 @@ LIMIT @lim;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -1274,3 +1291,56 @@ SELECT team_id
 FROM team_users
 WHERE org_id = @org_id AND user_id = @user_id
 ORDER BY team_id;
+
+-- The reach of an Alert Group (C-26.FR-2 to FR-5): the dispatcher reads it, under the Route's membership lock, after a
+-- transition that Alerts made, to record destination_joined in each Destination it reaches without a delivery yet.
+
+-- ShareRouteMembership takes, until the transaction ends, the shared membership lock of a Route (class
+-- db.RouteMembershipLockClass), which a change of its Destinations takes exclusively, before the reach is read: the
+-- dispatcher takes it after its lock of the Alert Group, the order Enqueue keeps, which takes it again.
+-- name: ShareRouteMembership :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@route_id::bigint));
+
+-- GetRouteDeliverToTeams reads "Also to the Teams from the label" of a Route, deleted or not.
+-- name: GetRouteDeliverToTeams :one
+SELECT deliver_to_teams
+FROM routes
+WHERE org_id = @org_id AND id = @id;
+
+-- ListGroupTeamIDs lists the Teams of an Alert Group by id, deleted ones included.
+-- name: ListGroupTeamIDs :many
+SELECT team_id
+FROM alert_group_teams
+WHERE org_id = @org_id AND alert_group_id = @alert_group_id
+ORDER BY team_id;
+
+-- ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
+-- those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
+-- message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
+-- there, by Destination.
+-- name: ListReachEntries :many
+SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d.name, d.type,
+       EXISTS (SELECT 1
+               FROM deliveries x
+               WHERE x.org_id = @org_id AND x.alert_group_id = @alert_group_id::bigint
+                 AND x.destination_id = e.destination_id)::boolean AS delivered
+FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
+      FROM route_destinations rd
+      WHERE rd.org_id = @org_id AND rd.route_id = @route_id
+      UNION ALL
+      SELECT 'team'::text, td.team_id, td.destination_id, td.severity_condition
+      FROM team_destinations td
+      WHERE td.org_id = @org_id
+        AND td.team_id IN (SELECT t.team_id
+                           FROM alert_group_teams t
+                           WHERE t.org_id = @org_id AND t.alert_group_id = @alert_group_id::bigint)) e
+JOIN destinations d ON d.org_id = @org_id AND d.id = e.destination_id
+WHERE d.deleted_at IS NULL AND (d.type <> 'webhook' OR d.webhook_mode IS DISTINCT FROM 'events')
+ORDER BY e.destination_id, e.kind, e.team_id;
+
+-- ListTimelineDestinations names the Destinations of destination_joined entries, deleted ones included, with their
+-- health.
+-- name: ListTimelineDestinations :many
+SELECT id, public_id, name, type, health, broken_since, broken_reason
+FROM destinations
+WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);

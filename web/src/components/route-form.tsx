@@ -136,7 +136,7 @@ export function formValues(base: RouteInput): FormValues {
     minimum_severity: base.minimum_severity ?? "none",
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
-    destination_ids: [...base.destination_ids],
+    destination_ids: [...(base.destination_ids ?? [])],
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
     message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
@@ -354,7 +354,7 @@ export function RouteForm({
         return;
       }
       applyFieldProblem(err, sent);
-      const byDestination = destinationErrors(err.errors ?? [], input.destination_ids);
+      const byDestination = destinationErrors(err.errors ?? [], input.destination_ids ?? []);
       setServerDestinationErrors(byDestination);
       const rest: string[] = [];
       const byTemplate: Partial<Record<MessageTemplate, ProblemError[]>> = {};
@@ -393,7 +393,7 @@ export function RouteForm({
             { type: item.code, message: item.code },
             { shouldFocus: true },
           );
-        } else if (destinationOfPointer(item.pointer, input.destination_ids) !== undefined) {
+        } else if (destinationOfPointer(item.pointer, input.destination_ids ?? []) !== undefined) {
           // Shown at the Destination it is about; the focus goes to the section's picker.
           document.getElementById(`${ID}-destinations-add`)?.focus();
         } else if (item.pointer === "/description") {
@@ -493,7 +493,7 @@ export function RouteForm({
         </div>
         <RouteDestinations
           id={`${ID}-destinations`}
-          value={base.destination_ids}
+          value={base.destination_ids ?? []}
           route={route}
           readOnly
         />

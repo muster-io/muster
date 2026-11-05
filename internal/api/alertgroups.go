@@ -672,6 +672,10 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		if e.TeamValue != nil {
 			v.TeamValue.Set(*e.TeamValue)
 		}
+		if d := e.Destination; d != nil {
+			v.Destination = &gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
+				Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
+		}
 		err = out.FromTimelineSystemEntry(v)
 	}
 	if err != nil {
@@ -731,6 +735,18 @@ func (s *Server) ListAlertGroupDeliveries(ctx context.Context, req gen.ListAlert
 			PossibleDuplicate: st.PossibleDuplicate, PastEditWindow: st.PastEditWindow,
 			MessageUrl: nullableString(st.MessageURL),
 			Error:      nullableString(st.Error), UpdatedAt: &updated,
+			Entries: make([]gen.DeliveryEntry, 0, len(st.Entries)),
+		}
+		for _, e := range st.Entries {
+			entry := gen.DeliveryEntry{Kind: gen.DeliveryEntryKind(e.Kind),
+				SeverityCondition: gen.SeverityCondition(e.Condition)}
+			if e.Team != nil {
+				entry.Team.Set(gen.TeamRef{Id: e.Team.PublicID, Name: e.Team.Name, Slug: e.Team.Slug,
+					Deleted: e.Team.Deleted})
+			} else {
+				entry.Team.SetNull()
+			}
+			item.Entries = append(item.Entries, entry)
 		}
 		out.Items = append(out.Items, item)
 	}

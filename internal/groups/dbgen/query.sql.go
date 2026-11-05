@@ -935,6 +935,25 @@ func (q *Queries) GetRetentionPeriods(ctx context.Context, orgID int64) (GetRete
 	return i, err
 }
 
+const getRouteDeliverToTeams = `-- name: GetRouteDeliverToTeams :one
+SELECT deliver_to_teams
+FROM routes
+WHERE org_id = $1 AND id = $2
+`
+
+type GetRouteDeliverToTeamsParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// GetRouteDeliverToTeams reads "Also to the Teams from the label" of a Route, deleted or not.
+func (q *Queries) GetRouteDeliverToTeams(ctx context.Context, arg GetRouteDeliverToTeamsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, getRouteDeliverToTeams, arg.OrgID, arg.ID)
+	var deliver_to_teams bool
+	err := row.Scan(&deliver_to_teams)
+	return deliver_to_teams, err
+}
+
 const getRoutePolicy = `-- name: GetRoutePolicy :one
 SELECT id, public_id, is_default, minimum_severity, group_key, reopen_window_seconds, grace_period_seconds,
        urgent_rise_removes_ack
@@ -1243,7 +1262,7 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1253,7 +1272,8 @@ VALUES (
     $21, $22, $23::text[],
     $24, $25::text[], $26,
     $27, $28, $29, $30,
-    $31, $32, $33, $34
+    $31, $32, $33, $34,
+    $35
 )
 `
 
@@ -1292,6 +1312,7 @@ type InsertTimelineEntryParams struct {
 	TeamRule              pgtype.Text
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
+	DestinationID         pgtype.Int8
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1331,6 +1352,7 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.TeamRule,
 		arg.TeamMatcher,
 		arg.TeamValue,
+		arg.DestinationID,
 	)
 	return err
 }
@@ -1918,6 +1940,39 @@ func (q *Queries) ListGroupFiringAlerts(ctx context.Context, arg ListGroupFiring
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupTeamIDs = `-- name: ListGroupTeamIDs :many
+SELECT team_id
+FROM alert_group_teams
+WHERE org_id = $1 AND alert_group_id = $2
+ORDER BY team_id
+`
+
+type ListGroupTeamIDsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// ListGroupTeamIDs lists the Teams of an Alert Group by id, deleted ones included.
+func (q *Queries) ListGroupTeamIDs(ctx context.Context, arg ListGroupTeamIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGroupTeamIDs, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -3236,6 +3291,77 @@ func (q *Queries) ListOwnedGroups(ctx context.Context, arg ListOwnedGroupsParams
 	return items, nil
 }
 
+const listReachEntries = `-- name: ListReachEntries :many
+SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d.name, d.type,
+       EXISTS (SELECT 1
+               FROM deliveries x
+               WHERE x.org_id = $1 AND x.alert_group_id = $2::bigint
+                 AND x.destination_id = e.destination_id)::boolean AS delivered
+FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
+      FROM route_destinations rd
+      WHERE rd.org_id = $1 AND rd.route_id = $3
+      UNION ALL
+      SELECT 'team'::text, td.team_id, td.destination_id, td.severity_condition
+      FROM team_destinations td
+      WHERE td.org_id = $1
+        AND td.team_id IN (SELECT t.team_id
+                           FROM alert_group_teams t
+                           WHERE t.org_id = $1 AND t.alert_group_id = $2::bigint)) e
+JOIN destinations d ON d.org_id = $1 AND d.id = e.destination_id
+WHERE d.deleted_at IS NULL AND (d.type <> 'webhook' OR d.webhook_mode IS DISTINCT FROM 'events')
+ORDER BY e.destination_id, e.kind, e.team_id
+`
+
+type ListReachEntriesParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	RouteID      int64
+}
+
+type ListReachEntriesRow struct {
+	Kind              string
+	TeamID            int64
+	DestinationID     int64
+	SeverityCondition string
+	PublicID          string
+	Name              string
+	Type              string
+	Delivered         bool
+}
+
+// ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
+// those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
+// message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
+// there, by Destination.
+func (q *Queries) ListReachEntries(ctx context.Context, arg ListReachEntriesParams) ([]ListReachEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listReachEntries, arg.OrgID, arg.AlertGroupID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReachEntriesRow{}
+	for rows.Next() {
+		var i ListReachEntriesRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.TeamID,
+			&i.DestinationID,
+			&i.SeverityCondition,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.Delivered,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRelatedGroups = `-- name: ListRelatedGroups :many
 SELECT g.id, g.public_id, g.number, g.status, g.created_at, g.resolved_at, g.resolved_by_kind, g.resolved_by_user_id,
        g.resolved_by_service_account_id, g.resolve_reason, g.resolve_reason_text
@@ -3596,7 +3722,7 @@ const listTimelineAsc = `-- name: ListTimelineAsc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -3649,6 +3775,7 @@ type ListTimelineAscRow struct {
 	TeamRule              pgtype.Text
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
+	DestinationID         pgtype.Int8
 }
 
 // ListTimelineAsc reads the Timeline entries of an Alert Group, oldest first, after a position.
@@ -3702,6 +3829,7 @@ func (q *Queries) ListTimelineAsc(ctx context.Context, arg ListTimelineAscParams
 			&i.TeamRule,
 			&i.TeamMatcher,
 			&i.TeamValue,
+			&i.DestinationID,
 		); err != nil {
 			return nil, err
 		}
@@ -3796,7 +3924,7 @@ const listTimelineDesc = `-- name: ListTimelineDesc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -3849,6 +3977,7 @@ type ListTimelineDescRow struct {
 	TeamRule              pgtype.Text
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
+	DestinationID         pgtype.Int8
 }
 
 // The Timeline merges three sources by (at, source, id): its entries (source 0), Notes (1) and delivery events (2).
@@ -3904,6 +4033,58 @@ func (q *Queries) ListTimelineDesc(ctx context.Context, arg ListTimelineDescPara
 			&i.TeamRule,
 			&i.TeamMatcher,
 			&i.TeamValue,
+			&i.DestinationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTimelineDestinations = `-- name: ListTimelineDestinations :many
+SELECT id, public_id, name, type, health, broken_since, broken_reason
+FROM destinations
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListTimelineDestinationsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListTimelineDestinationsRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	Type         string
+	Health       string
+	BrokenSince  pgtype.Timestamptz
+	BrokenReason pgtype.Text
+}
+
+// ListTimelineDestinations names the Destinations of destination_joined entries, deleted ones included, with their
+// health.
+func (q *Queries) ListTimelineDestinations(ctx context.Context, arg ListTimelineDestinationsParams) ([]ListTimelineDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listTimelineDestinations, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTimelineDestinationsRow{}
+	for rows.Next() {
+		var i ListTimelineDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.Health,
+			&i.BrokenSince,
+			&i.BrokenReason,
 		); err != nil {
 			return nil, err
 		}
@@ -4433,6 +4614,42 @@ func (q *Queries) LockRouteForMove(ctx context.Context, arg LockRouteForMovePara
 	return i, err
 }
 
+const lockRouteStorm = `-- name: LockRouteStorm :many
+SELECT id
+FROM storms
+WHERE org_id = $1 AND route_id = $2 AND ended_at IS NULL
+FOR NO KEY UPDATE
+`
+
+type LockRouteStormParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+// LockRouteStorm locks the active Storm of a Route that grouping creates an Alert Group in FOR NO KEY UPDATE, and
+// ShareRouteStorm the active Storm of any other Route whose Alert Groups it changes FOR SHARE: both before the first
+// change of an Alert Group, in Route id order, so that every grouping transaction takes its Storms in one order and
+// none upgrades a Storm it shares (delivery's JoinStorm after its LockActiveStorm, the same predicate).
+func (q *Queries) LockRouteStorm(ctx context.Context, arg LockRouteStormParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockRouteStorm, arg.OrgID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRoutes = `-- name: LockRoutes :many
 SELECT id, public_id, is_default, minimum_severity, group_key, reopen_window_seconds, grace_period_seconds,
        urgent_rise_removes_ack
@@ -4876,6 +5093,58 @@ SAVEPOINT grouping
 func (q *Queries) SavepointGrouping(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, savepointGrouping)
 	return err
+}
+
+const shareRouteMembership = `-- name: ShareRouteMembership :exec
+
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareRouteMembershipParams struct {
+	LockClass int32
+	RouteID   int64
+}
+
+// The reach of an Alert Group (C-26.FR-2 to FR-5): the dispatcher reads it, under the Route's membership lock, after a
+// transition that Alerts made, to record destination_joined in each Destination it reaches without a delivery yet.
+// ShareRouteMembership takes, until the transaction ends, the shared membership lock of a Route (class
+// db.RouteMembershipLockClass), which a change of its Destinations takes exclusively, before the reach is read: the
+// dispatcher takes it after its lock of the Alert Group, the order Enqueue keeps, which takes it again.
+func (q *Queries) ShareRouteMembership(ctx context.Context, arg ShareRouteMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const shareRouteStorm = `-- name: ShareRouteStorm :many
+SELECT id
+FROM storms
+WHERE org_id = $1 AND route_id = $2 AND ended_at IS NULL
+FOR SHARE
+`
+
+type ShareRouteStormParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+func (q *Queries) ShareRouteStorm(ctx context.Context, arg ShareRouteStormParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, shareRouteStorm, arg.OrgID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateMemberships = `-- name: UpdateMemberships :exec

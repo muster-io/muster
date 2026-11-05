@@ -201,6 +201,11 @@ test("creates a Mattermost Destination, refusing a channel without the bot next 
     "Choose a channel",
     "alerts",
     "Alerts prod (alerts-prod)",
+    "infra-critical",
+    "infra-notice",
+    "payments-critical",
+    "payments-notice",
+    "search-notice",
   ]);
   await expect(
     page.getByText(

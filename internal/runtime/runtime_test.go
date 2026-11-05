@@ -608,6 +608,11 @@ func (fakeDestinationsStore) ListDestinationRoutes(context.Context, destdb.ListD
 	return nil, nil
 }
 
+func (fakeDestinationsStore) ListDestinationTeams(context.Context, destdb.ListDestinationTeamsParams) (
+	[]destdb.ListDestinationTeamsRow, error) {
+	return nil, nil
+}
+
 func (fakeDestinationsStore) ListRouteDestinationRefs(context.Context, destdb.ListRouteDestinationRefsParams) (
 	[]destdb.ListRouteDestinationRefsRow, error) {
 	return nil, nil

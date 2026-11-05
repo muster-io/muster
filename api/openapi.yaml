@@ -5576,8 +5576,8 @@ paths:
       description: '`type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost,
         Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one
         that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also
-        generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach
-        Destinations through `destination_ids`.'
+        generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams
+        attach Destinations through their `destination_entries`.'
       x-permission: destinations:write
       x-listener: app
       security:
@@ -11759,6 +11759,16 @@ components:
             an update to keep the entries; a creation without it has none.
           items:
             $ref: '#/components/schemas/TeamIdpEntry'
+        destination_entries:
+          type: array
+          maxItems: 100
+          description: The Destinations of the Team (C-26.FR-1), each once with its Severity condition, where the Alert
+            Groups of the Team arrive from the Routes that deliver to the Teams from the label (`deliver_to_teams`).
+            Replaced as a whole; omit it on an update to keep the entries, and a creation without it has none. A
+            Destination that is unknown or deleted is refused with `422` `unknown_id`, and one named twice with
+            `duplicate`, at the entry's `destination_id`. A change reaches the open Alert Groups at their next change.
+          items:
+            $ref: '#/components/schemas/DestinationEntry'
     TeamIdpEntry:
       type: object
       description: An identity provider entry of a Team.
@@ -11787,12 +11797,19 @@ components:
         - working_hours
         - matchers
         - idp_entries
+        - destination_entries
+        - destinations
         - user_count
         - created_at
         - etag
         properties:
           id:
             $ref: '#/components/schemas/PublicId'
+          destinations:
+            type: array
+            description: The Destinations of the Team's `destination_entries`, by name, with their health.
+            items:
+              $ref: '#/components/schemas/DestinationRef'
           user_count:
             type: integer
             description: How many people are in the Team, disabled Users included.
@@ -12579,7 +12596,6 @@ components:
       - name
       - matchers
       - group_key
-      - destination_ids
       - policy
       properties:
         name:
@@ -12609,10 +12625,35 @@ components:
             value.
           items:
             type: string
+        destination_entries:
+          type: array
+          maxItems: 100
+          description: The Route's Destinations (C-26.FR-1), each once with its Severity condition, checked against the
+            Severity level of each Alert Group of the Route. Replaced as a whole; an update that omits it and
+            `destination_ids` keeps them. A Destination that is unknown or deleted is refused with `422` `unknown_id`, and
+            one named twice with `duplicate`, at the entry's `destination_id`. A Destination may be named by several
+            Routes and Teams, each with its own condition; it gets one Root message for an Alert Group whichever entries
+            reach it.
+          items:
+            $ref: '#/components/schemas/DestinationEntry'
         destination_ids:
           type: array
+          deprecated: true
+          description: Derived from `destination_entries` on reads. When a request has no `destination_entries`, it sets
+            them, keeping the stored condition of each Destination it keeps and `any` for a new one; beside
+            `destination_entries` it is ignored. Removed in 0.3.0.
           items:
             $ref: '#/components/schemas/PublicId'
+        deliver_to_teams:
+          type: boolean
+          description: '"Also to the Teams from the label" (`route.deliver_to_teams`, C-26.FR-2): an Alert Group of the
+            Route also goes to the Destinations of each of its Teams whose Severity condition its Severity level meets.
+            Omitted on a create, false; omitted on an update, kept. The owning Team of the Route adds nothing.'
+        run_team_chains:
+          type: boolean
+          description: '"Run the Teams'' Escalation chains" (`route.run_team_chains`), read with `deliver_to_teams`:
+            stored and returned, and acting once Escalation chains run. Omitted on a create, true; omitted on an update,
+            kept.'
         owning_team_id:
           description: The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds
             delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with
@@ -12691,6 +12732,10 @@ components:
         - urgent
         - position
         - is_default
+        - destination_entries
+        - destination_ids
+        - deliver_to_teams
+        - run_team_chains
         - destinations
         - storm_active
         - open_alert_group_count
@@ -13639,6 +13684,7 @@ components:
       - notices_missed
       - team_joined
       - unknown_team_value
+      - destination_joined
       x-event-kinds:
         status:
         - created
@@ -13672,6 +13718,7 @@ components:
         system:
         - moved_to_default_route
         - unknown_team_value
+        - destination_joined
     Loudness:
       type: string
       enum:
@@ -13961,6 +14008,7 @@ components:
             - fallback_template_used
             - template_value_missing
             - unknown_team_value
+            - destination_joined
           event:
             description: Set for lifecycle events of kind `system`.
             $ref: '#/components/schemas/LifecycleEvent'
@@ -13989,6 +14037,9 @@ components:
             - string
             - 'null'
             description: The value of the Team label that names no Team, for `unknown_team_value`.
+          destination:
+            description: The Destination the Alert Group joined, for `destination_joined`.
+            $ref: '#/components/schemas/DestinationRef'
     TimelineEntry:
       description: One Timeline entry; `kind` selects the variant.
       oneOf:
@@ -14311,6 +14362,7 @@ components:
       type: object
       required:
       - destination
+      - entries
       - state
       - thread_not_attached
       - possible_duplicate
@@ -14318,6 +14370,12 @@ components:
       properties:
         destination:
           $ref: '#/components/schemas/DestinationRef'
+        entries:
+          type: array
+          description: The entries that reached the Destination, the Route's first; empty for a delivery made before
+            0.2.0 until the Alert Group's next change.
+          items:
+            $ref: '#/components/schemas/DeliveryEntry'
         state:
           $ref: '#/components/schemas/DeliveryState'
         thread_not_attached:
@@ -15666,6 +15724,50 @@ components:
           $ref: '#/components/schemas/DestinationType'
         health:
           $ref: '#/components/schemas/DestinationHealth'
+    SeverityCondition:
+      type: string
+      description: The Severity condition of a Destination of a Route or a Team (C-26.FR-1), checked against the Severity
+        level of the Alert Group, the highest level of its firing Alerts raised to the Route's Minimum severity. `any`
+        meets every level, `critical` only critical, `below_critical` every level but critical.
+      enum:
+      - any
+      - critical
+      - below_critical
+    DestinationEntry:
+      type: object
+      description: A Destination of a Route or a Team with its Severity condition.
+      required:
+      - destination_id
+      properties:
+        destination_id:
+          $ref: '#/components/schemas/PublicId'
+        severity_condition:
+          $ref: '#/components/schemas/SeverityCondition'
+          description: Omitted, `any`.
+    DeliveryEntry:
+      type: object
+      description: An entry that reached a Destination of an Alert Group (C-26.FR-3, FR-4), with the condition it had
+        when it first did. Entries are added and never removed, so a Destination keeps the entries that once reached it
+        after the Severity level fell or the Team's Alerts resolved.
+      required:
+      - kind
+      - team
+      - severity_condition
+      properties:
+        kind:
+          type: string
+          enum:
+          - route
+          - team
+          description: '`route`, the Alert Group''s Route, or `team`, a Team of the Alert Group on a Route with
+            `deliver_to_teams`.'
+        team:
+          description: The Team of a `team` entry, null for `route`.
+          oneOf:
+          - $ref: '#/components/schemas/TeamRef'
+          - type: 'null'
+        severity_condition:
+          $ref: '#/components/schemas/SeverityCondition'
     MentionSetting:
       type: object
       description: Whom to mention for one kind of Loud event. The default is nobody.
@@ -16025,12 +16127,18 @@ components:
       - id
       - health
       - routes
+      - teams
       - owning_team
       - created_at
       - etag
       properties:
         id:
           $ref: '#/components/schemas/PublicId'
+        teams:
+          type: array
+          description: The Teams that name the Destination as a Destination of the Team, by name.
+          items:
+            $ref: '#/components/schemas/TeamRef'
         owning_team:
           description: The Team that owns the Destination, null when none does.
           oneOf:
@@ -16181,8 +16289,8 @@ components:
           bridge: '#/components/schemas/BridgeDestination'
           slack: '#/components/schemas/SlackDestination'
     DestinationInput:
-      description: A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through
-        the Route's `destination_ids`.
+      description: A Destination as written; `type` selects the variant and cannot change on update. Routes and Teams
+        attach it through their `destination_entries`.
       oneOf:
       - $ref: '#/components/schemas/MattermostDestinationInput'
       - $ref: '#/components/schemas/TelegramDestinationInput'
@@ -17680,6 +17788,7 @@ components:
       - notices_missed
       - team_joined
       - unknown_team_value
+      - destination_joined
       - test
     WebhookMentionTarget:
       type: object
@@ -17824,6 +17933,20 @@ components:
           type: string
         slug:
           type: string
+    WebhookDestinationRef:
+      type: object
+      description: A Destination as an outgoing webhook event names it.
+      required:
+      - id
+      - name
+      - type
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/DestinationType'
     WebhookAlert:
       type: object
       required:
@@ -17903,6 +18026,9 @@ components:
           description: One element per Alert, by fingerprint.
           items:
             $ref: '#/components/schemas/WebhookAlert'
+        destination:
+          $ref: '#/components/schemas/WebhookDestinationRef'
+          description: The Destination the Alert Group joined, only on `destination_joined`.
         test:
           type: boolean
           description: True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert

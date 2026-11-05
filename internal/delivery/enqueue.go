@@ -5,16 +5,22 @@ package delivery
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // Form is how a lifecycle event appears in a messenger (the last column of the lifecycle event tables): a new Root
@@ -47,10 +53,11 @@ type Row struct {
 	EventMentions bool
 }
 
-// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11 and C-25 that delivery turns
-// into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row per
-// variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those it
-// leaves, a Quiet Publication in those it joins, an update in those of both.
+// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11, C-25 and C-26 that delivery
+// turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
+// per variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those
+// it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
+// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update.
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -76,6 +83,10 @@ var Table = []Row{
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventDestinationJoined, groups.VariantFiring, FormPublication, groups.Loud,
+		[]groups.Mention{groups.MentionNewAlertGroup}, false},
+	{groups.EventDestinationJoined, groups.VariantAcknowledged, FormPublication, groups.Quiet, nil, false},
+	{groups.EventDestinationJoined, groups.VariantSnoozed, FormPublication, groups.Quiet, nil, false},
 	{groups.EventUnacknowledged, groups.VariantOwnerReleased, FormReplyAndUpdate, groups.Loud, nil, false},
 	{groups.EventAcknowledged, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventTakeover, groups.VariantAny, FormReply, groups.Loud, []groups.Mention{groups.MentionPreviousOwner},
@@ -188,29 +199,41 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 	return out
 }
 
-// Enqueue is the re-render step of the dispatcher (C-11.FR-1, FR-20; groups.Rerender), in the dispatcher's
-// transaction tx. It renders the Root message once per markup of the Route's Destinations, reading through tx, and
-// reports each Route template that failed, whose message is the Fallback template, through r.Fallback (C-12.FR-6).
-// For each Destination of the Alert Group's Route that is not deleted it creates the delivery when it is missing and,
-// when what its Root message shows changed, stores it as the next Desired state, due now; the
-// lifecycle events whose form is a Thread reply queue one, new Alerts within the Thread batching window, or drop it
-// while the Destination is Broken, a Storm holds the delivery or it ended. A delivery created by `created` is a Loud
-// Publication unless a Storm of the Route holds it (C-11.FR-6); the first Publication of an Alert Group that resolves
-// is settled by the rules of late Publications and Broken Destinations; an Alert Group moved to the Default route gets
-// the final edit in the Destinations it leaves and a Quiet Publication in those it joins (C-09.FR-19). An outgoing
-// webhook in the events mode has no Root message: each lifecycle event is queued for it as one event (C-15.FR-2),
-// whether it is Broken or a Storm holds the Alert Group. It wakes the delivery workers once tx commits.
+// Enqueue is the re-render step of the dispatcher (C-11.FR-1, FR-20; groups.Rerender), in the dispatcher's transaction
+// tx. It renders the Root message once per markup of the Destinations the Alert Group reaches, reading through tx, and
+// reports each Route template that failed, whose message is the Fallback template, through r.Fallback (C-12.FR-6). The
+// Destinations are those of its reach — its Route's entries whose Severity condition its level meets and, with "Also to
+// the Teams from the label", those of its Teams (routing.Reach, C-26.FR-2) — and those it reached before, which keep
+// their deliveries and are kept current until their final state (C-26.FR-4). For each it creates the delivery when it
+// is missing, with the entries that reach it appended (C-26.FR-3), and, when what its Root message shows changed,
+// stores it as the next Desired state, due now; the lifecycle events whose form is a Thread reply queue one, new Alerts
+// within the Thread batching window, or drop it while the Destination is Broken, a Storm holds the delivery or it
+// ended. A delivery created by `created` is a Loud Publication unless a Storm of the Route holds it (C-11.FR-6), and so
+// is one a Team or a rise adds before the first Publication, as part of it; one created by destination_joined is the
+// Publication of its row, Loud while the Alert Group fires, held during a Storm of the Route unless the Alert Group is
+// Urgent (C-26.FR-5); a missing delivery of a change of configuration, such as a raised Minimum severity or a Team
+// evaluated on a save (C-26.FR-9, C-25.FR-13), is a Quiet Publication, held where a Storm holds the Alert Group; none
+// has the Thread replies of its change. Only the causes by which the Destinations grow create deliveries (grows): a
+// fall of the level, a resolution or a Command updates those the Alert Group has. The first Publication of an Alert
+// Group that resolves is settled by the rules of late Publications and Broken Destinations; an Alert Group moved to the
+// Default route gets the final edit in the Destinations it leaves and a Quiet Publication in those it joins
+// (C-09.FR-19). An outgoing webhook in the events mode has no Root message: each lifecycle event is queued for it as
+// one event (C-15.FR-2), whether it is Broken or a Storm holds the Alert Group. It wakes the delivery workers once tx
+// commits.
 //
 // It first takes the Route's membership lock shared (ShareRouteMembership), which a change of the Route's Destinations
 // and the deletion of one of them take exclusively, so that an Enqueue and such a change serialize: neither misses a
-// delivery the other creates or retires. The membership lock closes no cycle: grouping holds the Route's row FOR SHARE
-// and takes this lock after it, and a change of the Destinations takes the row before this lock, so it waits for
-// grouping before it takes the lock; a Command or a timer holds only its Alert Group, FOR NO KEY UPDATE, which a change
-// of the Destinations never locks in a mode that waits for it — the foreign-key checks of its deliveries take FOR KEY
-// SHARE; the move to the Default route holds the Route's row and then the Alert Groups, but never this lock, which an
-// Enqueue takes without the row. While it waits nobody waits for a delivery row it holds: an Enqueue locks the
-// deliveries of its Route only after the lock, and a change of the Destinations locks those of its Route only after it.
-// The deliveries and Thread replies it then locks follow the lock order of worker.go.
+// delivery the other creates or retires. The dispatcher took the same lock before it read the reach it recorded joined
+// Destinations from, so the reach applied here is that one. The membership lock closes no cycle: grouping holds the
+// Route's row FOR SHARE and takes this lock after it, and a change of the Destinations takes the row before this lock,
+// so it waits for grouping before it takes the lock; a Command or a timer holds only its Alert Group, FOR NO KEY
+// UPDATE, which a change of the Destinations never locks in a mode that waits for it — the foreign-key checks of its
+// deliveries take FOR KEY SHARE; the move to the Default route holds the Route's row and then the Alert Groups, but
+// never this lock, which an Enqueue takes without the row. While it waits nobody waits for a delivery row it holds: an
+// Enqueue locks the deliveries of its Route only after the lock, and a change of the Destinations locks those of its
+// Route only after it. Right after the membership lock it takes the Route's Storm, before any delivery: the creation
+// joins or starts it, any other rendering locks the active one FOR SHARE, as a change of the Route's Destinations
+// does. The deliveries and Thread replies it then locks follow the lock order of worker.go.
 func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
 	q := s.store.queries(tx)
 	g := r.Group
@@ -230,35 +253,62 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			return fmt.Errorf("alert group #%d: the lifecycle event %s (%s) has no row in the delivery table", g.Number,
 				e.Event, e.Variant)
 		}
-		created = created || row.Form == FormPublication
+		created = created || e.Event == groups.EventCreated
 		moved = moved || e.Event == groups.EventMovedToDefaultRoute
 		if row.Form.replies() {
 			replies = append(replies, reply{event: e, row: row})
 		}
 	}
-	all, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
-	if err != nil {
-		return fmt.Errorf("list the destinations of alert group #%d: %w", g.Number, err)
-	}
-	dests, eventDests := splitDestinations(all)
-	now := s.clock.Now().UTC()
-	left := 0
-	if moved {
-		if left, err = s.leave(ctx, q, g, all, now); err != nil {
-			return err
-		}
-	}
-	if len(all) == 0 && !created {
-		return s.wake(ctx, q, left > 0)
-	}
 	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
 	if err != nil {
 		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
 	}
+	reached, err := s.reachOf(ctx, q, r, route.DeliverToTeams)
+	if err != nil {
+		return err
+	}
+	if reached, err = s.withJoined(ctx, q, r, reached); err != nil {
+		return err
+	}
+	now := s.clock.Now().UTC()
+	// The Route's Storm comes before every delivery the rendering locks (worker.go): the creation joins or starts it,
+	// any other rendering takes the active one FOR SHARE.
 	var st *storm
 	if created {
-		if st, err = s.joinStorm(ctx, q, g, route, now, later); err != nil {
+		st, err = s.joinStorm(ctx, q, g, route, now, later)
+	} else {
+		st, err = s.activeStorm(ctx, q, g.RouteID)
+	}
+	if err != nil {
+		return err
+	}
+	left := 0
+	if moved {
+		rows := make([]dbgen.ListRouteDestinationsRow, len(reached))
+		for i, t := range reached {
+			rows[i] = t.dest
+		}
+		if left, err = s.leave(ctx, q, g, rows, now); err != nil {
 			return err
+		}
+	}
+	had, err := q.ListGroupDestinations(ctx, dbgen.ListGroupDestinationsParams{OrgID: s.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return fmt.Errorf("list the destinations alert group #%d reached: %w", g.Number, err)
+	}
+	// An Alert Group that has no delivery anywhere yet is published wherever it reaches, as its first Publication.
+	targets := withReached(reached, had, created || moved || len(had) == 0 || grows(r))
+	if len(targets) == 0 && !created {
+		return s.wake(ctx, q, left > 0)
+	}
+	var dests []target
+	var eventDests []dbgen.ListRouteDestinationsRow
+	for _, t := range targets {
+		if sendsEvents(t.dest) {
+			eventDests = append(eventDests, t.dest)
+		}
+		if t.dest.Type != TypeWebhook || t.dest.WebhookMode.String != webhookEvents {
+			dests = append(dests, t)
 		}
 	}
 	if err := s.queueEvents(ctx, tx, q, r, eventDests, route, now); err != nil {
@@ -267,10 +317,11 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 	if len(dests) == 0 {
 		return s.wake(ctx, q, left > 0 || len(eventDests) > 0)
 	}
+	joined := r.Joined()
 	window := time.Duration(route.ThreadBatchingWindowSeconds) * time.Second
 	types := make([]string, len(dests))
-	for i, d := range dests {
-		types[i] = d.Type
+	for i, t := range dests {
+		types[i] = t.dest.Type
 	}
 	roots, err := s.renderer.Roots(ctx, tx, viewOf(g), markupsOf(types))
 	if err != nil {
@@ -285,27 +336,250 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		}
 	}
 	how := enqueueing{created: created, moved: moved, replies: replies, now: now, window: window, roots: roots, tx: tx}
-	if st != nil && !g.Urgent {
-		how.heldBy = &st.id
-	}
-	for _, d := range dests {
+	held := heldBy(had)
+	var summaries []stormDest
+	for _, t := range dests {
+		d := t.dest
 		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID),
 			Buttons: buttonSetOf(d.Buttons, d.OrganizationButtons)}
 		h := how
 		if sendsRequests(d.Type) && !d.WebhookReplies {
 			h.replies = nil // an outgoing webhook without a "reply in thread" request has no Thread
 		}
+		if h.entries, err = json.Marshal(t.entries); err != nil {
+			return fmt.Errorf("encode the entries of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
+		h.loud, h.heldBy = publicationOf(r, g, created, moved, joined[d.ID], st, held)
+		if h.heldBy != nil && (created || t.had == nil) {
+			summaries = append(summaries, stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type})
+		}
 		if err := s.enqueue(ctx, q, r, dst, d.Health == healthBroken, h); err != nil {
 			return err
 		}
 	}
-	if st != nil {
+	if st != nil && created {
+		if summaries, err = s.withSummaries(ctx, q, st, dests); err != nil {
+			return err
+		}
+	}
+	if st != nil && len(summaries) > 0 {
 		if err := s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
-			language: route.Language}, dests, now); err != nil {
+			language: route.Language}, summaries, now); err != nil {
 			return err
 		}
 	}
 	return s.wake(ctx, q, true)
+}
+
+// reachQueries are the queries of the reach of an Alert Group (C-26.FR-2 to FR-4).
+type reachQueries interface {
+	ListTeamDestinations(ctx context.Context, arg dbgen.ListTeamDestinationsParams) (
+		[]dbgen.ListTeamDestinationsRow, error)
+	ListGroupDestinations(ctx context.Context, arg dbgen.ListGroupDestinationsParams) (
+		[]dbgen.ListGroupDestinationsRow, error)
+	ListEntryTeams(ctx context.Context, arg dbgen.ListEntryTeamsParams) ([]dbgen.ListEntryTeamsRow, error)
+	ListDestinationsByID(ctx context.Context, arg dbgen.ListDestinationsByIDParams) (
+		[]dbgen.ListDestinationsByIDRow, error)
+}
+
+// target is a Destination of a rendering: its row, the entries that reach it now — none for a Destination the Alert
+// Group reached before and no longer reaches — and the delivery it had, nil when it had none.
+type target struct {
+	dest    dbgen.ListRouteDestinationsRow
+	entries []routing.Reaching
+	had     *dbgen.ListGroupDestinationsRow
+}
+
+// reachOf is the reach of the rendered Alert Group (C-26.FR-2, FR-3): the entries of its Route and, with toTeams, of
+// its Teams, given by the dispatcher, whose Severity condition its level meets, by Destination in id order.
+func (s *Service) reachOf(ctx context.Context, q queries, r groups.Rendering, toTeams bool) ([]target, error) {
+	g := r.Group
+	rows, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: g.RouteID})
+	if err != nil {
+		return nil, fmt.Errorf("list the destinations of alert group #%d: %w", g.Number, err)
+	}
+	byID := make(map[int64]dbgen.ListRouteDestinationsRow, len(rows))
+	route := make([]routing.Entry, len(rows))
+	for i, d := range rows {
+		byID[d.ID] = d
+		route[i] = routing.Entry{DestinationID: d.ID, Condition: routing.SeverityCondition(d.SeverityCondition)}
+	}
+	var teams []routing.TeamEntries
+	if toTeams && len(r.Teams) > 0 {
+		trs, err := q.ListTeamDestinations(ctx, dbgen.ListTeamDestinationsParams{OrgID: s.orgID, TeamIds: r.Teams})
+		if err != nil {
+			return nil, fmt.Errorf("list the destinations of the teams of alert group #%d: %w", g.Number, err)
+		}
+		by := map[int64][]routing.Entry{}
+		for _, t := range trs {
+			if _, ok := byID[t.ID]; !ok {
+				byID[t.ID] = dbgen.ListRouteDestinationsRow{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Type: t.Type,
+					ConnectionID: t.ConnectionID, Health: t.Health, WebhookMode: t.WebhookMode,
+					WebhookReplies: t.WebhookReplies, Buttons: t.Buttons, OrganizationButtons: t.OrganizationButtons}
+			}
+			by[t.TeamID] = append(by[t.TeamID], routing.Entry{DestinationID: t.ID,
+				Condition: routing.SeverityCondition(t.SeverityCondition)})
+		}
+		for id, es := range by {
+			teams = append(teams, routing.TeamEntries{TeamID: id, Entries: es})
+		}
+	}
+	reached := routing.Reach(string(g.Severity), route, toTeams, teams)
+	out := make([]target, len(reached))
+	for i, rc := range reached {
+		out[i] = target{dest: byID[rc.DestinationID], entries: rc.Entries}
+	}
+	return out, nil
+}
+
+// withJoined adds to the reach the Destinations the dispatcher recorded destination_joined for that the reach read
+// here no longer has, with the entries the dispatcher read: a Team saved between the two reads, whose Destinations take
+// no lock yet, must not leave a destination_joined in the Timeline and the outgoing webhook events without its Root
+// message. A Destination deleted meanwhile is left out.
+func (s *Service) withJoined(ctx context.Context, q queries, r groups.Rendering, reached []target) ([]target, error) {
+	var missing []int64
+	entries := map[int64][]routing.Reaching{}
+	for id, e := range r.Joined() {
+		if !slices.ContainsFunc(reached, func(t target) bool { return t.dest.ID == id }) {
+			missing = append(missing, id)
+			entries[id] = e.Destination.Entries
+		}
+	}
+	if len(missing) == 0 {
+		return reached, nil
+	}
+	slices.Sort(missing)
+	rows, err := q.ListDestinationsByID(ctx, dbgen.ListDestinationsByIDParams{OrgID: s.orgID, Ids: missing})
+	if err != nil {
+		return nil, fmt.Errorf("read the destinations alert group #%d joined: %w", r.Group.Number, err)
+	}
+	for _, d := range rows {
+		reached = append(reached, target{dest: dbgen.ListRouteDestinationsRow{ID: d.ID, PublicID: d.PublicID,
+			Name: d.Name, Type: d.Type, ConnectionID: d.ConnectionID, Health: d.Health, WebhookMode: d.WebhookMode,
+			WebhookReplies: d.WebhookReplies, Buttons: d.Buttons, OrganizationButtons: d.OrganizationButtons},
+			entries: entries[d.ID]})
+	}
+	slices.SortFunc(reached, func(a, b target) int { return cmp.Compare(a.dest.ID, b.dest.ID) })
+	return reached, nil
+}
+
+// withReached are the Destinations of a rendering in id order: those reached, with the delivery each had, and those
+// the Alert Group reached before and reaches no longer, whose delivery has not ended and waits for no final edit, and
+// the outgoing webhooks in the events mode it sent events to (C-26.FR-4). A rendering that cannot grow the
+// Destinations (grow false) keeps of the reached ones only those the Alert Group had.
+func withReached(reached []target, had []dbgen.ListGroupDestinationsRow, grow bool) []target {
+	out := slices.Clone(reached)
+	if !grow {
+		out = slices.DeleteFunc(out, func(t target) bool {
+			return !slices.ContainsFunc(had, func(h dbgen.ListGroupDestinationsRow) bool { return h.ID == t.dest.ID })
+		})
+	}
+	index := make(map[int64]int, len(out))
+	for i, t := range out {
+		index[t.dest.ID] = i
+	}
+	for i := range had {
+		h := &had[i]
+		if j, ok := index[h.ID]; ok {
+			out[j].had = h
+			continue
+		}
+		if h.Delivered && (ended(h.State) || h.Retiring) {
+			continue
+		}
+		t := target{dest: dbgen.ListRouteDestinationsRow{ID: h.ID, PublicID: h.PublicID, Name: h.Name, Type: h.Type,
+			ConnectionID: h.ConnectionID, Health: h.Health, WebhookMode: h.WebhookMode, WebhookReplies: h.WebhookReplies,
+			Buttons: h.Buttons, OrganizationButtons: h.OrganizationButtons}, entries: []routing.Reaching{}}
+		if h.Delivered {
+			t.had = h
+		}
+		out = append(out, t)
+	}
+	for i := range out {
+		if out[i].entries == nil {
+			out[i].entries = []routing.Reaching{}
+		}
+	}
+	slices.SortFunc(out, func(a, b target) int { return cmp.Compare(a.dest.ID, b.dest.ID) })
+	return out
+}
+
+// heldBy is the Storm that holds the Alert Group in a Destination it has a delivery in, nil when none does.
+func heldBy(had []dbgen.ListGroupDestinationsRow) *int64 {
+	for _, h := range had {
+		if h.HeldByStormID.Valid {
+			id := h.HeldByStormID.Int64
+			return &id
+		}
+	}
+	return nil
+}
+
+// unpublished reports whether the Alert Group's first Publication is still to come: a Destination that a Team or a
+// rise adds before it is part of it (C-26.FR-5).
+func unpublishedGroup(g *groups.Group) bool {
+	return g.FirstPublishedAt == nil && g.Status != groups.StatusResolved
+}
+
+// grows reports whether a rendering may create the deliveries of Destinations the Alert Group reaches without one
+// (C-26.FR-4, FR-9): one of groups.ReachEvents — a Team that joined, by its Alerts or by the evaluation of the Teams
+// on a save, or a rise of the level, by an Alert or by the Route's Minimum severity — or destination_joined, the
+// same notion by which the dispatcher records destination_joined. Any other rendering — a fall of the level, a
+// resolution, a Command, Alerts that bring neither a Team nor a rise, or the re-render of a change of configuration
+// such as a renamed Team or a button set — updates the deliveries the Alert Group has and creates none; only an Alert
+// Group without any delivery yet is published wherever it reaches, as its first Publication.
+func grows(r groups.Rendering) bool {
+	return slices.ContainsFunc(r.Events, func(e groups.Recorded) bool {
+		return e.Event == groups.EventDestinationJoined || slices.Contains(groups.ReachEvents, e.Event)
+	})
+}
+
+// activeStorm locks the active Storm of the Route FOR SHARE, before any delivery it holds is written, and returns it,
+// nil when the Route has none.
+func (s *Service) activeStorm(ctx context.Context, q queries, routeID int64) (*storm, error) {
+	active, err := q.LockActiveStorm(ctx, dbgen.LockActiveStormParams{OrgID: s.orgID, RouteID: routeID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock the storm of route %d: %w", routeID, err)
+	}
+	return &storm{id: active.ID, started: active.StartedAt, count: active.AlertGroupCount,
+		urgent: active.UrgentCount}, nil
+}
+
+// publicationOf is the loudness of the Publication of a delivery that the rendering creates, and the Storm that holds
+// it. st is the Route's active Storm, which an Urgent Alert Group is never held by, and held the Storm that holds the
+// Alert Group in a Destination it already has. Loud at the creation of the Alert Group, held by its Storm; Quiet in a
+// Destination it joins by a move; the loudness of its destination_joined in a Destination it joined, held by the
+// Route's Storm (C-26.FR-5); Quiet for a change of configuration (C-26.FR-9, ADR-0018); Loud as part of a first
+// Publication still to come; and Quiet otherwise. Outside the creation and destination_joined, a delivery is held when
+// the active Storm holds the Alert Group elsewhere, so that a Destination new to a held Alert Group holds it too, as a
+// Destination added to the Route does. A delivery that exists keeps its own loudness.
+func publicationOf(r groups.Rendering, g *groups.Group, created, moved bool, joined groups.Recorded, st *storm,
+	held *int64) (pgtype.Bool, *int64) {
+	quiet := pgtype.Bool{Bool: deliveryEvent(DeliveryAddedDestination).loud(false), Valid: true}
+	loud := pgtype.Bool{Bool: true, Valid: true}
+	var storm, holds *int64
+	if st != nil && !g.Urgent {
+		storm = &st.id
+		if held != nil && *held == st.id {
+			holds = storm
+		}
+	}
+	switch {
+	case created:
+		return loud, storm
+	case moved:
+		return quiet, nil
+	case joined.Destination != nil:
+		return pgtype.Bool{Bool: joined.Loudness == groups.Loud, Valid: true}, storm
+	case configurationOnly(r):
+		return quiet, holds
+	case unpublishedGroup(g):
+		return loud, holds
+	}
+	return quiet, holds
 }
 
 // wake wakes the delivery workers once the transaction commits, when changed.
@@ -326,12 +600,15 @@ type reply struct {
 }
 
 // enqueueing is how a rendering reaches each Destination: its Root messages by markup, whether the Alert Group was
-// created or moved, the Storm that holds a new one, its Thread replies, the time, the Thread batching window and the
-// transaction of the change, which the request of an outgoing webhook is rendered through.
+// created or moved, the loudness of the Publication of a delivery it creates and the Storm that holds it, the entries
+// that reach the Destination, encoded, its Thread replies, the time, the Thread batching window and the transaction of
+// the change, which the request of an outgoing webhook is rendered through.
 type enqueueing struct {
 	roots          Roots
 	created, moved bool
+	loud           pgtype.Bool
 	heldBy         *int64
+	entries        []byte
 	replies        []reply
 	now            time.Time
 	window         time.Duration
@@ -340,22 +617,23 @@ type enqueueing struct {
 
 // enqueue sets the Desired state of the Alert Group in one Destination and queues its Thread replies; while the
 // Destination is Broken, while a Storm holds the delivery, or once the delivery ended, they are created dropped
-// (C-11.FR-6, FR-13, FR-19). An Urgent Alert Group that a Storm holds is released at once.
+// (C-11.FR-6, FR-13, FR-19). A delivery the rendering creates outside the creation of the Alert Group has none: its
+// Publication shows the current state. An Urgent Alert Group that a Storm holds is released at once.
 func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d Destination, broken bool,
 	how enqueueing) error {
 	g, now := r.Group, how.now
-	p := dbgen.EnsureDeliveryParams{OrgID: s.orgID, DestinationID: d.ID,
-		AlertGroupID: pgtype.Int8{Int64: g.ID, Valid: true}, HeldByStormID: nullInt(how.heldBy), Urgent: g.Urgent,
-		Now: now}
-	switch {
-	case how.created:
-		p.PublicationLoud = pgtype.Bool{Bool: true, Valid: true}
-	case how.moved:
-		p.PublicationLoud = pgtype.Bool{Bool: deliveryEvent(DeliveryAddedDestination).loud(false), Valid: true}
+	entries := how.entries
+	if entries == nil {
+		entries = []byte("[]")
 	}
-	row, err := q.EnsureDelivery(ctx, p)
+	row, err := q.EnsureDelivery(ctx, dbgen.EnsureDeliveryParams{OrgID: s.orgID, DestinationID: d.ID,
+		AlertGroupID: pgtype.Int8{Int64: g.ID, Valid: true}, HeldByStormID: nullInt(how.heldBy), Urgent: g.Urgent,
+		PublicationLoud: how.loud, Entries: entries, Now: now})
 	if err != nil {
 		return fmt.Errorf("create the delivery of alert group #%d to %s: %w", g.Number, d.PublicID, err)
+	}
+	if row.Inserted && !how.created {
+		how.replies = nil
 	}
 	state := row.State
 	if how.moved && !row.Inserted {

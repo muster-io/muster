@@ -4,14 +4,19 @@
 package groups
 
 import (
+	"cmp"
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // owner is the User who acknowledges and snoozes in the tests.
@@ -176,6 +181,30 @@ func TestLifecycleEventTable(t *testing.T) {
 				a := h.teamAlert("x", "Payments")
 				h.changes(t, ingest.ChangeFired, a)
 				return h.groupOf(t, a)
+			}},
+		{"destination joined by a firing alert group", want{EventDestinationJoined, KindSystem, Loud,
+			[]string{"new_alert_group"}},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.withReach()
+				a := h.teamAlert("x", "", byLabel(payments))
+				h.changes(t, ingest.ChangeFired, a)
+				g := h.groupOf(t, a)
+				h.published(g, destNotice)
+				h.clock.Advance(time.Minute)
+				h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+				return g
+			}},
+		{"destination joined by an acknowledged alert group", want{EventDestinationJoined, KindSystem, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				h.withReach()
+				a := h.teamAlert("x", "", byLabel(payments))
+				h.changes(t, ingest.ChangeFired, a)
+				g := h.groupOf(t, a)
+				h.published(g, destNotice)
+				h.acknowledge(g)
+				h.clock.Advance(time.Minute)
+				h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+				return g
 			}},
 	}
 	produced := map[Event]bool{}
@@ -608,4 +637,378 @@ func TestTimerEventTable(t *testing.T) {
 			t.Errorf("no case covers %s", e)
 		}
 	}
+}
+
+// fakeReach is what the reach of an Alert Group is read from (C-26.FR-2): the Destination entries of each Route and
+// each Team, "Also to the Teams from the label" of each Route, the Destinations that have a Root message by id, and the
+// Route membership locks taken, in order. The deliveries are fakeDB.delivered.
+type fakeReach struct {
+	routes  map[int64][]routing.Entry
+	teams   map[int64][]routing.Entry
+	toTeams map[int64]bool
+	dests   map[int64]JoinedDestination
+	locks   []int64
+}
+
+func (f *fakeDB) ShareRouteMembership(_ context.Context, arg dbgen.ShareRouteMembershipParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if arg.LockClass != db.RouteMembershipLockClass {
+		return errors.New("not the membership lock")
+	}
+	f.reach.locks = append(f.reach.locks, arg.RouteID)
+	return f.call("ShareRouteMembership")
+}
+
+func (f *fakeDB) GetRouteDeliverToTeams(_ context.Context, arg dbgen.GetRouteDeliverToTeamsParams) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetRouteDeliverToTeams"); err != nil || arg.OrgID != orgID {
+		return false, err
+	}
+	return f.reach.toTeams[arg.ID], nil
+}
+
+func (f *fakeDB) ListGroupTeamIDs(_ context.Context, arg dbgen.ListGroupTeamIDsParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListGroupTeamIDs"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []int64
+	for _, gt := range f.teams.groups[arg.AlertGroupID] {
+		out = append(out, gt.team)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (f *fakeDB) ListReachEntries(_ context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListReachEntries"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListReachEntriesRow
+	row := func(kind string, team int64, e routing.Entry) {
+		d, ok := f.reach.dests[e.DestinationID]
+		if !ok {
+			return
+		}
+		out = append(out, dbgen.ListReachEntriesRow{Kind: kind, TeamID: team, DestinationID: e.DestinationID,
+			SeverityCondition: string(e.Condition), PublicID: d.PublicID, Name: d.Name, Type: d.Type,
+			Delivered: slices.Contains(f.delivered[arg.AlertGroupID], e.DestinationID)})
+	}
+	for _, e := range f.reach.routes[arg.RouteID] {
+		row(routing.EntryRoute, 0, e)
+	}
+	for _, gt := range f.teams.groups[arg.AlertGroupID] {
+		for _, e := range f.reach.teams[gt.team] {
+			row(routing.EntryTeam, gt.team, e)
+		}
+	}
+	slices.SortFunc(out, func(a, b dbgen.ListReachEntriesRow) int {
+		return cmp.Or(cmp.Compare(a.DestinationID, b.DestinationID), cmp.Compare(a.Kind, b.Kind),
+			cmp.Compare(a.TeamID, b.TeamID))
+	})
+	return out, nil
+}
+
+func (f *fakeDB) ListTimelineDestinations(_ context.Context, arg dbgen.ListTimelineDestinationsParams) (
+	[]dbgen.ListTimelineDestinationsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListTimelineDestinations"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListTimelineDestinationsRow
+	for _, id := range arg.Ids {
+		if d, ok := f.reach.dests[id]; ok {
+			out = append(out, dbgen.ListTimelineDestinationsRow{ID: id, PublicID: d.PublicID, Name: d.Name,
+				Type: d.Type, Health: "healthy"})
+		}
+	}
+	return out, nil
+}
+
+// The Destinations of the reach tests: notice of the Route db below critical, critical of the Route db for
+// critical, and the search Team's notice below critical.
+const (
+	destNotice   = 61
+	destCritical = 62
+	destSearch   = 63
+)
+
+// withReach gives the Route db its Destinations notice (below critical) and critical (critical) with "Also to the
+// Teams from the label" on, and the Team search the Destination search-notice below critical; publish marks the Alert
+// Groups published once they exist.
+func (h *harness) withReach() {
+	h.withTeams()
+	h.db.reach = fakeReach{
+		routes: map[int64][]routing.Entry{2: {{DestinationID: destNotice, Condition: routing.ConditionBelowCritical},
+			{DestinationID: destCritical, Condition: routing.ConditionCritical}}},
+		teams:   map[int64][]routing.Entry{search: {{DestinationID: destSearch, Condition: routing.ConditionBelowCritical}}},
+		toTeams: map[int64]bool{2: true},
+		dests: map[int64]JoinedDestination{
+			destNotice:   {ID: destNotice, PublicID: "DS00000000NOTC", Name: "infra-notice", Type: "mattermost"},
+			destCritical: {ID: destCritical, PublicID: "DS00000000CRIT", Name: "infra-critical", Type: "mattermost"},
+			destSearch:   {ID: destSearch, PublicID: "DS00000000SRCH", Name: "search-notice", Type: "mattermost"},
+		},
+	}
+	if h.db.delivered == nil {
+		h.db.delivered = map[int64][]int64{}
+	}
+}
+
+// published marks the Alert Group published with a delivery in each Destination of dests, as delivery does.
+func (h *harness) published(g *dbgen.LockGroupsRow, dests ...int64) {
+	g.FirstPublishedAt = ts(t0)
+	h.db.delivered[g.ID] = append(h.db.delivered[g.ID], dests...)
+}
+
+// joinedEntries are the destination_joined entries of an Alert Group with their Destinations.
+func (h *harness) joinedEntries(g *dbgen.LockGroupsRow) []*fakeEntry {
+	var out []*fakeEntry
+	for _, e := range h.entriesOf(g) {
+		if e.Event.String == string(EventDestinationJoined) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TestDestinationJoined is C-26.FR-4, FR-5, AC-4 and AC-5 in the dispatcher: an Alert of a Team joining a published,
+// firing Alert Group records one Loud destination_joined with new_alert_group for the Team's Destination it reaches
+// without a delivery, under the Route's membership lock, and nothing for the Destinations it already has; joining an
+// acknowledged one records it Quiet; a rise to critical joins the critical Destination; an Alert Group not published
+// yet, a resolved one or a change of configuration records none; the Rendering carries the Teams and the event's
+// Destination.
+func TestDestinationJoined(t *testing.T) {
+	t.Run("a team joins a firing alert group", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		var renderings []Rendering
+		h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+			renderings = append(renderings, r)
+			return nil
+		})
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		if len(h.joinedEntries(g)) != 0 || len(h.db.reach.locks) != 0 {
+			t.Fatalf("the creation joined %v, locks %v", h.events(g), h.db.reach.locks)
+		}
+		h.published(g, destNotice)
+		h.clock.Advance(time.Minute)
+		b := h.teamAlert("x", "", byLabel(search))
+		h.changes(t, ingest.ChangeFired, b)
+		joined := h.joinedEntries(g)
+		if len(joined) != 1 {
+			t.Fatalf("joined %v", h.events(g))
+		}
+		e := joined[0]
+		if e.Kind != string(KindSystem) || e.SystemEvent.String != string(SystemDestinationJoined) ||
+			e.Loudness.String != string(Loud) || !slices.Equal(e.Mentions, []string{"new_alert_group"}) ||
+			e.DestinationID.Int64 != destSearch || !e.EventSeq.Valid {
+			t.Errorf("entry %+v", e.InsertTimelineEntryParams)
+		}
+		if !slices.Equal(h.db.reach.locks, []int64{2}) {
+			t.Errorf("membership locks %v", h.db.reach.locks)
+		}
+		r := renderings[len(renderings)-1]
+		if !slices.Equal(r.Teams, []int64{payments, search}) || len(r.Joined()) != 1 ||
+			r.Joined()[destSearch].Destination.PublicID != "DS00000000SRCH" ||
+			r.Joined()[destSearch].Loudness != Loud ||
+			!slices.Equal(r.Joined()[destSearch].Destination.Entries, []routing.Reaching{{Kind: routing.EntryTeam,
+				TeamID: search, Condition: routing.ConditionBelowCritical}}) {
+			t.Errorf("rendering teams %v joined %+v", r.Teams, r.Joined())
+		}
+		page, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(page.Entries, func(e TimelineEntry) bool { return e.Event == string(EventDestinationJoined) })
+		if i < 0 || page.Entries[i].Destination == nil || page.Entries[i].Destination.Name != "search-notice" ||
+			page.Entries[i].Destination.Type != "mattermost" {
+			t.Errorf("timeline %+v", page.Entries)
+		}
+
+		// The Destination has its delivery now: the next Alert joins nothing.
+		h.published(g, destSearch)
+		h.clock.Advance(time.Minute)
+		c := h.teamAlert("x", "", byLabel(search))
+		h.changes(t, ingest.ChangeFired, c)
+		if len(h.joinedEntries(g)) != 1 {
+			t.Errorf("joined again %v", h.events(g))
+		}
+	})
+	t.Run("an acknowledged alert group joins quietly", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		h.published(g, destNotice)
+		h.acknowledge(g)
+		h.clock.Advance(time.Minute)
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+		joined := h.joinedEntries(g)
+		if len(joined) != 1 || joined[0].Loudness.String != string(Quiet) || len(joined[0].Mentions) != 0 {
+			t.Errorf("joined %v", h.events(g))
+		}
+	})
+	t.Run("a rise to critical joins the critical destination", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		g := h.rise(t, func(g *dbgen.LockGroupsRow) { h.published(g, destNotice) })
+		joined := h.joinedEntries(g)
+		if len(joined) != 1 || joined[0].DestinationID.Int64 != destCritical ||
+			joined[0].Loudness.String != string(Loud) {
+			t.Errorf("joined %v", h.events(g))
+		}
+	})
+	// A Reopen at a level above the one the Alert Group resolved at is a rise by Alerts: the Destinations of the
+	// higher level join it, Loud while it fires; a Reopen at the same or a lower level joins nothing.
+	reopenAt := func(t *testing.T, h *harness, from, to string, dests ...int64) *dbgen.LockGroupsRow {
+		t.Helper()
+		a := h.alert(2, from, map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		h.published(g, dests...)
+		h.clock.Advance(time.Minute)
+		h.resolve(t, a)
+		h.clock.Advance(8 * time.Minute)
+		h.changes(t, ingest.ChangeFired, h.alert(2, to, map[string]string{"alertname": "A", "cluster": "x", "n": "2"}))
+		if g.Status != string(StatusFiring) || g.SeverityLevel != to {
+			t.Fatalf("after the reopen %s %s: %v", g.Status, g.SeverityLevel, h.events(g))
+		}
+		return g
+	}
+	t.Run("a reopen at a higher level joins the critical destination", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		g := reopenAt(t, h, "warning", "critical", destNotice)
+		joined := h.joinedEntries(g)
+		if len(joined) != 1 || joined[0].DestinationID.Int64 != destCritical ||
+			joined[0].Loudness.String != string(Loud) || !g.Urgent {
+			t.Errorf("joined %v", h.events(g))
+		}
+		var rise *fakeEntry
+		for _, e := range h.entriesOf(g) {
+			if e.Event.String == string(EventUrgencyRaised) {
+				rise = e
+			}
+		}
+		// The Quiet urgency_raised that keeps the status, by Alerts: the Reopen is what is announced.
+		if rise == nil || rise.Loudness.String != string(Quiet) || rise.FromStatus != rise.ToStatus ||
+			rise.Reason.String == ReasonMinimumSeverity {
+			t.Errorf("the reopen recorded %v", h.events(g))
+		}
+	})
+	t.Run("a reopen at a higher level that is not urgent records severity_raised", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		g := reopenAt(t, h, "info", "warning", destNotice)
+		if !slices.Contains(h.events(g), string(EventSeverityRaised)) || len(h.joinedEntries(g)) != 0 {
+			t.Errorf("the reopen recorded %v", h.events(g))
+		}
+	})
+	for _, c := range []struct{ name, from, to string }{{"the same", "warning", "warning"},
+		{"a lower", "critical", "warning"}} {
+		t.Run("a reopen at "+c.name+" level joins nothing", func(t *testing.T) {
+			h := newHarness(t)
+			h.withReach()
+			g := reopenAt(t, h, c.from, c.to, destCritical)
+			events := h.events(g)
+			if len(h.joinedEntries(g)) != 0 || slices.Contains(events, string(EventSeverityRaised)) ||
+				slices.Contains(events, string(EventUrgencyRaised)) {
+				t.Errorf("the reopen recorded %v", events)
+			}
+		})
+	}
+	t.Run("a new alert after a fall joins nothing", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		a := h.alert(2, "critical", map[string]string{"alertname": "A", "cluster": "x", "n": "1"})
+		b := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x", "n": "2"})
+		h.changes(t, ingest.ChangeFired, a, b)
+		g := h.groupOf(t, a)
+		h.published(g, destCritical)
+		h.clock.Advance(time.Minute)
+		h.resolve(t, a)
+		if g.SeverityLevel != "warning" {
+			t.Fatalf("level after the fall %s", g.SeverityLevel)
+		}
+		h.clock.Advance(time.Minute)
+		h.changes(t, ingest.ChangeFired, h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x",
+			"n": "3"}))
+		if joined := h.joinedEntries(g); len(joined) != 0 {
+			t.Errorf("a warning alert after the fall joined %v", h.events(g))
+		}
+	})
+	t.Run("before the first publication nothing joins", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		g := h.rise(t, nil)
+		if len(h.joinedEntries(g)) != 0 || len(h.db.reach.locks) != 0 {
+			t.Errorf("joined %v", h.events(g))
+		}
+	})
+	t.Run("a change of configuration joins nothing", func(t *testing.T) {
+		g := &Group{FirstPublishedAt: &t0, Status: StatusFiring}
+		for name, c := range map[string]change{
+			"teams evaluated": {configuration: true, entries: []entry{{Event: EventTeamJoined}}},
+			"minimum severity": {entries: []entry{{Event: EventUrgencyRaised, Variant: VariantRemovesNone,
+				Reason: ReasonMinimumSeverity}}},
+			"a command": {entries: []entry{{Event: EventAcknowledged}}},
+			// Alerts that bring neither a Team nor a rise join nothing (C-26.FR-5).
+			"alerts added":   {entries: []entry{{Event: EventAlertsAdded}}},
+			"alert replaced": {entries: []entry{{Event: EventAlertReplaced}}},
+			// A Reopen joins only with the rise it records above the level it resolved at.
+			"reopened":       {entries: []entry{{Event: EventReopened}}},
+			"alert resolved": {entries: []entry{{Event: EventAlertResolved}}},
+		} {
+			if joinsByAlerts(&c, g) {
+				t.Errorf("%s joins", name)
+			}
+		}
+		resolved := &Group{FirstPublishedAt: &t0, Status: StatusResolved}
+		if joinsByAlerts(&change{entries: []entry{{Event: EventTeamJoined}}}, resolved) {
+			t.Error("a resolved alert group joins")
+		}
+		for _, e := range []entry{{Event: EventTeamJoined}, {Event: EventSeverityRaised},
+			{Event: EventUrgencyRaised, Variant: VariantRemoves}} {
+			if !joinsByAlerts(&change{entries: []entry{{Event: EventAlertsAdded}, e}}, g) ||
+				!joinsByAlerts(&change{entries: []entry{{Event: EventReopened}, e}}, g) {
+				t.Errorf("%s joins nothing", e.Event)
+			}
+		}
+	})
+	t.Run("failures", func(t *testing.T) {
+		for _, q := range []string{"ShareRouteMembership", "GetRouteDeliverToTeams", "ListReachEntries",
+			"ListGroupTeamIDs"} {
+			h := newHarness(t)
+			h.withReach()
+			h.svc.SetRerender(func(context.Context, DBTX, Rendering) error { return nil })
+			a := h.teamAlert("x", "", byLabel(payments))
+			h.changes(t, ingest.ChangeFired, a)
+			h.published(h.groupOf(t, a), destNotice)
+			h.db.fail[q] = errBoom
+			if _, err := h.apply(ingest.ChangeFired, h.teamAlert("x", "", byLabel(search))); !errors.Is(err, errBoom) {
+				t.Errorf("%s: %v", q, err)
+			}
+		}
+		h := newHarness(t)
+		h.withReach()
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		h.published(g, destNotice)
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+		h.db.fail["ListTimelineDestinations"] = errBoom
+		if _, err := h.svc.Timeline(t.Context(), g.PublicID, TimelineFilter{Limit: 50}); !errors.Is(err, errBoom) {
+			t.Errorf("timeline: %v", err)
+		}
+	})
 }

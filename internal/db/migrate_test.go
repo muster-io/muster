@@ -2737,18 +2737,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (31)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (32)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":31`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":32`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":31`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":32`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2764,10 +2764,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (31)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (32)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":31`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":32`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -2931,6 +2931,221 @@ func TestIntegrationRouteMessageLabels(t *testing.T) {
 		}
 		if n := e.count(t, `SELECT count(*) FROM routes WHERE message_labels IS NULL`); n != 2 {
 			t.Errorf("up again: %d routes with the computed list, want 2", n)
+		}
+	})
+}
+
+// TestIntegrationDestinationEntriesAndTeams runs 0032 over a database with a Route naming a Destination, an Alert
+// Group with a delivery and Timeline entries in a partition, and rows of the kinds of 0031: up gives the existing Route
+// Destination the Severity condition any, the Route deliver_to_teams off and run_team_chains on, the delivery no
+// entries, keeps the rows, validates the _v3 CHECKs of the Timeline and the webhook events and
+// open_group_updates_kind_v6_check and drops the old ones, so that destination_joined (kind system, with its
+// system_event and Destination), its webhook event, a Team's Destination and a row of team_destinations are taken
+// while an unknown condition, destination_joined of another kind or system event and an unknown kind are not. Down
+// deletes the rows of the new values, keeps the older ones and restores the old CHECKs, validated; up again works.
+func TestIntegrationDestinationEntriesAndTeams(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 31)
+		e.exec(t, `CREATE TABLE timeline_entries_p202611 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, 'NT0000000000D1', 'am', 'webhook_only', '{}', 45, false, 300, 'not_configured', '2026-11-05',
+				'2026-11-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000D1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-11-05', '2026-11-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000D1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-11-05', '{}', 1, 1,
+				'healthy', '2026-11-05', '2026-11-05'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at)
+			SELECT r.id, d.id, r.org_id, '2026-11-05' FROM routes r, destinations d`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000D1', 1, id, '{alertname}', '{}', sha256('d1'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-11-05', '2026-11-05'
+			FROM routes`)
+		e.exec(t, `INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, urgent, next_attempt_at,
+			created_at, updated_at)
+			SELECT g.org_id, d.id, g.id, 'pending', false, '2026-11-05', '2026-11-05', '2026-11-05'
+			FROM alert_groups g, destinations d`)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			SELECT id, 'TM0000000000D1', 'Payments', 'payments', '2026-11-05', '2026-11-05' FROM organizations`)
+		e.exec(t, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+			SELECT id, 'organization_message_settings', '2026-11-05' FROM organizations`)
+		n := 0
+		// entry records a lifecycle event of the kind with the columns and values of extra, split at |.
+		entry := func(t *testing.T, event, kind, extra string) error {
+			t.Helper()
+			n++
+			columns, values := "", ""
+			if extra != "" {
+				parts := strings.SplitN(extra, "|", 2)
+				columns, values = ", "+parts[0], ", "+parts[1]
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at,
+				kind, event, event_seq, loudness, actor_kind, transport`+columns+`)
+				SELECT org_id, $1, id, '2026-11-05 12:00:00+00', $2, $3, $4, 'quiet', 'system', 'system'`+values+`
+				FROM alert_groups`, fmt.Sprintf("TE0000000%05d", n), kind, event, n)
+			return err
+		}
+		hook := func(t *testing.T, event string) error {
+			t.Helper()
+			n++
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO webhook_events (org_id, destination_id, alert_group_id,
+				sequence, webhook_id, event, notify, occurred_at, body, state, next_attempt_at, created_at)
+				SELECT g.org_id, d.id, g.id, $1, $2, $3, false, '2026-11-05', '{}', 'pending', '2026-11-05',
+					'2026-11-05'
+				FROM alert_groups g, destinations d`, n, fmt.Sprintf("wh-%d", n), event)
+			return err
+		}
+		update := func(t *testing.T, kind string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
+				SELECT org_id, $1, id, '2026-11-05' FROM teams`, kind)
+			return err
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		if err := entry(t, "team_joined", "alerts", `team_id, team_rule|(SELECT id FROM teams), 'label'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := hook(t, "team_joined"); err != nil {
+			t.Fatal(err)
+		}
+		const joined = `system_event|'destination_joined'`
+		refused(t, "destination_joined before up", entry(t, "destination_joined", "system", joined),
+			"timeline_entries_event_kind_v2_check")
+		refused(t, "a webhook event destination_joined before up", hook(t, "destination_joined"),
+			"webhook_events_event_v2_check")
+		refused(t, "a row of team_destinations before up", update(t, "team_destinations"),
+			"open_group_updates_kind_v5_check")
+		checks := func(t *testing.T) string {
+			t.Helper()
+			parts := []string{"timeline_entries", "timeline_entries_p202611"}
+			return e.constraints(t, parts, "timeline_entries_event") + " " +
+				e.constraints(t, parts, "timeline_entries_system") + " " +
+				e.constraints(t, []string{"webhook_events"}, "webhook_events_event") + " " +
+				e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind")
+		}
+		version := func(v string, kinds string) string {
+			return "timeline_entries.timeline_entries_event_kind_" + v + "_check:true " +
+				"timeline_entries.timeline_entries_event_" + v + "_check:true " +
+				"timeline_entries_p202611.timeline_entries_event_kind_" + v + "_check:true " +
+				"timeline_entries_p202611.timeline_entries_event_" + v + "_check:true " +
+				"timeline_entries.timeline_entries_system_event_" + v + "_check:true " +
+				"timeline_entries.timeline_entries_system_" + v + "_check:true " +
+				"timeline_entries_p202611.timeline_entries_system_event_" + v + "_check:true " +
+				"timeline_entries_p202611.timeline_entries_system_" + v + "_check:true " +
+				"webhook_events.webhook_events_event_" + v + "_check:true " +
+				"open_group_updates.open_group_updates_kind_" + kinds + "_check:true"
+		}
+		if got, want := checks(t), version("v2", "v5"); got != want {
+			t.Fatalf("before up: constraints\n%s\nwant\n%s", got, want)
+		}
+
+		if err := e.mm.Migrate(32); err != nil {
+			t.Fatalf("up to 32: %v", err)
+		}
+		if got, want := checks(t), version("v3", "v6"); got != want {
+			t.Errorf("after up: constraints\n%s\nwant\n%s", got, want)
+		}
+		for what, sql := range map[string]string{
+			"the Route Destination with any": `SELECT count(*) FROM route_destinations WHERE severity_condition = 'any'`,
+			"the Route with the defaults":    `SELECT count(*) FROM routes WHERE NOT deliver_to_teams AND run_team_chains`,
+			"the delivery without entries":   `SELECT count(*) FROM deliveries WHERE entries = '[]'`,
+			"the entry of 0031":              `SELECT count(*) FROM timeline_entries WHERE event = 'team_joined'`,
+			"the event of 0031":              `SELECT count(*) FROM webhook_events WHERE event = 'team_joined'`,
+			"the row of 0031":                `SELECT count(*) FROM open_group_updates`,
+			"the validated conditions": `SELECT count(*) FROM pg_constraint
+				WHERE conname = 'route_destinations_severity_condition_check' AND convalidated`,
+			"the index of the Teams of a Destination": `SELECT count(*) FROM pg_indexes
+				WHERE indexname = 'team_destinations_destination_idx' AND indexdef LIKE '%(org_id, destination_id)'`,
+		} {
+			if got := e.count(t, sql); got != 1 {
+				t.Errorf("after up: %d rows of %s", got, what)
+			}
+		}
+		for name, err := range map[string]error{
+			"destination_joined": entry(t, "destination_joined", "system",
+				`system_event, destination_id|'destination_joined', (SELECT id FROM destinations)`),
+			"a webhook event destination_joined": hook(t, "destination_joined"),
+			"a row of team_destinations":         update(t, "team_destinations"),
+		} {
+			if err != nil {
+				t.Errorf("after up, %s: %v", name, err)
+			}
+		}
+		refused(t, "destination_joined of kind alerts", entry(t, "destination_joined", "alerts", ""),
+			"timeline_entries_event_kind_v3_check")
+		refused(t, "destination_joined as unknown_team_value", entry(t, "destination_joined", "system",
+			`system_event|'unknown_team_value'`), "timeline_entries_system_v3_check")
+		refused(t, "an unknown event", entry(t, "destination_left", "system", joined),
+			"timeline_entries_event_kind_v3_check")
+		refused(t, "an unknown webhook event", hook(t, "destination_left"), "webhook_events_event_v3_check")
+		refused(t, "a row of an unknown kind", update(t, "team_routes"), "open_group_updates_kind_v6_check")
+		e.exec(t, `INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+			SELECT t.org_id, t.id, d.id, 'below_critical', '2026-11-05' FROM teams t, destinations d`)
+		e.exec(t, `UPDATE route_destinations SET severity_condition = 'critical'`)
+		e.exec(t, `UPDATE deliveries SET entries = '[{"kind": "route", "severity_condition": "critical"}]'`)
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE team_destinations SET severity_condition = 'warning'`)
+		refused(t, "an unknown condition of a Team", err, "team_destinations_severity_condition_check")
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE route_destinations SET severity_condition = 'warning'`)
+		refused(t, "an unknown condition of a Route", err, "route_destinations_severity_condition_check")
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE deliveries SET entries = '{}'`)
+		refused(t, "entries that are no list", err, "deliveries_entries_check")
+		_, err = e.d.Pool.Exec(t.Context(), `INSERT INTO team_destinations (org_id, team_id, destination_id, added_at)
+			SELECT t.org_id, t.id, d.id, '2026-11-05' FROM teams t, destinations d`)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23505" {
+			t.Errorf("a Destination twice in a Team: %v", err)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 32 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if got, want := checks(t), version("v2", "v5"); got != want {
+			t.Errorf("after down: constraints\n%s\nwant\n%s", got, want)
+		}
+		for what, sql := range map[string]string{
+			"destination_joined":             `SELECT count(*) FROM timeline_entries WHERE event = 'destination_joined'`,
+			"its webhook event":              `SELECT count(*) FROM webhook_events WHERE event = 'destination_joined'`,
+			"the row of team_destinations":   `SELECT count(*) FROM open_group_updates WHERE kind = 'team_destinations'`,
+			"the table of Team Destinations": `SELECT count(*) FROM pg_tables WHERE tablename = 'team_destinations'`,
+		} {
+			if got := e.count(t, sql); got != 0 {
+				t.Errorf("after down: %s is left", what)
+			}
+		}
+		for what, sql := range map[string]string{
+			"the entry of 0031": `SELECT count(*) FROM timeline_entries WHERE event = 'team_joined'`,
+			"the event of 0031": `SELECT count(*) FROM webhook_events WHERE event = 'team_joined'`,
+			"the row of 0031":   `SELECT count(*) FROM open_group_updates`,
+		} {
+			if got := e.count(t, sql); got != 1 {
+				t.Errorf("after down: %d rows of %s", got, what)
+			}
+		}
+
+		if err := e.mm.Migrate(32); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM route_destinations WHERE severity_condition = 'any'`); n != 1 {
+			t.Error("up again: the Route Destination is not any")
 		}
 	})
 }

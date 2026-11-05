@@ -61,7 +61,7 @@ func suggested(id string) (Input, error) {
 			Matchers: []Matcher{{Label: "alertname", Op: string(matchers.Regexp), Value: "Muster.*"}},
 			GroupKey: []string{"alertname", internalalerts.EntityIntegration, internalalerts.EntityDestination,
 				internalalerts.EntityRoute, internalalerts.EntitySchedule},
-			DestinationIDs: []string{}, Policy: paging().Policy,
+			DestinationIDs: []string{}, DeliverToTeams: new(true), Policy: paging().Policy,
 		}, nil
 	default:
 		return Input{}, ErrSuggestionNotFound

@@ -40,25 +40,54 @@ const (
 // Lock order. A transaction that locks rows of more than one of these tables locks them in this order, the
 // dispatcher's: the Alert Groups by id (groups' LockGroups), then their deliveries, then the Thread replies of a
 // delivery. Enqueue takes the Route's membership lock before its deliveries, and a Storm's row comes before the
-// deliveries it changes. A delivery is made held by a Storm only under a lock of that Storm that its calm check,
-// which locks it FOR NO KEY UPDATE, waits for: Enqueue's JoinStorm updates the Storm, and a change of the Route's
-// Destinations takes the membership lock, then the active Storm FOR SHARE (LockActiveStorm), then the deliveries;
-// otherwise a calm check could end the Storm before those deliveries commit, and they would stay held. The transactions
-// of the worker follow it: the record of a Thread reply's outcome locks its delivery first (LockReplyDelivery), and the
-// first Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it.
-// A Publication a bridge replayed is no exception: its outcome and the edit that follows lock the delivery row only, as
+// deliveries it changes. The dispatcher itself takes the Route's membership lock shared after its lock of the Alert
+// Group and before it reads the reach of a transition that Alerts made, from which it records destination_joined
+// (C-26.FR-5), so that no change of the Route's Destinations commits between that reach and the one Enqueue applies
+// under the same lock, which it takes again; the Destinations of Teams take no lock of their own yet. Every Enqueue
+// takes the Route's Storm right after the membership lock, before the first delivery it locks: the creation of an Alert
+// Group joins or starts it (JoinStorm, StartStorm), any other rendering takes the active one FOR SHARE
+// (LockActiveStorm), so that a calm check, which locks the Storm FOR NO KEY UPDATE and then its held deliveries, never
+// holds the Storm while waiting for a delivery such a transaction locked. Only the creation of an Alert Group updates a
+// Storm, and only grouping creates one. Grouping's order is: the Routes FOR SHARE, the counter row when it creates or
+// reopens, the Alert Groups by id, then, before its first dispatch and in Route id order, the active Storm of every
+// Route whose Alert Groups it changes or creates — FOR NO KEY UPDATE where it creates one (groups' LockRouteStorm), FOR
+// SHARE elsewhere (ShareRouteStorm); then, per Alert Group, the Route's membership lock shared, the Storm, which it
+// holds already in the mode Enqueue needs, and the deliveries. Taken lazily, per Alert Group, the Storms would close
+// cycles. The counter row alone does not keep the update of a Storm out of one: a transaction that creates nothing
+// takes no counter row, shares the Storm and may wait for a Storm summary that an earlier rendering of the creating
+// transaction locked (EnsureStormSummary, for a held Alert Group that grew into a new Destination), while the creation
+// would wait for that share to update the Storm. And Alert Groups in id order are not Routes in id order: a transaction
+// that shares the Storm of one Route for its first Alert Group and the Storm of another for its second would meet a
+// creating one that took them the other way round. Taken up front in one order, for update where they are updated, the
+// Storms make every other transaction wait before it locks a delivery, and none upgrades a lock. A Route without an
+// active Storm has no row to lock, and none to share: a Storm a creation starts is seen only once it commits, and only
+// a creation, under the counter row, starts one. A Storm that another creation starts and commits after a transaction
+// that creates nothing took its Storms is taken by that transaction's Enqueue FOR SHARE, late and out of Route id
+// order: rare, and a cycle it closes is a deadlock PostgreSQL detects, after which the lane retries the Snapshot.
+// Taking the Storms after the Routes closes no cycle with a change of a Route's Destinations, which takes the
+// membership lock exclusively and then the Storm FOR SHARE. Where grouping updates the Storm, it holds the Route's row
+// FOR SHARE, and each such change takes the row in a mode that conflicts with it before the membership lock — a Route
+// update writes the row before its Destinations, the deletion of a Destination locks its Routes FOR NO KEY UPDATE
+// (BumpRoutesOfDestination) before their membership locks — so it waits for grouping before it holds anything grouping
+// waits for; where grouping only shares the Storm, the change's share does not wait for it, and grouping holds no
+// delivery the change locks. A calm check takes the Storm, then deliveries only. A delivery is made held by a Storm
+// only under a lock of that Storm that its calm check waits for: Enqueue's, or a change of the Route's Destinations,
+// which takes the membership lock, then the active Storm FOR SHARE (LockActiveStorm), then the deliveries; otherwise a
+// calm check could end the Storm before those deliveries commit, and they would stay held. The transactions of the
+// worker follow it: the record of a Thread reply's outcome locks its delivery first (LockReplyDelivery), and the first
+// Publication is marked through the dispatcher only after the outcome committed (markPublished), never inside it. A
+// Publication a bridge replayed is no exception: its outcome and the edit that follows lock the delivery row only, as
 // every outcome and every edit does, never its Alert Group before it; nor is a republication past a bridge's edit
 // window (editwindow.go), whose preparation updates the delivery row only — its lease and its start, as a Publication's
-// does — and whose outcome locks it only.
-// The preparation of a Telegram reply that waits for its copy is the one exception: it holds the reply, then takes the
-// post's copy lock and the delivery, the order of the learning of a copy and of the record of a Publication
-// (copies.go). The re-render after a key rotation (rerender.go) takes the dispatcher's order — the Alert Group, SKIP
-// LOCKED, then the Route's membership lock shared, then its deliveries by Destination — and never a Storm. A key's
-// advisory lock (LockButtonKey) is taken only by the outcome that replaces the key of a Root message's buttons
-// (released), after its delivery; after it, that outcome still updates the delivery's Thread (publishedThread), records
-// delivery events (RecordEvent) and may lock its Destination's row to end the Broken state (markHealthy). No
-// transaction locks a Destination before a key's lock, so none waits for the key while holding what the outcome
-// waits for.
+// does — and whose outcome locks it only. The preparation of a Telegram reply that waits for its copy is the one
+// exception: it holds the reply, then takes the post's copy lock and the delivery, the order of the learning of a copy
+// and of the record of a Publication (copies.go). The re-render after a key rotation (rerender.go) takes the
+// dispatcher's order — the Alert Group, SKIP LOCKED, then the Route's membership lock shared, then its deliveries by
+// Destination — and never a Storm. A key's advisory lock (LockButtonKey) is taken only by the outcome that replaces the
+// key of a Root message's buttons (released), after its delivery; after it, that outcome still updates the delivery's
+// Thread (publishedThread), records delivery events (RecordEvent) and may lock its Destination's row to end the Broken
+// state (markHealthy). No transaction locks a Destination before a key's lock, so none waits for the key while holding
+// what the outcome waits for.
 //
 // PostgreSQL takes locks of its own that this order does not show: an UPDATE of a row version the same transaction made
 // — a second UPDATE of a row in one transaction, or an UPDATE after its INSERT — checks every foreign key of the row

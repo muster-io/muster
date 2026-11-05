@@ -216,11 +216,14 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   `keycloak`, the default, puts the claims in the ID token and userinfo; `/_fake/config` `{"flavor":"gitlab"}` makes it
   behave as GitLab: `groups_direct` in the ID token, and `groups` and GitLab's role claims
   `https://gitlab.org/claims/groups/owner`, `…/maintainer` and `…/developer` in userinfo only, the role claims of a
-  scripted person from its `role_claims`, the direct groups of each role they hold. Both Mattermost servers and the Telegram server also
-  serve a second bot, with the published tokens `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for
-  which `muster dev` creates no Connection. The fake bridge serves two bots: `muster-dev-bridge-token`, which the demo
-  Connection "Example Bridge" uses in poll mode, and `muster-dev-bridge-token-b`, for which `muster dev` creates no
-  Connection; `/_fake/config` changes what its `info` says. The fake Slack server serves two Slack apps, each a
+  scripted person from its `role_claims`, the direct groups of each role they hold. The fake Mattermost server has,
+  beside `ch-alerts` and `ch-alerts-prod`, the channels `ch-infra-critical`, `ch-infra-notice`, `ch-payments-critical`,
+  `ch-payments-notice` and `ch-search-notice` for routing to Teams by Severity, with the bot a member of each. Both
+  Mattermost servers and the Telegram server also serve a second bot, with the published tokens
+  `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. The
+  fake bridge serves two bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll mode,
+  and `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection; `/_fake/config` changes what its `info`
+  says. The fake Slack server serves two Slack apps, each a
   workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
   `xapp-muster-dev-slack-token`, which the demo Connection "Example Slack" uses in `socket` mode, and
   `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;

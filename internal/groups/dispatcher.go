@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // Status is the status of an Alert Group (C-09.FR-1).
@@ -83,6 +84,8 @@ type Queries interface {
 	LockGroups(ctx context.Context, arg dbgen.LockGroupsParams) ([]dbgen.LockGroupsRow, error)
 	EnsureCounter(ctx context.Context, orgID int64) error
 	LockCounter(ctx context.Context, orgID int64) (int64, error)
+	LockRouteStorm(ctx context.Context, arg dbgen.LockRouteStormParams) ([]int64, error)
+	ShareRouteStorm(ctx context.Context, arg dbgen.ShareRouteStormParams) ([]int64, error)
 	SavepointGrouping(ctx context.Context) error
 	RollbackGrouping(ctx context.Context) error
 	NextNumber(ctx context.Context, orgID int64) (int64, error)
@@ -116,6 +119,10 @@ type Queries interface {
 	ListAlertTeams(ctx context.Context, arg dbgen.ListAlertTeamsParams) ([]dbgen.ListAlertTeamsRow, error)
 	AddGroupTeams(ctx context.Context, arg dbgen.AddGroupTeamsParams) ([]int64, error)
 	AddUnknownTeamValues(ctx context.Context, arg dbgen.AddUnknownTeamValuesParams) ([]string, error)
+	ShareRouteMembership(ctx context.Context, arg dbgen.ShareRouteMembershipParams) error
+	GetRouteDeliverToTeams(ctx context.Context, arg dbgen.GetRouteDeliverToTeamsParams) (bool, error)
+	ListGroupTeamIDs(ctx context.Context, arg dbgen.ListGroupTeamIDsParams) ([]int64, error)
+	ListReachEntries(ctx context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow, error)
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the connection or transaction the queries run on, which the re-render step writes through.
@@ -377,6 +384,8 @@ type entry struct {
 	TeamRule    string
 	TeamMatcher string
 	TeamValue   string
+	// Destination is the Destination of a destination_joined (C-26.FR-5).
+	Destination *JoinedDestination
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -424,7 +433,10 @@ func (c committed) run(ctx context.Context) {
 // for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
 // Configuration marks a rendering that a change of configuration made, as the evaluation of the Teams of the open
 // Alert Groups on a save (C-25.FR-13) and the re-render of a button set do: whatever its lifecycle events, it
-// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018).
+// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018). Teams are the Teams of the Alert Group
+// by id, from which, with its Severity level, the re-render step applies the reach (routing.Reach, C-26.FR-2); the
+// Destinations the change joined are those of its destination_joined events, and a change of configuration records
+// none (C-26.FR-5).
 type Rendering struct {
 	Group         *Group
 	Actor         Actor
@@ -434,6 +446,18 @@ type Rendering struct {
 	Fallback      func(f TemplateFailure)
 	Changed       func()
 	Configuration bool
+	Teams         []int64
+}
+
+// Joined are the Destinations the change joined by its Alerts, each with its destination_joined event.
+func (r Rendering) Joined() map[int64]Recorded {
+	out := map[int64]Recorded{}
+	for _, e := range r.Events {
+		if e.Event == EventDestinationJoined && e.Destination != nil {
+			out[e.Destination.ID] = e
+		}
+	}
+	return out
 }
 
 // TemplateFailure is a Route template that failed while the re-render step rendered a message of the Alert Group,
@@ -453,6 +477,18 @@ type Recorded struct {
 	Mentions     []Mention
 	Fingerprints []string
 	Reason       string
+	// Destination is the Destination a destination_joined joined.
+	Destination *JoinedDestination
+}
+
+// JoinedDestination is the Destination of a destination_joined: its internal id, public_id, name and type, and the
+// entries of the reach that reached it, which delivery records on the delivery it creates.
+type JoinedDestination struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Type     string
+	Entries  []routing.Reaching
 }
 
 // Rerender is the re-render step of the dispatcher: delivery's Enqueue, which writes through tx, the dispatcher's
@@ -537,6 +573,11 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	if len(c.entries) == 0 && !c.written {
 		return nil
 	}
+	if joinsByAlerts(&c, g) {
+		if err := d.joinDestinations(ctx, q, g, &c); err != nil {
+			return err
+		}
+	}
 	if err := d.syncSnoozeTimer(ctx, q, g, snoozeEnd, now); err != nil {
 		return err
 	}
@@ -596,11 +637,15 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	if err != nil {
 		return nil, false, err
 	}
+	teams, err := q.ListGroupTeamIDs(ctx, dbgen.ListGroupTeamIDsParams{OrgID: d.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return nil, false, fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+	}
 	var failures []TemplateFailure
 	changed := false
 	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
 		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
-		Changed: func() { changed = true }, Configuration: configuration}); err != nil {
+		Changed: func() { changed = true }, Configuration: configuration, Teams: teams}); err != nil {
 		return nil, false, err
 	}
 	return failures, changed, nil
@@ -645,6 +690,9 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			NoticeNumber: nullInt(e.NoticeNumber), MissedCount: nullInt(e.MissedCount), TeamID: nullInt(e.TeamID),
 			TeamRule: nonEmpty(e.TeamRule), TeamMatcher: nonEmpty(e.TeamMatcher), TeamValue: nonEmpty(e.TeamValue),
 		}
+		if e.Destination != nil {
+			p.DestinationID = pgtype.Int8{Int64: e.Destination.ID, Valid: true}
+		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:
 			p.ActorUserID = pgtype.Int8{Int64: person.ID, Valid: true}
@@ -671,7 +719,8 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 				p.Mentions = append(p.Mentions, string(m))
 			}
 			out = append(out, Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant,
-				Loudness: row.Loudness, Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason})
+				Loudness: row.Loudness, Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason,
+				Destination: e.Destination})
 		}
 		if e.System != "" {
 			p.Kind = string(KindSystem)
@@ -707,6 +756,70 @@ func (d *dispatcher) recordNote(ctx context.Context, q Queries, g *Group, actor 
 		return fmt.Errorf("add a note to alert group #%d: %w", g.Number, err)
 	}
 	n.CreatedAt = at
+	return nil
+}
+
+// joinsByAlerts reports whether the change of g may join Destinations (C-26.FR-4, FR-5): Alerts that brought it a
+// Team or raised its Severity level (ReachEvents), of an open Alert Group already published somewhere. A change of
+// configuration, such as the evaluation of the Teams on a save or a rise that the Route's Minimum severity made, joins
+// none: its re-render publishes Quietly. Alerts that join without a Team or a rise join nothing.
+func joinsByAlerts(c *change, g *Group) bool {
+	if c.configuration || g.FirstPublishedAt == nil || g.Status == StatusResolved {
+		return false
+	}
+	return slices.ContainsFunc(c.entries, func(e entry) bool {
+		return slices.Contains(ReachEvents, e.Event) && e.Reason != ReasonMinimumSeverity
+	})
+}
+
+// joinDestinations adds to the change of g one destination_joined per Destination its reach now has without a
+// delivery (C-26.FR-5): Loud with new_alert_group while it is firing, Quiet while it is acknowledged or snoozed, in the
+// order of the Destinations' ids. The reach — the entries of its Route and, with deliver_to_teams, of its Teams whose
+// condition its Severity level meets (routing.Reach) — is read under the Route's membership lock, taken shared after
+// the dispatcher's lock of g, the order Enqueue keeps: no change of the Route's Destinations commits between the reach
+// recorded here and the one the re-render step applies under the same lock.
+func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, c *change) error {
+	if err := q.ShareRouteMembership(ctx, dbgen.ShareRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
+		RouteID: g.RouteID}); err != nil {
+		return fmt.Errorf("lock the destinations of the route of alert group #%d: %w", g.Number, err)
+	}
+	toTeams, err := q.GetRouteDeliverToTeams(ctx, dbgen.GetRouteDeliverToTeamsParams{OrgID: d.orgID, ID: g.RouteID})
+	if err != nil {
+		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
+	}
+	rows, err := q.ListReachEntries(ctx, dbgen.ListReachEntriesParams{OrgID: d.orgID, RouteID: g.RouteID,
+		AlertGroupID: g.ID})
+	if err != nil {
+		return fmt.Errorf("read the reach of alert group #%d: %w", g.Number, err)
+	}
+	var route []routing.Entry
+	byTeam := map[int64][]routing.Entry{}
+	type known struct {
+		JoinedDestination
+		delivered bool
+	}
+	dests := map[int64]known{}
+	for _, r := range rows {
+		e := routing.Entry{DestinationID: r.DestinationID, Condition: routing.SeverityCondition(r.SeverityCondition)}
+		if r.Kind == routing.EntryTeam {
+			byTeam[r.TeamID] = append(byTeam[r.TeamID], e)
+		} else {
+			route = append(route, e)
+		}
+		dests[r.DestinationID] = known{JoinedDestination: JoinedDestination{ID: r.DestinationID, PublicID: r.PublicID,
+			Name: r.Name, Type: r.Type}, delivered: r.Delivered}
+	}
+	teams := make([]routing.TeamEntries, 0, len(byTeam))
+	for id, es := range byTeam {
+		teams = append(teams, routing.TeamEntries{TeamID: id, Entries: es})
+	}
+	for _, r := range routing.Reach(string(g.Severity), route, toTeams, teams) {
+		if dst := dests[r.DestinationID]; !dst.delivered {
+			dst.Entries = r.Entries
+			c.add(entry{Event: EventDestinationJoined, Variant: statusVariant(g.Status),
+				System: SystemDestinationJoined, Destination: &dst.JoinedDestination})
+		}
+	}
 	return nil
 }
 

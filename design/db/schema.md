@@ -70,7 +70,11 @@
   provider and the membership they give, C-03.FR-5 to FR-7 revised for L2, C-25.FR-4, S-117) and
   [`0031_message_settings_updates`](../../internal/db/migrations/0031_message_settings_updates.up.sql)
   (the kinds `organization_message_settings` and `team_name` of `open_group_updates`, the re-render of the open Root
-  messages after a change of the Organization's message settings or a rename of a Team, C-29.FR-1 to FR-3), in
+  messages after a change of the Organization's message settings or a rename of a Team, C-29.FR-1 to FR-3) and
+  [`0032_destination_entries_and_teams`](../../internal/db/migrations/0032_destination_entries_and_teams.up.sql)
+  (the Severity conditions of the Destinations of Routes and Teams, `routes.deliver_to_teams` and
+  `routes.run_team_chains`, `team_destinations`, `deliveries.entries`, the lifecycle event `destination_joined` and the
+  kind `team_destinations` of `open_group_updates`, C-26.FR-1 to FR-5, S-121), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1067,7 +1071,17 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
 - **`route_matchers`** — Matchers of a Route, `op` checked against `=`, `!=`, `=~`, `!~`; replaced as a whole on update.
   The Default route has none (enforced by the routes package; a trigger was not worth it).
 - **`route_destinations`** — Destinations of a Route with `added_at`, which drives the Quiet publication of the Route's
-  open Alert Groups into a newly added Destination (C-11.FR-14).
+  open Alert Groups into a newly added Destination (C-11.FR-14), and, from migration 0032, `severity_condition`
+  (`any`, the default and the value of every row made before, `critical` or `below_critical`,
+  `route_destinations_severity_condition_check`), checked against the Alert Group's Severity level (C-26.FR-1). The API
+  still derives `destination_ids` from these rows until 0.3.0.
+- **`routes.deliver_to_teams`** and **`routes.run_team_chains`** (migration 0032, C-26.FR-2) — "Also to the Teams from
+  the label", off by default, which also delivers an Alert Group of the Route to the Destinations of each of its Teams
+  (`team_destinations`) whose condition its Severity level meets, and "Run the Teams' Escalation chains", on by default,
+  stored and returned until Escalation chains run. The reach of an Alert Group — its Route's entries whose condition its
+  level meets and, with `deliver_to_teams`, the entries of its Teams that it meets, by Destination — is one rule of
+  `internal/routing` (`Reach`), which the dispatcher and delivery apply to what each reads under the Route's
+  membership lock; the owning Team of a Route adds nothing.
 - **`route_suggestion_dismissals`** — suggestions (`heartbeat_lost`, `internal_alerts`) dismissed per user (C-08.FR-11).
 - **`routes.owning_team_id`** — the Team that owns the Route (C-25.FR-2, migration 0022), which only organizes and
   filters and never adds delivery, with the partial index `routes_owning_team_idx` on `(org_id, owning_team_id)`.
@@ -1189,12 +1203,16 @@ and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cl
 Transport CHECK is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the
 lifecycle event tables: every event has its Timeline kind (`x-event-kinds` of the API specification), a lifecycle
 event always carries loudness and a sequence number, an entry without an event is a `system` entry,
-`moved_to_default_route` and `unknown_team_value` are both, and `mentions` only uses the eight symbolic names.
+`moved_to_default_route`, `unknown_team_value` and `destination_joined` are both, and `mentions` only uses the eight
+symbolic names.
 Migration 0024 replaced the `CHECK`s of the events, event kinds, system events and the system rule of `0001` by `_v2`
 ones with `team_joined` (kind `alerts`) and `unknown_team_value` (kind `system`, with the same `system_event`), added
 `NOT VALID`, validated in a second transaction and the old ones dropped in a third, and added the columns of the Teams:
 `team_id`, `team_rule` and `team_matcher` of `team_joined`, `team_value` of `unknown_team_value`; `team_id` has no
-foreign key, as the actor columns have none, and names a Team that may be deleted since. Delivery events are not stored
+foreign key, as the actor columns have none, and names a Team that may be deleted since. Migration 0032 replaced the
+`_v2` `CHECK`s by `_v3` ones with `destination_joined` (kind `system`, with the same `system_event`), in the same three
+transactions, and added `destination_id`, the Destination an Alert Group joined after its first Publication elsewhere
+(C-26.FR-5), likewise without a foreign key. Delivery events are not stored
 here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
 ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
 `(org_id, alert_group_id, at, id)`, serves the Timeline (both directions, kind filter).
@@ -1244,7 +1262,11 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
     is the final "no longer updated here" edit), `desired_received_at` (the receipt time of the oldest Snapshot whose
     change the actual message does not show yet — null when only Commands or timers changed it; the adapter call
     observes `muster_delivery_latency_seconds` from it and a delivered version clears it), `publication_loud`,
-    `late_note`;
+    `late_note`; `entries` (migration 0032, `jsonb`, an array, `deliveries_entries_check`) — the entries that reached the
+    Destination of an Alert Group's delivery, appended and never removed, one per Route (`{"kind": "route"}`) or Team
+    (`{"kind": "team", "team_id": N}`) with the `severity_condition` it had when it first reached it, so that the
+    delivery state says why an Alert Group is in a channel after its level fell or its Team's Alerts resolved; empty for
+    the deliveries made before 0.2.0 until their next re-render and for Storm summaries;
   - *actual message*: `actual_version`, `actual_hash`, `actual_button_key_id`, `message_id`, `message_url`; for outgoing
     webhooks in template mode `response_values` — the dictionary of values extracted from responses (`.Response`),
     replaced by each "create" and added to by "open thread" — and `thread_opened`, reset by each "create";
@@ -1318,7 +1340,8 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   attempted, the next waits until it is `delivered` or `not_delivered` (at least once, in order, never collapsed). Not
   subject to Storms and never dropped while the Destination is Broken, with no age limit. The `CHECK` of `event` lists
   every lifecycle event; migration 0024 replaced the one of `0001` by `webhook_events_event_v2_check` with
-  `team_joined` and `unknown_team_value`, in the three transactions of the Timeline's.
+  `team_joined` and `unknown_team_value`, and migration 0032 replaced it by `webhook_events_event_v3_check` with
+  `destination_joined`, in the three transactions of the Timeline's.
 - **`delivery_events`** (partitioned by month on `occurred_at`) — what happened while delivering: Publication, possible
   duplicate, Not delivered with its error class and error, delivered late, deleted in the messenger, republished, Thread
   not attached, rejected markup, Broken and recovered, Storm summary, final edit, republished past the edit window
@@ -1483,6 +1506,13 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   of the name, the description, the Working hours or the people inserts no row `team_evaluation`. A save with a changed
   name inserts a row `team_name` with the Team in `team_id` (migration 0031), which re-renders the Root messages of the
   open Alert Groups that have the Team, whose field Teams shows its name (C-29.FR-1).
+- **`team_destinations`** (migration 0032, C-26.FR-1) — the Destinations of each Team, primary key
+  `(team_id, destination_id)`, each with its `severity_condition` (`any` by default, `critical` or `below_critical`)
+  and `added_at`; a save of the Team's `destination_entries` replaces them, keeping the rows it keeps. The index
+  `team_destinations_destination_idx` on `(org_id, destination_id)` lists the Teams that name a Destination. The
+  dispatcher and delivery read them for the Teams of an Alert Group (`alert_group_teams`) on a Route with
+  `deliver_to_teams`; a deleted Team's rows stay until a later version takes them away with the deletion, and a deleted
+  Destination's are left out of every read.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
@@ -1618,8 +1648,10 @@ Teams are deleted softly), and "Labels in the message" of a Route (`route_messag
 which `open_group_updates_route_scope_check` requires; it also covers a rename of the Route, which the field Route of
 the messages shows), the Severity label, Team label, Instance labels, time zone, start of the working day or first day
 of the week of the Organization, which the Root messages show (`organization_message_settings`, without a scope), and
-the name of a Team (`team_name`, with the Team in `team_id`) from migration 0031, more kinds as later stories add them
-to the kind `CHECK`, versioned `open_group_updates_kind_v5_check` since migration 0031 — is one row of
+the name of a Team (`team_name`, with the Team in `team_id`) from migration 0031, and the Destinations of a Team
+(`team_destinations`, with the Team in `team_id`), which the kind `CHECK` takes from migration 0032 and whose handler a
+later version adds — no replica of 0.2.0 writes or claims such a row — more kinds as later stories add them to the kind
+`CHECK`, versioned `open_group_updates_kind_v6_check` since migration 0032 — is one row of
 `open_group_updates`, inserted in the transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The
 worker of every replica — not a Leader task — is woken at start, by that notification and by the development clock, and
 claims one row at a time:

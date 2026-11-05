@@ -948,8 +948,18 @@ func TestTeamsAndChannels(t *testing.T) {
 		}
 		return out
 	}
-	if got := names(); !slices.Equal(got, []string{"alerts", "alerts-prod"}) {
+	if got := names(); !slices.Equal(got, []string{"alerts", "alerts-prod", "infra-critical", "infra-notice",
+		"payments-critical", "payments-notice", "search-notice"}) {
 		t.Errorf("channels %v", got)
+	}
+	// The channels of routing to Teams (C-26) have the bot as a member.
+	for _, id := range []string{fakemattermost.ChannelInfraCritical, fakemattermost.ChannelInfraNotice,
+		fakemattermost.ChannelPaymentsCritical, fakemattermost.ChannelPaymentsNotice,
+		fakemattermost.ChannelSearchNotice} {
+		m := decode[map[string]string](t, fx.api(http.MethodGet, "/api/v4/channels/"+id+"/members/me", ""))
+		if m["user_id"] != fakemattermost.BotUserID {
+			t.Errorf("membership in %s %+v", id, m)
+		}
 	}
 
 	c := decode[fakemattermost.Channel](t, fx.api(http.MethodGet, "/api/v4/channels/ch-nobot", ""))
@@ -976,7 +986,8 @@ func TestTeamsAndChannels(t *testing.T) {
 	if r := fx.control(http.MethodPost, "/_fake/channels/ch-alerts-prod/archive", ""); r.status != http.StatusNoContent {
 		t.Fatalf("archive = %s", r)
 	}
-	if got := names(); !slices.Equal(got, []string{"alerts"}) {
+	if got := names(); !slices.Equal(got, []string{"alerts", "infra-critical", "infra-notice", "payments-critical",
+		"payments-notice", "search-notice"}) {
 		t.Errorf("channels after the archive %v", got)
 	}
 	if r := fx.api(http.MethodGet, "/api/v4/channels/ch-alerts-prod/members/me", ""); r.status != http.StatusOK {

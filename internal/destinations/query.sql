@@ -68,6 +68,15 @@ JOIN routes r ON r.org_id = rd.org_id AND r.id = rd.route_id
 WHERE rd.org_id = @org_id AND rd.destination_id = ANY(@destination_ids::bigint[]) AND r.deleted_at IS NULL
 ORDER BY r.name, r.id;
 
+-- ListDestinationTeams lists the Teams that are not deleted that name the Destinations as Destinations of the Team
+-- (C-26.FR-1), by name.
+-- name: ListDestinationTeams :many
+SELECT td.destination_id, t.public_id, t.name, t.slug
+FROM team_destinations td
+JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id
+WHERE td.org_id = @org_id AND td.destination_id = ANY(@destination_ids::bigint[]) AND t.deleted_at IS NULL
+ORDER BY t.name, t.id;
+
 -- ListRouteDestinationRefs lists the Destinations that are not deleted of the Routes, with their health, by name.
 -- name: ListRouteDestinationRefs :many
 SELECT rd.route_id, d.public_id, d.name, d.type, d.health, d.broken_since, d.broken_reason

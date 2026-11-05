@@ -10,6 +10,8 @@ import type { TemplateErrorState } from './templateErrorState';
 
 export interface DestinationReadFields {
   id: PublicId;
+  /** The Teams that name the Destination as a Destination of the Team, by name. */
+  teams: TeamRef[];
   /** The Team that owns the Destination, null when none does. */
   owning_team: TeamRef | null;
   health: DestinationHealth;

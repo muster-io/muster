@@ -256,8 +256,10 @@ type Reminders struct {
 	CapSeconds           int64 `json:"cap_seconds"`
 }
 
-// Route is a Route as the API reads it; Position is its zero-based place in evaluation order, DestinationIDs the
-// public_ids of its Destinations that are not deleted, in order, and Storm its active Storm, nil when there is none.
+// Route is a Route as the API reads it; Position is its zero-based place in evaluation order, DestinationEntries its
+// Destinations that are not deleted with their Severity conditions, by public_id, DestinationIDs their public_ids, which
+// the API still derives from them until 0.3.0, and Storm its active Storm, nil when there is none. DeliverToTeams is
+// "Also to the Teams from the label" and RunTeamChains "Run the Teams' Escalation chains" (C-26.FR-2).
 type Route struct {
 	ID          int64
 	PublicID    string
@@ -273,10 +275,14 @@ type Route struct {
 	GroupKey        []string
 	Policy          Policy
 	DestinationIDs  []string
-	Storm           *Storm
-	TemplateError   *TemplateError
-	CreatedAt       time.Time
-	Version         int64
+	// DestinationEntries are the Destinations with their Severity conditions (C-26.FR-1).
+	DestinationEntries []DestinationEntry
+	DeliverToTeams     bool
+	RunTeamChains      bool
+	Storm              *Storm
+	TemplateError      *TemplateError
+	CreatedAt          time.Time
+	Version            int64
 	// OpenAlertGroupCount is the number of its open Alert Groups, which block its deletion (C-09.FR-19).
 	OpenAlertGroupCount int64
 	// OwningTeam is the Team that owns the Route (C-25.FR-2), nil when none does.
@@ -330,6 +336,13 @@ type Storm struct {
 	AlertGroupCount int64
 }
 
+// DestinationEntry is a Destination of a Route with its Severity condition, by the Destination's public_id
+// (C-26.FR-1).
+type DestinationEntry struct {
+	DestinationID string            `json:"destination_id"`
+	Condition     SeverityCondition `json:"severity_condition"`
+}
+
 // Membership is the hook that delivery runs, in the transaction tx of a Route's change, when Destinations were added
 // to or removed from the Route routeID, by internal id (C-11.FR-14).
 type Membership func(ctx context.Context, tx dbgen.DBTX, routeID int64, added, removed []int64) error
@@ -355,8 +368,17 @@ type Input struct {
 	MinimumSeverity *string
 	Urgent          bool
 	GroupKey        []string
-	DestinationIDs  []string
-	Policy          Policy
+	// DestinationEntries are the Route's Destinations with their Severity conditions, replacing the stored ones as a
+	// whole; nil, when the request left them out, takes DestinationIDs. DestinationIDs, the deprecated list of a 0.1
+	// client, is read only without DestinationEntries: it keeps the stored condition of each Destination it keeps and
+	// gives a new one any. Both nil keep the stored entries on an update and are none on a creation.
+	DestinationEntries *[]DestinationEntry
+	DestinationIDs     []string
+	// DeliverToTeams and RunTeamChains are the options of C-26.FR-2: nil keeps the stored one on an update and is
+	// false, or true for RunTeamChains, on a creation.
+	DeliverToTeams *bool
+	RunTeamChains  *bool
+	Policy         Policy
 	// Keep are the templates an update leaves as they are stored.
 	Keep KeepTemplates
 	// OwningTeamID is the public_id of the Team that owns the Route: nil keeps the stored one on an update and is none
@@ -420,6 +442,7 @@ type Queries interface {
 	ListRouteDestinationIDs(ctx context.Context, arg dbgen.ListRouteDestinationIDsParams) (
 		[]dbgen.ListRouteDestinationIDsRow, error)
 	InsertRouteDestinations(ctx context.Context, arg dbgen.InsertRouteDestinationsParams) error
+	SetRouteDestinationConditions(ctx context.Context, arg dbgen.SetRouteDestinationConditionsParams) error
 	DeleteRouteDestinations(ctx context.Context, arg dbgen.DeleteRouteDestinationsParams) error
 	LockRouteMembership(ctx context.Context, arg dbgen.LockRouteMembershipParams) error
 	BumpRoutesOfDestination(ctx context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
@@ -593,7 +616,8 @@ func (s *Service) list(ctx context.Context, q Queries) (List, error) {
 			StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
 			OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName,
 			OwningTeamSlug: r.OwningTeamSlug, OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels,
-			SeverityLabel: r.SeverityLabel, TeamLabel: r.TeamLabel})
+			SeverityLabel: r.SeverityLabel, TeamLabel: r.TeamLabel, DeliverToTeams: r.DeliverToTeams,
+			RunTeamChains: r.RunTeamChains})
 	}
 	if err := s.withMatchers(ctx, q, out.Routes); err != nil {
 		return List{}, err
@@ -734,13 +758,14 @@ func (s *Service) withMatchers(ctx context.Context, q Queries, list []Route) err
 	return nil
 }
 
-// withDestinations sets the public_ids of the Destinations of each Route that are not deleted, in order.
+// withDestinations sets the Destinations of each Route that are not deleted with their Severity conditions, and their
+// public_ids, in order.
 func (s *Service) withDestinations(ctx context.Context, q Queries, list []Route) error {
 	ids := make([]int64, len(list))
 	index := make(map[int64]int, len(list))
 	for i, r := range list {
 		ids[i], index[r.ID] = r.ID, i
-		list[i].DestinationIDs = []string{}
+		list[i].DestinationIDs, list[i].DestinationEntries = []string{}, []DestinationEntry{}
 	}
 	rows, err := q.ListRouteDestinationIDs(ctx, dbgen.ListRouteDestinationIDsParams{OrgID: s.orgID, RouteIds: ids})
 	if err != nil {
@@ -749,33 +774,104 @@ func (s *Service) withDestinations(ctx context.Context, q Queries, list []Route)
 	for _, d := range rows {
 		if i, ok := index[d.RouteID]; ok {
 			list[i].DestinationIDs = append(list[i].DestinationIDs, d.PublicID)
+			list[i].DestinationEntries = append(list[i].DestinationEntries, DestinationEntry{DestinationID: d.PublicID,
+				Condition: SeverityCondition(d.SeverityCondition)})
 		}
 	}
 	return nil
 }
 
-// destinationSet is the Destinations of a Route as an edit gives them: their internal ids by public_id.
-type destinationSet map[string]int64
+// wanted is a Destination of a Route as an edit gives it: its internal id and its Severity condition.
+type wanted struct {
+	id        int64
+	condition SeverityCondition
+}
+
+// destinationSet is the Destinations of a Route as an edit gives them, by public_id.
+type destinationSet map[string]wanted
 
 // publicIDs are the public_ids of the set, in order.
 func (d destinationSet) publicIDs() []string {
 	return slices.Sorted(maps.Keys(d))
 }
 
-// resolveDestinations reads the Destinations ids name, each once (C-08.FR-1): an id that names no Destination, or a
-// deleted one, is an unknown_id FieldError at its pointer.
-func (s *Service) resolveDestinations(ctx context.Context, q Queries, ids []string) (destinationSet, error) {
+// entries are the entries of the set, in the order of the public_ids.
+func (d destinationSet) entries() []DestinationEntry {
+	out := make([]DestinationEntry, 0, len(d))
+	for _, id := range d.publicIDs() {
+		out = append(out, DestinationEntry{DestinationID: id, Condition: d[id].condition})
+	}
+	return out
+}
+
+// requested is one Destination entry of a request with the pointer of its Destination.
+type requested struct {
+	DestinationEntry
+	pointer string
+}
+
+// requestedDestinations are the Destination entries an Input gives (C-26.FR-1, C-08.FR-1): its DestinationEntries,
+// any by default; without them its deprecated DestinationIDs, each with the stored condition of a Destination the Route
+// keeps and any for a new one; without either the stored entries, none on a creation.
+func requestedDestinations(in Input, stored []DestinationEntry) []requested {
+	switch {
+	case in.DestinationEntries != nil:
+		out := make([]requested, len(*in.DestinationEntries))
+		for i, e := range *in.DestinationEntries {
+			if e.Condition == "" {
+				e.Condition = ConditionAny
+			}
+			out[i] = requested{DestinationEntry: e, pointer: "/destination_entries/" + strconv.Itoa(i) + "/destination_id"}
+		}
+		return out
+	case in.DestinationIDs != nil:
+		conditions := make(map[string]SeverityCondition, len(stored))
+		for _, e := range stored {
+			conditions[e.DestinationID] = e.Condition
+		}
+		out := make([]requested, len(in.DestinationIDs))
+		for i, raw := range in.DestinationIDs {
+			c := ConditionAny
+			if id, err := publicid.Parse(publicid.Destination, raw); err == nil && conditions[id] != "" {
+				c = conditions[id]
+			}
+			out[i] = requested{DestinationEntry: DestinationEntry{DestinationID: raw, Condition: c},
+				pointer: "/destination_ids/" + strconv.Itoa(i)}
+		}
+		return out
+	}
+	out := make([]requested, len(stored))
+	for i, e := range stored {
+		out[i] = requested{DestinationEntry: e, pointer: "/destination_entries/" + strconv.Itoa(i) + "/destination_id"}
+	}
+	return out
+}
+
+// resolveDestinations reads the Destinations of the requested entries (C-08.FR-1, C-26.FR-1): an id that names no
+// Destination, or a deleted one, is an unknown_id FieldError at its pointer, and a condition outside the three an
+// invalid_format one. The deprecated list may name a Destination twice, which counts once; the entries may not, which is
+// a duplicate FieldError.
+func (s *Service) resolveDestinations(ctx context.Context, q Queries, req []requested) (destinationSet, error) {
 	out := destinationSet{}
-	if len(ids) == 0 {
+	if len(req) == 0 {
 		return out, nil
 	}
-	canonical := make([]string, len(ids))
-	for i, raw := range ids {
-		id, err := publicid.Parse(publicid.Destination, raw)
+	canonical := make([]string, len(req))
+	seen := make(map[string]bool, len(req))
+	for i, r := range req {
+		id, err := publicid.Parse(publicid.Destination, r.DestinationID)
 		if err != nil {
-			return nil, unknownDestination(i)
+			return nil, unknownDestination(r.pointer)
 		}
-		canonical[i] = id
+		if !slices.Contains(Conditions, r.Condition) {
+			return nil, &FieldError{Pointer: strings.TrimSuffix(r.pointer, "/destination_id") + "/severity_condition",
+				Code: CodeInvalidFormat, Detail: "Choose any, critical or below_critical."}
+		}
+		if seen[id] && strings.HasPrefix(r.pointer, "/destination_entries/") {
+			return nil, &FieldError{Pointer: r.pointer, Code: CodeDuplicate,
+				Detail: "The Destination is named twice."}
+		}
+		seen[id], canonical[i] = true, id
 	}
 	rows, err := q.ResolveDestinations(ctx, dbgen.ResolveDestinationsParams{OrgID: s.orgID, PublicIds: canonical})
 	if err != nil {
@@ -788,22 +884,23 @@ func (s *Service) resolveDestinations(ctx context.Context, q Queries, ids []stri
 	for i, id := range canonical {
 		internal, ok := found[id]
 		if !ok {
-			return nil, unknownDestination(i)
+			return nil, unknownDestination(req[i].pointer)
 		}
-		out[id] = internal
+		out[id] = wanted{id: internal, condition: req[i].Condition}
 	}
 	return out, nil
 }
 
-// unknownDestination is the refusal of the i-th Destination of a Route.
-func unknownDestination(i int) error {
-	return &FieldError{Pointer: "/destination_ids/" + strconv.Itoa(i), Code: CodeUnknownID,
-		Detail: "No such Destination."}
+// unknownDestination is the refusal of a Destination of a Route at its pointer.
+func unknownDestination(pointer string) error {
+	return &FieldError{Pointer: pointer, Code: CodeUnknownID, Detail: "No such Destination."}
 }
 
 // writeDestinations makes want the Destinations of the Route routeID in route_destinations — those kept keep when
-// they were added — and runs the membership hook with those added and removed. It takes the Route's membership lock
-// first, after the Route's row, so that an Enqueue on the Route waits for the change or the change for it.
+// they were added, and take the condition of want — and runs the membership hook with those added and removed. It
+// takes the Route's membership lock first, after the Route's row, so that an Enqueue on the Route waits for the change
+// or the change for it. A changed condition reaches the open Alert Groups at their next change (S-170 publishes it at
+// the save).
 func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int64, want destinationSet) error {
 	if err := q.LockRouteMembership(ctx, dbgen.LockRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
 		RouteID: routeID}); err != nil {
@@ -816,35 +913,48 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int6
 	}
 	current := make(map[int64]bool, len(rows))
 	var removed []int64
+	var changed dbgen.SetRouteDestinationConditionsParams
 	for _, r := range rows {
 		current[r.DestinationID] = true
-		if _, ok := want[r.PublicID]; !ok {
+		w, ok := want[r.PublicID]
+		switch {
+		case !ok:
 			removed = append(removed, r.DestinationID)
+		case string(w.condition) != r.SeverityCondition:
+			changed.DestinationIds = append(changed.DestinationIds, r.DestinationID)
+			changed.Conditions = append(changed.Conditions, string(w.condition))
 		}
 	}
-	var added []int64
-	for _, id := range want {
-		if !current[id] {
-			added = append(added, id)
+	var added dbgen.InsertRouteDestinationsParams
+	for _, id := range want.publicIDs() {
+		if w := want[id]; !current[w.id] {
+			added.DestinationIds = append(added.DestinationIds, w.id)
+			added.Conditions = append(added.Conditions, string(w.condition))
 		}
 	}
-	slices.Sort(added)
+	if len(changed.DestinationIds) > 0 {
+		changed.OrgID, changed.RouteID = s.orgID, routeID
+		if err := q.SetRouteDestinationConditions(ctx, changed); err != nil {
+			return fmt.Errorf("change the severity conditions of the destinations of the route: %w", err)
+		}
+	}
 	if len(removed) > 0 {
 		if err := q.DeleteRouteDestinations(ctx, dbgen.DeleteRouteDestinationsParams{OrgID: s.orgID,
 			RouteID: routeID, DestinationIds: removed}); err != nil {
 			return fmt.Errorf("remove destinations from the route: %w", err)
 		}
 	}
-	if len(added) > 0 {
-		if err := q.InsertRouteDestinations(ctx, dbgen.InsertRouteDestinationsParams{OrgID: s.orgID,
-			RouteID: routeID, DestinationIds: added, Now: s.clock.Now().UTC()}); err != nil {
+	if len(added.DestinationIds) > 0 {
+		added.OrgID, added.RouteID, added.Now = s.orgID, routeID, s.clock.Now().UTC()
+		if err := q.InsertRouteDestinations(ctx, added); err != nil {
 			return fmt.Errorf("add destinations to the route: %w", err)
 		}
 	}
-	if s.membership == nil || len(added)+len(removed) == 0 {
+	if s.membership == nil || len(added.DestinationIds)+len(removed) == 0 {
 		return nil
 	}
-	if err := s.membership(ctx, q.DB(), routeID, added, removed); err != nil {
+	ids := slices.Sorted(slices.Values(added.DestinationIds))
+	if err := s.membership(ctx, q.DB(), routeID, ids, removed); err != nil {
 		return fmt.Errorf("deliver to the changed destinations of the route: %w", err)
 	}
 	return nil
@@ -901,7 +1011,7 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 				return err
 			}
 		}
-		dests, err := s.resolveDestinations(ctx, q, in.DestinationIDs)
+		dests, err := s.resolveDestinations(ctx, q, requestedDestinations(in, nil))
 		if err != nil {
 			return err
 		}
@@ -930,7 +1040,9 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			OwningTeamID: ownerID(owner), MessageLabels: own, Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(owner), MessageLabels: own,
+			DeliverToTeams: in.DeliverToTeams != nil && *in.DeliverToTeams,
+			RunTeamChains:  in.RunTeamChains == nil || *in.RunTeamChains, Now: s.clock.Now().UTC(),
 		})
 		if err != nil {
 			return fmt.Errorf("create the route: %w", nameTaken(err))
@@ -1051,7 +1163,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if err := s.checkTemplates(ctx, before.ID, in.Policy, before.Policy.Templates, checked); err != nil {
 			return err
 		}
-		dests, err := s.resolveDestinations(ctx, q, in.DestinationIDs)
+		dests, err := s.resolveDestinations(ctx, q, requestedDestinations(in, before.DestinationEntries))
 		if err != nil {
 			return err
 		}
@@ -1063,7 +1175,13 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			next.MinimumSeverity = MinimumCritical
 		}
 		next.Urgent = next.MinimumSeverity == MinimumCritical
-		next.DestinationIDs, next.OwningTeam = dests.publicIDs(), owner
+		next.DestinationIDs, next.DestinationEntries, next.OwningTeam = dests.publicIDs(), dests.entries(), owner
+		if in.DeliverToTeams != nil {
+			next.DeliverToTeams = *in.DeliverToTeams
+		}
+		if in.RunTeamChains != nil {
+			next.RunTeamChains = *in.RunTeamChains
+		}
 		if in.Description != nil {
 			next.Description = *in.Description
 		}
@@ -1090,7 +1208,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			AckTimeoutEnabled: p.AckTimeout.Enabled, AckTimeoutFirstIntervalSeconds: p.AckTimeout.FirstIntervalSeconds,
 			RemindersEnabled: p.Reminders.Enabled, RemindersFirstIntervalSeconds: p.Reminders.FirstIntervalSeconds,
 			RemindersCapSeconds: p.Reminders.CapSeconds, AutoUnacknowledge: p.AutoUnacknowledge,
-			OwningTeamID: ownerID(next.OwningTeam), MessageLabels: own, Now: s.clock.Now().UTC(),
+			OwningTeamID: ownerID(next.OwningTeam), MessageLabels: own, DeliverToTeams: next.DeliverToTeams,
+			RunTeamChains: next.RunTeamChains, Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the route %s: %w", before.PublicID, nameTaken(err))
 		}
@@ -1109,7 +1228,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
-		if !slices.Equal(before.DestinationIDs, next.DestinationIDs) {
+		if !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
 			if err := s.writeDestinations(ctx, q, before.ID, dests); err != nil {
 				return err
 			}
@@ -1551,7 +1670,11 @@ type view struct {
 	Urgent          bool      `json:"urgent"`
 	GroupKey        []string  `json:"group_key"`
 	DestinationIDs  []string  `json:"destination_ids"`
-	OwningTeamID    *string   `json:"owning_team_id"`
+	// DestinationEntries are the Destinations with their Severity conditions, of which DestinationIDs are the ids.
+	DestinationEntries []DestinationEntry `json:"destination_entries"`
+	DeliverToTeams     bool               `json:"deliver_to_teams"`
+	RunTeamChains      bool               `json:"run_team_chains"`
+	OwningTeamID       *string            `json:"owning_team_id"`
 	// MessageLabels is the Route's own list of "Labels in the message", null while it is computed.
 	MessageLabels []string `json:"message_labels"`
 	Policy        Policy   `json:"policy"`
@@ -1565,16 +1688,20 @@ func viewOf(r Route) view {
 	if key == nil {
 		key = []string{}
 	}
-	dests := r.DestinationIDs
+	dests, entries := r.DestinationIDs, r.DestinationEntries
 	if dests == nil {
 		dests = []string{}
+	}
+	if entries == nil {
+		entries = []DestinationEntry{}
 	}
 	p := r.Policy
 	if p.SnoozeDurationsSeconds == nil {
 		p.SnoozeDurationsSeconds = []int64{}
 	}
 	v := view{Name: r.Name, Description: r.Description, Matchers: ms, MinimumSeverity: r.MinimumSeverity,
-		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, MessageLabels: r.ownLabels(), Policy: p}
+		Urgent: r.Urgent, GroupKey: key, DestinationIDs: dests, DestinationEntries: entries,
+		DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains, MessageLabels: r.ownLabels(), Policy: p}
 	if r.OwningTeam != nil {
 		v.OwningTeamID = &r.OwningTeam.PublicID
 	}
@@ -1601,8 +1728,9 @@ func routeOf(r dbgen.GetRouteRow) Route {
 		MessageLabels:    MessageLabels(r.MessageLabels, r.GroupKey, labels.severity, labels.team),
 		ID:               r.ID, PublicID: r.PublicID, Name: r.Name, Description: r.Description, Position: int(r.Place),
 		IsDefault: r.IsDefault, MinimumSeverity: r.MinimumSeverity, Urgent: r.MinimumSeverity == MinimumCritical,
-		GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(),
-		Version: r.Version,
+		GroupKey: r.GroupKey, CreatedAt: r.CreatedAt.UTC(), DeliverToTeams: r.DeliverToTeams,
+		RunTeamChains: r.RunTeamChains,
+		Version:       r.Version,
 		Policy: Policy{
 			ReopenWindowSeconds: r.ReopenWindowSeconds, GracePeriodSeconds: r.GracePeriodSeconds,
 			UrgentRiseRemovesAck: r.UrgentRiseRemovesAck, SnoozeDurationsSeconds: r.SnoozeDurationsSeconds,

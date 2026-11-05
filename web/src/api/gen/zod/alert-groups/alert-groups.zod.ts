@@ -443,6 +443,7 @@ export const getAlertGroupTimelineResponseItemsItemFiveOneActorIdRegExp = new Re
 export const getAlertGroupTimelineResponseItemsItemFiveTwoDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemSixOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemSixOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getAlertGroupTimelineResponseItemsItemSixTwoDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const GetAlertGroupTimelineResponse = zod.object({
@@ -459,7 +460,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -498,7 +499,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -531,7 +532,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -564,7 +565,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined']).describe('Lifecycle event names, exactly as in the lifecycle event tables (every row is one Timeline entry with the row\'s kind, loudness and Mentions).\nThe Timeline kind of each event is given in `x-event-kinds`.\n'),
   "loudness": zod.enum(['loud', 'quiet']),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.'))
 })).and(zod.object({
@@ -611,14 +612,24 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
   "kind": zod.enum(['system']),
-  "system_event": zod.enum(['moved_to_default_route', 'muster_unavailable', 'fallback_template_used', 'template_value_missing', 'unknown_team_value']),
-  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value']).optional().describe('Set for lifecycle events of kind `system`.'),
+  "system_event": zod.enum(['moved_to_default_route', 'muster_unavailable', 'fallback_template_used', 'template_value_missing', 'unknown_team_value', 'destination_joined']),
+  "event": zod.enum(['created', 'alerts_added', 'alert_replaced', 'alert_resolved', 'alert_continued', 'annotations_changed', 'severity_raised', 'urgency_raised', 'reopened', 'snooze_ended', 'resolved', 'moved_to_default_route', 'acknowledged', 'takeover', 'unacknowledged', 'unresolved', 'snoozed', 'unsnoozed', 'note_added', 'ack_timeout', 'unclaimed', 'reminder', 'reminder_answered', 'auto_unacknowledged', 'notices_missed', 'team_joined', 'unknown_team_value', 'destination_joined']).optional().describe('Set for lifecycle events of kind `system`.'),
   "loudness": zod.enum(['loud', 'quiet']).optional(),
   "mentions": zod.array(zod.enum(['owner', 'previous_owner', 'new_alert_group', 'new_alerts', 'reopen', 'ack_timeout', 'snooze_ended', 'rise_to_urgent']).describe('A symbolic Mention that each Destination turns into real Mentions.')).optional(),
   "period_from": zod.iso.datetime({"offset":true}).nullish(),
   "period_to": zod.iso.datetime({"offset":true}).nullish(),
   "detail": zod.string().nullish(),
-  "team_value": zod.string().nullish().describe('The value of the Team label that names no Team, for `unknown_team_value`.')
+  "team_value": zod.string().nullish().describe('The value of the Team label that names no Team, for `unknown_team_value`.'),
+  "destination": zod.object({
+  "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemSixTwoDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),
+  "health": zod.object({
+  "state": zod.enum(['healthy', 'broken']),
+  "since": zod.iso.datetime({"offset":true}).nullish(),
+  "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
+})
+}).optional().describe('The Destination the Alert Group joined, for `destination_joined`.')
 })).and(zod.object({
   "kind": zod.enum(['system'])
 }))]).describe('One Timeline entry; `kind` selects the variant.')),
@@ -684,6 +695,7 @@ export const ListAlertGroupDeliveriesParams = zod.object({
 })
 
 export const listAlertGroupDeliveriesResponseItemsItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const listAlertGroupDeliveriesResponseItemsItemEntriesItemTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const ListAlertGroupDeliveriesResponse = zod.object({
@@ -698,6 +710,16 @@ export const ListAlertGroupDeliveriesResponse = zod.object({
   "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
 })
 }),
+  "entries": zod.array(zod.object({
+  "kind": zod.enum(['route', 'team']).describe('`route`, the Alert Group\'s Route, or `team`, a Team of the Alert Group on a Route with `deliver_to_teams`.'),
+  "team": zod.union([zod.object({
+  "id": zod.string().regex(listAlertGroupDeliveriesResponseItemsItemEntriesItemTeamOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),zod.null()]).describe('The Team of a `team` entry, null for `route`.'),
+  "severity_condition": zod.enum(['any', 'critical', 'below_critical']).describe('The Severity condition of a Destination of a Route or a Team (C-26.FR-1), checked against the Severity level of the Alert Group, the highest level of its firing Alerts raised to the Route\'s Minimum severity. `any` meets every level, `critical` only critical, `below_critical` every level but critical.')
+}).describe('An entry that reached a Destination of an Alert Group (C-26.FR-3, FR-4), with the condition it had when it first did. Entries are added and never removed, so a Destination keeps the entries that once reached it after the Severity level fell or the Team\'s Alerts resolved.')).describe('The entries that reached the Destination, the Route\'s first; empty for a delivery made before 0.2.0 until the Alert Group\'s next change.'),
   "state": zod.enum(['pending', 'delivered', 'waiting_for_broken_destination', 'not_delivered', 'deleted_in_messenger', 'withheld', 'retired']).describe('`waiting_for_broken_destination` — derived, never stored: a `pending` delivery whose Destination is Broken; `withheld` — never posted to this Destination: the Alert Group resolved while a Storm summary stood for it or while the Destination was Broken; `retired` — no longer updated there after its final edit, because the Destination left the Route or was deleted.'),
   "thread_not_attached": zod.boolean(),
   "possible_duplicate": zod.boolean(),

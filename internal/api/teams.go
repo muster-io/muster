@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/teams"
 )
@@ -228,6 +229,16 @@ func teamInputOf(b gen.TeamInput) teams.Input {
 		}
 		in.IdpEntries = &entries
 	}
+	if b.DestinationEntries != nil {
+		entries := make([]teams.DestinationEntry, len(*b.DestinationEntries))
+		for i, e := range *b.DestinationEntries {
+			entries[i] = teams.DestinationEntry{DestinationID: e.DestinationId}
+			if e.SeverityCondition != nil {
+				entries[i].Condition = string(*e.SeverityCondition)
+			}
+		}
+		in.DestinationEntries = &entries
+	}
 	return in
 }
 
@@ -265,10 +276,20 @@ func teamOf(t teams.Team) gen.Team {
 	for i, m := range t.Matchers {
 		ms[i] = gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value}
 	}
+	entries := make([]gen.DestinationEntry, len(t.DestinationEntries))
+	for i, e := range t.DestinationEntries {
+		entries[i] = gen.DestinationEntry{DestinationId: e.DestinationID,
+			SeverityCondition: new(gen.SeverityCondition(e.Condition))}
+	}
+	dests := make([]gen.DestinationRef, len(t.Destinations))
+	for i, d := range t.Destinations {
+		dests[i] = gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
+			Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
+	}
 	return gen.Team{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Description: t.Description,
 		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours),
 		IdpEntries: idpEntriesOf(t.IdpEntries), UserCount: int(t.UserCount), CreatedAt: t.CreatedAt.UTC(), Etag: &tag,
-		Matchers: ms}
+		Matchers: ms, DestinationEntries: entries, Destinations: dests}
 }
 
 // teamUserOf is the API form of a person in a Team.

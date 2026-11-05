@@ -6,6 +6,7 @@ package delivery
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/outbound"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // Destinations joining and leaving Routes (C-11.FR-14, C-09.FR-19): a Destination added to a Route publishes the
@@ -162,28 +164,37 @@ func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, ro
 			if g.Held {
 				heldBy = &st.id
 			}
-			if err := s.join(ctx, tx, q, view, dst, roots[i], heldBy, now); err != nil {
+			if err := s.join(ctx, tx, q, view, dst, routeEntry(d), roots[i], heldBy, now); err != nil {
 				return err
 			}
 		}
 	}
 	if st != nil {
 		return s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
-			language: route.Language}, dests, now)
+			language: route.Language}, stormDestsOf(dests), now)
 	}
 	return nil
 }
 
+// routeEntry is the entry of the Route that a Destination added to it reaches the Route's open Alert Groups by, encoded
+// for deliveries.entries: until a later version applies its Severity condition at the save, the added Destination is
+// published in each of them whatever the condition (C-11.FR-14).
+func routeEntry(d dbgen.ListRouteDestinationsRow) []byte {
+	b, _ := json.Marshal([]routing.Reaching{{Kind: routing.EntryRoute, // a fixed struct always encodes
+		Condition: routing.SeverityCondition(d.SeverityCondition)}})
+	return b
+}
+
 // join makes the delivery of an open Alert Group current in a Destination that joined its Route: a Quiet
 // Publication, held by the Storm heldBy when one holds the Alert Group, or an edit of a Root message whose final edit
-// still waited.
-func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, d Destination, roots Roots,
-	heldBy *int64, now time.Time) error {
+// still waited; the Route's entry is appended to those of the delivery.
+func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, d Destination, entries []byte,
+	roots Roots, heldBy *int64, now time.Time) error {
 	groupID := g.ID
 	loud := deliveryEvent(DeliveryAddedDestination).loud(g.Status == groups.StatusFiring)
 	row, err := q.EnsureDelivery(ctx, dbgen.EnsureDeliveryParams{OrgID: s.orgID, DestinationID: d.ID,
 		AlertGroupID: pgtype.Int8{Int64: groupID, Valid: true}, HeldByStormID: nullInt(heldBy), Urgent: g.Urgent,
-		PublicationLoud: pgtype.Bool{Bool: loud, Valid: true}, Now: now})
+		PublicationLoud: pgtype.Bool{Bool: loud, Valid: true}, Entries: entries, Now: now})
 	if err != nil {
 		return fmt.Errorf("create the delivery of alert group #%d to %s: %w", g.Number, d.PublicID, err)
 	}

@@ -915,11 +915,16 @@ func (q *Queries) EnsureBuckets(ctx context.Context, arg EnsureBucketsParams) er
 
 const ensureDelivery = `-- name: EnsureDelivery :one
 INSERT INTO deliveries (org_id, destination_id, alert_group_id, held_by_storm_id, state, urgent, publication_loud,
-                        next_attempt_at, created_at, updated_at)
+                        entries, next_attempt_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4::bigint, 'pending', $5,
-        $6::boolean, $7, $7, $7)
+        $6::boolean, $7::jsonb, $8, $8, $8)
 ON CONFLICT (alert_group_id, destination_id) WHERE alert_group_id IS NOT NULL
-DO UPDATE SET updated_at = deliveries.updated_at
+DO UPDATE SET updated_at = deliveries.updated_at,
+              entries    = deliveries.entries
+                           || coalesce((SELECT jsonb_agg(e.value)
+                                        FROM jsonb_array_elements(excluded.entries) AS e
+                                        WHERE NOT deliveries.entries @> jsonb_build_array(e.value - 'severity_condition')),
+                                       '[]'::jsonb)
 RETURNING id, desired_version, desired_hash, thread_batch_until, state, held_by_storm_id, (xmax = 0)::boolean AS inserted
 `
 
@@ -930,6 +935,7 @@ type EnsureDeliveryParams struct {
 	HeldByStormID   pgtype.Int8
 	Urgent          bool
 	PublicationLoud pgtype.Bool
+	Entries         []byte
 	Now             time.Time
 }
 
@@ -945,7 +951,8 @@ type EnsureDeliveryRow struct {
 
 // EnsureDelivery creates the delivery of an Alert Group and a Destination when it is missing, held by the Storm
 // @held_by_storm_id when one stands for it, and locks it either way; inserted tells a new one, state whether it ended
-// and held_by_storm_id whether a Storm holds it.
+// and held_by_storm_id whether a Storm holds it. The @entries that reach it are appended to those it has, each Route or
+// Team once with the condition it first reached it with (C-26.FR-3).
 func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) (EnsureDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, ensureDelivery,
 		arg.OrgID,
@@ -954,6 +961,7 @@ func (q *Queries) EnsureDelivery(ctx context.Context, arg EnsureDeliveryParams) 
 		arg.HeldByStormID,
 		arg.Urgent,
 		arg.PublicationLoud,
+		arg.Entries,
 		arg.Now,
 	)
 	var i EnsureDeliveryRow
@@ -1726,7 +1734,7 @@ func (q *Queries) GetRetentionDetailsDays(ctx context.Context, orgID int64) (int
 }
 
 const getRouteDelivery = `-- name: GetRouteDelivery :one
-SELECT public_id, name, language, thread_batching_window_seconds, storm_threshold
+SELECT public_id, name, language, thread_batching_window_seconds, storm_threshold, deliver_to_teams
 FROM routes
 WHERE org_id = $1 AND id = $2
 `
@@ -1742,10 +1750,11 @@ type GetRouteDeliveryRow struct {
 	Language                    string
 	ThreadBatchingWindowSeconds int64
 	StormThreshold              int64
+	DeliverToTeams              bool
 }
 
 // GetRouteDelivery reads what delivery needs of a Route, deleted or not: its public_id and name, its language, its
-// Thread batching window and its Storm threshold.
+// Thread batching window, its Storm threshold and "Also to the Teams from the label".
 func (q *Queries) GetRouteDelivery(ctx context.Context, arg GetRouteDeliveryParams) (GetRouteDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getRouteDelivery, arg.OrgID, arg.ID)
 	var i GetRouteDeliveryRow
@@ -1755,6 +1764,7 @@ func (q *Queries) GetRouteDelivery(ctx context.Context, arg GetRouteDeliveryPara
 		&i.Language,
 		&i.ThreadBatchingWindowSeconds,
 		&i.StormThreshold,
+		&i.DeliverToTeams,
 	)
 	return i, err
 }
@@ -2473,8 +2483,116 @@ func (q *Queries) ListDestinationHealth(ctx context.Context, orgID int64) ([]Lis
 	return items, nil
 }
 
+const listDestinationsByID = `-- name: ListDestinationsByID :many
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons
+FROM destinations d
+JOIN organizations o ON o.id = d.org_id
+WHERE d.org_id = $1 AND d.id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY d.id
+`
+
+type ListDestinationsByIDParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListDestinationsByIDRow struct {
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	ConnectionID        pgtype.Int8
+	Health              string
+	WebhookMode         pgtype.Text
+	WebhookReplies      bool
+	Buttons             []byte
+	OrganizationButtons []byte
+}
+
+// ListDestinationsByID reads, as ListRouteDestinations does, the Destinations that are not deleted among @ids: those
+// the dispatcher recorded destination_joined for, which the reach Enqueue reads again may have lost meanwhile.
+func (q *Queries) ListDestinationsByID(ctx context.Context, arg ListDestinationsByIDParams) ([]ListDestinationsByIDRow, error) {
+	rows, err := q.db.Query(ctx, listDestinationsByID, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDestinationsByIDRow{}
+	for rows.Next() {
+		var i ListDestinationsByIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.ConnectionID,
+			&i.Health,
+			&i.WebhookMode,
+			&i.WebhookReplies,
+			&i.Buttons,
+			&i.OrganizationButtons,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntryTeams = `-- name: ListEntryTeams :many
+SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
+FROM teams
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListEntryTeamsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListEntryTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
+}
+
+// ListEntryTeams names the Teams of the entries of deliveries, deleted ones included.
+func (q *Queries) ListEntryTeams(ctx context.Context, arg ListEntryTeamsParams) ([]ListEntryTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listEntryTeams, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEntryTeamsRow{}
+	for rows.Next() {
+		var i ListEntryTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGroupDeliveries = `-- name: ListGroupDeliveries :many
 SELECT d.state, d.thread_state, d.possible_duplicate, d.past_edit_window, d.message_url, d.last_error, d.updated_at,
+       d.entries,
        ds.public_id AS destination_public_id, ds.name AS destination_name, ds.type AS destination_type, ds.health,
        ds.broken_since, ds.broken_reason
 FROM deliveries d
@@ -2496,6 +2614,7 @@ type ListGroupDeliveriesRow struct {
 	MessageUrl          pgtype.Text
 	LastError           pgtype.Text
 	UpdatedAt           time.Time
+	Entries             []byte
 	DestinationPublicID string
 	DestinationName     string
 	DestinationType     string
@@ -2504,7 +2623,8 @@ type ListGroupDeliveriesRow struct {
 	BrokenReason        pgtype.Text
 }
 
-// ListGroupDeliveries reads the delivery state of an Alert Group per Destination, by Destination name.
+// ListGroupDeliveries reads the delivery state of an Alert Group per Destination, with the entries that reached each,
+// by Destination name.
 func (q *Queries) ListGroupDeliveries(ctx context.Context, arg ListGroupDeliveriesParams) ([]ListGroupDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, listGroupDeliveries, arg.OrgID, arg.AlertGroupID)
 	if err != nil {
@@ -2522,12 +2642,90 @@ func (q *Queries) ListGroupDeliveries(ctx context.Context, arg ListGroupDeliveri
 			&i.MessageUrl,
 			&i.LastError,
 			&i.UpdatedAt,
+			&i.Entries,
 			&i.DestinationPublicID,
 			&i.DestinationName,
 			&i.DestinationType,
 			&i.Health,
 			&i.BrokenSince,
 			&i.BrokenReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupDestinations = `-- name: ListGroupDestinations :many
+SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons, (x.id IS NOT NULL)::boolean AS delivered,
+       coalesce(x.state, '')::text AS state, x.held_by_storm_id, coalesce(x.desired_retire, false)::boolean AS retiring
+FROM destinations d
+JOIN organizations o ON o.id = d.org_id
+LEFT JOIN deliveries x ON x.org_id = $1 AND x.alert_group_id = $2::bigint AND x.destination_id = d.id
+WHERE d.org_id = $1 AND d.deleted_at IS NULL
+  AND (x.id IS NOT NULL
+       OR EXISTS (SELECT 1
+                  FROM webhook_events w
+                  WHERE w.org_id = $1 AND w.alert_group_id = $2::bigint
+                    AND w.destination_id = d.id))
+ORDER BY d.id
+`
+
+type ListGroupDestinationsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+type ListGroupDestinationsRow struct {
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	ConnectionID        pgtype.Int8
+	Health              string
+	WebhookMode         pgtype.Text
+	WebhookReplies      bool
+	Buttons             []byte
+	OrganizationButtons []byte
+	Delivered           bool
+	State               string
+	HeldByStormID       pgtype.Int8
+	Retiring            bool
+}
+
+// ListGroupDestinations lists the Destinations that are not deleted that an Alert Group reached before: those it has a
+// delivery in, with its state, the Storm that holds it and whether its final edit waits, and the outgoing webhooks in
+// the events mode that have an event of it, with what ListRouteDestinations reads of them, in id order (C-26.FR-4).
+func (q *Queries) ListGroupDestinations(ctx context.Context, arg ListGroupDestinationsParams) ([]ListGroupDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupDestinations, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupDestinationsRow{}
+	for rows.Next() {
+		var i ListGroupDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.ConnectionID,
+			&i.Health,
+			&i.WebhookMode,
+			&i.WebhookReplies,
+			&i.Buttons,
+			&i.OrganizationButtons,
+			&i.Delivered,
+			&i.State,
+			&i.HeldByStormID,
+			&i.Retiring,
 		); err != nil {
 			return nil, err
 		}
@@ -2695,7 +2893,7 @@ const listRouteDestinations = `-- name: ListRouteDestinations :many
 
 SELECT d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
        coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
-       d.buttons, o.buttons AS organization_buttons
+       d.buttons, o.buttons AS organization_buttons, rd.severity_condition
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 JOIN organizations o ON o.id = d.org_id
@@ -2719,6 +2917,7 @@ type ListRouteDestinationsRow struct {
 	WebhookReplies      bool
 	Buttons             []byte
 	OrganizationButtons []byte
+	SeverityCondition   string
 }
 
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -2729,9 +2928,9 @@ type ListRouteDestinationsRow struct {
 // telegram_post_copies. Due times are business times and leases real times; both come from Go. Row locks follow the
 // lock order of the delivery worker (worker.go): an explicit lock on a row of deliveries, storms or destinations is FOR
 // NO KEY UPDATE, so that the FOR KEY SHARE of a foreign-key check never waits for it, outside the SKIP LOCKED claims.
-// ListRouteDestinations lists the Destinations of a Route that are not deleted, with their health, the mode of an
-// outgoing webhook and whether it has a "reply in thread" request, and their button set with the Organization's, which
-// a Destination without its own follows, in id order, for Enqueue.
+// ListRouteDestinations lists the Destinations of a Route that are not deleted, with their Severity conditions, their
+// health, the mode of an outgoing webhook and whether it has a "reply in thread" request, and their button set with the
+// Organization's, which a Destination without its own follows, in id order, for Enqueue.
 func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestinationsParams) ([]ListRouteDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listRouteDestinations, arg.OrgID, arg.RouteID)
 	if err != nil {
@@ -2752,6 +2951,7 @@ func (q *Queries) ListRouteDestinations(ctx context.Context, arg ListRouteDestin
 			&i.WebhookReplies,
 			&i.Buttons,
 			&i.OrganizationButtons,
+			&i.SeverityCondition,
 		); err != nil {
 			return nil, err
 		}
@@ -2799,7 +2999,7 @@ func (q *Queries) ListStormActivity(ctx context.Context, orgID int64) ([]ListSto
 }
 
 const listStormSummaries = `-- name: ListStormSummaries :many
-SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type
+SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type, ds.public_id AS destination_public_id
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 WHERE d.org_id = $1 AND d.storm_id = $2::bigint
@@ -2812,14 +3012,15 @@ type ListStormSummariesParams struct {
 }
 
 type ListStormSummariesRow struct {
-	ID              int64
-	DesiredHash     []byte
-	DestinationID   int64
-	DestinationType string
+	ID                  int64
+	DesiredHash         []byte
+	DestinationID       int64
+	DestinationType     string
+	DestinationPublicID string
 }
 
-// ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached, with the Destination and
-// its type.
+// ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached, with the Destination, its
+// type and its public_id.
 func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummariesParams) ([]ListStormSummariesRow, error) {
 	rows, err := q.db.Query(ctx, listStormSummaries, arg.OrgID, arg.StormID)
 	if err != nil {
@@ -2834,6 +3035,73 @@ func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummaries
 			&i.DesiredHash,
 			&i.DestinationID,
 			&i.DestinationType,
+			&i.DestinationPublicID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamDestinations = `-- name: ListTeamDestinations :many
+SELECT td.team_id, d.id, d.public_id, d.name, d.type, d.connection_id, d.health, d.webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean AS webhook_replies,
+       d.buttons, o.buttons AS organization_buttons, td.severity_condition
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+JOIN organizations o ON o.id = d.org_id
+WHERE td.org_id = $1 AND td.team_id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, d.id
+`
+
+type ListTeamDestinationsParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamDestinationsRow struct {
+	TeamID              int64
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	ConnectionID        pgtype.Int8
+	Health              string
+	WebhookMode         pgtype.Text
+	WebhookReplies      bool
+	Buttons             []byte
+	OrganizationButtons []byte
+	SeverityCondition   string
+}
+
+// ListTeamDestinations lists the Destinations of the Teams that are not deleted, with the Team and the Severity
+// condition of each and what ListRouteDestinations reads of them, by Team and Destination (C-26.FR-2).
+func (q *Queries) ListTeamDestinations(ctx context.Context, arg ListTeamDestinationsParams) ([]ListTeamDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamDestinations, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamDestinationsRow{}
+	for rows.Next() {
+		var i ListTeamDestinationsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.ConnectionID,
+			&i.Health,
+			&i.WebhookMode,
+			&i.WebhookReplies,
+			&i.Buttons,
+			&i.OrganizationButtons,
+			&i.SeverityCondition,
 		); err != nil {
 			return nil, err
 		}
@@ -3506,11 +3774,18 @@ FROM (SELECT x.id,
              (EXISTS (SELECT 1
                       FROM destinations ds
                       WHERE ds.org_id = x.org_id AND ds.id = x.destination_id AND ds.deleted_at IS NOT NULL)
-              OR NOT EXISTS (SELECT 1
-                             FROM alert_groups g
-                             JOIN route_destinations rd ON rd.org_id = g.org_id AND rd.route_id = g.route_id
-                             WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
-                               AND rd.destination_id = x.destination_id)) AS left_destination
+              OR (NOT EXISTS (SELECT 1
+                              FROM alert_groups g
+                              JOIN route_destinations rd ON rd.org_id = g.org_id AND rd.route_id = g.route_id
+                              WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
+                                AND rd.destination_id = x.destination_id)
+                  AND NOT EXISTS (SELECT 1
+                                  FROM alert_groups g
+                                  JOIN routes r ON r.org_id = g.org_id AND r.id = g.route_id AND r.deliver_to_teams
+                                  JOIN alert_group_teams t ON t.org_id = g.org_id AND t.alert_group_id = g.id
+                                  JOIN team_destinations td ON td.org_id = t.org_id AND td.team_id = t.team_id
+                                  WHERE g.org_id = x.org_id AND g.id = x.alert_group_id
+                                    AND td.destination_id = x.destination_id))) AS left_destination
       FROM deliveries x
       WHERE x.org_id = $13 AND x.id = $15) AS f
 WHERE d.org_id = $13 AND d.id = f.id AND d.lease_owner = $14::text
@@ -3542,24 +3817,24 @@ type RecordDeliveredRow struct {
 
 // RecordDelivered records a successful call that brought the actual message to @version: the delivery is delivered
 // unless the Desired state grew meanwhile, or its Destination left the Route while the call was made, in which cases it
-// stays pending and the next call carries the newest state or the final edit.
-// The delivered version clears the receipt time, so a later call never observes a Snapshot already delivered. A
-// Publication marks the Root message published — an outgoing webhook in the template mode may have no message id —
-// and replaces the values extracted from responses with those of its "create" (@response_values, none for a
-// messenger), whose Thread "open thread" has not opened yet.
-// A row that ended while the call was in flight — withheld, retired or deleted in the messenger — stays so, with the
-// actual message recorded, unless the call was a Publication that created a message on a row that had none (raced):
-// a Storm summary is then retired with it; an Alert Group whose Destination was deleted or left its Route meanwhile
-// gets the final edit of that message (pending, desired_retire); any other row follows the rule above, so that the
-// message that now exists is kept current. The key that signed the buttons of the message sent becomes the actual one
-// (@button_key_id, none for a message without buttons). A bridge's `thread_ref` (@thread_ref) becomes the Thread
-// anchor. A Publication the messenger @replayed (C-22.FR-6) records its message, url and `thread_ref`, is dated from
-// the start of its first attempt, when the message was really posted, and stays pending without an actual version,
+// stays pending and the next call carries the newest state or the final edit. The delivered version clears the receipt
+// time, so a later call never observes a Snapshot already delivered. A Publication marks the Root message published —
+// an outgoing webhook in the template mode may have no message id — and replaces the values extracted from responses
+// with those of its "create" (@response_values, none for a messenger), whose Thread "open thread" has not opened yet. A
+// row that ended while the call was in flight — withheld, retired or deleted in the messenger — stays so, with the
+// actual message recorded, unless the call was a Publication that created a message on a row that had none (raced): a
+// Storm summary is then retired with it; an Alert Group whose Destination was deleted, or that its Route reaches no
+// longer — neither among the Route's Destinations nor, with deliver_to_teams, among the Destinations of the Alert
+// Group's Teams — gets the final edit of that message (pending, desired_retire); any other row follows the rule above,
+// so that the message that now exists is kept current. The key that signed the buttons of the message sent becomes the
+// actual one (@button_key_id, none for a message without buttons). A bridge's `thread_ref` (@thread_ref) becomes the
+// Thread anchor. A Publication the messenger @replayed (C-22.FR-6) records its message, url and `thread_ref`, is dated
+// from the start of its first attempt, when the message was really posted, and stays pending without an actual version,
 // its Snapshot's receipt time kept: the replayed message shows the state of that attempt, so the next call is an edit
-// to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided.
-// The status the message shows (@actual_status) is unknown after a replay. A Publication clears the start of a
-// republication past a bridge's edit window, which only a published Root message has: one left by the deleted Root
-// message flow of an older replica would otherwise republish the new Root message.
+// to the latest Desired state. @possible_duplicate records a possible duplicate that the outcome decided. The status
+// the message shows (@actual_status) is unknown after a replay. A Publication clears the start of a republication past
+// a bridge's edit window, which only a published Root message has: one left by the deleted Root message flow of an
+// older replica would otherwise republish the new Root message.
 func (q *Queries) RecordDelivered(ctx context.Context, arg RecordDeliveredParams) (RecordDeliveredRow, error) {
 	row := q.db.QueryRow(ctx, recordDelivered,
 		arg.Replayed,

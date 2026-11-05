@@ -8,8 +8,8 @@ depends_on: [S-111, S-118, S-163]
 covers: [C-26.FR-1, C-26.FR-2, C-26.FR-3, C-26.FR-4, C-26.FR-5, C-26.FR-7, C-26.FR-9, C-26.FR-13, C-26.AC-1, C-26.AC-2, C-26.AC-3, C-26.AC-4, C-26.AC-5, C-26.AC-10, C-26.AC-11, C-25.FR-13, C-25.AC-13, C-08.FR-1, C-09.FR-22, C-11.FR-6, C-11.FR-20, C-15.FR-2]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0027_destination_entries_and_teams.up.sql
-  - internal/db/migrations/0027_destination_entries_and_teams.down.sql
+  - internal/db/migrations/0032_destination_entries_and_teams.up.sql
+  - internal/db/migrations/0032_destination_entries_and_teams.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
@@ -30,30 +30,44 @@ files_touched:
   - internal/groups/dispatcher.go
   - internal/groups/events.go
   - internal/groups/events_test.go
+  - internal/groups/dispatcher_test.go
   - internal/groups/read.go
+  - internal/groups/grouping.go
+  - internal/groups/transitions.go
+  - internal/groups/grouping_test.go
   - internal/groups/query.sql
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
   - internal/delivery/storm.go
-  - internal/delivery/storm_test.go
   - internal/delivery/query.sql
   - internal/delivery/lockorder_integration_test.go
   - internal/delivery/worker.go
+  - internal/delivery/worker_test.go
+  - internal/delivery/live_test.go
+  - internal/delivery/delivery.go
+  - internal/delivery/membership.go
   - internal/api/alertgroups.go
   - internal/webhooks/body.go
   - internal/webhooks/body_test.go
   - internal/api/destinations.go
   - internal/destinations/destinations.go
   - internal/destinations/query.sql
+  - internal/destinations/destinations_test.go
+  - internal/runtime/runtime_test.go
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/fakemattermost_test.go
+  - internal/connections/connections_test.go
+  - internal/mattermost/check_test.go
   - test/e2e/routing_teams_test.go
   - web/src/test/fixtures/destinations.ts
   - web/src/test/fixtures/alert-groups.ts
   - web/src/test/fixtures/teams.ts
+  - web/src/components/route-form.tsx
+  - web/e2e/destinations.spec.ts
   - docs/concepts/routing-to-teams.md
   - mkdocs.yml
   - docs/install/versions.md
+  - docs/outgoing-webhooks/events.md
   - AGENTS.md
 acceptance:
   - "[C-26.FR-1, C-08.FR-1] Routes take `destination_entries` — each a Destination with a `severity_condition`, `any` by default, `critical` or `below_critical` — and Teams the same as the Destinations of the Team; a Destination may be named by several Routes and Teams, each with its own condition; `destination_ids` stays on Routes, derived from the entries, and a request with only `destination_ids` keeps the stored conditions of the Destinations it keeps and gives new ones `any`; every change is in the Audit log diff (`routes_test.go`, `teams_test.go`)."
@@ -61,7 +75,7 @@ acceptance:
   - "[C-26.FR-3, C-26.AC-3] A Destination named by the Route for `critical` and by a Team for `below_critical` receives a warning and a critical Alert Group, each with one Root message; `listAlertGroupDeliveries` names for each Destination the entries that reached it — the Route, or the Team — with their conditions (`reach_test.go`)."
   - "[C-26.FR-3] The reach is read under the Route's membership lock: a Route save that adds a Destination and commits while an Alert's transition is between its lock of the Alert Group and its re-render leaves that Destination neither out of the save's membership hook nor out of the Enqueue — the dispatcher takes the lock shared before it reads the reach, and `Enqueue` applies the rule again under it (`enqueue_test.go`, `lockorder_integration_test.go`)."
   - "[C-26.FR-4, C-26.FR-5, C-26.AC-4, C-26.AC-5, C-09.FR-22, C-11.FR-20] An Alert of \"search\" joining a firing, unowned Alert Group of \"payments\" records `destination_joined` (Timeline kind `system`) for `search-notice` with `loudness` `loud` and `mentions` `[new_alert_group]` and a new Root message there; joining an acknowledged one records it Quiet with a Quiet Root message; a rise from warning to critical publishes the Alert Group in the critical Destinations with `destination_joined` and keeps the Root messages below critical, which stay and are edited to the current state after the critical Alert resolves; a Destination that a Team or a rise adds before the first Publication is part of it (`enqueue_test.go`, `routing_teams_test.go`)."
-  - "[C-26.FR-5, C-11.FR-6] During a Storm of the Route, a Team Destination counts a non-Urgent Alert Group in its own Storm summary, and an Urgent one is published there on its own (`storm_test.go`)."
+  - "[C-26.FR-5, C-11.FR-6] During a Storm of the Route, a Team Destination counts a non-Urgent Alert Group in its own Storm summary, and an Urgent one is published there on its own (`enqueue_test.go`: `TestEnqueueStormTeamDestination`, `TestEnqueueTeamsEvaluatedDuringStorm`)."
   - "[C-26.FR-7, C-26.AC-10] A Route owned by \"payments\" without `deliver_to_teams` delivers an Alert Group of `team=\"payments\"` only to its own Destinations (`reach_test.go`)."
   - "[C-26.FR-9, C-26.AC-11, C-25.FR-13, C-25.AC-13] Raising a Route's Minimum severity to critical publishes its open warning Alert Groups Quietly in its Destinations limited to critical, without `destination_joined`; creating the Team \"checkout\" for an open Alert Group of `team=\"checkout\"` on a Route with `deliver_to_teams` publishes it Quietly in the Team's Destinations, without `destination_joined`: a reached Destination without a delivery after a system transition of a change of configuration gets a Quiet Publication (`enqueue_test.go`, `routing_teams_test.go`)."
   - "[C-15.FR-2] Outgoing webhooks in events mode receive `destination_joined` one to one, with the Destination it joined in the event's optional `destination` {`id`, `name`, `type`}, which no other event carries; `webhook_events_event_v3_check` accepts it (`body_test.go`, `db_test.go`, `routing_teams_test.go`)."
@@ -124,7 +138,7 @@ issue: 410
     `timeline_entries.destination_id`; `OutgoingWebhookEvent` gains the optional `destination` {`id`, `name`, `type`
     (`DestinationType`)}, the Destination the Alert Group joined, set on `destination_joined` only, as S-148's `page` is
     on its own event (`internal/webhooks/body.go`).
-- **Schema** (migration `0027_destination_entries_and_teams`, expand only; `schema.md` §4.8, §4.9, §4.11, §4.15):
+- **Schema** (migration `0032_destination_entries_and_teams`, expand only; `schema.md` §4.8, §4.9, §4.11, §4.15):
   - `route_destinations.severity_condition text NOT NULL DEFAULT 'any' CHECK (severity_condition IN ('any',
     'critical', 'below_critical'))`; `routes.deliver_to_teams boolean NOT NULL DEFAULT false` and
     `routes.run_team_chains boolean NOT NULL DEFAULT true`.
@@ -134,10 +148,12 @@ issue: 410
     `{"kind": "route"}` or `{"kind": "team", "team_id": N}`, with the condition at that time.
   - `timeline_entries.destination_id`; the CHECKs of events, event kinds, system events and the system rule are
     replaced by `_v3` ones with `destination_joined` (kind `system`, the same `system_event`), as S-118's `_v2`.
+    `deliveries_entries_check` keeps `deliveries.entries` an array.
   - `webhook_events_event_v3_check` adds `destination_joined` to S-118's `_v2`, `NOT VALID`, validated, the old one
     dropped, so that events mode can store it.
-  - `open_group_updates_kind_v4_check` lists every kind of `_v3` and `team_destinations` (with the Team), the kind
-    whose handler S-170 writes; `NOT VALID`, then validated, the old one dropped.
+  - `open_group_updates_kind_v6_check` lists every kind of `_v5` (0031) and `team_destinations` (with the Team), the
+    kind whose handler S-170 writes; `NOT VALID`, then validated, the old one dropped. No replica of this version writes
+    or claims a row of it: the worker claims only the kinds it handles.
 - **Suggestion** (`internal/routing/suggestions.go`): the Route of `internal_alerts` has `deliver_to_teams` true
   (orchestrator's decision Q1 on S-133).
 - **Reach** (`internal/routing/reach.go`, a pure rule with no store): `Reach(level, route entries, deliver_to_teams,
@@ -205,7 +221,7 @@ issue: 410
    condition at every level, Teams with and without `deliver_to_teams`, a Destination named twice and the owning Team,
    and `reach_test.go` runs them.
 4. Deliver to the reach: Publications, the joined Destinations, the Quiet Publications of the system transitions of
-   a change of configuration, and Storms. Check: `enqueue_test.go`, `storm_test.go`; `lockorder_integration_test.go`
+   a change of configuration, and Storms. Check: `enqueue_test.go`; `lockorder_integration_test.go`
    holds a transition between its lock of the Alert Group and its reach while a Route save adds a Destination, and
    finds the Destination delivered once and no deadlock.
 5. Extend the fake Mattermost server, write the end-to-end test and the documentation. Check: the Verification below;
@@ -248,7 +264,8 @@ ROOTS $G                                                                    # ["
 # C-26.AC-5: a rise to critical joins the critical Destinations; the others stay
 PUTA o1 c '{"labels":{"category":"infra","system":"k8s","team":"payments","severity":"critical"}}'; NOTIFY o1 '{"reason":"new alerts"}'; sleep 1
 ROOTS $G         # ["ch-infra-critical","ch-infra-notice","ch-payments-critical","ch-payments-notice","ch-search-notice"]
-curl -s -X DELETE $FAM/groups/o1/alerts/c > /dev/null; NOTIFY o1 '{"reason":"resolved"}'; sleep 1
+PUTA o1 c '{"labels":{"category":"infra","system":"k8s","team":"payments","severity":"critical"},"status":"resolved"}'; NOTIFY o1 '{"reason":"resolved"}'; sleep 1
+curl -s "${A[@]}" $API/alert-groups/$G | jq -r .severity_level                                       # warning
 curl -s "${A[@]}" "$API/alert-groups/$G/deliveries" | jq -r '[.items[].state] | unique | join(",")'      # delivered
 
 # C-26.AC-2, C-26.AC-10: a Route without deliver_to_teams, owned by "payments", reaches only its own Destinations
@@ -285,17 +302,73 @@ None.
   the read and the deliveries; reading the reach in the dispatcher without the lock would lose that.
 - Interim until S-170 (beyond the Scope's): after a change of a Route's conditions, a Destination that the next Alert
   of an open Alert Group brings into the reach gets a Loud `destination_joined`, where S-170 publishes it Quietly at the
-  save; and the `team_destinations` of a deleted Team are still reached for the open Alert Groups that list the Team,
-  until S-170 takes them away with the deletion.
+  save; the `team_destinations` of a deleted Team are still reached for the open Alert Groups that list the Team,
+  until S-170 takes them away with the deletion; and removing a Destination from a Route still retires its deliveries
+  through the membership hook of L1 even when an entry of a Team still reaches it, which S-170 fixes with the final
+  edits that only a Destination no entry reaches gets; and a Team save that adds a Destination between the reach the
+  dispatcher reads and the one Enqueue reads publishes the Alert Group there Quietly, without `destination_joined`,
+  until S-170 adds the Team's lock.
 - The review of the contracts split S-170 from this story: S-121 keeps the reach and `destination_joined`, and S-170
   takes the changes of configuration that move the reach of open Alert Groups, with their Quiet Publications and the
   final edits. The migration stays here, the kind `team_destinations` included, so that S-170 needs none.
 - The suggested Route "Muster internal alerts" (`internal/routing/suggestions.go`) turns `deliver_to_teams` on once this
   story adds it, so that the `MusterScheduleGap` of each Schedule, which S-133 groups by `schedule` and gives its
   Team's slug under the Team label, reaches its own Team's Destinations (orchestrator's decision Q1 on S-133).
-- Migration `0027` follows the story map; a story merged out of that order renumbers its migration to the next free
+- Migration `0027` followed the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request and re-versions the CHECKs it replaces, listing every value present
-  when it merges (S-131's Notes).
+  when it merges (S-131's Notes). Merged after 0027–0031, the migration is `0032`, and the kind CHECK it replaces is
+  `open_group_updates_kind_v5_check` of 0031, so its own is `_v6`; the Timeline's are at `_v2` (0024), so its own are
+  `_v3`, and `webhook_events_event_v2_check` becomes `_v3`.
+- Files added to `files_touched` in the pull request: `internal/groups/dispatcher_test.go` and
+  `internal/delivery/worker_test.go` (the fake databases of the packages read the reach and the new columns);
+  `internal/delivery/live_test.go` (its table of lifecycle rows names the Destination of `destination_joined`);
+  `internal/groups/transitions.go` (a Reopen above the level the Alert Group resolved at records its rise, a finding
+  of the review); `internal/groups/grouping.go` and `internal/groups/grouping_test.go` (grouping locks the active Storms of the Routes
+  it changes or creates Alert Groups in before its first dispatch, in Route id order, findings of the review);
+  `internal/delivery/delivery.go` (the delivery state carries the entries, and the queries of the reach join the
+  package's); `internal/delivery/membership.go` (a Destination added to a Route appends the Route's entry to the
+  deliveries it creates, and the Storm summaries take their Destinations as Enqueue gives them);
+  `internal/destinations/destinations_test.go` and `internal/runtime/runtime_test.go` (their fake stores read the
+  Teams of a Destination); `web/src/components/route-form.tsx` (`destination_ids` is optional in `RouteInput` once
+  `destination_entries` exists, so the form reads it with a default); `web/e2e/destinations.spec.ts`,
+  `internal/connections/connections_test.go` and `internal/mattermost/check_test.go` (the fake Mattermost server lists
+  the new channels); `docs/outgoing-webhooks/events.md` (the event `destination_joined` and its
+  `destination` in the reference of events mode). `internal/delivery/storm_test.go` left `files_touched`: the Storms
+  with Team Destinations are tested in `enqueue_test.go`, which drives them through Enqueue, and the fake of the
+  Storm summaries needed no change.
+- Decisions taken in the pull request, within the PRD: a Route request with neither `destination_entries` nor
+  `destination_ids` keeps the stored entries on an update; with both, `destination_entries` wins and `destination_ids`
+  is ignored; a Destination named twice in `destination_entries` is refused with `duplicate`. `deliveries.entries` keeps
+  one entry per Route or Team, with the condition it first reached the Destination with. The Storm summary that a Team
+  Destination gets shows the Route's counts; a delivery that destination_joined creates during a Storm is held by it
+  unless the Alert Group is Urgent, and a delivery that any other rendering creates for an Alert Group the active Storm
+  holds elsewhere — a change of configuration, a Team or a rise before the first Publication — is held by it too, with
+  the Storm summary there. Every Enqueue takes the Route's Storm — joined by a creation, the active one FOR SHARE
+  otherwise — before the first delivery it locks, and only a creation updates it. Grouping takes, before its first
+  dispatch and in Route id order, the active Storm of every Route whose Alert Groups it changes or creates: FOR NO KEY
+  UPDATE where it creates one (`LockRouteStorm`), FOR SHARE elsewhere (`ShareRouteStorm`), so that no transaction
+  upgrades a Storm it shares and none takes two Storms in the other order (findings of the review: a Snapshot that
+  creates nothing takes no counter row, shares the Storm and grows a held Alert Group into a Destination whose summary
+  an earlier rendering of the creating Snapshot locked, while the creation's JoinStorm waits for that share; and Storms
+  shared per Alert Group, in Alert Group id order, are not taken in Route order). A change of a Route's Destinations,
+  which takes the Storm FOR SHARE under the exclusive membership lock, takes the Route's row first, so it never holds
+  the membership lock while grouping updates the Storm (lock order of `worker.go`). Decisions of the reviews (C-26.FR-4,
+  FR-5): the reach of an Alert Group grows only by a Team that joins it — by its Alerts or by the evaluation of the
+  Teams on a save — or by a rise of its level — by an Alert or by the Minimum severity (`groups.ReachEvents`); the
+  dispatcher records `destination_joined` only after such a change that Alerts made, and delivery creates the missing
+  deliveries of newly reached Destinations only after such a change, after its creation or a move, or while the Alert
+  Group has no delivery anywhere yet. Alerts that bring neither a Team nor a rise, a fall of the level, a resolution, a
+  Command and the re-render of a change of configuration that moves no reach — a renamed Team, "Labels in the message",
+  a button set — update the deliveries the Alert Group has and create none. A Destination the dispatcher recorded
+  `destination_joined` for gets its delivery even when the reach Enqueue reads again no longer has it. Outgoing webhooks
+  in events mode record no `destination_joined` for themselves; they receive the events of an Alert Group from the first
+  change that adds them, and keep receiving them once they did. A delivery that the rendering creates outside the
+  creation of the Alert Group gets no Thread reply of that change: its Publication shows the current state. A Reopen is
+  no growing event of its own: a Reopen whose new level is above the level the Alert Group resolved at records that rise
+  after `reopened` (C-26.FR-4, FR-5), Quiet and without a change of status — `urgency_raised` `removes_none` when it
+  makes the Alert Group Urgent, `severity_raised` otherwise — so the Destinations of the higher level join it with
+  `destination_joined`, Loud while it fires, and a Reopen into an acknowledgement or a Snooze keeps it; a Reopen at the
+  same or a lower level records no rise and joins nothing.
 
 ## Coverage
 

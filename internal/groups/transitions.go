@@ -64,7 +64,9 @@ func (t *snapshotChange) apply(ctx context.Context, q Queries, g *Group, c *chan
 	}
 	if s := t.b.slot; s != nil && s.reopen {
 		// A reopened Alert Group fires only its new Alerts: its level is theirs, and the Reopen records it.
-		t.level(g, levelOf(s.joins))
+		alerts := levelOf(s.joins)
+		t.level(g, alerts)
+		t.reopenRise(g, before, alerts, c)
 	} else {
 		// Also without new Alerts: a Minimum severity raised since and not applied yet by the worker of
 		// open_group_updates raises the level here, with its Quiet entry, before the resolutions, which only lower the
@@ -248,6 +250,27 @@ func (t *snapshotChange) members(ctx context.Context, q Queries, g *Group, c *ch
 		})
 	}
 	return nil
+}
+
+// reopenRise records, after the Reopen, a level above the one g resolved at (C-26.FR-4, FR-5): a rise by Alerts, by
+// which its reach grows as an open Alert Group's does, so that the Destinations of the higher level get it with
+// destination_joined. The entry is the Quiet one of a rise without a change of status, urgency_raised when it makes g
+// Urgent, severity_raised otherwise: the Reopen itself is what the Root message announces, and a Reopen into an
+// acknowledgement or a Snooze keeps it, as before. A Reopen at the same or a lower level records nothing more.
+func (t *snapshotChange) reopenRise(g *Group, before, alerts organization.SeverityLevel, c *change) {
+	if rank(g.Severity) <= rank(before) {
+		return
+	}
+	reason := ""
+	if rank(alerts) < rank(g.Severity) {
+		reason = ReasonMinimumSeverity
+	}
+	if !urgentOf(before) && g.Urgent {
+		c.add(entry{Event: EventUrgencyRaised, Variant: VariantRemovesNone, From: g.Status, To: g.Status,
+			Reason: reason})
+		return
+	}
+	c.add(entry{Event: EventSeverityRaised, Reason: reason})
 }
 
 // rise records a rise in Severity level (C-26.FR-8, C-09.FR-9): the level of the Alerts that joined, raised to the

@@ -26,6 +26,7 @@ function readFields(): Omit<DestinationReadFields, "id"> {
     owning_team: null,
     health: { state: "healthy" },
     routes: [],
+    teams: [],
     created_at: "2026-10-13T09:00:00Z",
     etag: '"1"',
   };

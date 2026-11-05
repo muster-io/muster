@@ -174,6 +174,10 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 `alerts`
 :   One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.
 
+`destination`
+:   Only on `destination_joined`: the `id`, `name` and `type` of the Destination the Alert Group joined. No other
+    event carries it.
+
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
 ### Event names
@@ -242,6 +246,11 @@ never sent.
 `unknown_team_value`
 :   `notify`: false. An Alert of the Alert Group carries a value of the Team label that names no Team; sent once per
     value and Alert Group.
+
+`destination_joined`
+:   `notify`: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
+    reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
+    Destination, named in `destination` ([Routing to Teams](../concepts/routing-to-teams.md)).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.
