@@ -132,6 +132,7 @@ export function MatcherBuilder({
   onChange,
   errors,
   readOnly = false,
+  emptyText,
 }: {
   id: string;
   rows: readonly MatcherRow[];
@@ -139,6 +140,8 @@ export function MatcherBuilder({
   /** The errors of each row, by its key. */
   errors: ReadonlyMap<number, MatcherRowErrors>;
   readOnly?: boolean;
+  /** What a read-only builder without rows says; the Route text by default. */
+  emptyText?: string;
 }) {
   const { t } = useTranslation();
   const list = useRef<HTMLOListElement>(null);
@@ -158,7 +161,9 @@ export function MatcherBuilder({
     onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   if (readOnly) {
     return rows.length === 0 ? (
-      <p className="text-sm text-muted-foreground">{t("routes.matchers.none")}</p>
+      <p className="text-sm text-muted-foreground" data-testid="matchers-none">
+        {emptyText ?? t("routes.matchers.none")}
+      </p>
     ) : (
       <ul className="flex flex-wrap gap-1.5" aria-label={t("routes.fields.matchers")}>
         {rows.map((row) => (

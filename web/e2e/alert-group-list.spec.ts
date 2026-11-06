@@ -24,6 +24,7 @@ import {
   removeIntegration,
   removeTeamsBySlug,
   seedTeamAlerts,
+  teamSlugs,
   shot,
   signIn,
   signInAdmin,
@@ -251,7 +252,8 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
   const csp = watchCsp(page);
   const admin = await adminApi();
   await removeIntegration(admin, "ag-list-teams");
-  await removeTeamsBySlug(admin, ["payments", "search"]);
+  const slugs = teamSlugs("ListTeam");
+  await removeTeamsBySlug(admin, [slugs.pay, slugs.sea]);
   await admin.dispose();
   // "payments" has bob in it and "search" has nobody; one Alert Group each by the Team label.
   await seedTeamAlerts("ag-list-teams", "ListTeam");
@@ -260,10 +262,10 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
     await page.goto("/alert-groups?q=ListTeam");
     await expect(page.getByRole("columnheader", { name: "Teams" })).toBeVisible();
     await expect(groupRow(page, "ListTeamPayments").getByTestId("team-entry")).toHaveText(
-      "payments — by the Team label",
+      `${slugs.pay} — by the Team label`,
     );
     await expect(groupRow(page, "ListTeamSearch").getByTestId("team-entry")).toHaveText(
-      "search — by the Team label",
+      `${slugs.sea} — by the Team label`,
     );
     // An Alert Group with a value of no Team has none: a dash.
     await expect(groupRow(page, "ListTeamCapital").getByTestId("team-entry")).toHaveCount(0);
@@ -273,7 +275,7 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
     await page
       .getByTestId("filter-team")
       .getByLabel("Team", { exact: true })
-      .selectOption({ label: "search" });
+      .selectOption({ label: slugs.sea });
     await expect(page).toHaveURL(/[?&]team=TM[0-9A-Z]+/);
     await expect(groupRow(page, "ListTeamSearch")).toHaveCount(1);
     await expect(groupRow(page, "ListTeamPayments")).toHaveCount(0);
@@ -317,7 +319,7 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
   } finally {
     const cleanup = await adminApi();
     await removeIntegration(cleanup, "ag-list-teams");
-    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await removeTeamsBySlug(cleanup, [slugs.pay, slugs.sea]);
     await cleanup.dispose();
   }
   expect(csp).toEqual([]);

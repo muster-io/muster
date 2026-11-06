@@ -11,6 +11,7 @@
 import { Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
+import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
 import { useListTeamLabelValues } from "../api/gen/endpoints/teams/teams";
 import type { TeamLabelValue } from "../api/gen/model";
 import { problemText } from "../lib/api";
@@ -20,17 +21,23 @@ import { useCan } from "./app-shell";
 import { elapsedSeconds, formatElapsed, useNow } from "./relative-time";
 import { buttonVariants } from "./ui/button";
 
+/** The Team label of the Organization, once it is known; undefined while it is read or when the read failed. */
+export function useTeamLabel() {
+  const organization = useGetOrganization();
+  return { label: organization.data?.team_label, query: organization };
+}
+
 /** The Team label, the hint about what makes an Alert belong to a Team, and the link to change the label. */
 export function TeamLabelLine() {
   const { t } = useTranslation();
   const canChange = useCan("organization:write");
-  const values = useListTeamLabelValues();
+  const { label, query } = useTeamLabel();
   return (
     <div className="flex min-w-0 flex-col gap-1.5 rounded-lg border p-3" data-testid="team-label">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-sm font-medium">{t("teams.label.title")}</span>
         <code className="font-mono text-sm wrap-anywhere" data-testid="team-label-name">
-          {values.data?.label ?? "team"}
+          {label ?? "…"}
         </code>
         {canChange && (
           <Link
@@ -43,6 +50,11 @@ export function TeamLabelLine() {
         <DocsLink to="field.team_label" kind="learn_more" about={t("docs.fields.teamLabel")} />
       </div>
       <p className="text-sm text-muted-foreground">{t("teams.label.hint")}</p>
+      {query.isError && (
+        <p className="text-sm text-destructive" role="alert" data-testid="team-label-error">
+          {problemText(t, query.error)}
+        </p>
+      )}
     </div>
   );
 }

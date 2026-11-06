@@ -17,17 +17,24 @@ import {
   createTeam,
   getListTeamLabelValuesQueryKey,
   getListTeamsQueryKey,
-  useListTeamLabelValues,
 } from "../api/gen/endpoints/teams/teams";
 import { RequirePermission } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
+import { matcherText } from "../components/matcher-builder";
 import { TeamForm } from "../components/team-form";
+import { useTeamLabel } from "../components/team-label-values";
 import { buttonVariants } from "../components/ui/button";
 
-const searchSchema = z.object({
-  slug: z.string().min(1).optional().catch(undefined),
-  value: z.string().min(1).optional().catch(undefined),
-});
+/** A value the URL may have parsed as a number, such as a slug of 42, kept as typed. */
+const text = z
+  .preprocess(
+    (v) => (typeof v === "number" || typeof v === "boolean" ? String(v) : v),
+    z.string().min(1),
+  )
+  .optional()
+  .catch(undefined);
+
+const searchSchema = z.object({ slug: text, value: text });
 
 export const Route = createFileRoute("/teams/new")({
   staticData: { shell: true },
@@ -38,14 +45,16 @@ export const Route = createFileRoute("/teams/new")({
 /** The note under the title for a value that is no slug: only a Team matcher can pick such Alerts. */
 function ValueNote({ value }: { value: string }) {
   const { t } = useTranslation();
-  const values = useListTeamLabelValues();
-  const label = values.data?.label ?? "team";
+  const { label } = useTeamLabel();
+  if (label === undefined) {
+    return null;
+  }
   return (
     <p
       className="max-w-2xl text-sm text-muted-foreground wrap-anywhere"
       data-testid="team-value-note"
     >
-      {t("teams.create.valueNote", { value, matcher: `${label}="${value}"` })}
+      {t("teams.create.valueNote", { value, matcher: matcherText({ label, op: "=", value }) })}
     </p>
   );
 }

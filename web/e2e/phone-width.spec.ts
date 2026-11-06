@@ -26,6 +26,7 @@ import {
   removeIntegration,
   removeTeamsBySlug,
   seedTeamAlerts,
+  teamSlugs,
   shot,
   signIn,
   signInAdmin,
@@ -185,7 +186,8 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
   const csp = watchCsp(page);
   const admin = await adminApi();
   await removeIntegration(admin, "ag-phone-teams");
-  await removeTeamsBySlug(admin, ["payments", "search"]);
+  const slugs = teamSlugs("PhoneTeam");
+  await removeTeamsBySlug(admin, [slugs.pay, slugs.sea]);
   await admin.dispose();
   const integration = await seedTeamAlerts("ag-phone-teams", "PhoneTeam");
   const group = await alertGroupOf(integration, "PhoneTeamPayments");
@@ -211,7 +213,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
 
     await page.goto(`/alert-groups/${group}`);
     await expect(page.getByTestId("alert-group-teams")).toContainText(
-      "Teams: payments — by the Team label",
+      `Teams: ${slugs.pay} — by the Team label`,
     );
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-page-teams-360");
@@ -225,7 +227,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
     await expectNoHorizontalScroll(page);
     await page.goto(`/alert-groups/${group}`);
     await expect(page.getByTestId("alert-group-teams")).toContainText(
-      "Команды: payments — по метке команды",
+      `Команды: ${slugs.pay} — по метке команды`,
     );
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-page-teams-ru-360");
@@ -237,7 +239,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
     await bob.dispose();
     const cleanup = await adminApi();
     await removeIntegration(cleanup, "ag-phone-teams");
-    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await removeTeamsBySlug(cleanup, [slugs.pay, slugs.sea]);
     await cleanup.dispose();
   }
   expect(csp).toEqual([]);

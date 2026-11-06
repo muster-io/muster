@@ -20,6 +20,7 @@ import {
   removeIntegration,
   removeTeamsBySlug,
   seedTeamAlerts,
+  teamSlugs,
   shot,
   signIn,
   signInAdmin,
@@ -463,7 +464,8 @@ test("the Alerts view shows the Teams of each Alert with their rule", async ({ p
   const csp = watchCsp(page);
   const admin = await adminApi();
   await removeIntegration(admin, "int-teams");
-  await removeTeamsBySlug(admin, ["payments", "search"]);
+  const slugs = teamSlugs("IntTeam");
+  await removeTeamsBySlug(admin, [slugs.pay, slugs.sea]);
   await admin.dispose();
   const id = await seedTeamAlerts("int-teams", "IntTeam");
   try {
@@ -472,9 +474,13 @@ test("the Alerts view shows the Teams of each Alert with their rule", async ({ p
     const table = page.getByRole("table", { name: "Alerts" });
     await expect(table.getByRole("columnheader", { name: "Teams" })).toBeVisible();
     const pay = alertRows(page).filter({ hasText: "alertname=IntTeamPayments" });
-    await expect(await alertCell(page, pay, "Teams")).toHaveText("payments — by the Team label");
+    await expect(await alertCell(page, pay, "Teams")).toHaveText(
+      `${slugs.pay} — by the Team label`,
+    );
     const search = alertRows(page).filter({ hasText: "alertname=IntTeamSearch" });
-    await expect(await alertCell(page, search, "Teams")).toHaveText("search — by the Team label");
+    await expect(await alertCell(page, search, "Teams")).toHaveText(
+      `${slugs.sea} — by the Team label`,
+    );
     // A value of the Team label that names no Team, and an Alert of no Team label, have no Teams.
     const capital = alertRows(page).filter({ hasText: "alertname=IntTeamCapital" });
     await expect(await alertCell(page, capital, "Teams")).toHaveText("—");
@@ -487,7 +493,7 @@ test("the Alerts view shows the Teams of each Alert with their rule", async ({ p
   } finally {
     const cleanup = await adminApi();
     await removeIntegration(cleanup, "int-teams");
-    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await removeTeamsBySlug(cleanup, [slugs.pay, slugs.sea]);
     await cleanup.dispose();
   }
   expect(csp).toEqual([]);

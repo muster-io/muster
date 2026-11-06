@@ -2731,6 +2731,7 @@
       "example": "How an Alert Group shows it",
       "matchersField": "Team matchers",
       "matchersHint": "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
+      "noMatchers": "No Team matchers: only the Team label brings Alerts.",
       "sharedNamespaceHint": "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
       "title": "Which Alerts belong to this Team",
       "tooMany": "A Team has at most {{max}} matchers."

@@ -181,6 +181,17 @@ describe("Which Alerts belong to this Team", () => {
     expect(page.getByRole("button", { name: "Add matcher" }).elements()).toHaveLength(0);
   });
 
+  test("says a Team without matchers is brought Alerts only by the Team label, not the Route text", async () => {
+    await renderRules({ team: team({ matchers: [] }), canWrite: false });
+    await expect
+      .poll(() => page.getByTestId("matchers-none").element().textContent)
+      .toBe("No Team matchers: only the Team label brings Alerts.");
+    await i18n.changeLanguage("ru");
+    await expect
+      .poll(() => page.getByTestId("matchers-none").element().textContent)
+      .toBe("Матчеров команды нет: алерты приходят только по метке команды.");
+  });
+
   test("speaks Russian", async () => {
     await i18n.changeLanguage("ru");
     await renderRules({});

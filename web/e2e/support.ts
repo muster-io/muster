@@ -756,21 +756,17 @@ export async function ensureLocalUser(admin: Api, login: string, role: string): 
   return id;
 }
 
-/** Creates the Team whose name and slug are slug unless it exists, with the people in it, and returns its id. */
+/**
+ * Creates the Team whose name and slug are slug with the people and the Team matchers, and returns its id. A Team that
+ * exists is deleted first, so that a rerun starts from the same Team and not from what an earlier run left in it.
+ */
 export async function ensureTeam(
   admin: Api,
   slug: string,
   userIds: string[] = [],
   matchers: { label: string; op: string; value: string }[] = [],
 ): Promise<string> {
-  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
-    "GET",
-    "/api/v1/teams?limit=500",
-  );
-  const found = list.items.find((t) => t.slug === slug);
-  if (found !== undefined) {
-    return found.id;
-  }
+  await removeTeamsBySlug(admin, [slug]);
   const team = await admin.call<{ id: string }>("POST", "/api/v1/teams", {
     name: slug,
     slug,
@@ -794,21 +790,28 @@ export async function removeTeamsBySlug(admin: Api, slugs: string[]): Promise<vo
   }
 }
 
-/** The Teams of the Team specs: bob is in payments and not in search. */
+/** The Team of bob. */
 export const TEAM_BOB = "teams-bob";
 
+/** The slugs of the two Teams a spec seeds with the prefix of its Alert names, so that no spec meets another's Teams. */
+export function teamSlugs(prefix: string): { pay: string; sea: string } {
+  const key = prefix.toLowerCase();
+  return { pay: `payments-${key}`, sea: `search-${key}` };
+}
+
 /**
- * Seeds the Teams "payments" (with bob in it) and "search", an Integration called name and, through the fake
- * Alertmanager, one Alert Group each for the values team="payments", team="search", team="checkout" and team="Payments"
- * of the Team label, and one of namespace="billing" without the Team label. The Alert names start with prefix, so that
- * a spec finds its own Alert Groups. Returns the Integration's id.
+ * Seeds the Teams "payments-<prefix>" (with bob in it) and "search-<prefix>" (see teamSlugs), an Integration called
+ * name and, through the fake Alertmanager, one Alert Group each for their slugs, team="checkout" and team="Payments"
+ * as values of the Team label, and one of namespace="billing" without the Team label. The Alert names start with
+ * prefix, so that a spec finds its own Alert Groups. Returns the Integration's id.
  */
 export async function seedTeamAlerts(name: string, prefix: string): Promise<string> {
+  const slugs = teamSlugs(prefix);
   const admin = await adminApi();
   try {
     const bob = await ensureLocalUser(admin, TEAM_BOB, "responder");
-    await ensureTeam(admin, "payments", [bob]);
-    await ensureTeam(admin, "search");
+    await ensureTeam(admin, slugs.pay, [bob]);
+    await ensureTeam(admin, slugs.sea);
   } finally {
     await admin.dispose();
   }
@@ -820,8 +823,8 @@ export async function seedTeamAlerts(name: string, prefix: string): Promise<stri
     labels: { job: prefix },
   });
   const alerts: [string, Record<string, string>][] = [
-    ["pay", { alertname: `${prefix}Payments`, team: "payments" }],
-    ["sea", { alertname: `${prefix}Search`, team: "search" }],
+    ["pay", { alertname: `${prefix}Payments`, team: slugs.pay }],
+    ["sea", { alertname: `${prefix}Search`, team: slugs.sea }],
     ["che", { alertname: `${prefix}Checkout`, team: "checkout" }],
     ["cap", { alertname: `${prefix}Capital`, team: "Payments" }],
     ["bil", { alertname: `${prefix}Billing`, namespace: "billing" }],

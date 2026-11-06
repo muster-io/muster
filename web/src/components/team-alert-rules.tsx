@@ -147,6 +147,7 @@ export function TeamAlertRules({ team, label, canWrite, save }: TeamAlertRulesPr
           id="team-matchers"
           rows={rows}
           readOnly={!canWrite}
+          emptyText={t("teams.rules.noMatchers")}
           errors={errors}
           onChange={(next) => {
             setRows(next);

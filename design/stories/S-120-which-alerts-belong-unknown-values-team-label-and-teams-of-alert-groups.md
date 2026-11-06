@@ -87,7 +87,7 @@ issue: 409
   reference.md, each value with its relative and absolute time last seen, and "Create Team" to `/teams/new?slug=<value>`
   for a valid slug or `/teams/new?value=<value>` for another, which shows the note and an empty slug.
 - **Team page** (`team-alert-rules.tsx`): the Team label with the slug read-only (changed with the slug), the matchers
-  with `label-matchers-input.tsx` and the two hints, and the example line "Teams: {name} — by the Team label" (the name is what the Alert Group page shows). The
+  with the Matcher builder of Routes (`matcher-builder.tsx`, saved with the section's Save) and the two hints, and the example line "Teams: {name} — by the Team label" (the name is what the Alert Group page shows). The
   approved mockup shows the label and the matchers as one switch; L2.md §5.2 keeps both, so the page does too.
 - **General** (`admin.organization.general.tsx`): "Team label" under the time zone; `reserved_label` shows its message, in both languages, at the field.
 - **Alert Group page** (`alert-group-header.tsx`, `alert-group-alerts.tsx`, `timeline.tsx`): the header line "Teams:
