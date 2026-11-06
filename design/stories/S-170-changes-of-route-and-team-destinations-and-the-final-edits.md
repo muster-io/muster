@@ -248,8 +248,9 @@ None.
   Teams' locks per Alert Group, out of id order across Alert Groups of different Teams: a cycle with the deletion of a
   Destination that two of those Teams name is possible, rare and detected by PostgreSQL, as for the Routes' locks; the
   lane retries the Snapshot, and the deletion runs again, up to three times (`internal/destinations/delete.go`),
-  instead of answering 500. A Storm summary retired in a Destination is not revived when the Destination is added
-  again during the same Storm, as before this story (review, L1: a follow-up). The Storm summary of a Destination taken away is retired only once nothing of the Route is kept current
+  instead of answering 500. A Storm summary retired in a Destination is published afresh, Loud as a first one, when
+  the Destination is reached again during the same Storm (`EnsureStormSummary`); the creation of another Alert Group
+  leaves a retired summary as it is (review, L1). The Storm summary of a Destination taken away is retired only once nothing of the Route is kept current
   there. The dispatcher and Enqueue take the Teams' locks only when the Route delivers to the Teams: otherwise no Team's
   entry counts. A Team created writes no `team_destinations` row: no open Alert Group has it yet, and `team_evaluation`
   publishes those it brings.

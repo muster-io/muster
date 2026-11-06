@@ -1095,19 +1095,52 @@ DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NU
               updated_at = excluded.updated_at;
 
 -- EnsureStormSummary creates the Storm summary of a Storm in a Destination when it is missing, Loud at its first
--- Publication, and locks it either way.
+-- Publication, and locks it either way. One that left the Destination — retired or withheld when the Destination left
+-- the reach of the Route's Alert Groups during the Storm — is published there afresh, as a new one is: its message and
+-- its desired hash are cleared, so that the caller stores its Desired state again.
 -- name: EnsureStormSummary :one
 INSERT INTO deliveries (org_id, destination_id, storm_id, state, urgent, publication_loud, next_attempt_at, created_at,
                         updated_at)
 VALUES (@org_id, @destination_id, @storm_id, 'pending', false, true, @now, @now, @now)
 ON CONFLICT (storm_id, destination_id) WHERE storm_id IS NOT NULL
-DO UPDATE SET updated_at = deliveries.updated_at
+DO UPDATE SET updated_at             = deliveries.updated_at,
+              state                  = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN 'pending'
+                                            ELSE deliveries.state END,
+              message_id             = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.message_id END,
+              message_url            = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.message_url END,
+              published_at           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.published_at END,
+              publication_started_at = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.publication_started_at END,
+              actual_version         = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_version END,
+              actual_hash            = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_hash END,
+              actual_status          = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_status END,
+              past_edit_window       = deliveries.past_edit_window AND deliveries.state NOT IN ('retired', 'withheld'),
+              thread_state           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN 'none'
+                                            ELSE deliveries.thread_state END,
+              thread_anchor_id       = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.thread_anchor_id END,
+              republication_started_at = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                              ELSE deliveries.republication_started_at END,
+              desired_hash           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.desired_hash END,
+              publication_loud       = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN true
+                                            ELSE deliveries.publication_loud END,
+              desired_retire         = deliveries.desired_retire AND deliveries.state NOT IN ('retired', 'withheld'),
+              next_attempt_at        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN @now
+                                            ELSE deliveries.next_attempt_at END
 RETURNING id, desired_hash;
 
 -- ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached, with the Destination, its
 -- type and its public_id.
 -- name: ListStormSummaries :many
-SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type, ds.public_id AS destination_public_id
+SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type, ds.public_id AS destination_public_id,
+       d.state
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 WHERE d.org_id = @org_id AND d.storm_id = @storm_id::bigint
