@@ -299,10 +299,10 @@ test("shows the Teams of an Alert Group in its header, Timeline and Alerts", asy
   try {
     // Teams pay (by the Team label and, once it has the matcher, by namespace) and sea; Alert Groups of their slugs,
     // team="Payments" (no Team) and namespace="billing".
-    const integration = await seedTeamAlerts("ag-teams", "AT");
-    const paymentsGroup = await alertGroupOf(integration, "ATPayments");
-    const billingGroup = await alertGroupOf(integration, "ATBilling");
-    const capitalGroup = await alertGroupOf(integration, "ATCapital");
+    const seed = await seedTeamAlerts("ag-teams", "AT");
+    const paymentsGroup = await alertGroupOf(seed.integrationId, seed.name("Payments"));
+    const billingGroup = await alertGroupOf(seed.integrationId, seed.name("Billing"));
+    const capitalGroup = await alertGroupOf(seed.integrationId, seed.name("Capital"));
     const matcher = await adminApi();
     await setTeamMatchers(matcher, pay, [
       { label: "namespace", op: "=~", value: "checkout|billing" },

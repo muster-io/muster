@@ -594,7 +594,7 @@ test("lists the unknown values of the Team label, makes a Team of one and sets w
   await removeIntegration(admin, "teams-labels");
   await admin.dispose();
   // The Teams pay (bob is in it) and sea, and Alert Groups with their slugs, team="checkout" and team="Payments".
-  const integrationId = await seedTeamAlerts("teams-labels", "TL");
+  const seed = await seedTeamAlerts("teams-labels", "TL");
   try {
     await signInAdmin(page);
     await openTeams(page);
@@ -641,7 +641,7 @@ test("lists the unknown values of the Team label, makes a Team of one and sets w
     await openTeams(page);
     await expect(valueRow(page, "checkout")).toHaveCount(0);
     await nav(page).getByRole("link", { name: "Alert Groups", exact: true }).click();
-    const checkoutGroup = await alertGroupOf(integrationId, "TLCheckout");
+    const checkoutGroup = await alertGroupOf(seed.integrationId, seed.name("Checkout"));
     await expect(async () => {
       await page.goto(`/alert-groups/${checkoutGroup}`);
       await expect(page.getByTestId("alert-group-teams")).toContainText(

@@ -189,19 +189,21 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
   const slugs = teamSlugs("PhoneTeam");
   await removeTeamsBySlug(admin, [slugs.pay, slugs.sea]);
   await admin.dispose();
-  const integration = await seedTeamAlerts("ag-phone-teams", "PhoneTeam");
-  const group = await alertGroupOf(integration, "PhoneTeamPayments");
+  const seed = await seedTeamAlerts("ag-phone-teams", "PhoneTeam");
+  const paymentsAlert = seed.name("Payments");
+  const searchAlert = seed.name("Search");
+  const group = await alertGroupOf(seed.integrationId, paymentsAlert);
   try {
     await signIn(page, TEAM_BOB, TEAM_SPEC_PASSWORD);
     const rowOf = (name: string) => page.getByTestId("alert-group-row").filter({ hasText: name });
 
     await page.goto("/alert-groups?q=PhoneTeam");
-    await expect(rowOf("PhoneTeamSearch")).toHaveCount(1);
+    await expect(rowOf(searchAlert)).toHaveCount(1);
     await page.getByTestId("filter-my-teams").tap();
     await expect(page).toHaveURL(/[?&]team=mine/);
     await expect(page.getByTestId("filter-my-teams")).toHaveAttribute("aria-pressed", "true");
-    await expect(rowOf("PhoneTeamPayments")).toHaveCount(1);
-    await expect(rowOf("PhoneTeamSearch")).toHaveCount(0);
+    await expect(rowOf(paymentsAlert)).toHaveCount(1);
+    await expect(rowOf(searchAlert)).toHaveCount(0);
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-list-my-teams-360");
     // The filter "Team" is in the sheet of filters.
@@ -223,7 +225,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
     await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
     await page.goto("/alert-groups?q=PhoneTeam&team=mine");
     await expect(page.getByTestId("filter-my-teams")).toHaveText("Мои команды");
-    await expect(rowOf("PhoneTeamPayments")).toHaveCount(1);
+    await expect(rowOf(paymentsAlert)).toHaveCount(1);
     await expectNoHorizontalScroll(page);
     await page.goto(`/alert-groups/${group}`);
     await expect(page.getByTestId("alert-group-teams")).toContainText(

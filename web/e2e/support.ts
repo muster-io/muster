@@ -803,9 +803,16 @@ export function teamSlugs(prefix: string): { pay: string; sea: string } {
  * Seeds the Teams "payments-<prefix>" (with bob in it) and "search-<prefix>" (see teamSlugs), an Integration called
  * name and, through the fake Alertmanager, one Alert Group each for their slugs, team="checkout" and team="Payments"
  * as values of the Team label, and one of namespace="billing" without the Team label. The Alert names start with
- * prefix, so that a spec finds its own Alert Groups. Returns the Integration's id.
+ * prefix and end with a token of this call, so that a spec finds its own Alert Groups and a rerun on the same database
+ * makes new ones instead of reopening those of the run before. Returns the Integration's id and name(kind), the Alert
+ * name of "Payments", "Search", "Checkout", "Capital" or "Billing".
  */
-export async function seedTeamAlerts(name: string, prefix: string): Promise<string> {
+export async function seedTeamAlerts(
+  name: string,
+  prefix: string,
+): Promise<{ integrationId: string; name: (kind: string) => string }> {
+  const run = Math.random().toString(36).slice(2, 7);
+  const alertName = (kind: string) => `${prefix}${kind}${run}`;
   const slugs = teamSlugs(prefix);
   const admin = await adminApi();
   try {
@@ -823,11 +830,11 @@ export async function seedTeamAlerts(name: string, prefix: string): Promise<stri
     labels: { job: prefix },
   });
   const alerts: [string, Record<string, string>][] = [
-    ["pay", { alertname: `${prefix}Payments`, team: slugs.pay }],
-    ["sea", { alertname: `${prefix}Search`, team: slugs.sea }],
-    ["che", { alertname: `${prefix}Checkout`, team: "checkout" }],
-    ["cap", { alertname: `${prefix}Capital`, team: "Payments" }],
-    ["bil", { alertname: `${prefix}Billing`, namespace: "billing" }],
+    ["pay", { alertname: alertName("Payments"), team: slugs.pay }],
+    ["sea", { alertname: alertName("Search"), team: slugs.sea }],
+    ["che", { alertname: alertName("Checkout"), team: "checkout" }],
+    ["cap", { alertname: alertName("Capital"), team: "Payments" }],
+    ["bil", { alertname: alertName("Billing"), namespace: "billing" }],
   ];
   for (const [id, labels] of alerts) {
     await fam("PUT", `/groups/${group}/alerts/${id}`, {
@@ -836,7 +843,7 @@ export async function seedTeamAlerts(name: string, prefix: string): Promise<stri
     });
   }
   await notify(integrationId, group, { reason: "first notification" });
-  return integrationId;
+  return { integrationId, name: alertName };
 }
 
 /** The id of the Alert Group of the Alert called alertname in the Integration, once Muster has made it. */
