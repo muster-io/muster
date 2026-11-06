@@ -82,7 +82,7 @@ test("shows the statistics per Route and per Integration, with no CSP violation"
   await signInAdmin(page);
   const nav = page.getByRole("navigation", { name: "Main" });
   const links = await nav.getByRole("link").allTextContents();
-  expect(links.indexOf("Statistics")).toBe(links.indexOf("Alert Groups") + 1);
+  expect(links.indexOf("Statistics")).toBe(links.indexOf("Teams") + 1);
   await nav.getByRole("link", { name: "Statistics" }).click();
   await expect(page.getByRole("heading", { name: "Statistics", level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "By route" })).toBeChecked();

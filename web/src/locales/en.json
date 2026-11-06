@@ -962,7 +962,8 @@
     },
     "list": {
       "broken": "Broken Destinations",
-      "empty": "No Destinations yet."
+      "empty": "No Destinations yet.",
+      "emptyFiltered": "No Destinations of this Team."
     },
     "mattermost": {
       "archived": "{{name}} (archived)",
@@ -1219,6 +1220,7 @@
       "slackManifest": "Slack app manifest",
       "snooze": "Snooze durations",
       "staticLabels": "Static labels",
+      "teamIdp": "Identity provider groups",
       "telegramBaseUrl": "Telegram in restricted networks",
       "telegramMode": "Long polling or webhook",
       "template": "Message templates",
@@ -1227,7 +1229,8 @@
       "webhookExtraction": "Extraction rules",
       "webhookSecrets": "Secrets",
       "webhookSigningSecret": "Signing secret",
-      "webhookTemplates": "Request templates"
+      "webhookTemplates": "Request templates",
+      "workingHours": "Working hours"
     },
     "fixes": {
       "afterDowntime": "Recovery after downtime",
@@ -1309,6 +1312,7 @@
       "statistics": "Statistics",
       "storedSnapshots": "Stored Snapshots",
       "systemStatus": "System status",
+      "teams": "Teams",
       "users": "Adding Users"
     },
     "howToFix": "How to fix",
@@ -1702,7 +1706,8 @@
     "organization": "Organization",
     "profile": "Profile",
     "routes": "Routes",
-    "statistics": "Statistics"
+    "statistics": "Statistics",
+    "teams": "Teams"
   },
   "notes": {
     "add": "Add note",
@@ -1762,12 +1767,9 @@
     "hint": "Sign-in through your identity provider.",
     "mapping": {
       "add": "Add IdP group",
-      "claim": "Claim: {{claim}}",
-      "claimTitle": "Reads the claim {{claim}}",
+      "claim": "Claim {{number}}",
       "empty": "No IdP groups are mapped.",
       "group": "IdP group {{number}}",
-      "groupsClaim": "groups",
-      "groupsClaimTitle": "Reads the groups claim of these settings",
       "hint": "When a user's IdP groups map to several Roles, the highest wins.",
       "remove": "Remove IdP group {{group}}",
       "role": "Role for IdP group {{number}}",
@@ -1801,7 +1803,10 @@
       "timeZoneHint": "Times in messages use this time zone. Each user sees the web UI in their own time zone.",
       "timeZoneSearch": "Search time zones",
       "weekStart": "First day of the week",
+      "workdayEnd": "End of the working day",
       "workdayStart": "Start of the working day",
+      "workingDays": "Working days",
+      "workingHoursHint": "The Working hours of the Organization, which every Team without its own follows.",
       "workingWeekHint": "Snooze presets end at this time and on this day."
     },
     "keyring": {
@@ -2188,6 +2193,7 @@
     "list": {
       "defaultHint": "Takes every alert no other route took. Always last.",
       "dragHint": "Drag to change the order",
+      "emptyFiltered": "No Routes of this Team.",
       "label": "Routes in evaluation order",
       "minimumSeverity": "Minimum severity: {{level}}",
       "moved": "{{name}} moved to position {{position}} of {{total}}.",
@@ -2197,6 +2203,7 @@
       "noMatchers": "No Matchers: takes every alert",
       "openAlertGroups_one": "{{count}} open Alert Group",
       "openAlertGroups_other": "{{count}} open Alert Groups",
+      "owningTeam": "Owning Team: {{name}}",
       "stale": "Someone else changed the order. Reload to see it.",
       "templateError": "Template error"
     },
@@ -2601,6 +2608,102 @@
   "table": {
     "loadMore": "Load more"
   },
+  "teams": {
+    "create": {
+      "start": "New Team",
+      "title": "New Team"
+    },
+    "delete": {
+      "action": "Delete Team",
+      "description": "Its people and Working hours go; the Routes and Destinations it owns are left without an owner.",
+      "inUse": "The Team still has Schedules or Escalation chains. Remove them first.",
+      "title": "Delete Team {{name}}?"
+    },
+    "details": {
+      "title": "Details"
+    },
+    "errors": {
+      "stale": "Someone else changed this Team. Reload to see the changes."
+    },
+    "fields": {
+      "name": "Name",
+      "people": "People",
+      "slug": "Slug"
+    },
+    "filter": {
+      "all": "All",
+      "label": "Team",
+      "mine": "My Teams"
+    },
+    "form": {
+      "description": "Description",
+      "name": "Name",
+      "nameTaken": "Another Team has this name.",
+      "slug": "Slug",
+      "slugHint": "The value of the Team label that names the Team: 1 to 63 characters, lowercase letters, digits, - _ and ., starting with a letter or a digit.",
+      "slugTaken": "Another Team has this slug."
+    },
+    "hint": "A Team groups people and owns Routes and Destinations. It grants no access: Roles are the same across the Organization.",
+    "hours": {
+      "days": "Days",
+      "endAfterStart": "The end must be later than the start.",
+      "from": "From",
+      "noDays": "no days",
+      "organizationDefault": "Organization default: {{days}} {{from}}–{{to}}, {{zone}}",
+      "own": "Own",
+      "timeZone": "Time zone",
+      "title": "Working hours",
+      "to": "To"
+    },
+    "idp": {
+      "add": "Add",
+      "claim": "Claim {{number}}",
+      "empty": "No groups: people are in the Team only when added by hand.",
+      "group": "Identity provider group {{number}}",
+      "hint": "Checked at every sign-in, like the Role mapping: each entry reads its own claim, and a/b/* takes the whole subtree. The Role of the people does not change.",
+      "legend": "Identity provider groups",
+      "remove": "Remove group {{group}}",
+      "title": "Identity provider groups"
+    },
+    "list": {
+      "empty": "No Teams yet.",
+      "people_one": "{{count}} person",
+      "people_other": "{{count}} people"
+    },
+    "owner": {
+      "hint": "For ownership and the filter of the UI; does not affect delivery.",
+      "label": "Owning Team",
+      "none": "None"
+    },
+    "page": {
+      "slug": "Slug:",
+      "title": "Team"
+    },
+    "people": {
+      "actions": "Actions",
+      "add": "Add person",
+      "addSubmit": "Add",
+      "byHand": "added by hand",
+      "chooseUser": "Choose a user",
+      "claimTitle": "Claim {{claim}}",
+      "deactivated": "{{name}} (deactivated)",
+      "empty": "Nobody is in this Team yet.",
+      "fromGroup": "group",
+      "fromIdp": "identity provider",
+      "messengers": "Messengers",
+      "notLinked": "not linked",
+      "remove": "Remove",
+      "removeNamed": "Remove {{name}}",
+      "role": "Role",
+      "search": "Search",
+      "searchHint": "Name, login or email",
+      "source": "Source",
+      "title": "People",
+      "unknownUser": "This User does not exist or was deleted.",
+      "user": "User"
+    },
+    "title": "Teams"
+  },
   "templates": {
     "errors": {
       "atLine": "Line {{line}}: {{error}}",
@@ -2929,5 +3032,14 @@
     "thursday": "Thursday",
     "tuesday": "Tuesday",
     "wednesday": "Wednesday"
+  },
+  "weekdaysShort": {
+    "friday": "Fri",
+    "monday": "Mon",
+    "saturday": "Sat",
+    "sunday": "Sun",
+    "thursday": "Thu",
+    "tuesday": "Tue",
+    "wednesday": "Wed"
   }
 }

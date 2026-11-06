@@ -10,7 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -31,6 +31,7 @@ import { AccessLayout } from "../components/access-nav";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { fieldLabel } from "../components/audit-diff";
 import { DocsLink, PageTitle } from "../components/docs-link";
+import type { EntryErrors } from "../components/claim-entries-editor";
 import {
   GroupMappingEditor,
   type MappingRow,
@@ -178,7 +179,13 @@ function offlineAccessText(t: TFunction, result: OidcCheckResult): string {
 
 function ConnectionCheck({ dirty, groupsClaim }: { dirty: boolean; groupsClaim: string }) {
   const { t } = useTranslation();
-  const check = useCheckOidcSettings();
+  const queryClient = useQueryClient();
+  // The check keeps the claims of discovery for the claim comboboxes of the editors, which read them with the settings.
+  const check = useCheckOidcSettings({
+    mutation: {
+      onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetOidcSettingsQueryKey() }),
+    },
+  });
   const result = check.data;
   return (
     <Card>
@@ -257,6 +264,7 @@ function OidcForm({ settings }: { settings: OidcSettings }) {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [saved, setSaved] = useState(false);
   const form = useForm<OidcValues>({ defaultValues: formValues(settings) });
+  const groupsClaim = useWatch({ control: form.control, name: "groups_claim" });
   const { isDirty } = form.formState;
   const formElement = useRef<HTMLFormElement>(null);
   const [focusRequest, setFocusRequest] = useState(0);
@@ -321,11 +329,13 @@ function OidcForm({ settings }: { settings: OidcSettings }) {
       proxyFieldErrors[field] = text;
     }
   }
-  const mappingErrors = new Map<number, string>();
+  const mappingErrors = new Map<number, EntryErrors>();
   for (const [pointer, code] of Object.entries(errors)) {
-    const match = /^\/group_mappings\/(\d+)/.exec(pointer);
+    const match = /^\/group_mappings\/(\d+)(?:\/(claim))?/.exec(pointer);
     if (match?.[1] !== undefined) {
-      mappingErrors.set(Number(match[1]), fieldErrorText(t, code));
+      const index = Number(match[1]);
+      const field = match[2] === "claim" ? "claim" : "group";
+      mappingErrors.set(index, { ...mappingErrors.get(index), [field]: fieldErrorText(t, code) });
     }
   }
   const text = (
@@ -485,6 +495,8 @@ function OidcForm({ settings }: { settings: OidcSettings }) {
                     value={field.value}
                     disabled={!canWrite}
                     errors={mappingErrors}
+                    claims={settings.claims_supported}
+                    groupsClaim={groupsClaim.trim()}
                     onChange={field.onChange}
                   />
                 )}

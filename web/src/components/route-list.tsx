@@ -27,12 +27,20 @@ import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { cn } from "./ui/utils";
 
-/** The Routes list with its ETag, which covers the order. A route hint invalidates it through the list's key. */
-export const routesQuery = queryOptions({
-  queryKey: [...getListRoutesQueryKey(), "tagged"],
-  queryFn: ({ signal }) =>
-    apiFetchTagged<RouteListModel>(getListRoutesUrl(), { method: "GET", signal }),
-});
+/**
+ * The Routes list with its ETag, which covers the order; with a Team, only what that Team owns (the id of a Team, or
+ * "mine" for the Teams of the signed-in User). A route hint invalidates it through the list's key.
+ */
+export function routesQueryFor(team?: string) {
+  return queryOptions({
+    queryKey: [...getListRoutesQueryKey(), "tagged", ...(team === undefined ? [] : [team])],
+    queryFn: ({ signal }) =>
+      apiFetchTagged<RouteListModel>(getListRoutesUrl(team === undefined ? undefined : { team }), {
+        method: "GET",
+        signal,
+      }),
+  });
+}
 
 function reorder(order: RouteOrder, etag: string): Promise<Tagged<RouteListModel>> {
   return apiFetchTagged<RouteListModel>(getReorderRoutesUrl(), {
@@ -146,7 +154,7 @@ function RouteRow({
         aria-hidden="true"
         className="mt-0.5 w-5 shrink-0 text-right text-sm text-muted-foreground tabular-nums"
       >
-        {route.is_default ? "" : `${number}.`}
+        {route.is_default || number === 0 ? "" : `${number}.`}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
@@ -166,6 +174,14 @@ function RouteRow({
               {t("routes.list.minimumSeverity", {
                 level: minimumSeverityName(t, minimumSeverity),
               })}
+            </span>
+          )}
+          {route.owning_team != null && (
+            <span
+              className="inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+              data-testid="route-owning-team"
+            >
+              {t("routes.list.owningTeam", { name: route.owning_team.name })}
             </span>
           )}
           {route.template_error && (
@@ -256,16 +272,20 @@ function RouteRow({
 
 export function RouteList({
   canWrite,
+  team,
   focusRouteId,
   onFocused,
 }: {
   canWrite: boolean;
+  /** Only what this Team owns: the id of a Team, or "mine". The order cannot be changed in a filtered list. */
+  team?: string;
   /** A Route whose link takes the focus once the list shows it, such as the Route an accepted suggestion created. */
   focusRouteId?: string;
   onFocused?: () => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const routesQuery = routesQueryFor(team);
   const query = useQuery(routesQuery);
   const [pending, setPending] = useState<string[] | null>(null);
   const [stale, setStale] = useState(false);
@@ -402,7 +422,7 @@ export function RouteList({
       </p>
     );
   }
-  const canMove = canWrite;
+  const canMove = canWrite && team === undefined;
   return (
     <div className="flex flex-col gap-3">
       {stale && (
@@ -432,8 +452,13 @@ export function RouteList({
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
+      {routes.length === 0 && (
+        <p className="text-sm text-muted-foreground" role="status" data-testid="route-list-empty">
+          {t("routes.list.emptyFiltered")}
+        </p>
+      )}
       <ol
-        className="rounded-lg border"
+        className={cn("rounded-lg border", routes.length === 0 && "hidden")}
         aria-label={t("routes.list.label")}
         aria-busy={save.isPending}
         data-testid="route-list"
@@ -442,7 +467,7 @@ export function RouteList({
           <RouteRow
             key={route.id}
             route={route}
-            number={index + 1}
+            number={team === undefined ? index + 1 : 0}
             canMove={canMove}
             first={index === 0}
             last={index === ordered.length - 1}

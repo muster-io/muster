@@ -87,6 +87,8 @@ function routeField(t: TFunction, pointer: string): string | undefined {
       return t("routes.fields.matchers");
     case "/minimum_severity":
       return t("routes.fields.minimumSeverity");
+    case "/owning_team_id":
+      return t("teams.owner.label");
     case "/urgent":
       return t("routes.fields.urgent");
     case "/group_key":
@@ -235,6 +237,8 @@ function destinationField(t: TFunction, pointer: string): string | undefined {
   switch (pointer) {
     case "/name":
       return t("destinations.fields.name");
+    case "/owning_team_id":
+      return t("teams.owner.label");
     case "/connection_id":
       return t("destinations.mattermost.connection");
     case "/team_id":
@@ -251,6 +255,24 @@ function destinationField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.limiterPerSeconds");
     case "/deleted_at":
       return t("audit.fields.deletedAt");
+    default:
+      return undefined;
+  }
+}
+
+/** The names of the changed fields of a Team. */
+function teamField(t: TFunction, pointer: string): string | undefined {
+  switch (pointer) {
+    case "/name":
+      return t("teams.fields.name");
+    case "/slug":
+      return t("teams.fields.slug");
+    case "/description":
+      return t("teams.form.description");
+    case "/idp_entries":
+      return t("teams.idp.title");
+    case "/working_hours":
+      return t("teams.hours.title");
     default:
       return undefined;
   }
@@ -338,6 +360,9 @@ export function fieldLabel(
       break;
     case "destination":
       label = destinationField(t, pointer);
+      break;
+    case "team":
+      label = teamField(t, pointer);
       break;
     default:
       break;

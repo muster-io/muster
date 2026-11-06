@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The main navigation against `muster dev`: Verification steps 1-6 of the compact navigation story. An Admin sees eight
+// The main navigation against `muster dev`: Verification steps 1-6 of the compact navigation story. An Admin sees nine
 // entries that fit 1280 px wide in English and Russian; "Access" groups Users, Service accounts and OIDC, the Audit log
 // sits under Organization and Profile opens from the user menu; the old addresses keep working; a Responder and a
-// Viewer see seven entries and are refused the admin pages.
+// Viewer see eight entries and are refused the admin pages.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -22,8 +22,9 @@ import {
 test.describe.configure({ mode: "serial" });
 
 const NO_PERMISSION = "You do not have permission to see this page.";
-const SEVEN = [
+const WITHOUT_ACCESS = [
   "Alert Groups",
+  "Teams",
   "Statistics",
   "Integrations",
   "Routes",
@@ -31,7 +32,7 @@ const SEVEN = [
   "Destinations",
   "Organization",
 ];
-const EIGHT = [...SEVEN.slice(0, 6), "Access", "Organization"];
+const WITH_ACCESS = [...WITHOUT_ACCESS.slice(0, 7), "Access", "Organization"];
 
 function main(page: Page, name = "Main") {
   return page.getByRole("navigation", { name });
@@ -68,12 +69,12 @@ async function user(login: string, role: string, password: string) {
   }
 }
 
-test("an Admin's main navigation has eight entries that fit 1280 px wide", async ({ page }) => {
+test("an Admin's main navigation has nine entries that fit 1280 px wide", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
 
-  // 1. Eight entries, in order, that fit; Profile opens from the user menu.
-  await expect(main(page).getByRole("link")).toHaveText(EIGHT);
+  // 1. Nine entries, in order, that fit; Profile opens from the user menu.
+  await expect(main(page).getByRole("link")).toHaveText(WITH_ACCESS);
   await expectFits(page, "Main");
   await shot(page, "navigation-admin-1280");
   await openProfile(page);
@@ -139,10 +140,11 @@ test("the main navigation fits in Russian, and both sub-navigations at 360 px", 
   await signInAdmin(page);
   await page.goto("/profile");
   try {
-    // 5. Russian: the eight entries fit; Access and Organization in Russian; no sideways scroll at 360 px.
+    // 5. Russian: the nine entries fit; Access and Organization in Russian; no sideways scroll at 360 px.
     await page.getByLabel("Language").selectOption("ru");
     await expect(main(page, "Основная").getByRole("link")).toHaveText([
       "Группы алертов",
+      "Команды",
       "Статистика",
       "Интеграции",
       "Маршруты",
@@ -186,17 +188,17 @@ test("the main navigation fits in Russian, and both sub-navigations at 360 px", 
   expect(csp).toEqual([]);
 });
 
-test("a Responder and a Viewer see seven entries and no admin page", async ({ page }) => {
+test("a Responder and a Viewer see eight entries and no admin page", async ({ page }) => {
   const csp = watchCsp(page);
   for (const [login, role] of [
     ["nav-rita", "responder"],
     ["nav-vera", "viewer"],
   ] as const) {
-    // 6. Seven entries without Access; Organization with Lookup tables and Link rules; the admin pages refuse.
+    // 6. Eight entries without Access; Organization with Lookup tables and Link rules; the admin pages refuse.
     const password = `${login}-password-1`;
     await user(login, role, password);
     await signIn(page, login, password);
-    await expect(main(page).getByRole("link")).toHaveText(SEVEN);
+    await expect(main(page).getByRole("link")).toHaveText(WITHOUT_ACCESS);
     await entry(page, "Organization").click();
     await expect(page).toHaveURL(`${APP}/admin/organization/lookup-tables`);
     await expect(

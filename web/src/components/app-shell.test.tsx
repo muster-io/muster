@@ -174,9 +174,10 @@ describe("navigation", () => {
       .not.toBeInTheDocument();
   });
 
-  test("eight entries, Access and Organization last, in place of the pages they group", () => {
+  test("nine entries, Teams after Alert Groups, Access and Organization last, in place of the pages they group", () => {
     expect(NAVIGATION.map((e) => e.to)).toEqual([
       "/alert-groups",
+      "/teams",
       "/statistics",
       "/integrations",
       "/routes",
@@ -185,7 +186,8 @@ describe("navigation", () => {
       "/admin/access",
       "/admin/organization",
     ]);
-    expect(NAVIGATION).toHaveLength(8);
+    expect(NAVIGATION).toHaveLength(9);
+    expect(NAVIGATION[1]).toEqual({ to: "/teams", label: "teams", permission: "teams:read" });
     const moved = [
       "/profile",
       "/admin/users",
@@ -214,9 +216,11 @@ describe("navigation", () => {
     );
   });
 
-  test("an Admin sees eight entries, a Responder and a Viewer seven without Access", async () => {
+  test("an Admin sees nine entries, a Responder and a Viewer eight without Access", async () => {
     const admin: Permission[] = [
       "alert-groups:read",
+      "teams:read",
+      "teams:write",
       "integrations:read",
       "routes:read",
       "connections:read",
@@ -234,6 +238,7 @@ describe("navigation", () => {
     const responder: Permission[] = [
       "alert-groups:read",
       "alert-groups:acknowledge",
+      "teams:read",
       "integrations:read",
       "routes:read",
       "connections:read",
@@ -243,6 +248,7 @@ describe("navigation", () => {
     ];
     const viewer: Permission[] = [
       "alert-groups:read",
+      "teams:read",
       "integrations:read",
       "routes:read",
       "connections:read",
@@ -250,8 +256,9 @@ describe("navigation", () => {
       "lookup-tables:read",
       "link-rules:read",
     ];
-    const seven = [
+    const eight = [
       "Alert Groups",
+      "Teams",
       "Statistics",
       "Integrations",
       "Routes",
@@ -260,9 +267,9 @@ describe("navigation", () => {
       "Organization",
     ];
     for (const [permissions, expected] of [
-      [admin, [...seven.slice(0, 6), "Access", "Organization"]],
-      [responder, seven],
-      [viewer, seven],
+      [admin, [...eight.slice(0, 7), "Access", "Organization"]],
+      [responder, eight],
+      [viewer, eight],
     ] as const) {
       const shown = await renderNavigation(permissions, NAVIGATION);
       const nav = shown.getByRole("navigation", { name: "Main" });
@@ -365,9 +372,9 @@ describe("navigation", () => {
     await sibling.unmount();
   });
 
-  test("Statistics follows Alert Groups and needs alert-groups:read", async () => {
+  test("Statistics follows Teams and needs alert-groups:read", async () => {
     const index = NAVIGATION.findIndex((e) => e.to === "/statistics");
-    expect(NAVIGATION[index - 1]?.to).toBe("/alert-groups");
+    expect(NAVIGATION[index - 1]?.to).toBe("/teams");
     expect(NAVIGATION[index]?.permission).toBe("alert-groups:read");
 
     const shown = await renderNavigation(["alert-groups:read"], NAVIGATION);

@@ -321,6 +321,86 @@ test("General saves the working day and week, which the Snooze presets name, and
   expect(csp).toEqual([]);
 });
 
+test("General edits the working days and the end of the working day, which a Team without its own follows", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  const teamId = await withAdmin(
+    async (admin) =>
+      (
+        await admin.call<{ id: string }>("POST", "/api/v1/teams", {
+          name: "org-hours",
+          slug: "org-hours",
+          own_working_hours: false,
+        })
+      ).id,
+  );
+  await signInAdmin(page);
+  try {
+    // 6. "Working days" Monday to Friday and "End of the working day" 18:00 are shown with the start.
+    await page.goto("/admin/organization/general");
+    const end = page.getByLabel("End of the working day", { exact: true });
+    const days = page.getByTestId("organization-working-days-days");
+    await expect(page.getByLabel("Start of the working day")).toHaveValue("09:00");
+    await expect(end).toHaveValue("18:00");
+    await expect(days.getByRole("checkbox")).toHaveCount(7);
+    for (const [day, checked] of [
+      ["Mon", true],
+      ["Tue", true],
+      ["Wed", true],
+      ["Thu", true],
+      ["Fri", true],
+      ["Sat", false],
+      ["Sun", false],
+    ] as const) {
+      await expect(days.getByRole("checkbox", { name: day })).toBeChecked({ checked });
+    }
+    await expect(
+      page.getByText(
+        "The Working hours of the Organization, which every Team without its own follows.",
+      ),
+    ).toBeVisible();
+    await shot(page, "general-working-hours-en");
+
+    // An end that is not later than the start shows the message at the field.
+    await end.fill("08:00");
+    await save(page);
+    await expect(end).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("The end must be later than the start.")).toBeVisible();
+    await expect(page.getByTestId("general-status")).toHaveText("");
+    await shot(page, "general-working-hours-refused-en");
+
+    // Thursday at the latest, until 17:00 → "Saved."; a Team without its own Working hours follows.
+    await end.fill("17:00");
+    await days.getByRole("checkbox", { name: "Fri" }).uncheck();
+    await save(page);
+    await expect(page.getByTestId("general-status")).toHaveText("Saved.");
+    const org = await withAdmin((admin) =>
+      admin.call<{ working_days: string[]; workday_end: string }>("GET", "/api/v1/organization"),
+    );
+    expect(org.working_days).toEqual(["monday", "tuesday", "wednesday", "thursday"]);
+    expect(org.workday_end).toBe("17:00");
+    await page.goto(`/teams/${teamId}`);
+    // The time zone is the Organization's, which an earlier test of the file may have changed.
+    await expect(page.getByTestId("working-hours-summary")).toHaveText(
+      /^Organization default: Mon–Thu 09:00–17:00, \S+$/,
+    );
+    // No day is refused at the field.
+    await page.goto("/admin/organization/general");
+    for (const day of ["Mon", "Tue", "Wed", "Thu"]) {
+      await days.getByRole("checkbox", { name: day }).uncheck();
+    }
+    await save(page);
+    await expect(page.getByText("Fill in this field.")).toBeVisible();
+    await expect(page.getByTestId("general-status")).toHaveText("");
+  } finally {
+    await withAdmin(async (admin) => {
+      await admin.call("DELETE", `/api/v1/teams/${teamId}`);
+    });
+  }
+  expect(csp).toEqual([]);
+});
+
 test("Retention shows the order refusal at the summaries field, then saves", async ({ page }) => {
   const csp = watchCsp(page);
   await signInAdmin(page);
