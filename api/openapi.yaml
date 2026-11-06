@@ -17021,7 +17021,8 @@ components:
           - null
         layout:
           description: For `root_message`, the content of the rendered message as structured data; null when the
-            template failed.
+            template failed, and when a template of the Route renders the content, which the structured data cannot
+            carry, as a bridge then receives no `layout`.
           oneOf:
           - $ref: '#/components/schemas/MessageLayout'
           - type: 'null'

@@ -46,6 +46,41 @@ func TestLayoutOf(t *testing.T) {
 	if one := LayoutOf(r.Root(source("firing", 1), MarkupCommonMark).Message); one.Alerts != nil {
 		t.Fatalf("one Alert %+v", one.Alerts)
 	}
+	ru := source("acknowledged", 3)
+	ru.Route.Language, ru.Owner = LanguageRussian, "Алиса"
+	if l := LayoutOf(r.Root(ru, MarkupCommonMark).Message); l.StatusWord != T(LanguageRussian, "status.acknowledged", nil) ||
+		l.StatusWord == "Acknowledged" || l.StatusWord == "" || l.Owner == nil || l.Owner.Name != "Алиса" {
+		t.Fatalf("in Russian %q %+v", l.StatusWord, l.Owner)
+	}
+}
+
+// TestHasLayout is C-29.FR-8 and C-29.FR-5: only a Root message of Muster's compact default content has a layout; a
+// Route's own root_message template, the Fallback template and a Desired state stored before the compact layout have
+// content that only the body holds, and so have none, nor does a Thread reply or a Storm summary; the preview of a
+// Route's own template carries no layout either.
+func TestHasLayout(t *testing.T) {
+	r := newRenderer(t)
+	src := source("firing", 3)
+	compact := r.Root(src, MarkupCommonMark).Message
+	templated := src
+	templated.Route.RootMessage = ptr("{{ .AlertGroup.Title }} is down")
+	withTemplate := r.Root(templated, MarkupCommonMark).Message
+	fallback := r.fallback(compact, src, LanguageEnglish)
+	earlier := compact
+	earlier.StatusWord = ""
+	if !HasLayout(compact) || withTemplate.Body == nil || HasLayout(withTemplate) || HasLayout(fallback) ||
+		HasLayout(earlier) || HasLayout(Message{Kind: KindReply, Lines: []string{"x"}}) ||
+		HasLayout(Message{Kind: KindStorm, Lines: []string{"x"}}) {
+		t.Fatalf("compact %v, template %v, fallback %v, earlier %v", HasLayout(compact), HasLayout(withTemplate),
+			HasLayout(fallback), HasLayout(earlier))
+	}
+	f := &fakeQueries{group: source("firing", 3)}
+	pr := withFake(t, f)
+	res, err := pr.Preview(t.Context(), PreviewRequest{Kind: TemplateRootMessage, AlertGroupID: "AGK7M3QX9P2RTA",
+		Template: "{{ .AlertGroup.Title }} is down", Format: MarkupCommonMark})
+	if err != nil || !res.Valid || res.Layout != nil || res.Length == 0 {
+		t.Fatalf("the preview of a Route's own template %+v %v", res, err)
+	}
 }
 
 // TestLayoutPeople is C-29.FR-8 and C-29.AC-6 for the people of the layout: in CommonMark, the markup of bridges, an
@@ -103,10 +138,11 @@ func TestLayoutPeople(t *testing.T) {
 }
 
 // TestLayoutInTheDesiredState is C-29.FR-8 for the Desired state, whose payload is the JSON of the Message and whose
-// hash is the hash of that payload: the layout of a Message restored from its JSON is the layout of the Message, so a
-// layout is never lost between the render and the call; and a change that alters only the layout — here the number
-// and the total of the Alerts, which no body of a bridge shows — alters the JSON, and with it the hash, so that it
-// edits the Root message.
+// hash, in internal/delivery, is the SHA-256 of that payload: the layout of a Message restored from its JSON is the
+// layout of the Message, so a layout is never lost between the render and the call; and every change of the layout —
+// here the number, which only the envelope's title shows, the total of the Alerts, which the body shows only through
+// "…and K more", and the Owner — alters the JSON, and with it the hash, so that it edits the Root message. The hash
+// itself is unexported in internal/delivery (encode), which this test cannot reach.
 func TestLayoutInTheDesiredState(t *testing.T) {
 	r := newRenderer(t)
 	src := source("acknowledged", 7)

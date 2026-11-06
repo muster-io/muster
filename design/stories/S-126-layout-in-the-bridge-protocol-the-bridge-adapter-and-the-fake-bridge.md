@@ -15,6 +15,8 @@ files_touched:
   - internal/messages/render.go
   - internal/api/templates.go
   - internal/api/templates_test.go
+  - internal/messages/preview.go
+  - design/stories/S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md
   - internal/bridge/envelope.go
   - internal/bridge/envelope_test.go
   - internal/bridge/delivery.go
@@ -160,8 +162,14 @@ None.
     than its people", and that footer is only its person, whom `owner` carries, and the status. The footers "Snoozed
     by", "Resolved by" and "Resolved automatically" stay as lines of `notices`, the person named as text, since
     `layout` has no person for them.
-  - A Route with its own root_message template sends a `layout` without its Body: `layout` has no field for template
-    output, and the summary, description, key labels and Alerts that the template replaces are empty there.
+  - Decided by the orchestrator: a Root message whose items 3 to 5 come from a Route's own root_message template or
+    from the Fallback template — and a Desired state stored before the compact layout — carries no `layout`
+    (`messages.HasLayout`), since `layout` has no field for that content and C-29.FR-8 asks for "the same content";
+    a bridge renders `body` whenever `layout` is absent, as it must for Storm summaries, Thread replies and older
+    Muster. The preview of a Route's own template carries no `layout` either (`internal/messages/preview.go`, added to
+    `files_touched`), with its length still given; `api/openapi.yaml` says so for `TemplatePreviewResult.layout`.
+  - `files_touched` adds S-168's story file: its Notes now say that the "· Escalation chains stopped" of item 7 must
+    become a line of `notices`, which the Owner's early return in `LayoutOf` would otherwise swallow.
   - `muster bridge check` sends a `layout` of the number 1, the step in the title and as the one field, the body's
     text as the summary and the link; `api/bridge.yaml` gives the example of `MessageInput` a `layout`.
   - The fake bridge refuses as invalid a `layout` whose `status.key` is not one of the four, as it checks `status`.

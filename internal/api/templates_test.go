@@ -27,6 +27,9 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 	case `{{ env "HOME" }}`:
 		return messages.PreviewResult{Format: messages.MarkupMarkdown, Source: req.Template,
 			Errors: []*templates.Error{{Code: "unknown_function", Line: 1, Column: 4, Detail: `"env"`}}}, nil
+	case "templated":
+		return messages.PreviewResult{Valid: true, Output: "#1287 KubernetesContainerOOMKilled — Firing\nbody",
+			Format: req.Format, Length: 50, MessengerLimit: messages.MessengerLimit(req.Format)}, nil
 	case "sample":
 		return messages.PreviewResult{Errors: []*templates.Error{{Code: messages.CodeInvalidSample, Detail: "x"}}}, nil
 	case "route":
@@ -82,6 +85,12 @@ func TestPreviewTemplateAPI(t *testing.T) {
 		req != (messages.PreviewRequest{Kind: "root_message", Format: messages.MarkupHTML, RouteID: "RTAAAAAAAAAAAA",
 			AlertGroupID: "AGK7M3QX9P2RTA", SnapshotID: "SS0000000000AA", Language: "ru", LengthLimit: 4096}) {
 		t.Errorf("preview = %d %s, request %+v", a.status, a.body, req)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"templated","format":"commonmark"}`)
+	if body := string(a.body); a.status != http.StatusOK || !strings.Contains(body, `"layout":null`) ||
+		!strings.Contains(body, `"length":50`) {
+		t.Errorf("a Route's own template = %d %s", a.status, a.body)
 	}
 	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
 		`{"kind":"root_message","template":"{{ env \"HOME\" }}"}`)

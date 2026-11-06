@@ -32,8 +32,8 @@ import (
 // Connection, listed in `mentions` (C-22.FR-16). The footer names a user linked through the Connection by a marker of
 // their own in a new message for a bridge with `native_mentions`; an edit carries no Mentions, and any other bridge
 // would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
-// Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message
-// also carry `layout` (C-29.FR-8): the same content as plain-text data, shortened together with the body (C-29.FR-6),
+// Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message of
+// Muster's compact default content also carry `layout` (C-29.FR-8): the same content as plain-text data, shortened together with the body (C-29.FR-6),
 // with the Owner of an acknowledged Alert Group, who has the `ref` of their entry in `mentions` only where the message
 // carries their marker — a new message to a bridge with `native_mentions` — and null otherwise.
 
@@ -60,7 +60,8 @@ const zeroWidthSpace = "\u200b"
 const markerScheme = "muster-mention:"
 
 // content is the envelope of m for a bridge whose info is i, with head — the mention line of a Loud call, the mark of a
-// test message — before its body, and for a Root message its layout, whose people have no reference.
+// test message — before its body, and for a Root message of the compact default content its layout, whose people have
+// no reference; a Root message of a Route's own template or of the Fallback template has none (messages.HasLayout).
 func content(m messages.Message, i Info, head []string) gen.MessageContent {
 	c := gen.MessageContent{Status: gen.Status(m.Colour), Color: messages.StatusColour(m.Colour),
 		Emoji: messages.StatusEmoji(m.Colour), Buttons: buttonsOf(m, i)}
@@ -79,7 +80,7 @@ func content(m messages.Message, i Info, head []string) gen.MessageContent {
 	c.Title = cutEnd(strings.TrimSpace(c.Title), maxTitle)
 	var short messages.Message
 	c.Body, short = fitted(rest, i, head)
-	if m.Kind == messages.KindRoot && m.Heading != nil {
+	if messages.HasLayout(m) {
 		l := layoutOf(m, short)
 		c.Layout = &l
 	}

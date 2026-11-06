@@ -623,7 +623,8 @@ func layoutOfEnvelope(t *testing.T, env map[string]any) map[string]any {
 // CommonMark escapes where the body has them, whose key labels are key and value, whose Alerts list the values with
 // whether each is resolved and the total of the Alert Group, and whose notices, people and links follow the message;
 // an acknowledged one names its Owner, without a reference, and its footer is no notice; the envelopes pass the schemas
-// of api/bridge.yaml, and a Storm summary and a Thread reply carry no layout.
+// of api/bridge.yaml; a Root message of a Route's own template, of the Fallback template or of an earlier version, a
+// Storm summary and a Thread reply carry no layout.
 func TestLayoutEnvelope(t *testing.T) {
 	i := infoOf(t)
 	firing := postInput(gen.Root, "ch-alerts", content(compactMessage(t, messages.ColourFiring), i, nil), false)
@@ -669,9 +670,26 @@ func TestLayoutEnvelope(t *testing.T) {
 		!slices.Equal(l.Notices, []string{"🔁 Reopened ×2", "Snoozed by Bob Smith"}) {
 		t.Fatalf("snoozed %+v", l)
 	}
-	if b, _ := json.Marshal(content(rootMessage(t, messages.ColourAcknowledged), i, nil)); visit(t,
-		bridgeSchema(t, "MessageContent"), b) != nil || !strings.Contains(string(b), `"layout":{`) {
-		t.Fatalf("a Desired state of an earlier version %s", b)
+	// A Route's own template, the Fallback template and a Desired state of an earlier version have content that only
+	// the body holds: no layout, so that a bridge that renders layout renders the body instead.
+	templated := compactMessage(t, messages.ColourFiring)
+	templated.Summary, templated.Description, templated.KeyLabels, templated.AlertsLine = "", "", nil, nil
+	templated.Body = &messages.Body{Text: "QueueFull: 7 pods", Markup: messages.MarkupCommonMark}
+	fallback := compactMessage(t, messages.ColourFiring)
+	fallback.Summary, fallback.Description, fallback.KeyLabels, fallback.AlertsLine = "", "", nil, nil
+	fallback.CommonLabels = []messages.Label{{Name: "svc", Value: "br"}}
+	fallback.Alerts = &messages.AlertList{Lines: []messages.AlertLine{{Text: "pod=api-1"}}}
+	for name, m := range map[string]messages.Message{"a Route's own template": templated, "the Fallback": fallback,
+		"a Desired state of an earlier version": rootMessage(t, messages.ColourAcknowledged)} {
+		c := content(m, i, nil)
+		b, _ := json.Marshal(postInput(gen.Root, "ch-alerts", c, false))
+		if c.Layout != nil || strings.Contains(string(b), `"layout"`) || visit(t, bridgeSchema(t, "MessageInput"), b) != nil ||
+			c.Body == "" {
+			t.Errorf("%s: %s", name, b)
+		}
+	}
+	if c := content(templated, i, nil); !strings.Contains(c.Body, "QueueFull: 7 pods") {
+		t.Errorf("the body of a Route's own template %q", c.Body)
 	}
 	storm := postInput(gen.StormSummary, "ch-alerts", content(stormMessage(), i, nil), false)
 	reply := replyInput("t-m1", replyMessage("New Alert: pod i3"), i, nil, nil, false)

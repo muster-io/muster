@@ -75,7 +75,8 @@ type PreviewRequest struct {
 // PreviewResult is what a preview shows: whether the template rendered against every sample, the output against the
 // first one in the requested markup, whether it was shortened, the source of the template — the built-in one for an
 // empty template — the sample and the errors with their positions. A Root message also has its Layout, nil when the
-// template failed, the Length of its output as its messenger counts it and the MessengerLimit of the adapter of its
+// template failed or when its content is not Muster's compact default (HasLayout), as a bridge then receives none, the
+// Length of its output as its messenger counts it and the MessengerLimit of the adapter of its
 // markup, 0 for none (C-29.FR-7).
 type PreviewResult struct {
 	Valid          bool
@@ -188,9 +189,11 @@ func (r *Renderer) Preview(ctx context.Context, req PreviewRequest) (PreviewResu
 			m, res.Truncated = Shorten(m, req.LengthLimit, format)
 			res.Output = Layout(m, format)
 			if req.Kind == TemplateRootMessage {
-				l := LayoutOf(m)
-				res.Layout, res.Length = &l, MessengerLength(res.Output, format)
-				res.MessengerLimit = MessengerLimit(format)
+				if HasLayout(m) {
+					l := LayoutOf(m)
+					res.Layout = &l
+				}
+				res.Length, res.MessengerLimit = MessengerLength(res.Output, format), MessengerLimit(format)
 			}
 		}
 	}

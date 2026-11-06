@@ -44,6 +44,15 @@ type LayoutPerson struct {
 	Name string
 }
 
+// HasLayout reports whether the content of the Root message m is wholly Muster's compact default, which a MessageLayout
+// carries (C-29.FR-8): not a Route's root_message template, whose Body renders items 3 to 5 (C-29.FR-5), not the
+// Fallback template, which shows every label, and not a Desired state stored before the compact layout, without the
+// status word. Those have content that only the body holds, so they have no layout.
+func HasLayout(m Message) bool {
+	return m.Kind == KindRoot && m.Heading != nil && m.StatusWord != "" && m.Body == nil && m.Alerts == nil &&
+		m.Environment == "" && len(m.GroupLabels) == 0 && len(m.CommonLabels) == 0 && len(m.CommonAnnotations) == 0
+}
+
 // LayoutOf is the MessageLayout of the Root message m, its values as neutral text, from the fields the adapters lay
 // out: a message shortened for a limit has the layout of what is left. The footer names its user by their Muster
 // display name, also in a message whose footer an adapter chose (WithFooterIn); with an Owner, the footer of the

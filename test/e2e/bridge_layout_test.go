@@ -68,8 +68,8 @@ func ownerOf(t *testing.T, l *gen.Layout) string {
 // bob's Ack through the bridge edits it to a layout with the status acknowledged and the Owner bob with the `ref`
 // null; a new Root message after the acknowledgement, in a Destination added to the Route, names bob with the `ref`
 // of his entry in `mentions`, and through a bridge without `native_mentions` with the `ref` null; a Thread reply
-// carries no layout; a body cut to `max_body_length` cuts the layout with it; and `muster bridge check` sends a layout
-// that the fake keeps.
+// carries no layout; a body cut to `max_body_length` cuts the layout with it; a Route with its own root_message template
+// sends no layout; and `muster bridge check` sends a layout that the fake keeps.
 func TestBridgeLayout(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -202,6 +202,19 @@ func TestBridgeLayout(t *testing.T) {
 	}
 	t.Logf("cut: body %d code points, description %q, summary %q", utf8.RuneCountInString(cut.Envelope.Body),
 		cl.Description, cl.Summary)
+
+	// A Route with its own root_message template: the content is the template's, which only body holds, so no layout.
+	e.route("tpl", "tpl", []string{dest}, func(p map[string]any) {
+		calm(p)
+		p["templates"] = map[string]any{"root_message": "Rendered by the template of {{ .AlertGroup.Title }}"}
+	})
+	e.group("t1", "Templated")
+	e.alert("t1", "t1", `{"team":"tpl","cluster":"tpl"}`, "")
+	e.notify("t1", "first notification")
+	tm := e.waitIn(fakebridge.ChannelAlerts, "Templated")
+	if tm.Envelope.Layout != nil || !strings.Contains(tm.Envelope.Body, "Rendered by the template of Templated") {
+		t.Fatalf("a Route's own template: layout %+v, body %q", tm.Envelope.Layout, tm.Envelope.Body)
+	}
 
 	// muster bridge check sends a layout with its messages, which the fake keeps.
 	token := filepath.Join(t.TempDir(), "token")

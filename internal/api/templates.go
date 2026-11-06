@@ -69,6 +69,8 @@ func (s *Server) PreviewTemplate(ctx context.Context, req gen.PreviewTemplateReq
 		out.Layout = nullable.NewNullNullable[gen.MessageLayout]()
 		if res.Layout != nil {
 			out.Layout = nullable.NewNullableWithValue(messageLayoutOf(*res.Layout))
+		}
+		if res.Valid {
 			length := res.Length
 			out.Length = &length
 		}
