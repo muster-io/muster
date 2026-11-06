@@ -102,6 +102,22 @@ func (q *Queries) CountOpenAlertGroups(ctx context.Context, arg CountOpenAlertGr
 	return column_1, err
 }
 
+const deleteDestinationTeams = `-- name: DeleteDestinationTeams :exec
+DELETE FROM team_destinations
+WHERE org_id = $1 AND destination_id = $2
+`
+
+type DeleteDestinationTeamsParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// DeleteDestinationTeams removes a deleted Destination from every Team.
+func (q *Queries) DeleteDestinationTeams(ctx context.Context, arg DeleteDestinationTeamsParams) error {
+	_, err := q.db.Exec(ctx, deleteDestinationTeams, arg.OrgID, arg.DestinationID)
+	return err
+}
+
 const deleteRoute = `-- name: DeleteRoute :exec
 UPDATE routes
 SET deleted_at = $1, updated_at = $1, version = version + 1
@@ -1232,6 +1248,40 @@ func (q *Queries) ListRoutes(ctx context.Context, orgID int64) ([]ListRoutesRow,
 	return items, nil
 }
 
+const listTeamsOfDestination = `-- name: ListTeamsOfDestination :many
+SELECT DISTINCT team_id
+FROM team_destinations
+WHERE org_id = $1 AND destination_id = $2
+ORDER BY team_id
+`
+
+type ListTeamsOfDestinationParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+// ListTeamsOfDestination lists, in id order, the Teams whose Destination entries name a Destination about to be
+// deleted.
+func (q *Queries) ListTeamsOfDestination(ctx context.Context, arg ListTeamsOfDestinationParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listTeamsOfDestination, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUserTeams = `-- name: ListUserTeams :many
 SELECT t.public_id
 FROM team_users tu
@@ -1334,6 +1384,23 @@ type LockRouteMembershipParams struct {
 // so that a change of the Destinations and an Enqueue on the Route serialize.
 func (q *Queries) LockRouteMembership(ctx context.Context, arg LockRouteMembershipParams) error {
 	_, err := q.db.Exec(ctx, lockRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const lockTeamMembership = `-- name: LockTeamMembership :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// LockTeamMembership takes, until the transaction ends, the membership lock of a Team exclusively (class
+// db.TeamMembershipLockClass) before the Team's Destination entries change: whatever reads them for an Alert Group
+// takes it shared, so that the change and an Enqueue that reaches the Team's Destinations serialize.
+func (q *Queries) LockTeamMembership(ctx context.Context, arg LockTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, lockTeamMembership, arg.LockClass, arg.TeamID)
 	return err
 }
 

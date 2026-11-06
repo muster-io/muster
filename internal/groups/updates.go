@@ -35,7 +35,8 @@ import (
 // and organization write, the evaluation of the Teams of the open Alert Groups after a save of a Team or of the Team
 // label (C-25.FR-13), which teams and organization write, and a changed Severity label, Team label, Instance labels,
 // time zone, start of the working day or first day of the week of the Organization, or a renamed Team, whose values the
-// Root messages show (C-29.FR-1 to FR-3), which organization and teams write; and OpenGroupUpdatesChannel, the
+// Root messages show (C-29.FR-1 to FR-3), which organization and teams write, and the changed Destination entries of a
+// Team, its deletion included (C-26.FR-6, C-25.FR-10), which teams writes; and OpenGroupUpdatesChannel, the
 // LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity        = "route_minimum_severity"
@@ -45,13 +46,14 @@ const (
 	KindTeamEvaluation              = "team_evaluation"
 	KindOrganizationMessageSettings = "organization_message_settings"
 	KindTeamName                    = "team_name"
+	KindTeamDestinations            = "team_destinations"
 	OpenGroupUpdatesChannel         = "muster_open_group_updates"
 )
 
 // updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
 // of a kind a later version adds waits for a replica that knows it.
 var updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
-	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName}
+	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindTeamDestinations}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -198,12 +200,26 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // Alert Group's live-update hint, so that a second run, which changes no Desired state, records nothing. It returns
 // how many Alert Groups had a Desired state changed; after collects what runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
-	changed, err := s.rerenderIDs(ctx, q, ids, after)
+	changed, err := s.rerenderIDs(ctx, q, ids, 0, after)
 	return len(changed), err
 }
 
-// rerenderIDs is rerender, returning the Alert Groups that had a Desired state changed, by id.
-func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after *committed) ([]int64, error) {
+// teamDestinations runs the re-render step, without a lifecycle event, on the open Alert Groups ids that have the Team
+// team, after a change of the Team's Destination entries or its deletion (C-26.FR-6, C-25.FR-10): delivery publishes
+// each Quietly in the Destinations it now reaches without a delivery there (Rendering.Grows), and then gives the final
+// edit to each of its deliveries that an entry of the Team reached and no entry names any more (FinalEdits). A second
+// run finds every delivery in place and changes nothing. It returns how many Alert Groups it changed; after collects
+// what runs once the transaction committed.
+func (s *Service) teamDestinations(ctx context.Context, q Queries, team int64, ids []int64,
+	after *committed) (int, error) {
+	changed, err := s.rerenderIDs(ctx, q, ids, team, after)
+	return len(changed), err
+}
+
+// rerenderIDs is rerender, returning the Alert Groups that had a Desired state changed, by id. With a Team team, it is
+// teamDestinations: each rendering can grow the reach, and the final edits of the Team's Destinations follow it.
+func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, team int64, after *committed) ([]int64,
+	error) {
 	if len(ids) == 0 || s.d.rerender == nil {
 		return nil, nil
 	}
@@ -211,8 +227,10 @@ func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after
 	if err != nil {
 		return nil, err
 	}
-	// The re-render step takes the membership lock of each Alert Group's Route shared; the Alert Groups go in the
-	// order (Route, id), so that the Routes are taken in id order, as the deletion of a Destination takes them.
+	// The re-render step takes the membership lock of each Alert Group's Route shared, then those of its Teams; the
+	// Alert Groups go in the order (Route, id), and every lock is taken up front, the Routes' in id order and then the
+	// Teams' in id order, as the deletion of a Destination takes them exclusively, so that the walk never takes a lock
+	// below one it holds.
 	open := make([]*Group, 0, len(locked))
 	for _, g := range locked {
 		if g != nil && g.Status != StatusResolved {
@@ -222,12 +240,23 @@ func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after
 	slices.SortFunc(open, func(a, b *Group) int {
 		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
 	})
+	if err := s.shareMemberships(ctx, q, open); err != nil {
+		return nil, err
+	}
 	now := s.d.clock.Now().UTC()
 	var changedIDs []int64
 	for _, g := range open {
-		failures, changed, err := s.d.render(ctx, q, g, System, nil, true, after)
+		failures, changed, err := s.d.render(ctx, q, g, System, nil,
+			rendering{configuration: true, grows: team != 0}, after)
 		if err != nil {
 			return nil, fmt.Errorf("re-render alert group #%d: %w", g.Number, err)
+		}
+		if team != 0 && s.finalEdits != nil {
+			n, err := s.finalEdits.FinalEditsFor(ctx, q.DB(), g, team)
+			if err != nil {
+				return nil, fmt.Errorf("give the final edits of team %d to alert group #%d: %w", team, g.Number, err)
+			}
+			changed = changed || n > 0
 		}
 		if !changed {
 			continue
@@ -246,6 +275,39 @@ func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after
 	return changedIDs, nil
 }
 
+// shareMemberships takes, before the re-render step of the open Alert Groups open, the membership locks it takes
+// shared: those of their Routes, in id order, then those of their Teams, in id order.
+func (s *Service) shareMemberships(ctx context.Context, q Queries, open []*Group) error {
+	if len(open) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(open))
+	var routes []int64
+	for i, g := range open {
+		ids[i] = g.ID
+		if !slices.Contains(routes, g.RouteID) {
+			routes = append(routes, g.RouteID)
+		}
+	}
+	for _, id := range slices.Sorted(slices.Values(routes)) {
+		if err := q.ShareRouteMembership(ctx, dbgen.ShareRouteMembershipParams{
+			LockClass: db.RouteMembershipLockClass, RouteID: id}); err != nil {
+			return fmt.Errorf("lock the destinations of route %d: %w", id, err)
+		}
+	}
+	rows, err := q.ListGroupsTeamIDs(ctx, dbgen.ListGroupsTeamIDsParams{OrgID: s.orgID, AlertGroupIds: ids})
+	if err != nil {
+		return fmt.Errorf("read the teams of the alert groups: %w", err)
+	}
+	var teams []int64
+	for _, r := range rows {
+		if !slices.Contains(teams, r.TeamID) {
+			teams = append(teams, r.TeamID)
+		}
+	}
+	return shareTeams(ctx, q, teams)
+}
+
 // evaluateAndRerender runs the re-render step on the open Alert Groups ids (rerender), then evaluates their Teams again
 // (evaluateTeams), in the transaction of q, after a change of the Organization's settings that the Root messages show:
 // its Severity label, Team label, Instance labels, time zone, start of the working day or first day of the week
@@ -258,7 +320,7 @@ func (s *Service) rerenderIDs(ctx context.Context, q Queries, ids []int64, after
 // that Team, which the Alert Groups the rename walks already have. It returns how many Alert Groups had a Desired state
 // changed or a Team joined, each counted once; after collects what runs once the transaction committed.
 func (s *Service) evaluateAndRerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
-	changed, err := s.rerenderIDs(ctx, q, ids, after)
+	changed, err := s.rerenderIDs(ctx, q, ids, 0, after)
 	if err != nil {
 		return 0, err
 	}
@@ -410,6 +472,19 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				}
 			}
 			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindTeamDestinations:
+			// The Team's membership lock orders the save against the Snapshots, which take it shared before they
+			// read the Team's entries: a Snapshot that read them before the save committed before the save, and its
+			// Alert Group is in the list; one after it reads what the save wrote. The batch needs no barrier.
+			if row.TeamID.Valid {
+				if ids, err = q.ListOpenGroupsOfTeamAfter(ctx, dbgen.ListOpenGroupsOfTeamAfterParams{OrgID: s.orgID,
+					TeamID: row.TeamID.Int64, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+					return fmt.Errorf("list the open alert groups of team %d: %w", row.TeamID.Int64, err)
+				}
+			}
+			if out.changed, err = s.teamDestinations(ctx, q, row.TeamID.Int64, ids, &after); err != nil {
 				return err
 			}
 		default:

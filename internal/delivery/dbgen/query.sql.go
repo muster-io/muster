@@ -130,6 +130,28 @@ func (q *Queries) AbandonWebhookEvents(ctx context.Context, arg AbandonWebhookEv
 	return items, nil
 }
 
+const appendDeliveryEntries = `-- name: AppendDeliveryEntries :exec
+UPDATE deliveries
+SET entries = entries || coalesce((SELECT jsonb_agg(e.value)
+                                   FROM jsonb_array_elements($1::jsonb) AS e
+                                   WHERE NOT deliveries.entries @> jsonb_build_array(e.value - 'severity_condition')),
+                                  '[]'::jsonb)
+WHERE org_id = $2 AND id = $3
+`
+
+type AppendDeliveryEntriesParams struct {
+	Entries []byte
+	OrgID   int64
+	ID      int64
+}
+
+// AppendDeliveryEntries appends to the entries of a delivery the @entries it does not hold yet, each Route or Team
+// once (C-26.FR-3): the entries that still name its Destination after one that reached it was taken away.
+func (q *Queries) AppendDeliveryEntries(ctx context.Context, arg AppendDeliveryEntriesParams) error {
+	_, err := q.db.Exec(ctx, appendDeliveryEntries, arg.Entries, arg.OrgID, arg.ID)
+	return err
+}
+
 const attachCopy = `-- name: AttachCopy :many
 UPDATE deliveries d
 SET thread_state = 'attached', thread_anchor_id = $1::text, thread_chain_last_id = NULL,
@@ -2544,6 +2566,57 @@ func (q *Queries) ListDestinationsByID(ctx context.Context, arg ListDestinations
 	return items, nil
 }
 
+const listEntryDeliveries = `-- name: ListEntryDeliveries :many
+SELECT id, alert_group_id::bigint AS alert_group_id, destination_id, state, desired_retire, entries
+FROM deliveries
+WHERE org_id = $1 AND alert_group_id = ANY($2::bigint[])
+ORDER BY alert_group_id, destination_id
+`
+
+type ListEntryDeliveriesParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListEntryDeliveriesRow struct {
+	ID            int64
+	AlertGroupID  int64
+	DestinationID int64
+	State         string
+	DesiredRetire bool
+	Entries       []byte
+}
+
+// ListEntryDeliveries lists the deliveries of the Alert Groups, with their state, whether their final edit waits and
+// the entries that reached them, by Alert Group and Destination (C-26.FR-6): what a change of the Destinations of a
+// Route or a Team publishes again or gives the final edit.
+func (q *Queries) ListEntryDeliveries(ctx context.Context, arg ListEntryDeliveriesParams) ([]ListEntryDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listEntryDeliveries, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEntryDeliveriesRow{}
+	for rows.Next() {
+		var i ListEntryDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlertGroupID,
+			&i.DestinationID,
+			&i.State,
+			&i.DesiredRetire,
+			&i.Entries,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntryTeams = `-- name: ListEntryTeams :many
 SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM teams
@@ -2737,9 +2810,45 @@ func (q *Queries) ListGroupDestinations(ctx context.Context, arg ListGroupDestin
 	return items, nil
 }
 
+const listGroupTeams = `-- name: ListGroupTeams :many
+SELECT team_id
+FROM alert_group_teams
+WHERE org_id = $1 AND alert_group_id = $2
+ORDER BY team_id
+`
+
+type ListGroupTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// ListGroupTeams lists the Teams of an Alert Group by id, deleted ones included.
+func (q *Queries) ListGroupTeams(ctx context.Context, arg ListGroupTeamsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGroupTeams, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupsOfRoute = `-- name: ListOpenGroupsOfRoute :many
 
-SELECT g.id, g.public_id, g.number, g.title, g.status, g.urgent,
+SELECT g.id, g.public_id, g.number, g.title, g.status, g.urgent, g.severity_level,
+       coalesce((SELECT array_agg(t.team_id ORDER BY t.team_id)
+                 FROM alert_group_teams t
+                 WHERE t.org_id = g.org_id AND t.alert_group_id = g.id), '{}')::bigint[] AS team_ids,
        coalesce(NOT g.urgent AND $1::bigint IS NOT NULL
                 AND (g.created_at >= $2::timestamptz
                      OR EXISTS (SELECT 1
@@ -2759,19 +2868,22 @@ type ListOpenGroupsOfRouteParams struct {
 }
 
 type ListOpenGroupsOfRouteRow struct {
-	ID       int64
-	PublicID string
-	Number   int64
-	Title    string
-	Status   string
-	Urgent   bool
-	Held     bool
+	ID            int64
+	PublicID      string
+	Number        int64
+	Title         string
+	Status        string
+	Urgent        bool
+	SeverityLevel string
+	TeamIds       []int64
+	Held          bool
 }
 
 // Destinations joining and leaving Routes, and deleted Destinations (C-11.FR-14, C-09.FR-19, C-11.FR-20).
-// ListOpenGroupsOfRoute lists the open Alert Groups of a Route, as delivery renders them, in id order, with whether the
-// active Storm @storm_id of the Route, started at @storm_started, holds it: not Urgent, and created since the Storm
-// started or held by it in another Destination. held is false when there is no Storm.
+// ListOpenGroupsOfRoute lists the open Alert Groups of a Route, as delivery renders them, in id order, with their
+// Severity level, their Teams by id, deleted ones included, and whether the active Storm @storm_id of the Route,
+// started at @storm_started, holds it: not Urgent, and created since the Storm started or held by it in another
+// Destination. held is false when there is no Storm.
 func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsOfRouteParams) ([]ListOpenGroupsOfRouteRow, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfRoute,
 		arg.StormID,
@@ -2793,6 +2905,8 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 			&i.Title,
 			&i.Status,
 			&i.Urgent,
+			&i.SeverityLevel,
+			&i.TeamIds,
 			&i.Held,
 		); err != nil {
 			return nil, err
@@ -4851,6 +4965,47 @@ func (q *Queries) ResetWebhookEventBudgets(ctx context.Context, arg ResetWebhook
 	return err
 }
 
+const retireDeliveries = `-- name: RetireDeliveries :many
+UPDATE deliveries
+SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
+    held_by_storm_id = NULL,
+    next_attempt_at  = $1,
+    updated_at       = $1
+WHERE org_id = $2 AND id = ANY($3::bigint[]) AND NOT desired_retire
+  AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+RETURNING id
+`
+
+type RetireDeliveriesParams struct {
+	Now   time.Time
+	OrgID int64
+	Ids   []int64
+}
+
+// RetireDeliveries gives deliveries of open Alert Groups whose Destination no entry names any more their final edit
+// (C-11.FR-14, C-26.FR-6): a published Root message is edited once more, and one never published there is withheld.
+// It returns the deliveries it changed; one that ended meanwhile is left as it is.
+func (q *Queries) RetireDeliveries(ctx context.Context, arg RetireDeliveriesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireDeliveries, arg.Now, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const retireDestinationDeliveries = `-- name: RetireDestinationDeliveries :many
 UPDATE deliveries d
 SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
@@ -4937,66 +5092,18 @@ func (q *Queries) RetireGroupDeliveries(ctx context.Context, arg RetireGroupDeli
 	return items, nil
 }
 
-const retireRouteDeliveries = `-- name: RetireRouteDeliveries :many
-UPDATE deliveries d
-SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
-    desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
-    held_by_storm_id = NULL,
-    next_attempt_at  = $1,
-    updated_at       = $1
-FROM alert_groups g
-WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
-  AND g.route_id = $4 AND g.status <> 'resolved'
-  AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
-RETURNING d.id, g.public_id
-`
-
-type RetireRouteDeliveriesParams struct {
-	Now           time.Time
-	OrgID         int64
-	DestinationID int64
-	RouteID       int64
-}
-
-type RetireRouteDeliveriesRow struct {
-	ID       int64
-	PublicID string
-}
-
-// RetireRouteDeliveries gives the deliveries of the open Alert Groups of a Route in a Destination that left it their
-// final edit (C-11.FR-14): a published Root message is edited once more, and one never published there is withheld.
-// It returns each delivery with the public_id of its Alert Group, for the alert-group hints.
-func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeliveriesParams) ([]RetireRouteDeliveriesRow, error) {
-	rows, err := q.db.Query(ctx, retireRouteDeliveries,
-		arg.Now,
-		arg.OrgID,
-		arg.DestinationID,
-		arg.RouteID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RetireRouteDeliveriesRow{}
-	for rows.Next() {
-		var i RetireRouteDeliveriesRow
-		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const retireStormSummary = `-- name: RetireStormSummary :exec
 UPDATE deliveries d
 SET state = CASE WHEN d.published_at IS NULL THEN 'withheld' ELSE 'retired' END, updated_at = $1
 FROM storms s
 WHERE d.org_id = $2 AND d.destination_id = $3 AND d.storm_id = s.id AND s.org_id = $2
   AND s.route_id = $4 AND s.ended_at IS NULL AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+  AND NOT EXISTS (SELECT 1
+                  FROM deliveries x
+                  JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+                  WHERE x.org_id = $2 AND x.destination_id = $3 AND g.route_id = $4
+                    AND g.status <> 'resolved' AND NOT x.desired_retire
+                    AND x.state NOT IN ('withheld', 'deleted_in_messenger', 'retired'))
 `
 
 type RetireStormSummaryParams struct {
@@ -5006,8 +5113,9 @@ type RetireStormSummaryParams struct {
 	RouteID       int64
 }
 
-// RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it: retired when
-// published there, withheld otherwise; it receives nothing more.
+// RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it, once no
+// open Alert Group of the Route has a delivery there that is kept current: retired when published there, withheld
+// otherwise; it receives nothing more.
 func (q *Queries) RetireStormSummary(ctx context.Context, arg RetireStormSummaryParams) error {
 	_, err := q.db.Exec(ctx, retireStormSummary,
 		arg.Now,
@@ -5337,6 +5445,24 @@ type ShareRouteMembershipParams struct {
 // then locks the Alert Groups, which a Command holds before its Enqueue.
 func (q *Queries) ShareRouteMembership(ctx context.Context, arg ShareRouteMembershipParams) error {
 	_, err := q.db.Exec(ctx, shareRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const shareTeamMembership = `-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+// db.TeamMembershipLockClass), which a change of the Team's Destination entries, the Team's deletion and the deletion
+// of a Destination it names take exclusively: after the Route's membership lock, by Team id, before the Team's entries
+// are read.
+func (q *Queries) ShareTeamMembership(ctx context.Context, arg ShareTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareTeamMembership, arg.LockClass, arg.TeamID)
 	return err
 }
 

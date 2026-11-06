@@ -402,6 +402,17 @@ WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at I
 DELETE FROM team_destinations
 WHERE org_id = @org_id AND team_id = @team_id AND destination_id = ANY(@destination_ids::bigint[]);
 
+-- DeleteAllTeamDestinations removes every Destination of a deleted Team.
+-- name: DeleteAllTeamDestinations :exec
+DELETE FROM team_destinations
+WHERE org_id = @org_id AND team_id = @team_id;
+
+-- LockTeamMembership takes, until the transaction ends, the membership lock of a Team exclusively (class
+-- db.TeamMembershipLockClass) before its Destination entries change: whatever reads them for an Alert Group takes it
+-- shared, so that the change and an Enqueue that reaches the Team's Destinations serialize.
+-- name: LockTeamMembership :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@team_id::bigint));
+
 -- UpsertTeamDestinations adds Destinations to a Team with their Severity conditions, added now, and changes the
 -- condition of those it keeps, which keep when they were added.
 -- name: UpsertTeamDestinations :exec

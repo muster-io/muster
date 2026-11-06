@@ -297,6 +297,12 @@ func (f *fakeDB) RetireStormSummary(_ context.Context, arg dbgen.RetireStormSumm
 		return err
 	}
 	st := f.activeStorm(arg.RouteID)
+	if slices.ContainsFunc(f.deliveries, func(x *fakeDelivery) bool {
+		return x.dest == arg.DestinationID && x.storm == 0 && f.open(x.group) &&
+			f.groups[x.group].route == arg.RouteID && !x.desiredRetire && !terminal(x)
+	}) {
+		return nil
+	}
 	for _, d := range f.deliveries {
 		if st != nil && d.storm == st.id && d.dest == arg.DestinationID && !terminal(d) {
 			d.state = "retired"
@@ -798,7 +804,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	e.rec.Reset()
 
 	e.db.routeDests[routeID] = []int64{destMM, destWH}
-	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH}, nil); err != nil {
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, []int64{destWH}, nil)); err != nil {
 		t.Fatal(err)
 	}
 	e.round(t)
@@ -832,7 +838,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	// It leaves during the Storm: final edits of its Root messages, its summary retired, nothing more there.
 	e.rec.Reset()
 	e.db.routeDests[routeID] = []int64{destMM}
-	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, nil, []int64{destWH}); err != nil {
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, nil, []int64{destWH})); err != nil {
 		t.Fatal(err)
 	}
 	var whSummary *fakeDelivery
@@ -857,12 +863,18 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	if whSummary.state != "retired" {
 		t.Errorf("summary revived %+v", whSummary)
 	}
-	for _, q := range []string{"LockActiveStorm", "RetireStormSummary"} {
-		e.db.fail[q] = errBoom
-		if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH},
-			[]int64{destMM}); !errors.Is(err, errBoom) {
-			t.Errorf("%s = %v", q, err)
-		}
-		delete(e.db.fail, q)
+	e.db.routeDests[routeID] = []int64{destWH}
+	e.db.fail["LockActiveStorm"] = errBoom
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, []int64{destWH},
+		[]int64{destMM})); !errors.Is(err, errBoom) {
+		t.Errorf("LockActiveStorm = %v", err)
+	}
+	// The summary of a Destination taken off the Route during a Storm is retired in the same change.
+	f := stormStarted(t)
+	f.db.routeDests[routeID] = nil
+	f.db.fail["RetireStormSummary"] = errBoom
+	if err := f.svc.RouteDestinationsChanged(t.Context(), nil, f.changeOf(routeID, nil,
+		[]int64{destMM})); !errors.Is(err, errBoom) {
+		t.Errorf("RetireStormSummary = %v", err)
 	}
 }

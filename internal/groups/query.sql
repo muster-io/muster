@@ -1301,6 +1301,19 @@ ORDER BY team_id;
 -- name: ShareRouteMembership :exec
 SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@route_id::bigint));
 
+-- ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+-- db.TeamMembershipLockClass), which a change of the Team's Destination entries takes exclusively, before the Team's
+-- entries are read: after the Route's membership lock, by Team id.
+-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@team_id::bigint));
+
+-- ListGroupsTeamIDs lists the Teams of the Alert Groups, deleted ones included, by Alert Group and Team.
+-- name: ListGroupsTeamIDs :many
+SELECT alert_group_id, team_id
+FROM alert_group_teams
+WHERE org_id = @org_id AND alert_group_id = ANY(@alert_group_ids::bigint[])
+ORDER BY alert_group_id, team_id;
+
 -- GetRouteDeliverToTeams reads "Also to the Teams from the label" of a Route, deleted or not.
 -- name: GetRouteDeliverToTeams :one
 SELECT deliver_to_teams

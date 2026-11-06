@@ -343,9 +343,41 @@ type DestinationEntry struct {
 	Condition     SeverityCondition `json:"severity_condition"`
 }
 
-// Membership is the hook that delivery runs, in the transaction tx of a Route's change, when Destinations were added
-// to or removed from the Route routeID, by internal id (C-11.FR-14).
-type Membership func(ctx context.Context, tx dbgen.DBTX, routeID int64, added, removed []int64) error
+// MembershipChange is a save of the Route RouteID that changed its Destination entries or its option "Also to the
+// Teams from the label" (C-26.FR-6, C-11.FR-14): the entries before and after the save, by internal Destination id in
+// id order, and the option before and after.
+type MembershipChange struct {
+	RouteID       int64
+	Before, After []Entry
+	ToTeamsBefore bool
+	ToTeamsAfter  bool
+}
+
+// Changed reports whether the save changed the entries or the option.
+func (c MembershipChange) Changed() bool {
+	return c.ToTeamsBefore != c.ToTeamsAfter || !slices.Equal(c.Before, c.After)
+}
+
+// Removed are the Destinations the save took off the Route, in id order.
+func (c MembershipChange) Removed() []int64 {
+	var out []int64
+	for _, e := range c.Before {
+		if !slices.ContainsFunc(c.After, func(a Entry) bool { return a.DestinationID == e.DestinationID }) {
+			out = append(out, e.DestinationID)
+		}
+	}
+	return out
+}
+
+// Added are the Destinations the save put on the Route, in id order.
+func (c MembershipChange) Added() []int64 {
+	return MembershipChange{Before: c.After, After: c.Before}.Removed()
+}
+
+// Membership is the hook that delivery runs, in the transaction tx of a Route's save, when the save changed the
+// Route's Destination entries or its option "Also to the Teams from the label" (C-26.FR-6, C-11.FR-14), under the
+// Route's membership lock, which the save holds exclusively.
+type Membership func(ctx context.Context, tx dbgen.DBTX, c MembershipChange) error
 
 // OpenAlertGroupsError is the refusal to delete a Route that still has open Alert Groups (C-09.FR-19); Count says
 // how many.
@@ -445,6 +477,9 @@ type Queries interface {
 	SetRouteDestinationConditions(ctx context.Context, arg dbgen.SetRouteDestinationConditionsParams) error
 	DeleteRouteDestinations(ctx context.Context, arg dbgen.DeleteRouteDestinationsParams) error
 	LockRouteMembership(ctx context.Context, arg dbgen.LockRouteMembershipParams) error
+	ListTeamsOfDestination(ctx context.Context, arg dbgen.ListTeamsOfDestinationParams) ([]int64, error)
+	LockTeamMembership(ctx context.Context, arg dbgen.LockTeamMembershipParams) error
+	DeleteDestinationTeams(ctx context.Context, arg dbgen.DeleteDestinationTeamsParams) error
 	BumpRoutesOfDestination(ctx context.Context, arg dbgen.BumpRoutesOfDestinationParams) (
 		[]dbgen.BumpRoutesOfDestinationRow, error)
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
@@ -552,7 +587,9 @@ func New(cfg Config) *Service {
 // Destination leaves its destination_ids — and its hint, and its membership lock is taken, so that no Enqueue on it
 // runs until tx ends. The Routes are locked in id order before their membership locks; a transaction that renders
 // Alert Groups of several Routes at once and holds the membership lock of one of them may still deadlock with it,
-// which PostgreSQL detects and ends.
+// which PostgreSQL detects and ends. Then, after the Routes' membership locks and in id order, it takes the membership
+// lock of each Team whose Destination entries name the Destination exclusively and removes it from those Teams, so
+// that no Enqueue reads such an entry and delivers to the Destination while the deletion commits (C-26.FR-6).
 func (s *Service) DestinationDeleted(ctx context.Context, tx dbgen.DBTX, destinationID int64) error {
 	q := s.store.On(tx)
 	routes, err := q.BumpRoutesOfDestination(ctx, dbgen.BumpRoutesOfDestinationParams{OrgID: s.orgID,
@@ -569,6 +606,24 @@ func (s *Service) DestinationDeleted(ctx context.Context, tx dbgen.DBTX, destina
 		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: r.PublicID}); err != nil {
 			return err
 		}
+	}
+	teams, err := q.ListTeamsOfDestination(ctx, dbgen.ListTeamsOfDestinationParams{OrgID: s.orgID,
+		DestinationID: destinationID})
+	if err != nil {
+		return fmt.Errorf("list the teams of destination %d: %w", destinationID, err)
+	}
+	if len(teams) == 0 {
+		return nil
+	}
+	for _, id := range teams {
+		if err := q.LockTeamMembership(ctx, dbgen.LockTeamMembershipParams{LockClass: db.TeamMembershipLockClass,
+			TeamID: id}); err != nil {
+			return fmt.Errorf("lock the destinations of team %d: %w", id, err)
+		}
+	}
+	if err := q.DeleteDestinationTeams(ctx, dbgen.DeleteDestinationTeamsParams{OrgID: s.orgID,
+		DestinationID: destinationID}); err != nil {
+		return fmt.Errorf("remove destination %d from its teams: %w", destinationID, err)
 	}
 	return nil
 }
@@ -897,25 +952,26 @@ func unknownDestination(pointer string) error {
 }
 
 // writeDestinations makes want the Destinations of the Route routeID in route_destinations — those kept keep when
-// they were added, and take the condition of want — and runs the membership hook with those added and removed. It
-// takes the Route's membership lock first, after the Route's row, so that an Enqueue on the Route waits for the change
-// or the change for it. A changed condition reaches the open Alert Groups at their next change (S-170 publishes it at
-// the save).
-func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int64, want destinationSet) error {
+// they were added, and take the condition of want — and returns the entries before and after, by Destination in id
+// order. It takes the Route's membership lock first, after the Route's row, so that an Enqueue on the Route waits for
+// the change or the change for it.
+func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int64, want destinationSet) (before,
+	after []Entry, err error) {
 	if err := q.LockRouteMembership(ctx, dbgen.LockRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
 		RouteID: routeID}); err != nil {
-		return fmt.Errorf("lock the destinations of the route: %w", err)
+		return nil, nil, fmt.Errorf("lock the destinations of the route: %w", err)
 	}
 	rows, err := q.ListRouteDestinationIDs(ctx, dbgen.ListRouteDestinationIDsParams{OrgID: s.orgID,
 		RouteIds: []int64{routeID}})
 	if err != nil {
-		return fmt.Errorf("list the destinations of the route: %w", err)
+		return nil, nil, fmt.Errorf("list the destinations of the route: %w", err)
 	}
 	current := make(map[int64]bool, len(rows))
 	var removed []int64
 	var changed dbgen.SetRouteDestinationConditionsParams
 	for _, r := range rows {
 		current[r.DestinationID] = true
+		before = append(before, Entry{DestinationID: r.DestinationID, Condition: SeverityCondition(r.SeverityCondition)})
 		w, ok := want[r.PublicID]
 		switch {
 		case !ok:
@@ -927,34 +983,54 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int6
 	}
 	var added dbgen.InsertRouteDestinationsParams
 	for _, id := range want.publicIDs() {
-		if w := want[id]; !current[w.id] {
+		w := want[id]
+		after = append(after, Entry{DestinationID: w.id, Condition: w.condition})
+		if !current[w.id] {
 			added.DestinationIds = append(added.DestinationIds, w.id)
 			added.Conditions = append(added.Conditions, string(w.condition))
 		}
 	}
+	byDestination := func(a, b Entry) int { return cmp.Compare(a.DestinationID, b.DestinationID) }
+	slices.SortFunc(before, byDestination)
+	slices.SortFunc(after, byDestination)
 	if len(changed.DestinationIds) > 0 {
 		changed.OrgID, changed.RouteID = s.orgID, routeID
 		if err := q.SetRouteDestinationConditions(ctx, changed); err != nil {
-			return fmt.Errorf("change the severity conditions of the destinations of the route: %w", err)
+			return nil, nil, fmt.Errorf("change the severity conditions of the destinations of the route: %w", err)
 		}
 	}
 	if len(removed) > 0 {
 		if err := q.DeleteRouteDestinations(ctx, dbgen.DeleteRouteDestinationsParams{OrgID: s.orgID,
 			RouteID: routeID, DestinationIds: removed}); err != nil {
-			return fmt.Errorf("remove destinations from the route: %w", err)
+			return nil, nil, fmt.Errorf("remove destinations from the route: %w", err)
 		}
 	}
 	if len(added.DestinationIds) > 0 {
 		added.OrgID, added.RouteID, added.Now = s.orgID, routeID, s.clock.Now().UTC()
 		if err := q.InsertRouteDestinations(ctx, added); err != nil {
-			return fmt.Errorf("add destinations to the route: %w", err)
+			return nil, nil, fmt.Errorf("add destinations to the route: %w", err)
 		}
 	}
-	if s.membership == nil || len(added.DestinationIds)+len(removed) == 0 {
+	return before, after, nil
+}
+
+// changeMembership writes the Destinations want of the Route routeID (writeDestinations) after a save that changed its
+// Destination entries or its option "Also to the Teams from the label", from toTeamsBefore to toTeamsAfter, and runs
+// the membership hook with the entries before and after and the option before and after (C-26.FR-6, C-11.FR-14), in
+// the save's transaction and under the Route's membership lock: delivery publishes the open Alert Groups Quietly where
+// their reach grew and gives the final edit where no entry names a Destination any more.
+func (s *Service) changeMembership(ctx context.Context, q Queries, routeID int64, want destinationSet,
+	toTeamsBefore, toTeamsAfter bool) error {
+	before, after, err := s.writeDestinations(ctx, q, routeID, want)
+	if err != nil {
+		return err
+	}
+	c := MembershipChange{RouteID: routeID, Before: before, After: after, ToTeamsBefore: toTeamsBefore,
+		ToTeamsAfter: toTeamsAfter}
+	if s.membership == nil || !c.Changed() {
 		return nil
 	}
-	ids := slices.Sorted(slices.Values(added.DestinationIds))
-	if err := s.membership(ctx, q.DB(), routeID, ids, removed); err != nil {
+	if err := s.membership(ctx, q.DB(), c); err != nil {
 		return fmt.Errorf("deliver to the changed destinations of the route: %w", err)
 	}
 	return nil
@@ -1055,7 +1131,8 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 		if err := s.writeMatchers(ctx, q, routeID, in.Matchers); err != nil {
 			return err
 		}
-		if err := s.writeDestinations(ctx, q, routeID, dests); err != nil {
+		// A new Route has no open Alert Group: its Destinations reach none.
+		if _, _, err := s.writeDestinations(ctx, q, routeID, dests); err != nil {
 			return err
 		}
 		if created, err = s.get(ctx, q, id); err != nil {
@@ -1228,8 +1305,10 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
-		if !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
-			if err := s.writeDestinations(ctx, q, before.ID, dests); err != nil {
+		if !slices.Equal(before.DestinationEntries, next.DestinationEntries) ||
+			before.DeliverToTeams != next.DeliverToTeams {
+			if err := s.changeMembership(ctx, q, before.ID, dests, before.DeliverToTeams,
+				next.DeliverToTeams); err != nil {
 				return err
 			}
 		}

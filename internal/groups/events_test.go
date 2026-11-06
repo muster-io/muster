@@ -641,13 +641,46 @@ func TestTimerEventTable(t *testing.T) {
 
 // fakeReach is what the reach of an Alert Group is read from (C-26.FR-2): the Destination entries of each Route and
 // each Team, "Also to the Teams from the label" of each Route, the Destinations that have a Root message by id, and the
-// Route membership locks taken, in order. The deliveries are fakeDB.delivered.
+// Route membership locks taken, in order, and the Team membership locks, in order. The deliveries are
+// fakeDB.delivered.
 type fakeReach struct {
-	routes  map[int64][]routing.Entry
-	teams   map[int64][]routing.Entry
-	toTeams map[int64]bool
-	dests   map[int64]JoinedDestination
-	locks   []int64
+	routes    map[int64][]routing.Entry
+	teams     map[int64][]routing.Entry
+	toTeams   map[int64]bool
+	dests     map[int64]JoinedDestination
+	locks     []int64
+	teamLocks []int64
+}
+
+func (f *fakeDB) ShareTeamMembership(_ context.Context, arg dbgen.ShareTeamMembershipParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if arg.LockClass != db.TeamMembershipLockClass {
+		return errors.New("not the team membership lock")
+	}
+	f.reach.teamLocks = append(f.reach.teamLocks, arg.TeamID)
+	return f.call("ShareTeamMembership")
+}
+
+func (f *fakeDB) ListGroupsTeamIDs(_ context.Context, arg dbgen.ListGroupsTeamIDsParams) (
+	[]dbgen.ListGroupsTeamIDsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListGroupsTeamIDs"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListGroupsTeamIDsRow
+	for _, id := range slices.Sorted(slices.Values(arg.AlertGroupIds)) {
+		var teams []int64
+		for _, gt := range f.teams.groups[id] {
+			teams = append(teams, gt.team)
+		}
+		slices.Sort(teams)
+		for _, team := range teams {
+			out = append(out, dbgen.ListGroupsTeamIDsRow{AlertGroupID: id, TeamID: team})
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeDB) ShareRouteMembership(_ context.Context, arg dbgen.ShareRouteMembershipParams) error {
@@ -780,7 +813,8 @@ func (h *harness) joinedEntries(g *dbgen.LockGroupsRow) []*fakeEntry {
 
 // TestDestinationJoined is C-26.FR-4, FR-5, AC-4 and AC-5 in the dispatcher: an Alert of a Team joining a published,
 // firing Alert Group records one Loud destination_joined with new_alert_group for the Team's Destination it reaches
-// without a delivery, under the Route's membership lock, and nothing for the Destinations it already has; joining an
+// without a delivery, under the Route's membership lock and its Teams', and nothing for the Destinations it already
+// has; a Route without the option takes no Team's lock; joining an
 // acknowledged one records it Quiet; a rise to critical joins the critical Destination; an Alert Group not published
 // yet, a resolved one or a change of configuration records none; the Rendering carries the Teams and the event's
 // Destination.
@@ -813,8 +847,10 @@ func TestDestinationJoined(t *testing.T) {
 			e.DestinationID.Int64 != destSearch || !e.EventSeq.Valid {
 			t.Errorf("entry %+v", e.InsertTimelineEntryParams)
 		}
-		if !slices.Equal(h.db.reach.locks, []int64{2}) {
-			t.Errorf("membership locks %v", h.db.reach.locks)
+		// After the Route's lock, those of its Teams by id, as the Route delivers to the Teams (C-26.FR-6).
+		if !slices.Equal(h.db.reach.locks, []int64{2}) ||
+			!slices.Equal(h.db.reach.teamLocks, []int64{payments, search}) {
+			t.Errorf("membership locks %v, team locks %v", h.db.reach.locks, h.db.reach.teamLocks)
 		}
 		r := renderings[len(renderings)-1]
 		if !slices.Equal(r.Teams, []int64{payments, search}) || len(r.Joined()) != 1 ||
@@ -866,6 +902,18 @@ func TestDestinationJoined(t *testing.T) {
 		if len(joined) != 1 || joined[0].DestinationID.Int64 != destCritical ||
 			joined[0].Loudness.String != string(Loud) {
 			t.Errorf("joined %v", h.events(g))
+		}
+	})
+	t.Run("a route without the option takes no team's lock", func(t *testing.T) {
+		h := newHarness(t)
+		h.withReach()
+		h.db.reach.toTeams[2] = false
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		h.published(h.groupOf(t, a), destNotice)
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+		if !slices.Equal(h.db.reach.locks, []int64{2}) || len(h.db.reach.teamLocks) != 0 {
+			t.Errorf("membership locks %v, team locks %v", h.db.reach.locks, h.db.reach.teamLocks)
 		}
 	})
 	// A Reopen at a level above the one the Alert Group resolved at is a rise by Alerts: the Destinations of the
@@ -987,7 +1035,7 @@ func TestDestinationJoined(t *testing.T) {
 	})
 	t.Run("failures", func(t *testing.T) {
 		for _, q := range []string{"ShareRouteMembership", "GetRouteDeliverToTeams", "ListReachEntries",
-			"ListGroupTeamIDs"} {
+			"ListGroupTeamIDs", "ShareTeamMembership"} {
 			h := newHarness(t)
 			h.withReach()
 			h.svc.SetRerender(func(context.Context, DBTX, Rendering) error { return nil })

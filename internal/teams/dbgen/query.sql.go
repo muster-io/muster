@@ -46,6 +46,22 @@ func (q *Queries) ClearByHand(ctx context.Context, arg ClearByHandParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const deleteAllTeamDestinations = `-- name: DeleteAllTeamDestinations :exec
+DELETE FROM team_destinations
+WHERE org_id = $1 AND team_id = $2
+`
+
+type DeleteAllTeamDestinationsParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DeleteAllTeamDestinations removes every Destination of a deleted Team.
+func (q *Queries) DeleteAllTeamDestinations(ctx context.Context, arg DeleteAllTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, deleteAllTeamDestinations, arg.OrgID, arg.TeamID)
+	return err
+}
+
 const deleteTeam = `-- name: DeleteTeam :exec
 UPDATE teams
 SET deleted_at = $1, updated_at = $1, own_working_hours = false, working_days = NULL, working_start = NULL,
@@ -1289,6 +1305,23 @@ func (q *Queries) LockTeamMember(ctx context.Context, arg LockTeamMemberParams) 
 		&i.IdpMatches,
 	)
 	return i, err
+}
+
+const lockTeamMembership = `-- name: LockTeamMembership :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// LockTeamMembership takes, until the transaction ends, the membership lock of a Team exclusively (class
+// db.TeamMembershipLockClass) before its Destination entries change: whatever reads them for an Alert Group takes it
+// shared, so that the change and an Enqueue that reaches the Team's Destinations serialize.
+func (q *Queries) LockTeamMembership(ctx context.Context, arg LockTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, lockTeamMembership, arg.LockClass, arg.TeamID)
+	return err
 }
 
 const lockTeamUser = `-- name: LockTeamUser :one

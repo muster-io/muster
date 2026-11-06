@@ -332,6 +332,25 @@ WHERE org_id = @org_id AND route_id = @route_id AND destination_id = ANY(@destin
 -- name: LockRouteMembership :exec
 SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@route_id::bigint));
 
+-- ListTeamsOfDestination lists, in id order, the Teams whose Destination entries name a Destination about to be
+-- deleted.
+-- name: ListTeamsOfDestination :many
+SELECT DISTINCT team_id
+FROM team_destinations
+WHERE org_id = @org_id AND destination_id = @destination_id
+ORDER BY team_id;
+
+-- LockTeamMembership takes, until the transaction ends, the membership lock of a Team exclusively (class
+-- db.TeamMembershipLockClass) before the Team's Destination entries change: whatever reads them for an Alert Group
+-- takes it shared, so that the change and an Enqueue that reaches the Team's Destinations serialize.
+-- name: LockTeamMembership :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@team_id::bigint));
+
+-- DeleteDestinationTeams removes a deleted Destination from every Team.
+-- name: DeleteDestinationTeams :exec
+DELETE FROM team_destinations
+WHERE org_id = @org_id AND destination_id = @destination_id;
+
 -- BumpRoutesOfDestination gives each Route that is not deleted of a Destination about to leave them a new version,
 -- locking them in id order, and returns them in that order.
 -- name: BumpRoutesOfDestination :many

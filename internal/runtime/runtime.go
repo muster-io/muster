@@ -999,9 +999,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Requests: p.requests})
 	p.groups.SetRerender(p.delivery.Enqueue)
 	p.groups.SetReminderReached(p.delivery.ReminderReached)
-	// Destinations added to or removed from a Route, or deleted, publish there or get their final edit (C-11.FR-14).
-	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
-		return p.delivery.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
+	// Destinations that a change of a Route's or a Team's Destination entries adds to the reach of the open Alert
+	// Groups publish there Quietly, and those that no entry names any more, or that are deleted, get their final edit
+	// (C-11.FR-14, C-26.FR-6).
+	p.groups.SetFinalEdits(p.delivery)
+	p.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+		return p.delivery.RouteDestinationsChanged(ctx, tx, c)
 	})
 	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).

@@ -2896,6 +2896,44 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 	return items, nil
 }
 
+const listGroupsTeamIDs = `-- name: ListGroupsTeamIDs :many
+SELECT alert_group_id, team_id
+FROM alert_group_teams
+WHERE org_id = $1 AND alert_group_id = ANY($2::bigint[])
+ORDER BY alert_group_id, team_id
+`
+
+type ListGroupsTeamIDsParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListGroupsTeamIDsRow struct {
+	AlertGroupID int64
+	TeamID       int64
+}
+
+// ListGroupsTeamIDs lists the Teams of the Alert Groups, deleted ones included, by Alert Group and Team.
+func (q *Queries) ListGroupsTeamIDs(ctx context.Context, arg ListGroupsTeamIDsParams) ([]ListGroupsTeamIDsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsTeamIDs, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsTeamIDsRow{}
+	for rows.Next() {
+		var i ListGroupsTeamIDsRow
+		if err := rows.Scan(&i.AlertGroupID, &i.TeamID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIntegrationRefs = `-- name: ListIntegrationRefs :many
 SELECT id, public_id, name
 FROM integrations
@@ -5145,6 +5183,23 @@ func (q *Queries) ShareRouteStorm(ctx context.Context, arg ShareRouteStormParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const shareTeamMembership = `-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+// db.TeamMembershipLockClass), which a change of the Team's Destination entries takes exclusively, before the Team's
+// entries are read: after the Route's membership lock, by Team id.
+func (q *Queries) ShareTeamMembership(ctx context.Context, arg ShareTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareTeamMembership, arg.LockClass, arg.TeamID)
+	return err
 }
 
 const updateMemberships = `-- name: UpdateMemberships :exec

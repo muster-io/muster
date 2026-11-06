@@ -64,6 +64,15 @@ const AccountLinkCodeTargetLockClass int32 = 0x6d75_0005
 // the lock of a Bridge event (internal/connections).
 const TeamEvaluationLockClass int32 = 0x6d75_0008
 
+// TeamMembershipLockClass is the first key of the transaction advisory locks of the Destinations of a Team, whose
+// second key is hashint8 of the Team's id, as RouteMembershipLockClass is for a Route: a change of the Team's
+// Destination entries, the deletion of the Team and the deletion of a Destination the Team names take it exclusively
+// (teams, routing), and whatever reads the Team's entries for an Alert Group that has the Team takes it shared, by Team
+// id, after the Route's membership lock — the dispatcher before it reads the reach, Enqueue, the re-render of the open
+// Alert Groups and the membership hook of a Route (groups, delivery) — so that an Enqueue and a change of the Team's
+// entries serialize.
+const TeamMembershipLockClass int32 = 0x6d75_0009
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

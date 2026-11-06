@@ -1013,3 +1013,111 @@ func TestRecordDeliveredKeepsTeamDestination(t *testing.T) {
 		}
 	}
 }
+
+// TestEnqueueTeamLocks is C-26.FR-6 on Enqueue: on a Route that delivers to the Teams it takes the membership lock of
+// each Team of the Alert Group shared, by Team id, after the Route's and before it reads the Teams' entries, so that a
+// change of a Team's entries and the Enqueue serialize; without the option it takes none. A failing lock fails it.
+func TestEnqueueTeamLocks(t *testing.T) {
+	e := reachEnv(t)
+	e.db.before["ShareTeamMembership"] = func() {
+		if len(e.db.membershipLocks) != 1 {
+			t.Errorf("a team's lock before the route's: %v", e.db.membershipLocks)
+		}
+	}
+	e.db.before["ListTeamDestinations"] = func() {
+		if !slices.Equal(e.db.teamLocks, []int64{3, teamPayments}) {
+			t.Errorf("the teams' entries read under the locks %v", e.db.teamLocks)
+		}
+	}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments, 3},
+		created())
+	if e.db.calls["ListTeamDestinations"] != 1 {
+		t.Error("the teams' entries were not read")
+	}
+
+	e = reachEnv(t)
+	r := e.db.routes[routeID]
+	r.toTeams = false
+	e.db.routes[routeID] = r
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	if len(e.db.teamLocks) != 0 {
+		t.Errorf("team locks without the option %v", e.db.teamLocks)
+	}
+
+	e = reachEnv(t)
+	e.db.fail["ShareTeamMembership"] = errBoom
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning", false),
+		Actor: groups.System, Events: []groups.Recorded{created()}, Teams: []int64{teamPayments}}); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failing team lock: %v", err)
+	}
+}
+
+// TestEnqueueGrowsQuietly is C-26.FR-6, C-25.FR-13 and ADR-0018 on the re-render of a change of a Team's Destination
+// entries (Rendering.Grows): without a lifecycle event it publishes the Alert Group Quietly, without Mentions and
+// Thread replies, in each Destination it now reaches without a delivery, and publishes again, Quietly, one whose
+// delivery got its final edit; a delivery Not delivered before its first Publication is not revived Loud; a Destination
+// whose condition its level does not meet gets nothing, so a level that fell gains no critical Destination; and a
+// re-render of a change of configuration that is not marked so creates nothing.
+func TestEnqueueGrowsQuietly(t *testing.T) {
+	e := reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+	e.round(t)
+	e.rec.Reset()
+	// Not marked as growing, the re-render of a change of configuration creates no delivery.
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning", true),
+		Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	if e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Fatal("a re-render that does not grow created a delivery")
+	}
+	grow := func() int {
+		t.Helper()
+		var changed int
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true, Grows: true,
+			Changed: func() { changed++ }}); err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	grow()
+	e.round(t)
+	if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 ||
+		len(e.repliesTo(destTeamNotice)) != 0 {
+		t.Errorf("the publication in the team's destination %+v", c)
+	}
+	if e.deliveryOf(groupID, destTeamCrit) != nil || e.deliveryOf(groupID, destCritical) != nil {
+		t.Error("a warning alert group grew into a critical destination")
+	}
+
+	// Its final edit done, the Destination reached again publishes afresh, Quietly.
+	d := e.deliveryOf(groupID, destTeamNotice)
+	d.state, d.desiredRetire = "retired", false
+	e.rec.Reset()
+	if grow() == 0 {
+		t.Error("publishing again changed nothing")
+	}
+	e.round(t)
+	if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+		t.Errorf("published again %+v", c)
+	}
+
+	// Not delivered before its first Publication, created Loud: published Quietly by the change.
+	e = reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	nd := e.deliveryOf(groupID, destTeamNotice)
+	nd.state = "not_delivered"
+	g := e.leveled(groups.StatusFiring, "warning", true)
+	g.Title = "disk full, renamed"
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Teams: []int64{teamPayments}, Configuration: true, Grows: true}); err != nil {
+		t.Fatal(err)
+	}
+	if nd.loud.Bool || nd.state != "pending" {
+		t.Errorf("not delivered revived %s, loud %v", nd.state, nd.loud)
+	}
+}

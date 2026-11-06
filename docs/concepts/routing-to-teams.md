@@ -77,6 +77,25 @@ shown in the channels of all of them: an Alert of "search" that joins a firing A
 in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
 default, to the Group key of the Route.
 
+## When you change a Route or a Team
+
+A save of a Route's Destination entries or of "Also to the Teams from the label", and a save of a Team's Destination
+entries, reach the open Alert Groups at once, without a lifecycle event in their Timelines:
+
+- A new Destination, a condition that is met now or a Team whose Destinations now count adds Root messages, Quietly
+  and without `destination_joined`: each open Alert Group is published in each Destination it now reaches at its
+  current Severity level and was not in. A condition is checked against the level as it is: a Destination named for
+  `critical` receives only the open critical Alert Groups, and an Alert Group whose level fell below critical is not
+  published in it. A change of configuration starts no Escalation chain.
+- No change removes a Root message by a condition. A Destination whose condition is not met any more, or a condition
+  narrowed back, keeps its Root messages, which stay current until their Alert Groups resolve.
+- A Destination taken away — removed from the Route or from the Team, reached only through the Teams when "Also to the
+  Teams from the label" is turned off, or named by a deleted Team — gets the final edit "No longer updated here" with a
+  link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. An entry that still
+  names it keeps the Root message, whether its condition is met or not: in the example above, if the Route also names
+  `payments-notice` for `critical`, removing `payments-notice` from the Team keeps the Root message of a warning Alert
+  Group there.
+
 ## A Route for test clusters
 
 A Route "Test clusters" placed first, with `cluster=~".*-stage|.*-preprod"`, no Destination of its own, "Also to the

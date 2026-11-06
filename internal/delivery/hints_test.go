@@ -246,6 +246,7 @@ func TestRouteDestinationRemovedHints(t *testing.T) {
 	e := published(t)
 	d := e.only(t)
 	e.db.hints = nil
+	e.db.routeDests[routeID] = nil
 	e.changed(t, routeID, nil, []int64{destMM})
 	if !d.desiredRetire || !slices.Equal(e.db.hints, []db.Hint{groupHint}) {
 		t.Fatalf("final edit %+v, hints %+v", d, e.db.hints)
@@ -258,6 +259,7 @@ func TestRouteDestinationRemovedHints(t *testing.T) {
 
 	u, ud := pending(t)
 	u.db.hints = nil
+	u.db.routeDests[routeID] = nil
 	u.changed(t, routeID, nil, []int64{destMM})
 	if ud.state != "withheld" || !slices.Equal(u.db.hints, []db.Hint{groupHint}) {
 		t.Errorf("never published %s, hints %+v", ud.state, u.db.hints)
@@ -265,8 +267,9 @@ func TestRouteDestinationRemovedHints(t *testing.T) {
 
 	f, _ := pending(t)
 	f.db.fail["Notify"] = errBoom
-	if err := f.svc.RouteDestinationsChanged(t.Context(), nil, routeID, nil, []int64{destMM}); !errors.Is(err,
-		errBoom) {
+	f.db.routeDests[routeID] = nil
+	if err := f.svc.RouteDestinationsChanged(t.Context(), nil, f.changeOf(routeID, nil, []int64{destMM})); !errors.Is(
+		err, errBoom) {
 		t.Errorf("a failed hint of the route's change = %v", err)
 	}
 }

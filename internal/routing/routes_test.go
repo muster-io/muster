@@ -89,8 +89,11 @@ type fakeStore struct {
 	deleted map[string]bool
 	links   map[int64][]link
 
-	// membershipLocks are the Routes whose membership lock was taken, in order.
+	// membershipLocks are the Routes whose membership lock was taken, in order; teamDests are the Destinations of each
+	// Team by id, and teamLocks the Teams whose membership lock was taken, in order.
 	membershipLocks []int64
+	teamDests       map[int64][]int64
+	teamLocks       []int64
 
 	// teams are the Teams that are not deleted by public_id, and userTeams the public_ids of the Teams of each User.
 	teams     map[string]dbgen.LockOwningTeamRow
@@ -586,6 +589,42 @@ func (s *fakeStore) LockRouteMembership(_ context.Context, arg dbgen.LockRouteMe
 		return errors.New("not the membership lock")
 	}
 	s.membershipLocks = append(s.membershipLocks, arg.RouteID)
+	return nil
+}
+
+func (s *fakeStore) ListTeamsOfDestination(_ context.Context, arg dbgen.ListTeamsOfDestinationParams) ([]int64,
+	error) {
+	if err := s.call("ListTeamsOfDestination"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for team, dests := range s.teamDests {
+		if slices.Contains(dests, arg.DestinationID) {
+			out = append(out, team)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (s *fakeStore) LockTeamMembership(_ context.Context, arg dbgen.LockTeamMembershipParams) error {
+	if err := s.call("LockTeamMembership"); err != nil {
+		return err
+	}
+	if arg.LockClass != db.TeamMembershipLockClass {
+		return errors.New("not the team membership lock")
+	}
+	s.teamLocks = append(s.teamLocks, arg.TeamID)
+	return nil
+}
+
+func (s *fakeStore) DeleteDestinationTeams(_ context.Context, arg dbgen.DeleteDestinationTeamsParams) error {
+	if err := s.call("DeleteDestinationTeams"); err != nil {
+		return err
+	}
+	for team, dests := range s.teamDests {
+		s.teamDests[team] = slices.DeleteFunc(dests, func(d int64) bool { return d == arg.DestinationID })
+	}
 	return nil
 }
 
@@ -1289,32 +1328,29 @@ const (
 	destGone = "DSAAAAAAAAAAA3"
 )
 
-// membershipCall is a call of the membership hook.
-type membershipCall struct {
-	route          int64
-	added, removed []int64
-}
-
-func withDestinations(t *testing.T) (*Service, *fakeStore, *clock.Manual, *[]membershipCall) {
+func withDestinations(t *testing.T) (*Service, *fakeStore, *clock.Manual, *[]MembershipChange) {
 	t.Helper()
 	svc, store, c := newService(t)
 	store.dests[destA], store.dests[destB], store.dests[destGone] = 51, 52, 53
 	store.deleted[destGone] = true
-	var calls []membershipCall
-	svc.SetMembership(func(_ context.Context, tx dbgen.DBTX, routeID int64, added, removed []int64) error {
+	store.teamDests = map[int64][]int64{}
+	var calls []MembershipChange
+	svc.SetMembership(func(_ context.Context, tx dbgen.DBTX, c MembershipChange) error {
 		if tx != nil {
 			t.Error("the hook runs outside the transaction")
 		}
-		calls = append(calls, membershipCall{route: routeID, added: added, removed: removed})
+		calls = append(calls, c)
 		return store.fail["membership"]
 	})
 	return svc, store, c, &calls
 }
 
-// TestRouteDestinations is C-08.FR-1 and C-11.FR-14: createRoute and updateRoute write destination_ids in the Route's
-// transaction — added, kept with their added_at, or removed — and run delivery's membership hook with the changes; an
-// edit that changes only destination_ids is saved with a new version and records route.updated with /destination_ids
-// and /destination_entries in its diff; an id that names no Destination, a deleted one or a malformed one is a 422
+// TestRouteDestinations is C-08.FR-1, C-11.FR-14 and C-26.FR-6: createRoute and updateRoute write destination_ids in
+// the Route's transaction — added, kept with their added_at, or removed — and updateRoute runs delivery's membership
+// hook with the entries before and after and "Also to the Teams from the label" before and after; a creation, whose
+// Route has no open Alert Group, runs none, and an unchanged save none either; an edit that changes only
+// destination_ids is saved with a new version and records route.updated with /destination_ids and
+// /destination_entries in its diff; an id that names no Destination, a deleted one or a malformed one is a 422
 // unknown_id at its pointer. An empty list removes every Destination.
 func TestRouteDestinations(t *testing.T) {
 	svc, store, c, calls := withDestinations(t)
@@ -1324,9 +1360,7 @@ func TestRouteDestinations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(created.DestinationIDs, []string{destA, destB}) || len(*calls) != 1 ||
-		!slices.Equal((*calls)[0].added, []int64{51, 52}) || (*calls)[0].removed != nil ||
-		(*calls)[0].route != created.ID {
+	if !slices.Equal(created.DestinationIDs, []string{destA, destB}) || len(*calls) != 0 {
 		t.Fatalf("created %+v, hook %+v", created.DestinationIDs, *calls)
 	}
 	var diff []audit.Change
@@ -1351,7 +1385,12 @@ func TestRouteDestinations(t *testing.T) {
 		store.hints[len(store.hints)-1].ID != created.PublicID {
 		t.Errorf("updated %+v, audit %s %+v", got, e.Action, diff)
 	}
-	if len(*calls) != 2 || (*calls)[1].added != nil || !slices.Equal((*calls)[1].removed, []int64{52}) {
+	any := ConditionAny
+	if len(*calls) != 1 || (*calls)[0].RouteID != created.ID || (*calls)[0].Added() != nil ||
+		!slices.Equal((*calls)[0].Removed(), []int64{52}) ||
+		!slices.Equal((*calls)[0].Before, []Entry{{DestinationID: 51, Condition: any}, {DestinationID: 52,
+			Condition: any}}) || !slices.Equal((*calls)[0].After, []Entry{{DestinationID: 51, Condition: any}}) ||
+		(*calls)[0].ToTeamsBefore || (*calls)[0].ToTeamsAfter {
 		t.Errorf("hook %+v", *calls)
 	}
 	// Each change of the Destinations takes the Route's membership lock, which an Enqueue on the Route takes shared.
@@ -1362,13 +1401,34 @@ func TestRouteDestinations(t *testing.T) {
 		t.Errorf("kept destination %+v", l)
 	}
 	in.DestinationIDs = []string{destB, destA}
-	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil ||
-		!slices.Equal((*calls)[2].added, []int64{52}) {
+	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 2 ||
+		!slices.Equal((*calls)[1].Added(), []int64{52}) || (*calls)[1].Removed() != nil {
 		t.Errorf("added again %+v %v %+v", got, err, *calls)
 	}
-	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 3 {
+	if got, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 2 {
 		t.Errorf("no change = %+v %v, %d calls", got, err, len(*calls))
 	}
+
+	// A changed condition is a change of the entries: the hook gets them before and after, with nothing added or
+	// removed. The option alone is one too, under the membership lock, with the entries unchanged.
+	in.DestinationIDs = nil
+	in.DestinationEntries = &[]DestinationEntry{{DestinationID: destA, Condition: ConditionCritical},
+		{DestinationID: destB, Condition: ConditionAny}}
+	if _, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 3 ||
+		(*calls)[2].Added() != nil || (*calls)[2].Removed() != nil ||
+		!slices.Equal((*calls)[2].After, []Entry{{DestinationID: 51, Condition: ConditionCritical},
+			{DestinationID: 52, Condition: any}}) || (*calls)[2].Before[0].Condition != any {
+		t.Errorf("a changed condition: %v %+v", err, *calls)
+	}
+	locks := len(store.membershipLocks)
+	in.DeliverToTeams = ptr(true)
+	if _, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 4 ||
+		!(*calls)[3].ToTeamsAfter || (*calls)[3].ToTeamsBefore ||
+		!slices.Equal((*calls)[3].Before, (*calls)[3].After) || len(store.membershipLocks) != locks+1 {
+		t.Errorf("the option on: %v %+v, locks %v", err, *calls, store.membershipLocks)
+	}
+	in.DeliverToTeams, in.DestinationEntries = nil, nil
+	in.DestinationIDs = []string{destB, destA}
 
 	for name, ids := range map[string][]string{"unknown": {destA, "DSZZZZZZZZZZZZ"}, "deleted": {destA, destGone},
 		"malformed": {destA, "nope"}} {
@@ -1418,9 +1478,13 @@ func TestRouteDestinations(t *testing.T) {
 
 // TestDestinationDeleted is C-11.FR-14 on the Routes: a Destination being deleted leaves each Route it belongs to, so
 // each Route that is not deleted gets a new version and its hint, and its membership lock is taken in id order; a
-// Route without it is untouched.
+// Route without it is untouched. It leaves each Team it belongs to after the Routes' locks, under the Teams' membership
+// locks in id order (C-26.FR-6); a Team without it is untouched, and a Destination of no Team takes no Team's lock.
 func TestDestinationDeleted(t *testing.T) {
 	svc, store, _, _ := withDestinations(t)
+	store.teamDests[9] = []int64{51, 52}
+	store.teamDests[4] = []int64{51}
+	store.teamDests[6] = []int64{52}
 	var ids []int64
 	for _, name := range []string{"one", "two", "three"} {
 		in := input(name)
@@ -1455,7 +1519,17 @@ func TestDestinationDeleted(t *testing.T) {
 		store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: store.rows[1].PublicID}) {
 		t.Errorf("locks %v, hints %+v", store.membershipLocks, store.hints)
 	}
-	for _, q := range []string{"BumpRoutesOfDestination", "LockRouteMembership", "Notify"} {
+	if !slices.Equal(store.teamLocks, []int64{4, 9}) || !slices.Equal(store.teamDests[9], []int64{52}) ||
+		len(store.teamDests[4]) != 0 || !slices.Equal(store.teamDests[6], []int64{52}) {
+		t.Errorf("team locks %v, team destinations %v", store.teamLocks, store.teamDests)
+	}
+	store.teamLocks = nil
+	if err := svc.DestinationDeleted(t.Context(), nil, 51); err != nil || len(store.teamLocks) != 0 {
+		t.Errorf("a destination of no team: %v, team locks %v", err, store.teamLocks)
+	}
+	store.teamDests[4] = []int64{51}
+	for _, q := range []string{"BumpRoutesOfDestination", "LockRouteMembership", "Notify", "ListTeamsOfDestination",
+		"LockTeamMembership", "DeleteDestinationTeams"} {
 		store.fail[q] = errBoom
 		if err := svc.DestinationDeleted(t.Context(), nil, 51); !errors.Is(err, errBoom) {
 			t.Errorf("%s = %v", q, err)
@@ -1985,7 +2059,7 @@ func TestRouteDestinationEntries(t *testing.T) {
 	want := []DestinationEntry{{DestinationID: destA, Condition: ConditionCritical},
 		{DestinationID: destB, Condition: ConditionAny}}
 	if !slices.Equal(created.DestinationEntries, want) || !slices.Equal(created.DestinationIDs, []string{destA, destB}) ||
-		created.DeliverToTeams || !created.RunTeamChains || len(*calls) != 1 {
+		created.DeliverToTeams || !created.RunTeamChains || len(*calls) != 0 {
 		t.Fatalf("created %+v %v, hook %+v", created.DestinationEntries, created.DestinationIDs, *calls)
 	}
 	if d := diffOf(); d["/destination_entries"].After == nil || d["/run_team_chains"].After != true {
@@ -2004,7 +2078,8 @@ func TestRouteDestinationEntries(t *testing.T) {
 		t.Fatalf("destination_ids adding B %+v, %v", got.DestinationEntries, err)
 	}
 
-	// Both: the entries win; a changed condition is written without the hook, and the options change.
+	// Both: the entries win; changed conditions and the option turned on run the hook once, which publishes the open
+	// Alert Groups where they now reach (C-26.FR-6), and the options change.
 	hooks := len(*calls)
 	upd.DestinationEntries = &[]DestinationEntry{{DestinationID: destA, Condition: ConditionBelowCritical},
 		{DestinationID: destB, Condition: ConditionCritical}}
@@ -2014,7 +2089,9 @@ func TestRouteDestinationEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Equal(got.DestinationEntries, *upd.DestinationEntries) || !got.DeliverToTeams || got.RunTeamChains ||
-		len(*calls) != hooks || store.calls["SetRouteDestinationConditions"] != 1 {
+		len(*calls) != hooks+1 || !(*calls)[hooks].ToTeamsAfter || (*calls)[hooks].ToTeamsBefore ||
+		(*calls)[hooks].After[0].Condition != ConditionBelowCritical || (*calls)[hooks].Added() != nil ||
+		store.calls["SetRouteDestinationConditions"] != 1 {
 		t.Errorf("both %+v %v %v, hooks %d", got.DestinationEntries, got.DeliverToTeams, got.RunTeamChains,
 			len(*calls)-hooks)
 	}

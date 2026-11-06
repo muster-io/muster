@@ -150,7 +150,7 @@ func entriesOf(want map[string]teamDestination) []DestinationEntry {
 
 // writeDestinations makes want the Destinations of the Team teamID, which had before: those it no longer names are
 // removed, the new ones added now and the kept ones keep when they were added with the condition of want. The change
-// reaches the open Alert Groups of the Team at their next change.
+// reaches the open Alert Groups of the Team through the row team_destinations of its save (changeDestinations).
 func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64, before []DestinationEntry,
 	want map[string]teamDestination, now time.Time) error {
 	keep := map[string]string{}

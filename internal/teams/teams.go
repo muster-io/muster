@@ -61,11 +61,15 @@ const (
 )
 
 // KindTeamEvaluation is the kind of the open_group_updates row that a save of a Team writes (C-25.FR-13), KindTeamName
-// that of a rename, whose new name the Root messages of the open Alert Groups that have the Team show (C-29.FR-1), and
-// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
+// that of a rename, whose new name the Root messages of the open Alert Groups that have the Team show (C-29.FR-1),
+// KindTeamDestinations that of a change of the Team's Destination entries or of its deletion, which publishes the open
+// Alert Groups that have the Team Quietly where they now reach and gives the final edit where no entry names a
+// Destination any more (C-26.FR-6, C-25.FR-10), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the
+// workers of internal/groups, which claim them.
 const (
 	KindTeamEvaluation      = "team_evaluation"
 	KindTeamName            = "team_name"
+	KindTeamDestinations    = "team_destinations"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
@@ -291,6 +295,8 @@ type Queries interface {
 		[]dbgen.ResolveTeamDestinationsRow, error)
 	DeleteTeamDestinations(ctx context.Context, arg dbgen.DeleteTeamDestinationsParams) error
 	UpsertTeamDestinations(ctx context.Context, arg dbgen.UpsertTeamDestinationsParams) error
+	DeleteAllTeamDestinations(ctx context.Context, arg dbgen.DeleteAllTeamDestinationsParams) error
+	LockTeamMembership(ctx context.Context, arg dbgen.LockTeamMembershipParams) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -660,6 +666,27 @@ func (s *Service) requestRename(ctx context.Context, q Queries, id int64, now ti
 	return nil
 }
 
+// changeDestinations takes the membership lock of the Team id exclusively, after the Team's row, and then runs write,
+// which changes the Team's Destination entries, and asks the workers of internal/groups to apply the change to the open
+// Alert Groups that have the Team (C-26.FR-6, C-25.FR-10): one open_group_updates row team_destinations with the Team,
+// requested at the business time of the change, and a notification that wakes them once the transaction commits. An
+// Enqueue that reads the Team's entries takes the lock shared, so it either commits before the change, and the row
+// then reaches its Alert Group, or reads the entries the change wrote.
+func (s *Service) changeDestinations(ctx context.Context, q Queries, id int64, now time.Time,
+	write func() error) error {
+	if err := q.LockTeamMembership(ctx, dbgen.LockTeamMembershipParams{LockClass: db.TeamMembershipLockClass,
+		TeamID: id}); err != nil {
+		return fmt.Errorf("lock the destinations of the team: %w", err)
+	}
+	if err := write(); err != nil {
+		return err
+	}
+	if err := s.requestUpdate(ctx, q, KindTeamDestinations, id, now); err != nil {
+		return fmt.Errorf("apply the destinations of the team to its open alert groups: %w", err)
+	}
+	return nil
+}
+
 // requestUpdate inserts the open_group_updates row of kind for the Team id and wakes the workers.
 func (s *Service) requestUpdate(ctx context.Context, q Queries, kind string, id int64, now time.Time) error {
 	if err := q.InsertTeamUpdate(ctx, dbgen.InsertTeamUpdateParams{OrgID: s.orgID, Kind: kind,
@@ -764,7 +791,8 @@ func setHours(days *[]string, start, end, zone *pgtype.Text, w *WorkingHours) {
 // An update that changes nothing writes nothing. A changed slug or changed Team matchers request in the transaction
 // the evaluation of the open Alert Groups (C-25.FR-13); a change of the name, the description or the Working hours
 // does not. A changed name requests the re-render of the Root messages of the open Alert Groups that have the Team
-// (C-29.FR-1).
+// (C-29.FR-1), and changed Destination entries the row team_destinations, under the Team's membership lock
+// (C-26.FR-6).
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Team, error) {
 	in, err := check(in)
 	if err != nil {
@@ -831,7 +859,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if dests != nil && !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
-			if err := s.writeDestinations(ctx, q, before.ID, before.DestinationEntries, dests, now); err != nil {
+			if err := s.changeDestinations(ctx, q, before.ID, now, func() error {
+				return s.writeDestinations(ctx, q, before.ID, before.DestinationEntries, dests, now)
+			}); err != nil {
 				return err
 			}
 		}
@@ -870,7 +900,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 // is refused with InUseError, read under the lock that every change of its Schedules takes (P-64). The row stays,
 // marked deleted, for the names that point at it, and its name and slug are free at once; its people and Working hours
 // are removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and
-// its own Audit log entry by the system, in the same transaction.
+// its own Audit log entry by the system, in the same transaction. Its Destination entries are removed last, under its
+// membership lock, with the row team_destinations that gives their final edits to the open Alert Groups that had the
+// Team wherever no other entry names them (C-25.FR-10, C-26.FR-6).
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	var before Team
 	err := s.store.InTx(ctx, func(q Queries) error {
@@ -916,6 +948,20 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		for _, rt := range routes {
 			if err := s.released(ctx, q, before, actionRouteUpdated, resourceRoute, hintRoute, rt.PublicID,
 				rt.Name); err != nil {
+				return err
+			}
+		}
+		// The Team's Destinations go last, after its Destinations and Routes: grouping holds a Route's row FOR SHARE
+		// before it takes the Team's membership lock shared, so taking the lock before the Routes' rows would close a
+		// cycle with it.
+		if len(before.DestinationEntries) > 0 {
+			if err := s.changeDestinations(ctx, q, before.ID, now, func() error {
+				if err := q.DeleteAllTeamDestinations(ctx, dbgen.DeleteAllTeamDestinationsParams{OrgID: s.orgID,
+					TeamID: before.ID}); err != nil {
+					return fmt.Errorf("remove the destinations of the team %s: %w", before.PublicID, err)
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 		}

@@ -1304,3 +1304,152 @@ func TestUpdateKindsOfOlderVersions(t *testing.T) {
 		}
 	}
 }
+
+// fakeFinalEdits records the final edits asked for, as group:team, and changes count deliveries of each Alert Group
+// the first time.
+type fakeFinalEdits struct {
+	got     []string
+	changes map[int64]int
+	fail    error
+	// teamLocks are the Team membership locks taken before the first final edit.
+	db        *fakeDB
+	teamLocks []int64
+}
+
+func (f *fakeFinalEdits) FinalEditsFor(_ context.Context, _ DBTX, g *Group, team int64) (int, error) {
+	if f.fail != nil {
+		return 0, f.fail
+	}
+	if f.got == nil {
+		f.teamLocks = slices.Clone(f.db.reach.teamLocks)
+	}
+	f.got = append(f.got, fmt.Sprintf("%d:%d", g.ID, team))
+	n := f.changes[g.ID]
+	delete(f.changes, g.ID)
+	return n, nil
+}
+
+// TestTeamDestinationsUpdate is C-26.FR-6 and C-25.FR-10 on the worker: a row team_destinations, which a change of a
+// Team's Destination entries or its deletion writes, runs the re-render step without a lifecycle event on each open
+// Alert Group that has the Team — not one of another Team, not one without a Team, not a resolved one — marked as a
+// change of configuration that can grow the reach (Rendering.Grows), so that delivery publishes it Quietly where it now
+// reaches, and then asks delivery for the final edits of the Team's Destinations on it (FinalEdits), in the same
+// transaction. Every membership lock is taken before the first rendering: the Routes', then the Teams' of the batch,
+// in id order. It evaluates nothing and waits for no Snapshot under the lock of the evaluation: the Teams' locks order
+// it against them. It records nothing in the Timeline and saves no Alert Group; it is deleted with its last batch and
+// logged with the Alert Groups it changed, none on a second run. A row whose Team is gone is done, and a failing final
+// edit fails the batch, which stays for a later round.
+func TestTeamDestinationsUpdate(t *testing.T) {
+	e := newEvaluation(t)
+	_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+	_, paid := e.fire(t, 3, map[string]string{"alertname": "Latency", "cluster": "b", "team": "payments"})
+	_, both := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "c", "team": "search"})
+	_, none := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "e"})
+	gone, _ := e.fire(t, 3, map[string]string{"alertname": "Gone", "cluster": "d", "team": "search"})
+	e.save(0)
+	e.round(t, e.worker)
+	e.resolve(t, gone)
+	if !slices.Equal(e.groupTeamSlugs(t, g), []string{"search:label"}) || len(e.groupTeamSlugs(t, none)) != 0 ||
+		!slices.Equal(e.groupTeamSlugs(t, paid), []string{"payments:label"}) {
+		t.Fatalf("teams %v %v", e.groupTeamSlugs(t, g), e.groupTeamSlugs(t, paid))
+	}
+	e.db.teamsOf().groups[both.ID] = append(e.db.teamsOf().groups[both.ID],
+		fakeGroupTeam{fakeAlertTeam: fakeAlertTeam{team: payments, rule: TeamRuleLabel}})
+	var rendered []Rendering
+	var first []int64
+	e.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		if rendered == nil {
+			first = slices.Clone(e.db.reach.locks)
+		}
+		rendered = append(rendered, r)
+		if r.Changed != nil && r.Group.ID == g.ID {
+			r.Changed()
+		}
+		return nil
+	})
+	fe := &fakeFinalEdits{db: e.db, changes: map[int64]int{both.ID: 1}}
+	e.svc.SetFinalEdits(fe)
+	entries, saves, locks := len(e.db.entries), e.db.calls["SaveGroup"], e.db.calls["LockTeamEvaluation"]
+	evaluated := e.db.calls["ListGroupFiringAlerts"]
+	e.db.reach.locks, e.db.reach.teamLocks = nil, nil
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	var got []string
+	for _, r := range rendered {
+		if !r.Configuration || !r.Grows || len(r.Events) != 0 || r.Actor != System {
+			t.Errorf("rendering of #%d: configuration %v, grows %v, events %v, actor %+v", r.Group.Number,
+				r.Configuration, r.Grows, r.Events, r.Actor)
+		}
+		got = append(got, fmt.Sprint(r.Group.ID))
+	}
+	// The Alert Groups go in the order (Route, id): g of Route 2 before both of Route 3.
+	if want := []string{fmt.Sprint(g.ID), fmt.Sprint(both.ID)}; !slices.Equal(got, want) {
+		t.Errorf("rendered %v, want %v", got, want)
+	}
+	if want := []string{fmt.Sprintf("%d:%d", g.ID, search), fmt.Sprintf("%d:%d", both.ID, search)}; !slices.Equal(fe.got,
+		want) {
+		t.Errorf("final edits %v, want %v", fe.got, want)
+	}
+	if !slices.Equal(first, []int64{2, 3}) || !slices.Equal(fe.teamLocks, []int64{payments, search}) {
+		t.Errorf("before the first rendering: route locks %v; before the first final edit: team locks %v", first,
+			fe.teamLocks)
+	}
+	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 ||
+		e.db.calls["LockTeamEvaluation"] != locks || e.db.calls["ListGroupFiringAlerts"] != evaluated ||
+		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"team_destinations",`+
+			`"team":"TMSEARCHAAAAAA","alert_groups":2`) {
+		t.Errorf("%d entries, %d saves, rows %d, %d evaluation locks, log %s", len(e.db.entries)-entries,
+			e.db.calls["SaveGroup"]-saves, len(e.db.updates), e.db.calls["LockTeamEvaluation"]-locks, e.log)
+	}
+
+	// A second run renders the same Alert Groups and changes nothing.
+	rendered, fe.got = nil, nil
+	e.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		rendered = append(rendered, r)
+		return nil
+	})
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if len(rendered) != 2 || len(fe.got) != 2 || len(e.db.updates) != 0 || !strings.Contains(e.log.String(),
+		`"kind":"team_destinations","team":"TMSEARCHAAAAAA","alert_groups":0`) {
+		t.Errorf("a second run: rendered %d, final edits %v, rows %d, log %s", len(rendered), fe.got,
+			len(e.db.updates), e.log)
+	}
+
+	// A row whose Team is gone is done without a list; a failing final edit fails the batch.
+	e.db.fail["ListOpenGroupsOfTeamAfter"] = errBoom
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if len(e.db.updates) != 0 || !strings.Contains(e.log.String(),
+		`"event":"open_group_update_done","kind":"team_destinations","alert_groups":0`) {
+		t.Errorf("a row without its team: rows %d, log %s", len(e.db.updates), e.log)
+	}
+	delete(e.db.fail, "ListOpenGroupsOfTeamAfter")
+	fe.fail = errBoom
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations, teamID: search,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if len(e.db.updates) != 1 || !strings.Contains(e.log.String(),
+		`"event":"open_group_update_failed","kind":"team_destinations","team":"TMSEARCHAAAAAA"`) {
+		t.Errorf("a failing final edit: rows %d, log %s", len(e.db.updates), e.log)
+	}
+	fe.fail = nil
+	e.db.updates = nil
+	for _, q := range []string{"ListGroupsTeamIDs", "ShareTeamMembership", "ShareRouteMembership"} {
+		e.db.fail[q] = errBoom
+		e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations, teamID: search,
+			requested: e.clock.Now()})
+		e.round(t, e.worker)
+		if len(e.db.updates) != 1 {
+			t.Errorf("%s: rows %d", q, len(e.db.updates))
+		}
+		delete(e.db.fail, q)
+		e.db.updates = nil
+	}
+	if !slices.Contains(updateKinds, KindTeamDestinations) {
+		t.Errorf("a replica of this version does not claim %s", KindTeamDestinations)
+	}
+}

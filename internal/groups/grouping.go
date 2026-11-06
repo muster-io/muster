@@ -71,6 +71,8 @@ type Service struct {
 	// saved (C-25.FR-13), cached per replica as the Router's is, and classify gives it its queries in a transaction.
 	classifier *teams.Classifier
 	classify   func(Queries) teams.ClassifyQueries
+	// finalEdits gives the final edits of the open Alert Group updates team_destinations; nil gives none.
+	finalEdits FinalEdits
 }
 
 // New returns the Service of the Organization in cfg.

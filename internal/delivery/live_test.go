@@ -188,8 +188,8 @@ func setupLive(t *testing.T, s dbtest.Server) *live {
 		Renderer: delivery.MessageRenderer{Renderer: l.renderer}})
 	l.groups.SetRerender(l.svc.Enqueue)
 	// As the runtime wires them: Route membership, the deletion of Destinations and the calm checks of Storms.
-	l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, routeID int64, added, removed []int64) error {
-		return l.svc.RouteDestinationsChanged(ctx, tx, routeID, added, removed)
+	l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+		return l.svc.RouteDestinationsChanged(ctx, tx, c)
 	})
 	l.dsvc = destinations.New(org.ID, destinations.NewStore(d.Pool))
 	l.dsvc.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(d.Pool), Audit: w, Business: l.business,
