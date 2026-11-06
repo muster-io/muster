@@ -129,8 +129,10 @@ func layoutOf(m, short messages.Message) gen.Layout {
 }
 
 // uriOf is the link u as a URI (RFC 3986): its path and fragment percent-encoded as Go writes a URL, and every byte of
-// its query that a URI does not allow percent-encoded too, so that a bridge that checks `format: uri` takes it; a link
-// that does not parse stays as it is.
+// its query that a URI does not allow percent-encoded too, so that a bridge that checks `format: uri` takes it. Its
+// authority — userinfo, host and port — stays exactly as given, since a client resolves an internationalized host as
+// written and not percent-encoded; a link without one, or that does not parse, is written as Go writes it, or stays as
+// it is.
 func uriOf(u string) string {
 	p, err := url.Parse(u)
 	if err != nil {
@@ -148,7 +150,20 @@ func uriOf(u string) string {
 		}
 	}
 	p.RawQuery = b.String()
-	return p.String()
+	prefix := p.Scheme + "://"
+	if p.Scheme == "" || p.Opaque != "" || !strings.HasPrefix(u, prefix) {
+		return p.String()
+	}
+	rest := u[len(prefix):]
+	authority := rest[:strings.IndexFunc(rest+"/", func(r rune) bool { return r == '/' || r == '?' || r == '#' })]
+	out := prefix + authority + p.EscapedPath()
+	if p.ForceQuery || p.RawQuery != "" {
+		out += "?" + p.RawQuery
+	}
+	if p.Fragment != "" {
+		out += "#" + p.EscapedFragment()
+	}
+	return out
 }
 
 // inURIQuery reports whether the byte c may stand in the query of a URI as it is (RFC 3986): an unreserved character,

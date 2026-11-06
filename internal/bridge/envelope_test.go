@@ -666,6 +666,18 @@ func TestLayoutEnvelope(t *testing.T) {
 		u.Path != "/рунбук/a|b{c}" || u.Query().Get("q") != "a|b" || u.Query().Get("x") != "{y}" || u.Fragment != "ч" {
 		t.Fatalf("a link with characters a URI does not allow %q", got)
 	}
+	for _, tc := range []struct{ in, want string }{
+		{"https://пример.рф/путь?q=a|b", "https://пример.рф/%D0%BF%D1%83%D1%82%D1%8C?q=a%7Cb"},
+		{"https://bob:s@пример.рф:8443/a b#ч", "https://bob:s@пример.рф:8443/a%20b#%D1%87"},
+		{"https://wiki.example.org", "https://wiki.example.org"},
+		{"https://wiki.example.org?x=1", "https://wiki.example.org?x=1"},
+		{"mailto:a@example.org", "mailto:a@example.org"},
+		{"%zz", "%zz"},
+	} {
+		if got := uriOf(tc.in); got != tc.want {
+			t.Errorf("uriOf(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 	if b, _ := json.Marshal(content(odd, i, nil)); visit(t, bridgeSchema(t, "MessageContent"), b) != nil {
 		t.Fatalf("%s", b)
 	}
