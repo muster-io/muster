@@ -107,6 +107,12 @@ type fakeStore struct {
 	classMatchers []teamsdb.ListClassifiedMatchersRow
 	alertTeams    map[int64][]string
 	unknown       map[int64]string
+
+	// The reads of the preview "Where alerts go": the Teams with their names, the Destination entries of the Teams
+	// and the Destinations with their names.
+	previewTeams []dbgen.ListPreviewTeamsRow
+	teamEntries  []dbgen.ListPreviewTeamEntriesRow
+	previewDests []dbgen.ListPreviewDestinationsRow
 }
 
 // link is a row of route_destinations; an empty condition is any.

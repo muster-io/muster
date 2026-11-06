@@ -485,6 +485,11 @@ type Queries interface {
 		[]dbgen.BumpRoutesOfDestinationRow, error)
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
 	ListUserTeams(ctx context.Context, arg dbgen.ListUserTeamsParams) ([]string, error)
+	ListPreviewTeams(ctx context.Context, arg dbgen.ListPreviewTeamsParams) ([]dbgen.ListPreviewTeamsRow, error)
+	ListPreviewTeamEntries(ctx context.Context, arg dbgen.ListPreviewTeamEntriesParams) (
+		[]dbgen.ListPreviewTeamEntriesRow, error)
+	ListPreviewDestinations(ctx context.Context, arg dbgen.ListPreviewDestinationsParams) (
+		[]dbgen.ListPreviewDestinationsRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 	// DB is the pool or the transaction the queries run on, which the membership hook writes through.

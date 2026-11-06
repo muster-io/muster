@@ -109,3 +109,15 @@ func orAny(c SeverityCondition) SeverityCondition {
 	}
 	return c
 }
+
+// ReachCounts counts, over the reaches of a set of Alert Groups, how many of them reach each Destination, by the
+// Destination's internal id (C-26.FR-12).
+func ReachCounts(reaches [][]Reached) map[int64]int {
+	counts := map[int64]int{}
+	for _, group := range reaches {
+		for _, r := range group {
+			counts[r.DestinationID]++
+		}
+	}
+	return counts
+}

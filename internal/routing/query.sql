@@ -446,3 +446,28 @@ CROSS JOIN LATERAL jsonb_each_text(a.labels) AS l(name, value)
 GROUP BY l.name
 ORDER BY count(DISTINCT x.alert_group_id) DESC, l.name
 LIMIT @lim;
+
+-- ListPreviewTeams reads the Teams that are not deleted among the ids with their names and slugs, for the Teams the
+-- preview "Where alerts go" names.
+-- name: ListPreviewTeams :many
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = @org_id AND id = ANY(@team_ids::bigint[]) AND deleted_at IS NULL
+ORDER BY id;
+
+-- ListPreviewTeamEntries lists the Destination entries of the Teams whose Destinations are not deleted, as delivery
+-- reads them, for the preview "Where alerts go".
+-- name: ListPreviewTeamEntries :many
+SELECT td.team_id, td.destination_id, td.severity_condition
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+WHERE td.org_id = @org_id AND td.team_id = ANY(@team_ids::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, td.destination_id;
+
+-- ListPreviewDestinations reads the Destinations that are not deleted among the ids with their names, types and
+-- health, for the preview "Where alerts go".
+-- name: ListPreviewDestinations :many
+SELECT id, public_id, name, type, health, broken_since, broken_reason
+FROM destinations
+WHERE org_id = @org_id AND id = ANY(@ids::bigint[]) AND deleted_at IS NULL
+ORDER BY id;

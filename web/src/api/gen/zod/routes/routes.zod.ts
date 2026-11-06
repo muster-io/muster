@@ -831,12 +831,13 @@ export const ListRouteProfilesResponse = zod.object({
 })
 
 /**
- * Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and with the proposed Group key.
+ * Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and with the proposed Group key. With the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of the Route, or those of the saved Route, the delivery preview "Where alerts go" (C-26.FR-12) lists the largest Alert Groups of the proposed key with their Teams and the Destinations each reaches, counts the Alert Groups that reach every Destination, and tells whether Alerts of different Teams would share an Alert Group. It reads only, so nothing is saved, recorded or sent.
  * @summary Preview a Group key
  */
 export const previewGroupKeyBodyRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
+export const previewGroupKeyBodyDestinationEntriesItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
 export const PreviewGroupKeyBody = zod.object({
@@ -847,8 +848,20 @@ export const PreviewGroupKeyBody = zod.object({
   "label": zod.string().min(1),
   "op": zod.enum(['=', '!=', '=~', '!~']),
   "value": zod.string().describe('Literal value, or an RE2 expression for `=~` and `!~`.')
-}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).optional().describe('Matchers to preview instead of, or without, a saved Route\'s own.')
+}).describe('A condition on one label, in Alertmanager syntax. Matchers of a Route are combined with AND.')).optional().describe('Matchers to preview instead of, or without, a saved Route\'s own.'),
+  "minimum_severity": zod.enum(['none', 'warning', 'critical']).optional().describe('The unsaved Minimum severity of the Route; the saved Route\'s when absent and `route_id` is given, else `none`.'),
+  "destination_entries": zod.array(zod.object({
+  "destination_id": zod.string().regex(previewGroupKeyBodyDestinationEntriesItemDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "severity_condition": zod.enum(['any', 'critical', 'below_critical']).optional().describe('Omitted, `any`.')
+}).describe('A Destination of a Route or a Team with its Severity condition.')).optional().describe('The unsaved Destinations of the Route with their Severity conditions; the saved Route\'s when absent and `route_id` is given, else none.'),
+  "deliver_to_teams": zod.boolean().optional().describe('The unsaved "Also to the Teams from the label"; the saved Route\'s when absent and `route_id` is given, else false.')
 }).describe('Preview of a Group key. Give `route_id` for a saved Route, `matchers` for a Route that is not saved yet (the create form), or both to try other Matchers on a saved Route; at least one of the two is required (`422`).')
+
+export const previewGroupKeyResponseDeliveryAlertGroupsItemTeamsItemIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const previewGroupKeyResponseDeliveryAlertGroupsItemDestinationsItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const previewGroupKeyResponseDeliveryAlertGroupsItemDestinationsItemEntriesItemTeamOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const previewGroupKeyResponseDeliveryDestinationCountsItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
 
 export const PreviewGroupKeyResponse = zod.object({
   "period_seconds": zod.int(),
@@ -866,7 +879,56 @@ export const PreviewGroupKeyResponse = zod.object({
   "group_key_values": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
   "alert_count": zod.int()
 })).describe('The `routing.group_key_preview_examples` largest Alert Groups.')
+}),
+  "delivery": zod.object({
+  "alert_groups": zod.array(zod.object({
+  "group_key_values": zod.record(zod.string(), zod.string()).describe('Label names and values.'),
+  "alert_count": zod.int(),
+  "severity_level": zod.enum(['critical', 'warning', 'info']).describe('The highest Severity level of the Alerts raised to the Minimum severity.'),
+  "teams": zod.array(zod.object({
+  "id": zod.string().regex(previewGroupKeyResponseDeliveryAlertGroupsItemTeamsItemIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.')).describe('The Teams of the Alerts, by the Team label and the Team matchers as saved.'),
+  "destinations": zod.array(zod.object({
+  "destination": zod.object({
+  "id": zod.string().regex(previewGroupKeyResponseDeliveryAlertGroupsItemDestinationsItemDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),
+  "health": zod.object({
+  "state": zod.enum(['healthy', 'broken']),
+  "since": zod.iso.datetime({"offset":true}).nullish(),
+  "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
 })
+}),
+  "entries": zod.array(zod.object({
+  "kind": zod.enum(['route', 'team']).describe('`route`, the Alert Group\'s Route, or `team`, a Team of the Alert Group on a Route with `deliver_to_teams`.'),
+  "team": zod.union([zod.object({
+  "id": zod.string().regex(previewGroupKeyResponseDeliveryAlertGroupsItemDestinationsItemEntriesItemTeamOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "deleted": zod.boolean()
+}).describe('The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.'),zod.null()]).describe('The Team of a `team` entry, null for `route`.'),
+  "severity_condition": zod.enum(['any', 'critical', 'below_critical']).describe('The Severity condition of a Destination of a Route or a Team (C-26.FR-1), checked against the Severity level of the Alert Group, the highest level of its firing Alerts raised to the Route\'s Minimum severity. `any` meets every level, `critical` only critical, `below_critical` every level but critical.')
+}).describe('An entry that reached a Destination of an Alert Group (C-26.FR-3, FR-4), with the condition it had when it first did. Entries are added and never removed, so a Destination keeps the entries that once reached it after the Severity level fell or the Team\'s Alerts resolved.')).describe('The entries that reach the Destination, the Route\'s first, then the Teams\' by Team.')
+})).describe('The Destinations the Alert Group would reach.')
+})).describe('The `routing.group_key_preview_examples` largest Alert Groups of the proposed Group key.'),
+  "destination_counts": zod.array(zod.object({
+  "destination": zod.object({
+  "id": zod.string().regex(previewGroupKeyResponseDeliveryDestinationCountsItemDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string(),
+  "type": zod.enum(['mattermost', 'telegram', 'webhook', 'bridge', 'slack']),
+  "health": zod.object({
+  "state": zod.enum(['healthy', 'broken']),
+  "since": zod.iso.datetime({"offset":true}).nullish(),
+  "reason": zod.string().nullish().describe('The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.')
+})
+}),
+  "alert_group_count": zod.int().describe('How many of all the Alert Groups the Alerts would form reach the Destination, listed or not.')
+})).describe('Every Destination that any Alert Group the Alerts would form reaches.'),
+  "shared_key_warning": zod.boolean().describe('True when the Route delivers to the Teams and the proposed Group key lacks the Team label, so that Alerts of different Teams with the same key share one Alert Group.')
+}).optional().describe('Absent when the request gave neither `destination_entries` nor `deliver_to_teams` and no `route_id`.')
 }).describe('Covers the Alerts reported firing in the Stored Snapshots of the period that the Route would take at its place in the current evaluation order (Matchers without a saved Route stand for a new Route just before the Default route), each Alert once with its Integration\'s Static labels, read from the newest Snapshot back and at most `routing.group_key_preview_max_alerts` of them.')
 
 /**

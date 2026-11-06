@@ -7,8 +7,10 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -283,4 +285,141 @@ func bearerPost(t *testing.T, url, value string) answer {
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
 	return answer{status: resp.StatusCode, header: resp.Header, body: b}
+}
+
+// deliveryPreview is the answer of previewGroupKey for the preview "Where alerts go".
+type deliveryPreview struct {
+	Delivery *struct {
+		AlertGroups []struct {
+			Values map[string]string `json:"group_key_values"`
+			Count  int               `json:"alert_count"`
+			Level  string            `json:"severity_level"`
+			Teams  []struct {
+				Slug string `json:"slug"`
+			} `json:"teams"`
+			Destinations []struct {
+				Destination struct {
+					Name string `json:"name"`
+				} `json:"destination"`
+				Entries []struct {
+					Kind string `json:"kind"`
+				} `json:"entries"`
+			} `json:"destinations"`
+		} `json:"alert_groups"`
+		Counts []struct {
+			Destination struct {
+				Name string `json:"name"`
+			} `json:"destination"`
+			Count int `json:"alert_group_count"`
+		} `json:"destination_counts"`
+		SharedKeyWarning bool `json:"shared_key_warning"`
+	} `json:"delivery"`
+}
+
+// lines are the Alert Groups of the preview as team slugs>level>destination:kinds, sorted.
+func (p deliveryPreview) lines() []string {
+	out := []string{}
+	for _, g := range p.Delivery.AlertGroups {
+		var teams, dests []string
+		for _, t := range g.Teams {
+			teams = append(teams, t.Slug)
+		}
+		for _, d := range g.Destinations {
+			var kinds []string
+			for _, e := range d.Entries {
+				kinds = append(kinds, e.Kind)
+			}
+			dests = append(dests, d.Destination.Name+":"+strings.Join(kinds, "+"))
+		}
+		out = append(out, strings.Join(teams, ",")+">"+g.Level+">"+strings.Join(dests, ","))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// TestRoutingPreviewDelivery is S-122 against `muster dev`, as its Verification: with the Route "Infrastructure" of
+// S-121 and Alerts of payments (warning) and devops (critical) in the period, the settings of the Route sent unsaved
+// list the Alert Group of payments in infra-notice (the Route) and payments-notice (the Team) and that of devops in
+// infra-critical alone; without "Also to the Teams from the label" the first reaches infra-notice only; a Group key
+// without the Team label warns while the option is on and does not otherwise; and the preview changes no Route
+// (C-26.FR-12).
+func TestRoutingPreviewDelivery(t *testing.T) {
+	h := Start(t, DevProcess)
+	e := newMM(t, h, h.Replicas[0])
+	rt := &routingTeams{mm: e, dests: map[string]string{}}
+	conn := e.connection(200)
+	for _, name := range []string{"infra-critical", "infra-notice", "payments-notice"} {
+		rt.dests[name] = e.destination(name, conn, "ch-"+name, map[string]string{}, 50)
+	}
+	var profiles struct {
+		Items []struct {
+			ID     string         `json:"id"`
+			Policy map[string]any `json:"policy"`
+		} `json:"items"`
+	}
+	decode(t, e.api.do(http.MethodGet, "/api/v1/route-profiles", ""), &profiles)
+	rt.policy = profiles.Items[0].Policy
+	rt.team("payments", rt.entries("payments-notice", "below_critical"))
+	infra := rt.route("Infrastructure", "infra", []string{"alertname", "system", "team"}, true, "",
+		rt.entries("infra-critical", "critical", "infra-notice", "below_critical"), nil)["id"].(string)
+
+	e.group("w1", "Disk")
+	e.alert("w1", "a", `{"category":"infra","system":"k8s","team":"payments","severity":"warning"}`, "")
+	e.alert("w1", "b", `{"category":"infra","system":"k8s","team":"devops","severity":"critical"}`, "")
+	e.notify("w1", "first notification")
+
+	routes := func() string {
+		return fmt.Sprint(h.count(t, `SELECT count(*) FROM routes`), "/",
+			h.count(t, `SELECT coalesce(sum(version), 0) FROM routes`))
+	}
+	audit := h.count(t, `SELECT count(*) FROM audit_log WHERE action LIKE 'route.%'`)
+	before := routes()
+	preview := func(key string, toTeams bool) deliveryPreview {
+		t.Helper()
+		var p deliveryPreview
+		a := e.api.do(http.MethodPost, "/api/v1/group-key-previews", fmt.Sprintf(`{"route_id":"%s","matchers":[{"label":"category",
+			"op":"=","value":"infra"}],"proposed_group_key":%s,"deliver_to_teams":%v,"destination_entries":[
+			{"destination_id":"%s","severity_condition":"critical"},
+			{"destination_id":"%s","severity_condition":"below_critical"}]}`, infra, key, toTeams,
+			rt.dests["infra-critical"], rt.dests["infra-notice"]))
+		decode(t, a, &p)
+		if a.status != http.StatusOK || p.Delivery == nil {
+			t.Fatalf("preview = %d %s", a.status, a.body)
+		}
+		return p
+	}
+	p := preview(`["alertname","system","team"]`, true)
+	if got, want := p.lines(), []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route,payments-notice:team"}; !slices.Equal(got, want) {
+		t.Errorf("deliver to Teams: %q, want %q", got, want)
+	}
+	counts := map[string]int{}
+	for _, c := range p.Delivery.Counts {
+		counts[c.Destination.Name] = c.Count
+	}
+	if p.Delivery.SharedKeyWarning || counts["infra-critical"] != 1 || counts["infra-notice"] != 1 ||
+		counts["payments-notice"] != 1 || len(counts) != 3 {
+		t.Errorf("counts %v, warning %v", counts, p.Delivery.SharedKeyWarning)
+	}
+	if got, want := preview(`["alertname","system","team"]`, false).lines(), []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route"}; !slices.Equal(got, want) {
+		t.Errorf("without deliver_to_teams: %q, want %q", got, want)
+	}
+	if !preview(`["alertname","system"]`, true).Delivery.SharedKeyWarning {
+		t.Error("no shared_key_warning with the Team label missing from the Group key")
+	}
+	if preview(`["alertname","system"]`, false).Delivery.SharedKeyWarning {
+		t.Error("shared_key_warning without deliver_to_teams")
+	}
+	// The saved Route's own settings answer when none are sent.
+	var saved deliveryPreview
+	decode(t, e.api.do(http.MethodPost, "/api/v1/group-key-previews",
+		`{"route_id":"`+infra+`","proposed_group_key":["alertname","system","team"]}`), &saved)
+	if got, want := saved.lines(), []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route,payments-notice:team"}; !slices.Equal(got, want) {
+		t.Errorf("saved Route: %q, want %q", got, want)
+	}
+	if after := routes(); after != before || h.count(t, `SELECT count(*) FROM audit_log WHERE action LIKE 'route.%'`) != audit {
+		t.Errorf("the previews changed the Routes: %s, now %s", before, after)
+	}
 }

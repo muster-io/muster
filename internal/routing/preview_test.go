@@ -14,10 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/routing/dbgen"
+	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
 )
 
 // fakeSnapshots are the Stored Snapshots of the period, newest first, each as the firing Alerts of one body.
@@ -361,5 +365,377 @@ func TestSideOf(t *testing.T) {
 	if side = sideOf(alerts, nil); side.AlertGroupCount != 1 || side.Examples[0].AlertCount != len(alerts) ||
 		len(side.Examples[0].GroupKeyValues) != 0 {
 		t.Errorf("no key %+v", side)
+	}
+}
+
+func (s *fakeStore) ListPreviewTeams(_ context.Context, arg dbgen.ListPreviewTeamsParams) (
+	[]dbgen.ListPreviewTeamsRow, error) {
+	if err := s.call("ListPreviewTeams"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListPreviewTeamsRow
+	for _, r := range s.previewTeams {
+		if slices.Contains(arg.TeamIds, r.ID) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ListPreviewTeamEntries(_ context.Context, arg dbgen.ListPreviewTeamEntriesParams) (
+	[]dbgen.ListPreviewTeamEntriesRow, error) {
+	if err := s.call("ListPreviewTeamEntries"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListPreviewTeamEntriesRow
+	for _, r := range s.teamEntries {
+		if slices.Contains(arg.TeamIds, r.TeamID) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ListPreviewDestinations(_ context.Context, arg dbgen.ListPreviewDestinationsParams) (
+	[]dbgen.ListPreviewDestinationsRow, error) {
+	if err := s.call("ListPreviewDestinations"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListPreviewDestinationsRow
+	for _, r := range s.previewDests {
+		if slices.Contains(arg.Ids, r.ID) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+const (
+	destCritical = "DSAAAAAAAAAAB1"
+	destNotice   = "DSAAAAAAAAAAB2"
+	destPayments = "DSAAAAAAAAAAB3"
+)
+
+// deliveryService is the setup of S-121's Route "Infrastructure": the Destinations infra-critical, infra-notice and
+// payments-notice, the Team payments (id 1) with payments-notice below critical, and Alerts of payments (warning)
+// and devops (critical) in the period.
+func deliveryService(t *testing.T) (*Service, *fakeStore) {
+	t.Helper()
+	svc, store, snaps, _ := newPreviewService(t)
+	store.dests[destCritical], store.dests[destNotice], store.dests[destPayments] = 61, 62, 63
+	store.previewDests = []dbgen.ListPreviewDestinationsRow{
+		{ID: 61, PublicID: destCritical, Name: "infra-critical", Type: "mattermost", Health: "healthy"},
+		{ID: 62, PublicID: destNotice, Name: "infra-notice", Type: "mattermost", Health: "healthy"},
+		{ID: 63, PublicID: destPayments, Name: "payments-notice", Type: "telegram", Health: "broken",
+			BrokenSince: pgtype.Timestamptz{Time: t0, Valid: true}, BrokenReason: pgtype.Text{String: "no", Valid: true}}}
+	store.classTeams = []teamsdb.ListClassifiedTeamsRow{{ID: 1, Slug: "payments"}, {ID: 2, Slug: "checkout"}}
+	store.classMatchers = []teamsdb.ListClassifiedMatchersRow{{TeamID: 2, Label: "namespace", Op: "=", Value: "shop"}}
+	store.previewTeams = []dbgen.ListPreviewTeamsRow{{ID: 1, PublicID: "TMAAAAAAAAAAA1", Name: "Payments", Slug: "payments"},
+		{ID: 2, PublicID: "TMAAAAAAAAAAA2", Name: "Checkout", Slug: "checkout"}}
+	store.teamEntries = []dbgen.ListPreviewTeamEntriesRow{{TeamID: 1, DestinationID: 63, SeverityCondition: "below_critical"},
+		{TeamID: 2, DestinationID: 62, SeverityCondition: "any"}}
+	snaps.bodies = [][]ingest.FiringAlert{firing(
+		"p1=alertname:Disk,category:infra,team:payments,severity:warning",
+		"d1=alertname:Disk,category:infra,team:devops,severity:critical")}
+	return svc, store
+}
+
+func infraEntries() *[]DestinationEntry {
+	return &[]DestinationEntry{{DestinationID: destCritical, Condition: ConditionCritical},
+		{DestinationID: destNotice, Condition: ConditionBelowCritical}}
+}
+
+// deliveryLine is a group of the delivery preview as team slugs>level>destination:kinds.
+func deliveryLine(g DeliveryGroup) string {
+	var teams, dests []string
+	for _, t := range g.Teams {
+		teams = append(teams, t.Slug)
+	}
+	for _, d := range g.Destinations {
+		var kinds []string
+		for _, e := range d.Entries {
+			kinds = append(kinds, e.Kind)
+		}
+		dests = append(dests, d.Destination.Name+":"+strings.Join(kinds, "+"))
+	}
+	return fmt.Sprintf("%s>%s>%s", strings.Join(teams, ","), g.SeverityLevel, strings.Join(dests, ","))
+}
+
+func deliveryLines(d *DeliveryPreview) []string {
+	var out []string
+	for _, g := range d.AlertGroups {
+		out = append(out, deliveryLine(g))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// TestPreviewDelivery is C-26.FR-12 with the Route "Infrastructure" of S-121 sent unsaved: the Alert Group of payments
+// reaches infra-notice by the Route and payments-notice by the Team, that of devops infra-critical only; without
+// deliver_to_teams the first reaches infra-notice only; the preview writes nothing.
+func TestPreviewDelivery(t *testing.T) {
+	svc, store := deliveryService(t)
+	ctx := t.Context()
+	req := PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=", Value: "infra"}},
+		ProposedGroupKey: []string{"alertname", "team"}, DestinationEntries: infraEntries(), DeliverToTeams: ptr(true)}
+	p, err := svc.Preview(ctx, req)
+	if err != nil || p.Delivery == nil {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	if got := deliveryLines(p.Delivery); !slices.Equal(got, []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route,payments-notice:team"}) {
+		t.Errorf("deliver to Teams: %q", got)
+	}
+	if p.Delivery.SharedKeyWarning {
+		t.Error("the Group key has the Team label")
+	}
+	counts := map[string]int{}
+	for _, c := range p.Delivery.DestinationCounts {
+		counts[c.Destination.Name] = c.AlertGroupCount
+	}
+	if len(counts) != 3 || counts["infra-critical"] != 1 || counts["infra-notice"] != 1 || counts["payments-notice"] != 1 {
+		t.Errorf("counts %v", counts)
+	}
+	var team *PreviewTeam
+	for _, g := range p.Delivery.AlertGroups {
+		for _, d := range g.Destinations {
+			for _, e := range d.Entries {
+				if e.Kind == EntryTeam {
+					team = e.Team
+				}
+			}
+			if d.Destination.Name == "payments-notice" && (d.Destination.Health != "broken" ||
+				d.Destination.BrokenSince == nil || *d.Destination.BrokenReason != "no") {
+				t.Errorf("destination %+v", d.Destination)
+			}
+		}
+	}
+	if team == nil || team.Slug != "payments" || team.PublicID != "TMAAAAAAAAAAA1" {
+		t.Errorf("team entry %+v", team)
+	}
+
+	req.DeliverToTeams = ptr(false)
+	p, err = svc.Preview(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := deliveryLines(p.Delivery); !slices.Equal(got, []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route"}) {
+		t.Errorf("without deliver_to_teams: %q", got)
+	}
+	if len(store.audit) != 0 || len(store.hints) != 0 || len(store.updates) != 0 || len(store.notified) != 0 ||
+		store.calls["InsertRoute"]+store.calls["UpdateRoute"]+store.calls["LockRoute"]+
+			store.calls["LockRouteMembership"]+store.calls["LockTeamMembership"] != 0 {
+		t.Errorf("the preview wrote or locked: %+v %v", store.audit, store.calls)
+	}
+}
+
+// TestPreviewDeliverySettings: absent settings take the saved Route's when it is given, else none, no entries and
+// false; given ones replace them; the delivery is absent for a request that gives nothing of the three and no Route.
+func TestPreviewDeliverySettings(t *testing.T) {
+	svc, _ := deliveryService(t)
+	ctx := t.Context()
+	infra := []Matcher{{Label: "category", Op: "=", Value: "infra"}}
+	key := []string{"alertname", "team"}
+	if p, err := svc.Preview(ctx, PreviewRequest{Matchers: infra, ProposedGroupKey: key,
+		MinimumSeverity: ptr(MinimumCritical)}); err != nil || p.Delivery != nil {
+		t.Errorf("neither entries nor deliver_to_teams: %+v, %v", p.Delivery, err)
+	}
+	p, err := svc.Preview(ctx, PreviewRequest{Matchers: infra, ProposedGroupKey: key, DeliverToTeams: ptr(true)})
+	if err != nil || !slices.Equal(deliveryLines(p.Delivery), []string{">critical>",
+		"payments>warning>payments-notice:team"}) {
+		t.Errorf("no entries: %+v, %v", p.Delivery, err)
+	}
+
+	in := input("infra", infra...)
+	in.MinimumSeverity, in.DeliverToTeams, in.DestinationEntries = ptr(MinimumCritical), ptr(true), infraEntries()
+	saved, err := svc.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = svc.Preview(ctx, PreviewRequest{RouteID: saved.PublicID, ProposedGroupKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The saved Minimum severity critical raises both groups to critical: infra-critical for both, no notice, and the
+	// Team's below_critical entry is not met.
+	if got := deliveryLines(p.Delivery); !slices.Equal(got, []string{">critical>infra-critical:route",
+		"payments>critical>infra-critical:route"}) {
+		t.Errorf("saved: %q", got)
+	}
+	p, err = svc.Preview(ctx, PreviewRequest{RouteID: saved.PublicID, ProposedGroupKey: key,
+		MinimumSeverity: ptr(MinimumNone), DeliverToTeams: ptr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := deliveryLines(p.Delivery); !slices.Equal(got, []string{">critical>infra-critical:route",
+		"payments>warning>infra-notice:route"}) {
+		t.Errorf("overridden: %q", got)
+	}
+	p, err = svc.Preview(ctx, PreviewRequest{RouteID: saved.PublicID, ProposedGroupKey: key,
+		DestinationEntries: &[]DestinationEntry{}, MinimumSeverity: ptr(MinimumNone)})
+	if err != nil || len(p.Delivery.DestinationCounts) != 1 || p.Delivery.DestinationCounts[0].Destination.Name !=
+		"payments-notice" {
+		t.Errorf("no entries given, Teams saved: %+v, %v", p.Delivery, err)
+	}
+}
+
+// TestPreviewDeliveryMinimumSeverity: the Minimum severity raises the Severity level of a group and never lowers it,
+// and a group's level is the highest of its Alerts.
+func TestPreviewDeliveryMinimumSeverity(t *testing.T) {
+	svc, _ := deliveryService(t)
+	snaps := svc.snapshots.(*fakeSnapshots)
+	snaps.bodies = [][]ingest.FiringAlert{firing("a=alertname:A,severity:info", "b=alertname:B,severity:warning",
+		"c=alertname:C,severity:critical", "d=alertname:C,severity:info", "e=alertname:D,severity:page",
+		"f=alertname:E")}
+	for _, tt := range []struct{ minimum, want string }{
+		{MinimumNone, "A=info B=warning C=critical D=warning E=info"},
+		{MinimumWarning, "A=warning B=warning C=critical D=warning E=warning"},
+		{MinimumCritical, "A=critical B=critical C=critical D=critical E=critical"},
+	} {
+		p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "alertname", Op: "=~", Value: ".+"}},
+			ProposedGroupKey: []string{"alertname"}, MinimumSeverity: ptr(tt.minimum), DeliverToTeams: ptr(false)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		levels := map[string]string{}
+		for _, g := range p.Delivery.AlertGroups {
+			levels[g.GroupKeyValues["alertname"]] = g.SeverityLevel
+		}
+		var got []string
+		for _, n := range []string{"A", "B", "C", "D", "E"} {
+			got = append(got, n+"="+levels[n])
+		}
+		if strings.Join(got, " ") != tt.want {
+			t.Errorf("minimum %s: %v, want %s", tt.minimum, got, tt.want)
+		}
+	}
+}
+
+// TestPreviewDeliveryTeams: an Alert Group of Alerts of two Teams, by the label and by a Team matcher, lists both and
+// reaches the Destinations of both; the warning is on while the Route delivers to Teams and the Group key lacks the
+// Team label.
+func TestPreviewDeliveryTeams(t *testing.T) {
+	svc, _ := deliveryService(t)
+	snaps := svc.snapshots.(*fakeSnapshots)
+	snaps.bodies = [][]ingest.FiringAlert{firing("p=alertname:Disk,team:payments,severity:warning",
+		"c=alertname:Disk,namespace:shop,severity:warning", "o=alertname:Disk,severity:warning")}
+	infra := []Matcher{{Label: "alertname", Op: "=", Value: "Disk"}}
+	for _, tt := range []struct {
+		key  []string
+		to   bool
+		warn bool
+		line string
+	}{
+		{[]string{"alertname"}, true, true, "payments,checkout>warning>infra-notice:route+team,payments-notice:team"},
+		{[]string{"alertname"}, false, false, "payments,checkout>warning>infra-notice:route"},
+		{[]string{"alertname", "team"}, true, false, ""},
+	} {
+		p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: infra, ProposedGroupKey: tt.key,
+			DestinationEntries: infraEntries(), DeliverToTeams: ptr(tt.to)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Delivery.SharedKeyWarning != tt.warn {
+			t.Errorf("%v %v: warning %v", tt.key, tt.to, p.Delivery.SharedKeyWarning)
+		}
+		if tt.line != "" && (len(p.Delivery.AlertGroups) != 1 || deliveryLine(p.Delivery.AlertGroups[0]) != tt.line) {
+			t.Errorf("%v %v: %q", tt.key, tt.to, deliveryLines(p.Delivery))
+		}
+	}
+}
+
+// TestPreviewDeliveryCounts: only the PreviewExamples largest groups are listed, and the counts cover all of them.
+func TestPreviewDeliveryCounts(t *testing.T) {
+	svc, _ := deliveryService(t)
+	snaps := svc.snapshots.(*fakeSnapshots)
+	var alerts []string
+	for i := range 8 {
+		alerts = append(alerts, fmt.Sprintf("a%d=alertname:A%d,severity:critical", i, i))
+		if i < 3 {
+			alerts = append(alerts, fmt.Sprintf("b%d=alertname:A%d,node:x%d,severity:critical", i, i, i))
+		}
+	}
+	snaps.bodies = [][]ingest.FiringAlert{firing(alerts...)}
+	p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "alertname", Op: "=~", Value: "A.*"}},
+		ProposedGroupKey: []string{"alertname"}, DestinationEntries: infraEntries(), DeliverToTeams: ptr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := p.Delivery
+	if len(d.AlertGroups) != PreviewExamples || d.AlertGroups[0].AlertCount != 2 || len(d.DestinationCounts) != 1 ||
+		d.DestinationCounts[0].Destination.Name != "infra-critical" || d.DestinationCounts[0].AlertGroupCount != 8 {
+		t.Errorf("%d listed, counts %+v", len(d.AlertGroups), d.DestinationCounts)
+	}
+}
+
+// TestPreviewDeliveryRefusals: a Minimum severity outside the three, an unknown or doubled Destination and a bad
+// condition point at their fields, and a failing read fails the preview.
+func TestPreviewDeliveryRefusals(t *testing.T) {
+	svc, _ := deliveryService(t)
+	base := PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=", Value: "infra"}},
+		ProposedGroupKey: []string{"alertname"}, DestinationEntries: infraEntries(), DeliverToTeams: ptr(true)}
+	for _, tt := range []struct {
+		change        func(*PreviewRequest)
+		pointer, code string
+	}{
+		{func(r *PreviewRequest) { r.MinimumSeverity = ptr("high") }, "/minimum_severity", CodeInvalidFormat},
+		{func(r *PreviewRequest) {
+			r.DestinationEntries = &[]DestinationEntry{{DestinationID: "DSZZZZZZZZZZZZ"}}
+		}, "/destination_entries/0/destination_id", CodeUnknownID},
+		{func(r *PreviewRequest) {
+			r.DestinationEntries = &[]DestinationEntry{{DestinationID: destNotice}, {DestinationID: destNotice}}
+		}, "/destination_entries/1/destination_id", CodeDuplicate},
+		{func(r *PreviewRequest) {
+			r.DestinationEntries = &[]DestinationEntry{{DestinationID: destNotice, Condition: "high"}}
+		}, "/destination_entries/0/severity_condition", CodeInvalidFormat},
+	} {
+		req := base
+		tt.change(&req)
+		_, err := svc.Preview(t.Context(), req)
+		if f := fieldError(t, err); f.Pointer != tt.pointer || f.Code != tt.code {
+			t.Errorf("%+v", f)
+		}
+	}
+	for _, name := range []string{"ListPreviewTeams", "ListPreviewTeamEntries", "ListPreviewDestinations",
+		"ListClassifiedTeams", "ListClassifiedMatchers", "ResolveDestinations"} {
+		var store *fakeStore
+		svc, store = deliveryService(t)
+		store.fail[name] = errBoom
+		snaps := svc.snapshots.(*fakeSnapshots)
+		snaps.bodies = [][]ingest.FiringAlert{firing("p=alertname:Disk,category:infra,team:payments,severity:warning")}
+		if _, err := svc.Preview(t.Context(), base); !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	svc, store := deliveryService(t)
+	store.mapping = []byte(`{`)
+	if _, err := svc.Preview(t.Context(), base); err == nil {
+		t.Error("a broken severity mapping")
+	}
+}
+
+// TestPreviewDeliveryDeletedMidRequest: a Team or a Destination that a read no longer returns, deleted while the
+// preview ran, is left out instead of being named with an empty public_id.
+func TestPreviewDeliveryDeletedMidRequest(t *testing.T) {
+	svc, store := deliveryService(t)
+	store.previewTeams, store.previewDests = nil, store.previewDests[:1]
+	p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=", Value: "infra"}},
+		ProposedGroupKey: []string{"alertname", "team"}, DestinationEntries: infraEntries(), DeliverToTeams: ptr(true)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range p.Delivery.AlertGroups {
+		if len(g.Teams) != 0 || len(g.Destinations) > 1 {
+			t.Errorf("%+v", g)
+		}
+		for _, d := range g.Destinations {
+			if d.Destination.PublicID == "" || len(d.Entries) == 0 {
+				t.Errorf("destination %+v", d)
+			}
+		}
+	}
+	if len(p.Delivery.DestinationCounts) != 1 || p.Delivery.DestinationCounts[0].Destination.PublicID != destCritical {
+		t.Errorf("counts %+v", p.Delivery.DestinationCounts)
 	}
 }

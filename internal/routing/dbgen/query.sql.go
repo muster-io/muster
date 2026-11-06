@@ -902,6 +902,145 @@ func (q *Queries) ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]
 	return items, nil
 }
 
+const listPreviewDestinations = `-- name: ListPreviewDestinations :many
+SELECT id, public_id, name, type, health, broken_since, broken_reason
+FROM destinations
+WHERE org_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListPreviewDestinationsParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListPreviewDestinationsRow struct {
+	ID           int64
+	PublicID     string
+	Name         string
+	Type         string
+	Health       string
+	BrokenSince  pgtype.Timestamptz
+	BrokenReason pgtype.Text
+}
+
+// ListPreviewDestinations reads the Destinations that are not deleted among the ids with their names, types and
+// health, for the preview "Where alerts go".
+func (q *Queries) ListPreviewDestinations(ctx context.Context, arg ListPreviewDestinationsParams) ([]ListPreviewDestinationsRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewDestinations, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewDestinationsRow{}
+	for rows.Next() {
+		var i ListPreviewDestinationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.Health,
+			&i.BrokenSince,
+			&i.BrokenReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPreviewTeamEntries = `-- name: ListPreviewTeamEntries :many
+SELECT td.team_id, td.destination_id, td.severity_condition
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+WHERE td.org_id = $1 AND td.team_id = ANY($2::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, td.destination_id
+`
+
+type ListPreviewTeamEntriesParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListPreviewTeamEntriesRow struct {
+	TeamID            int64
+	DestinationID     int64
+	SeverityCondition string
+}
+
+// ListPreviewTeamEntries lists the Destination entries of the Teams whose Destinations are not deleted, as delivery
+// reads them, for the preview "Where alerts go".
+func (q *Queries) ListPreviewTeamEntries(ctx context.Context, arg ListPreviewTeamEntriesParams) ([]ListPreviewTeamEntriesRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewTeamEntries, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewTeamEntriesRow{}
+	for rows.Next() {
+		var i ListPreviewTeamEntriesRow
+		if err := rows.Scan(&i.TeamID, &i.DestinationID, &i.SeverityCondition); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPreviewTeams = `-- name: ListPreviewTeams :many
+SELECT id, public_id, name, slug
+FROM teams
+WHERE org_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListPreviewTeamsParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListPreviewTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Slug     string
+}
+
+// ListPreviewTeams reads the Teams that are not deleted among the ids with their names and slugs, for the Teams the
+// preview "Where alerts go" names.
+func (q *Queries) ListPreviewTeams(ctx context.Context, arg ListPreviewTeamsParams) ([]ListPreviewTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listPreviewTeams, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPreviewTeamsRow{}
+	for rows.Next() {
+		var i ListPreviewTeamsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteDestinationIDs = `-- name: ListRouteDestinationIDs :many
 SELECT rd.route_id, rd.destination_id, d.public_id, rd.severity_condition
 FROM route_destinations rd

@@ -143,6 +143,18 @@ func (f *fakeRoutes) Preview(_ context.Context, req routing.PreviewRequest) (rou
 		out.Current = &routing.PreviewSide{AlertGroupCount: 1, Examples: []routing.PreviewExample{
 			{GroupKeyValues: map[string]string{}, AlertCount: 4}}}
 	}
+	if req.DestinationEntries != nil || req.DeliverToTeams != nil {
+		team := routing.PreviewTeam{PublicID: "TMAAAAAAAAAAA1", Name: "Payments", Slug: "payments"}
+		dest := routing.PreviewDestination{PublicID: "DSAAAAAAAAAAA1", Name: "infra-notice", Type: "mattermost",
+			Health: "healthy"}
+		out.Delivery = &routing.DeliveryPreview{SharedKeyWarning: true,
+			AlertGroups: []routing.DeliveryGroup{{GroupKeyValues: map[string]string{"team": "payments"}, AlertCount: 1,
+				SeverityLevel: "warning", Teams: []routing.PreviewTeam{team},
+				Destinations: []routing.ReachedDestination{{Destination: dest, Entries: []routing.ReachedEntry{
+					{Kind: routing.EntryRoute, Condition: routing.ConditionAny},
+					{Kind: routing.EntryTeam, Team: &team, Condition: routing.ConditionBelowCritical}}}}}},
+			DestinationCounts: []routing.DestinationCount{{Destination: dest, AlertGroupCount: 3}}}
+	}
 	return out, f.err
 }
 
@@ -544,6 +556,57 @@ func TestPreviewGroupKeyAPI(t *testing.T) {
 	if a = x.as(t, routesReader, http.MethodPost, "/api/v1/group-key-previews",
 		`{"route_id":"`+routeID+`","proposed_group_key":[]}`); a.status != http.StatusForbidden {
 		t.Errorf("preview by a viewer = %d", a.status)
+	}
+}
+
+// TestPreviewGroupKeyDeliveryAPI is C-26.FR-12 at the API: the unsaved settings reach the domain as given and the
+// delivery preview is answered with its Teams, Destinations, entries and counts; without them there is no delivery.
+func TestPreviewGroupKeyDeliveryAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	a := x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"matchers":[],"proposed_group_key":["team"],"minimum_severity":"warning","deliver_to_teams":true,
+		"destination_entries":[{"destination_id":"DSAAAAAAAAAAA1","severity_condition":"critical"},
+		{"destination_id":"DSAAAAAAAAAAA2"}]}`)
+	var p gen.GroupKeyPreview
+	decodeInto(t, a, &p)
+	req := fr.previews[0]
+	if a.status != http.StatusOK || *req.MinimumSeverity != "warning" || !*req.DeliverToTeams ||
+		len(*req.DestinationEntries) != 2 || (*req.DestinationEntries)[0].Condition != routing.ConditionCritical ||
+		(*req.DestinationEntries)[1].Condition != "" {
+		t.Fatalf("request %+v", req)
+	}
+	d := p.Delivery
+	if d == nil || !d.SharedKeyWarning || len(d.AlertGroups) != 1 || d.AlertGroups[0].SeverityLevel != gen.SeverityLevelWarning ||
+		d.AlertGroups[0].Teams[0].Slug != "payments" || d.DestinationCounts[0].AlertGroupCount != 3 {
+		t.Fatalf("delivery %s", a.body)
+	}
+	entries := d.AlertGroups[0].Destinations[0].Entries
+	if len(entries) != 2 || entries[0].Team.IsSpecified() && !entries[0].Team.IsNull() ||
+		!entries[1].Team.IsSpecified() || entries[1].Team.MustGet().Name != "Payments" ||
+		entries[1].SeverityCondition != gen.SeverityConditionBelowCritical ||
+		d.AlertGroups[0].Destinations[0].Destination.Health.State != gen.Healthy {
+		t.Errorf("entries %s", a.body)
+	}
+	a = x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"matchers":[],"proposed_group_key":["team"]}`)
+	if a.status != http.StatusOK || strings.Contains(string(a.body), `"delivery"`) || fr.previews[1].MinimumSeverity != nil ||
+		fr.previews[1].DestinationEntries != nil || fr.previews[1].DeliverToTeams != nil {
+		t.Errorf("without settings = %d %s", a.status, a.body)
+	}
+}
+
+// TestPreviewGroupKeyInvalidSeverityAPI: a Minimum severity outside none, warning and critical is refused by the
+// request validation as a 400 invalid_format at /minimum_severity, before the domain sees it.
+func TestPreviewGroupKeyInvalidSeverityAPI(t *testing.T) {
+	x, fr := newRoutesAPI(t)
+	a := x.as(t, routesWriter, http.MethodPost, "/api/v1/group-key-previews",
+		`{"matchers":[],"proposed_group_key":["team"],"minimum_severity":"high"}`)
+	errs, _ := a.json(t)["errors"].([]any)
+	if a.status != http.StatusBadRequest || len(errs) == 0 || len(fr.previews) != 0 {
+		t.Errorf("invalid minimum_severity = %d %s", a.status, a.body)
+	}
+	if first, _ := errs[0].(map[string]any); first["code"] != "invalid_format" || first["pointer"] != "/minimum_severity" {
+		t.Errorf("code %v in %s", first["code"], a.body)
 	}
 }
 
