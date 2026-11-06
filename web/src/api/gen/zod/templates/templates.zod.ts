@@ -80,7 +80,7 @@ export const PreviewTemplateResponse = zod.object({
   "label": zod.string(),
   "url": zod.string()
 })).describe('The links, "Open in Muster" first.')
-}).describe('The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.'),zod.null()]).optional().describe('For `root_message`, the content of the rendered message as structured data; null when the template failed, and when a template of the Route renders the content, which the structured data cannot carry, as a bridge then receives no `layout`.'),
+}).describe('The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.'),zod.null()]).optional().describe('For `root_message`, the content of the rendered message as structured data; null when the template failed, and when a template of the Route renders the content, which the structured data cannot carry, as a bridge then receives no `layout`. The preview renders without the Route\'s line template, so for a Route with a line template it shows the compact layout, although a bridge receives none.'),
   "length": zod.int().optional().describe('For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.'),
   "messenger_limit": zod.int().nullish().describe('For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost, 4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.'),
   "errors": zod.array(zod.object({
