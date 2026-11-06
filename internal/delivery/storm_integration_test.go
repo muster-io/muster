@@ -74,7 +74,7 @@ func TestEnsureStormSummaryRevives(t *testing.T) {
 				message_id = CASE WHEN $3 THEN 'm1' END, message_url = CASE WHEN $3 THEN 'https://x/m1' END,
 				published_at = CASE WHEN $3 THEN $4::timestamptz END,
 				publication_started_at = CASE WHEN $3 THEN $4::timestamptz END,
-				thread_state = CASE WHEN $3 THEN 'opened' ELSE 'none' END,
+				thread_state = CASE WHEN $3 THEN 'attached' ELSE 'none' END,
 				thread_anchor_id = CASE WHEN $3 THEN 'm1' END, thread_chain_last_id = CASE WHEN $3 THEN 'r1' END,
 				actual_version = CASE WHEN $3 THEN 1 END, actual_hash = CASE WHEN $3 THEN '\x01'::bytea END
 				WHERE id = $1`, row.ID, c.state, c.published, l.business.Now())
