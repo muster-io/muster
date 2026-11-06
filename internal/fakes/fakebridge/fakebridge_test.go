@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -518,7 +519,7 @@ func TestHarness(t *testing.T) {
 
 // envelope is a Root message to channel as Muster posts it.
 func envelope(channel string) gen.MessageInput {
-	return gen.MessageInput{ChannelId: channel, Kind: gen.Root, Status: gen.Firing, Color: "#d32f2f", Emoji: "🔴",
+	return gen.MessageInput{ChannelId: channel, Kind: gen.Root, Status: gen.StatusFiring, Color: "#d32f2f", Emoji: "🔴",
 		Title: "#1 DiskFull",
 		Link:  gen.Link{Url: "http://localhost:8080/alert-groups/AG00000000000A", Label: "Open in Muster"},
 		Body:  "> **pod** i1", Buttons: []gen.Button{{Label: "Ack", Style: gen.Primary, Data: "a1.k1.c2ln"}},
@@ -632,7 +633,7 @@ func TestMessages(t *testing.T) {
 		t.Errorf("posted %+v", p)
 	}
 	var e gen.MessageEdited
-	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).ok(t, http.StatusOK, &e)
+	s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)).ok(t, http.StatusOK, &e)
 	if e.Truncated {
 		t.Errorf("edited %+v", e)
 	}
@@ -650,7 +651,7 @@ func TestMessages(t *testing.T) {
 	if !r.OK() || out.MessageId != "m2" || out.Url.MustGet() != s.fake.URL()+"/m/m2" || out.ThreadRef.IsSpecified() {
 		t.Fatalf("Muster's post = %+v, %+v", out, r)
 	}
-	if _, r := c.EditMessage(ctx, outbound.ClassDelivery, "m2", content(gen.Resolved)); !r.OK() {
+	if _, r := c.EditMessage(ctx, outbound.ClassDelivery, "m2", content(gen.StatusResolved)); !r.OK() {
 		t.Errorf("Muster's edit = %+v", r)
 	}
 	rep, r := c.ReplyInThread(ctx, outbound.ClassDelivery, "m2", "reply-DS2-1", replyOf(nil))
@@ -670,7 +671,7 @@ func TestMessages(t *testing.T) {
 	m := ms[0]
 	if m.ID != "m1" || m.Bot != 1 || m.ChannelID != fakebridge.ChannelAlerts || m.URL != s.fake.URL()+"/m/m1" ||
 		m.Deleted || m.Truncated || m.Envelope.Title != "#1 DiskFull" || !m.Envelope.Notify ||
-		len(m.Envelope.Buttons) != 1 || len(m.Edits) != 1 || m.Edits[0].Status != gen.Acknowledged ||
+		len(m.Envelope.Buttons) != 1 || len(m.Edits) != 1 || m.Edits[0].Status != gen.StatusAcknowledged ||
 		len(m.Replies) != 2 {
 		t.Errorf("m1 = %+v", m)
 	}
@@ -680,7 +681,7 @@ func TestMessages(t *testing.T) {
 		t.Errorf("replies of m1 = %+v", m.Replies)
 	}
 	if m := ms[1]; m.ID != "m2" || m.Bot != 2 || m.ChannelID != fakebridge.ChannelAlertsProd ||
-		len(m.Edits) != 1 || m.Edits[0].Status != gen.Resolved || len(m.Replies) != 1 || m.Replies[0].ID != "r3" {
+		len(m.Edits) != 1 || m.Edits[0].Status != gen.StatusResolved || len(m.Replies) != 1 || m.Replies[0].ID != "r3" {
 		t.Errorf("m2 = %+v", m)
 	}
 	var raw []struct {
@@ -725,10 +726,10 @@ func TestMessageRefusals(t *testing.T) {
 	noReplyMentions.Mentions = nil
 	noReplyButtons := replyOf(nil)
 	noReplyButtons.Buttons = nil
-	editButtons := content(gen.Firing)
+	editButtons := content(gen.StatusFiring)
 	editButtons.Buttons = nil
 	post, postJSON := envelope(fakebridge.ChannelAlerts), mustJSON(t, envelope(fakebridge.ChannelAlerts))
-	editJSON, replyJSON := mustJSON(t, content(gen.Firing)), mustJSON(t, replyOf(nil))
+	editJSON, replyJSON := mustJSON(t, content(gen.StatusFiring)), mustJSON(t, replyOf(nil))
 	const messages, edit, replies = "/v1/messages", "/v1/messages/m1", "/v1/messages/m1/thread-replies"
 	const postM, patchM = http.MethodPost, http.MethodPatch
 	for name, rq := range map[string]request{
@@ -755,7 +756,7 @@ func TestMessageRefusals(t *testing.T) {
 		"a reply of buttons null":  {method: postM, path: replies, key: "k", body: noReplyButtons, broken: true},
 		"a reply of mentions null": {method: postM, path: replies, key: "k", body: noReplyMentions, broken: true},
 		"a reply that is not JSON": {method: postM, path: replies, key: "k", body: `{`, broken: true},
-		"an edit of an unknown id": {method: patchM, path: "/v1/messages/m9", body: content(gen.Firing)},
+		"an edit of an unknown id": {method: patchM, path: "/v1/messages/m9", body: content(gen.StatusFiring)},
 		"a reply to an unknown id": {method: postM, path: "/v1/messages/m9/thread-replies", key: "k",
 			body: replyOf(nil)},
 	} {
@@ -766,7 +767,7 @@ func TestMessageRefusals(t *testing.T) {
 			a.refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
 		}
 	}
-	s.edit(t, fakebridge.SecondToken, "m1", content(gen.Firing)).refused(t, http.StatusBadRequest,
+	s.edit(t, fakebridge.SecondToken, "m1", content(gen.StatusFiring)).refused(t, http.StatusBadRequest,
 		gen.ErrorClassInvalid)
 	s.reply(t, fakebridge.SecondToken, "m1", "k", replyOf(nil)).refused(t, http.StatusBadRequest,
 		gen.ErrorClassInvalid)
@@ -774,6 +775,69 @@ func TestMessageRefusals(t *testing.T) {
 		gen.ErrorClassForbidden)
 	if ms := s.fake.Messages(); len(ms) != 1 || len(ms[0].Edits) != 0 || len(ms[0].Replies) != 0 {
 		t.Errorf("messages %+v", ms)
+	}
+}
+
+// layoutOf is the layout of a Root message of status as Muster sends it, with the Owner bob while it is acknowledged.
+func layoutOf(status gen.LayoutStatusKey) *gen.Layout {
+	l := &gen.Layout{Number: 1, Title: "DiskFull", Status: gen.LayoutStatus{Key: status, Word: string(status)},
+		Fields: []gen.LayoutField{{Name: "Severity", Value: "warning"}}, Summary: "Disk *full* on #1",
+		Labels: []gen.LayoutLabel{{Key: "pod", Value: "i1"}}, Alerts: nullable.NewNullNullable[gen.LayoutAlerts](),
+		Notices: []string{}, Assignees: []gen.LayoutPerson{}, Owner: nullable.NewNullNullable[gen.LayoutPerson](),
+		Links: []gen.LayoutLink{{Label: "Open in Muster", Url: "http://localhost:8080/alert-groups/AG00000000000A"}}}
+	if status == gen.LayoutStatusKeyAcknowledged {
+		l.Owner = nullable.NewNullableWithValue(gen.LayoutPerson{Name: "bob", Ref: nullable.NewNullNullable[string]()})
+	}
+	return l
+}
+
+// TestMessageLayouts covers C-29.FR-8 for the fake: each message and each edit keeps the `layout` Muster sent, as it
+// was sent, and /_fake/messages shows it; a message without one, a Storm summary, shows none; the fake checks the
+// status of a layout and renders nothing from it.
+func TestMessageLayouts(t *testing.T) {
+	s := start(t)
+	root := envelope(fakebridge.ChannelAlerts)
+	root.Layout = layoutOf(gen.LayoutStatusKeyFiring)
+	s.post(t, fakebridge.Token, "pub-1", root).posted(t)
+	edit := content(gen.StatusAcknowledged)
+	edit.Layout = layoutOf(gen.LayoutStatusKeyAcknowledged)
+	s.edit(t, fakebridge.Token, "m1", edit).ok(t, http.StatusOK, &gen.MessageEdited{})
+	storm := envelope(fakebridge.ChannelAlerts)
+	storm.Kind, storm.Status = gen.StormSummary, gen.StatusStorm
+	s.post(t, fakebridge.Token, "pub-2", storm).posted(t)
+	ms, body := s.listing(t)
+	if len(ms) != 2 || !reflect.DeepEqual(ms[0].Envelope.Layout, root.Layout) || len(ms[0].Edits) != 1 ||
+		!reflect.DeepEqual(ms[0].Edits[0].Layout, edit.Layout) || ms[1].Envelope.Layout != nil ||
+		ms[0].Envelope.Body != root.Body {
+		t.Fatalf("messages %s", body)
+	}
+	var raw []struct {
+		Envelope map[string]json.RawMessage   `json:"envelope"`
+		Edits    []map[string]json.RawMessage `json:"edits"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if l := string(raw[0].Envelope["layout"]); !strings.Contains(l, `"number":1`) ||
+		!strings.Contains(l, `"summary":"Disk *full* on #1"`) || !strings.Contains(l, `"owner":null`) {
+		t.Errorf("the layout of m1 %s", l)
+	}
+	if l := string(raw[0].Edits[0]["layout"]); !strings.Contains(l, `"owner":{"name":"bob","ref":null}`) {
+		t.Errorf("the layout of the edit %s", l)
+	}
+	if _, ok := raw[1].Envelope["layout"]; ok {
+		t.Errorf("a Storm summary has a layout: %s", body)
+	}
+	bad := envelope(fakebridge.ChannelAlerts)
+	bad.Layout = layoutOf("storm")
+	s.exchange(t, request{method: http.MethodPost, path: "/v1/messages", token: fakebridge.Token, key: "pub-3",
+		body: bad, broken: true}).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	badEdit := content(gen.StatusFiring)
+	badEdit.Layout = layoutOf("gone")
+	s.exchange(t, request{method: http.MethodPatch, path: "/v1/messages/m1", token: fakebridge.Token, body: badEdit,
+		broken: true}).refused(t, http.StatusBadRequest, gen.ErrorClassInvalid)
+	if ms := s.fake.Messages(); len(ms) != 2 || len(ms[0].Edits) != 1 {
+		t.Errorf("a refused layout was kept: %+v", ms)
 	}
 }
 
@@ -885,7 +949,7 @@ func TestDeletedMessage(t *testing.T) {
 	if status, body := s.control(t, http.MethodDelete, "/_fake/messages/m1", ""); status != http.StatusNoContent {
 		t.Fatalf("DELETE /_fake/messages/m1 = %d %s", status, body)
 	}
-	for _, a := range []answer{s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)),
+	for _, a := range []answer{s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)),
 		s.reply(t, fakebridge.Token, "m1", "k3", replyOf(&first.ThreadRef))} {
 		if p := a.refused(t, http.StatusNotFound, gen.ErrorClassGone); p.Title == nil ||
 			*p.Title != fakebridge.MessageGone || p.Reason != nil {
@@ -896,7 +960,7 @@ func TestDeletedMessage(t *testing.T) {
 		t.Errorf("a key from before the deletion = %+v", again)
 	}
 	c := s.client(t, fakebridge.Token)
-	if _, r := c.EditMessage(t.Context(), outbound.ClassDelivery, "m1", content(gen.Resolved)); r.Outcome().Kind !=
+	if _, r := c.EditMessage(t.Context(), outbound.ClassDelivery, "m1", content(gen.StatusResolved)); r.Outcome().Kind !=
 		delivery.OutcomeGone {
 		t.Errorf("Muster's edit = %+v", r)
 	}
@@ -935,7 +999,7 @@ func TestBotDeletesItsMessage(t *testing.T) {
 	if evs := s.fake.Events(); len(evs) != 0 {
 		t.Errorf("events %+v", evs)
 	}
-	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).refused(t, http.StatusNotFound, gen.ErrorClassGone)
+	s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)).refused(t, http.StatusNotFound, gen.ErrorClassGone)
 	noContent("a second deletion", del(fakebridge.Token, "m1"))
 	noContent("the deletion of an unknown message", del(fakebridge.Token, "m99"))
 
@@ -964,20 +1028,20 @@ func TestMessageFaults(t *testing.T) {
 		http.StatusNoContent {
 		t.Fatalf("POST /_fake/faults = %d %s", status, body)
 	}
-	a := s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged))
+	a := s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged))
 	if p := a.refused(t, http.StatusTooManyRequests, gen.ErrorClassRateLimited); p.Scope == nil ||
 		*p.Scope != gen.Bot || a.header.Get("Retry-After") != "7" {
 		t.Errorf("the scripted problem = %+v, Retry-After %q", p, a.header.Get("Retry-After"))
 	}
 	s.reply(t, fakebridge.Token, "m1", "k2", replyOf(nil)).replied(t)
 	_, r := s.client(t, fakebridge.Token).EditMessage(t.Context(), outbound.ClassDelivery, "m1",
-		content(gen.Acknowledged))
+		content(gen.StatusAcknowledged))
 	if o := r.Outcome(); o.Kind != delivery.OutcomeRetryAfter || o.RetryAfter != 7*time.Second ||
 		o.Scope != delivery.ScopeConnection {
 		t.Errorf("Muster's edit = %+v", o)
 	}
 	var e gen.MessageEdited
-	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).ok(t, http.StatusOK, &e)
+	s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)).ok(t, http.StatusOK, &e)
 	if ms := s.fake.Messages(); len(ms) != 1 || len(ms[0].Edits) != 1 || len(ms[0].Replies) != 1 {
 		t.Errorf("messages %+v", ms)
 	}
@@ -1004,12 +1068,12 @@ func TestEditWindowClosedFault(t *testing.T) {
 	if r := s.reply(t, fakebridge.Token, "m1", "k2", replyOf(nil)).replied(t); r.ThreadRef != "t-m1" {
 		t.Errorf("a Thread reply under the fault = %+v", r)
 	}
-	if p := s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).refused(t, http.StatusNotFound,
+	if p := s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)).refused(t, http.StatusNotFound,
 		gen.ErrorClassGone); p.Reason == nil || *p.Reason != gen.EditWindowClosed {
 		t.Errorf("the refused edit = %+v", p)
 	}
 	_, r := s.client(t, fakebridge.Token).EditMessage(t.Context(), outbound.ClassDelivery, "m1",
-		content(gen.Acknowledged))
+		content(gen.StatusAcknowledged))
 	if r.Classification.Class != bridge.ClassGone || r.Classification.Reason != bridge.ReasonEditWindowClosed ||
 		r.Outcome().Kind != delivery.OutcomeGone {
 		t.Errorf("Muster's edit = %+v", r)
@@ -1018,7 +1082,7 @@ func TestEditWindowClosedFault(t *testing.T) {
 		t.Errorf("messages %+v", ms)
 	}
 	var e gen.MessageEdited
-	s.edit(t, fakebridge.Token, "m1", content(gen.Acknowledged)).ok(t, http.StatusOK, &e)
+	s.edit(t, fakebridge.Token, "m1", content(gen.StatusAcknowledged)).ok(t, http.StatusOK, &e)
 	if ms := s.fake.Messages(); len(ms[0].Edits) != 1 {
 		t.Errorf("an edit once the fault is spent: %+v", ms)
 	}
@@ -1039,7 +1103,7 @@ func TestTruncated(t *testing.T) {
 	if p := s.post(t, fakebridge.Token, "k2", in).posted(t); !p.Truncated {
 		t.Errorf("a body over the limit = %+v", p)
 	}
-	edit := content(gen.Acknowledged)
+	edit := content(gen.StatusAcknowledged)
 	edit.Body = in.Body
 	var e gen.MessageEdited
 	if s.edit(t, fakebridge.Token, "m2", edit).ok(t, http.StatusOK, &e); !e.Truncated {
@@ -1274,7 +1338,7 @@ func TestPress(t *testing.T) {
 		t.Errorf("the press = %+v", got)
 	}
 
-	edit := content(gen.Acknowledged)
+	edit := content(gen.StatusAcknowledged)
 	edit.Buttons = []gen.Button{{Label: "Resolve", Style: gen.Danger, Data: "a1.k1.cmVz"}}
 	var e gen.MessageEdited
 	s.edit(t, fakebridge.Token, "m1", edit).ok(t, http.StatusOK, &e)

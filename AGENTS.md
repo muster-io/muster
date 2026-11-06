@@ -223,7 +223,8 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. The
   fake bridge serves two bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll mode,
   and `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection; `/_fake/config` changes what its `info`
-  says. The fake Slack server serves two Slack apps, each a
+  says, and `/_fake/messages` lists every message and edit with the `layout` Muster sent, from which the fake renders
+  nothing. The fake Slack server serves two Slack apps, each a
   workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
   `xapp-muster-dev-slack-token`, which the demo Connection "Example Slack" uses in `socket` mode, and
   `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;

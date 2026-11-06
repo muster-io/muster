@@ -76,7 +76,9 @@ const (
 // TimeZone are those it was rendered in, for the notes delivery adds at call time. SnoozeSeconds are the Route's
 // Snooze durations, which its Snooze buttons name by index, set only in CommonMark and mrkdwn: a bridge writes the
 // first in the commands line and drops Snooze buttons from the longest (C-22.FR-5), Slack's Snooze menu names each as
-// its option (C-24.FR-5), and the Desired states of the other markups keep their hashes.
+// its option (C-24.FR-5), and the Desired states of the other markups keep their hashes. Owner is the Muster display
+// name of who acknowledged an acknowledged Alert Group, made safe, set only in CommonMark for the `owner` of a
+// bridge's layout (C-29.FR-8), so that the Desired states of the other markups keep their hashes too.
 type Message struct {
 	Kind              Kind                  `json:"kind"`
 	Language          string                `json:"language"`
@@ -103,6 +105,7 @@ type Message struct {
 	FooterUsers       map[string]FooterUser `json:"footer_users,omitempty"`
 	Buttons           []Button              `json:"buttons"`
 	SnoozeSeconds     []int64               `json:"snooze_seconds,omitempty"`
+	Owner             string                `json:"owner,omitempty"`
 	// FooterMention is the user of the footer as an adapter writes them in its markup, and FooterName their Muster
 	// display name made safe, which a footer cut by shortening keeps instead; WithFooterIn sets both for the layout,
 	// and neither is stored.
@@ -299,52 +302,6 @@ func HeadingLine(m Message, linked string) string {
 		return strings.TrimSpace(emoji + " " + linked)
 	}
 	return linked + " — " + strings.TrimSpace(emoji+" "+m.StatusWord)
-}
-
-// MessageLayout is the content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the MessageLayout of
-// the API: the number and the title apart, the status by its key and word, the fields, the summary and the
-// description, the key labels with their values — "2 values" where they differ — the Alerts by their distinguishing
-// label with the total, the notices with the footer as their last line, and the links. The Assignees and the Owner
-// come with the Escalation chains (C-32.FR-12); until then the footer names the Owner.
-type MessageLayout struct {
-	Number      int64
-	Title       string
-	Status      string
-	StatusWord  string
-	Fields      []Label
-	Summary     string
-	Description string
-	Labels      []Label
-	Alerts      *LayoutAlerts
-	Notices     []string
-	Links       []Link
-}
-
-// LayoutAlerts are the Alerts of a MessageLayout: the distinguishing label, the values listed and the total.
-type LayoutAlerts struct {
-	Label  string
-	Values []AlertValue
-	Total  int64
-}
-
-// LayoutOf is the MessageLayout of the Root message m, its values as neutral text; the footer names its user by their
-// Muster display name.
-func LayoutOf(m Message) MessageLayout {
-	out := MessageLayout{Status: m.Colour, StatusWord: m.StatusWord, Fields: slices.Clone(m.Fields),
-		Summary: m.Summary, Description: m.Description, Notices: slices.Clone(m.Notices), Links: slices.Clone(m.Links)}
-	if h := m.Heading; h != nil {
-		out.Number, out.Title = h.Number, h.Title
-	}
-	for _, k := range m.KeyLabels {
-		out.Labels = append(out.Labels, Label{Name: k.Name, Value: k.ValueText(m.Language)})
-	}
-	if a := m.AlertsLine; a != nil && a.Label != "" {
-		out.Alerts = &LayoutAlerts{Label: a.Label, Values: slices.Clone(a.Values), Total: a.Total}
-	}
-	if f := m.WithFooterIn("", nil); f.Footer != "" {
-		out.Notices = append(out.Notices, templates.StripTokens(f.Footer))
-	}
-	return out
 }
 
 // The length limits the adapters declare (C-12.FR-11), by the markup each writes: a Mattermost post (F-057), a

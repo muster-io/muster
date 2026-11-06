@@ -21,8 +21,8 @@ import (
 )
 
 // The Destination test of Bridge Destinations (C-22.FR-17, C-16.FR-1 to FR-4): the step message posts the Root message
-// of the source once with postMessage, of the kind test, Quiet, with "🧪 Test message" before its body and the buttons
-// of its status whose data name the Destination, through the interactive path, under an idempotency key new for each
+// of the source once with postMessage, of the kind test, Quiet, with "🧪 Test message" before its body, its layout
+// (C-29.FR-8) and the buttons of its status whose data name the Destination, through the interactive path, under an idempotency key new for each
 // test. Nothing is stored, no Timeline changes and the message has no Thread. The preview is the envelope that test
 // would post, as JSON, and posts nothing.
 

@@ -24,7 +24,7 @@ const MessageGone = "The message no longer exists."
 
 // Message is a message a bot posted, as GET /_fake/messages lists it: its id, the bot that posted it — 1 for Token, 2
 // for SecondToken, never the token — its channel, the envelope as Muster sent it, each edit as the whole envelope
-// Muster sent, its Thread replies, the link the fake answered, whether it was deleted, by a person or by its bot, and
+// Muster sent — each with the `layout` it carried, which the fake keeps and renders nothing from — its Thread replies, the link the fake answered, whether it was deleted, by a person or by its bot, and
 // whether its body was longer than limits.max_body_length, which the fake answers as truncated.
 type Message struct {
 	ID        string               `json:"id"`
@@ -119,7 +119,7 @@ func (f *Fake) editMessage(w http.ResponseWriter, r *http.Request) {
 		invalid(w, err)
 		return
 	}
-	if err := checkContent(in.Status, in.Buttons); err != nil {
+	if err := checkContent(in.Status, in.Buttons, in.Layout); err != nil {
 		invalid(w, err)
 		return
 	}
@@ -285,16 +285,19 @@ func checkPost(in gen.MessageInput) error {
 	case in.Mentions == nil:
 		return errors.New("mentions is required")
 	}
-	return checkContent(in.Status, in.Buttons)
+	return checkContent(in.Status, in.Buttons, in.Layout)
 }
 
-// checkContent checks the status and the buttons of an envelope, which the protocol requires.
-func checkContent(status gen.Status, buttons []gen.Button) error {
+// checkContent checks the status and the buttons of an envelope, which the protocol requires, and the status of its
+// layout when it has one.
+func checkContent(status gen.Status, buttons []gen.Button, layout *gen.Layout) error {
 	switch {
 	case !status.Valid():
 		return fmt.Errorf("status %q is not a status", status)
 	case buttons == nil:
 		return errors.New("buttons is required")
+	case layout != nil && !layout.Status.Key.Valid():
+		return fmt.Errorf("layout.status.key %q is not a status of a layout", layout.Status.Key)
 	}
 	return nil
 }

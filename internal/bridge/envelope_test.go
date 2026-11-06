@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/buttons"
@@ -216,7 +217,7 @@ func TestRootEnvelope(t *testing.T) {
 		t.Fatalf("body\n%q\nwant\n%q", c.Body, want)
 	}
 	storm := content(stormMessage(), i, nil)
-	if storm.Status != gen.Storm || storm.Color != "#6a1b9a" || storm.Emoji != "⛈" ||
+	if storm.Status != gen.StatusStorm || storm.Color != "#6a1b9a" || storm.Emoji != "⛈" ||
 		storm.Title != "⛈ Storm on br: 12 Alert Groups, 1 urgent — open in Muster" ||
 		storm.Link != (gen.Link{Url: routePage, Label: "Open in Muster"}) ||
 		storm.Body != "[Open in Muster]("+routePage+")" || len(storm.Buttons) != 0 {
@@ -447,7 +448,7 @@ func TestBodyShortening(t *testing.T) {
 		strings.Contains(body, "m39") {
 		t.Fatalf("%d characters: %q", n, body)
 	}
-	if got := fit(messages.Message{Lines: []string{"a"}}, 10); got != "a" {
+	if got, _ := fit(messages.Message{Lines: []string{"a"}}, 10); got != "a" {
 		t.Fatalf("a short text = %q", got)
 	}
 	links := rootMessage(t, messages.ColourAcknowledged)
@@ -457,11 +458,11 @@ func TestBodyShortening(t *testing.T) {
 	}
 	line := messages.Layout(messages.Message{Links: links.Links}, messages.MarkupCommonMark)
 	room := utf8.RuneCountInString(line) + 40
-	if got := fit(links, room); utf8.RuneCountInString(got) > room || !strings.HasPrefix(got, "[Full list in Mus") ||
+	if got, _ := fit(links, room); utf8.RuneCountInString(got) > room || !strings.HasPrefix(got, "[Full list in Mus") ||
 		!strings.Contains(got, "…\n\n"+line) {
 		t.Fatalf("%d characters: %q", utf8.RuneCountInString(got), got)
 	}
-	if got := fit(links, 200); utf8.RuneCountInString(got) != 200 || !strings.HasPrefix(got, "[Open in Muster]") ||
+	if got, _ := fit(links, 200); utf8.RuneCountInString(got) != 200 || !strings.HasPrefix(got, "[Open in Muster]") ||
 		!strings.HasSuffix(got, "…") {
 		t.Fatalf("a tail that does not fit = %q", got)
 	}
@@ -564,10 +565,209 @@ func TestFooterOfTheConnection(t *testing.T) {
 		DisplayName: "Bob B."}}
 	m.Summary = strings.Repeat("s ", 1000)
 	i := infoOf(t, set("limits", "max_body_length", 500))
-	marked, list := withFooterMention(m, 7, i, []gen.Mention{})
+	marked, list, _ := withFooterMention(m, 7, i, []gen.Mention{})
 	body := content(marked, i, nil).Body
 	if !strings.HasSuffix(body, "\n\nAcknowledged by [@Bob B.](muster-mention:m1)") || strings.Contains(body, "s s") ||
 		utf8.RuneCountInString(body) > 500 || len(list) != 1 || list[0].ExternalId != "u-bob" {
 		t.Fatalf("a cut body %q, %+v", body, list)
+	}
+}
+
+// compactMessage is a Root message of the compact layout as the renderer gives it in CommonMark (C-29.FR-1), in a
+// status: seven Alerts with five pods listed, the last of them resolved, the summary "Queue *full* on #1", a
+// description, the key labels, a notice, the links and the buttons of the status; when someone acted, a footer that
+// names Bob Smith, linked through Connection 1 as u-bob, and the Owner of an acknowledged Alert Group.
+func compactMessage(t *testing.T, status string) messages.Message {
+	t.Helper()
+	m := messages.Message{Kind: messages.KindRoot, Language: "en", TimeZone: "UTC", Colour: status,
+		Heading:    &messages.Heading{Number: 42, Title: "QueueFull", URL: groupPage},
+		StatusWord: messages.T("en", "status."+status, nil),
+		Fields: []messages.Label{{Name: "Severity", Value: "warning"}, {Name: "Route", Value: "br"},
+			{Name: "Started", Value: "2026-10-09 12:00 UTC"}},
+		Summary: "Queue *full* on #1", Description: "The queue _jobs_ holds 10000 items",
+		KeyLabels: []messages.KeyLabel{{Name: "svc", Value: "br"}, {Name: "namespace", Count: 2}},
+		AlertsLine: &messages.AlertsLine{Label: "pod", Values: []messages.AlertValue{{Value: "api-1"},
+			{Value: "api-3"}, {Value: "api-4"}, {Value: "api-5"}, {Value: "api-2", Resolved: true}}, Total: 7},
+		Links:         []messages.Link{{Text: "Open in Muster", URL: groupPage}, {Text: "Runbook", URL: runbook}},
+		Notices:       []string{"🔁 Reopened ×2"},
+		Buttons:       signedButtons(t, status, "en", snoozeSeconds),
+		SnoozeSeconds: snoozeSeconds}
+	footer := map[string]string{messages.ColourAcknowledged: "Acknowledged by ", messages.ColourSnoozed: "Snoozed by ",
+		messages.ColourResolved: "Resolved by "}[status]
+	if footer == "" {
+		return m
+	}
+	token := templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+	m.Footer = footer + "Bob Smith"
+	m.Footers = map[string]string{"bridge:1": footer + token}
+	m.FooterUsers = map[string]messages.FooterUser{"bridge:1": {Name: "Bob Smith", ExternalID: "u-bob",
+		DisplayName: "Bob [B]"}}
+	if status == messages.ColourAcknowledged {
+		m.Owner = "Bob Smith"
+	}
+	return m
+}
+
+// layoutOfEnvelope is the layout of a decoded envelope.
+func layoutOfEnvelope(t *testing.T, env map[string]any) map[string]any {
+	t.Helper()
+	l, ok := env["layout"].(map[string]any)
+	if !ok {
+		t.Fatalf("no layout in %v", env)
+	}
+	return l
+}
+
+// TestLayoutEnvelope covers C-29.FR-1, FR-4, FR-8 and C-29.AC-6, C-22.FR-4: the envelope of a firing Root message
+// carries `body` and `layout`, whose number is the number alone, whose title has no `#`, whose values carry no
+// CommonMark escapes where the body has them, whose key labels are key and value, whose Alerts list the values with
+// whether each is resolved and the total of the Alert Group, and whose notices, people and links follow the message;
+// an acknowledged one names its Owner, without a reference, and its footer is no notice; the envelopes pass the schemas
+// of api/bridge.yaml, and a Storm summary and a Thread reply carry no layout.
+func TestLayoutEnvelope(t *testing.T) {
+	i := infoOf(t)
+	firing := postInput(gen.Root, "ch-alerts", content(compactMessage(t, messages.ColourFiring), i, nil), false)
+	b, err := json.Marshal(firing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := visit(t, bridgeSchema(t, "MessageInput"), b); err != nil {
+		t.Fatalf("%s: %v", b, err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(b, &env); err != nil {
+		t.Fatal(err)
+	}
+	l := layoutOfEnvelope(t, env)
+	want := `{"alerts":{"label":"pod","total":7,"values":[{"resolved":false,"value":"api-1"},` +
+		`{"resolved":false,"value":"api-3"},{"resolved":false,"value":"api-4"},{"resolved":false,"value":"api-5"},` +
+		`{"resolved":true,"value":"api-2"}]},"assignees":[],"description":"The queue _jobs_ holds 10000 items",` +
+		`"fields":[{"name":"Severity","value":"warning"},{"name":"Route","value":"br"},` +
+		`{"name":"Started","value":"2026-10-09 12:00 UTC"}],"labels":[{"key":"svc","value":"br"},` +
+		`{"key":"namespace","value":"2 values"}],"links":[{"label":"Open in Muster","url":"` + groupPage + `"},` +
+		`{"label":"Runbook","url":"` + runbook + `"}],"notices":["🔁 Reopened ×2"],"number":42,"owner":null,` +
+		`"status":{"key":"firing","word":"Firing"},"summary":"Queue *full* on #1","title":"QueueFull"}`
+	if got, _ := json.Marshal(l); string(got) != want {
+		t.Fatalf("layout\n%s\nwant\n%s", got, want)
+	}
+	if body := firing.Body; !strings.Contains(body, `Queue \*full\* on #1`) ||
+		!strings.Contains(body, `The queue \_jobs\_ holds`) || firing.Title != "#42 QueueFull" {
+		t.Fatalf("title %q, body %q", firing.Title, body)
+	}
+	acked := content(withFooterIn(compactMessage(t, messages.ColourAcknowledged), 1), i, nil)
+	if l := acked.Layout; l == nil || l.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyAcknowledged,
+		Word: "Acknowledged"}) || !slices.Equal(l.Notices, []string{"🔁 Reopened ×2"}) {
+		t.Fatalf("acknowledged %+v", acked.Layout)
+	}
+	if b, _ := json.Marshal(acked.Layout); !strings.Contains(string(b), `"owner":{"name":"Bob Smith","ref":null}`) {
+		t.Fatalf("the Owner of an edit %s", b)
+	}
+	if !strings.HasSuffix(acked.Body, `Acknowledged by Bob \[B\]`) {
+		t.Fatalf("the body of an edit %q", acked.Body)
+	}
+	if l := content(compactMessage(t, messages.ColourSnoozed), i, nil).Layout; l == nil || !l.Owner.IsNull() ||
+		!slices.Equal(l.Notices, []string{"🔁 Reopened ×2", "Snoozed by Bob Smith"}) {
+		t.Fatalf("snoozed %+v", l)
+	}
+	if b, _ := json.Marshal(content(rootMessage(t, messages.ColourAcknowledged), i, nil)); visit(t,
+		bridgeSchema(t, "MessageContent"), b) != nil || !strings.Contains(string(b), `"layout":{`) {
+		t.Fatalf("a Desired state of an earlier version %s", b)
+	}
+	storm := postInput(gen.StormSummary, "ch-alerts", content(stormMessage(), i, nil), false)
+	reply := replyInput("t-m1", replyMessage("New Alert: pod i3"), i, nil, nil, false)
+	for name, v := range map[string]any{"storm summary": storm, "thread reply": reply} {
+		if b, _ := json.Marshal(v); strings.Contains(string(b), `"layout"`) {
+			t.Errorf("a %s has a layout: %s", name, b)
+		}
+	}
+}
+
+// TestLayoutOwnerRef covers C-29.AC-6: after an acknowledgement by a User linked through the Bridge, a new Root
+// message to a bridge with `native_mentions` names the Owner in `layout.owner` with the `ref` of their entry in
+// `mentions` — the entry of the Mentions line of a Loud call when they are mentioned too — and an edit, which carries
+// no Mentions, names them with the `ref` null; so does a bridge without `native_mentions`, a User linked elsewhere, a
+// body too short for the footer's marker, and a message that is not acknowledged has no Owner.
+func TestLayoutOwnerRef(t *testing.T) {
+	owner := func(t *testing.T, s seen) (map[string]any, string) {
+		t.Helper()
+		env := decode(t, s)
+		o, _ := layoutOfEnvelope(t, env)["owner"].(map[string]any)
+		return o, fmt.Sprint(env["mentions"])
+	}
+	e := newAdapterEnv(t)
+	acked := compactMessage(t, messages.ColourAcknowledged)
+	if o := e.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-1-1"), acked); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o, list := owner(t, e.bridge.requests("post")[0]); fmt.Sprint(o) != "map[name:Bob Smith ref:m1]" ||
+		list != "[map[display_name:Bob [B] external_id:u-bob ref:m1]]" {
+		t.Errorf("a new Quiet message: owner %v, mentions %s", o, list)
+	}
+	loud := call(groups.Loud, "pub-"+destPublicID+"-2-1")
+	loud.Targets = []mentions.Target{linked("Alice", "u-al", "Alice"), linked("Bob Smith", "u-bob", "Bob [B]")}
+	if o := e.adapter.Publish(t.Context(), loud, acked); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o, _ := owner(t, e.bridge.requests("post")[1]); fmt.Sprint(o) != "map[name:Bob Smith ref:m2]" {
+		t.Errorf("a new Loud message: owner %v", o)
+	}
+	if o := e.adapter.Update(t.Context(), call(groups.Quiet, ""), "m1", acked); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("update = %+v", o)
+	}
+	if o, list := owner(t, e.bridge.requests("edit")[0]); fmt.Sprint(o) != "map[name:Bob Smith ref:<nil>]" ||
+		list != "<nil>" {
+		t.Errorf("an edit: owner %v, mentions %s", o, list)
+	}
+	elsewhere := compactMessage(t, messages.ColourAcknowledged)
+	elsewhere.Footers = map[string]string{"bridge:9": elsewhere.Footers["bridge:1"]}
+	elsewhere.FooterUsers = map[string]messages.FooterUser{"bridge:9": elsewhere.FooterUsers["bridge:1"]}
+	unlinked := compactMessage(t, messages.ColourAcknowledged)
+	unlinked.Footers, unlinked.FooterUsers = nil, nil
+	for n, m := range []messages.Message{elsewhere, unlinked} {
+		if o := e.adapter.Publish(t.Context(), call(groups.Quiet, fmt.Sprintf("pub-%s-%d-1", destPublicID, n+3)),
+			m); o.Kind != delivery.OutcomeOK {
+			t.Fatalf("publish %d = %+v", n, o)
+		}
+		if o, list := owner(t, e.bridge.requests("post")[2+n]); fmt.Sprint(o) != "map[name:Bob Smith ref:<nil>]" ||
+			list != "[]" {
+			t.Errorf("not linked through the Connection %d: owner %v, mentions %s", n, o, list)
+		}
+	}
+	if o := e.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-5-1"),
+		compactMessage(t, messages.ColourFiring)); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o, _ := owner(t, e.bridge.requests("post")[4]); o != nil {
+		t.Errorf("firing: owner %v", o)
+	}
+	plain := newAdapterEnv(t, func(m map[string]any) { at(m, "capabilities")["native_mentions"] = false })
+	if o := plain.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-6-1"), acked); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o, list := owner(t, plain.bridge.requests("post")[0]); fmt.Sprint(o) != "map[name:Bob Smith ref:<nil>]" ||
+		list != "[]" {
+		t.Errorf("without native_mentions: owner %v, mentions %s", o, list)
+	}
+	tiny := newAdapterEnv(t, set("limits", "max_body_length", MinBodyLength))
+	crowded := compactMessage(t, messages.ColourAcknowledged)
+	for n := range 12 {
+		crowded.Links = append(crowded.Links, messages.Link{Text: fmt.Sprintf("Dashboard %02d", n),
+			URL: "https://grafana.example.org/d/" + strings.Repeat("x", 40)})
+	}
+	if o := tiny.adapter.Publish(t.Context(), call(groups.Quiet, "pub-"+destPublicID+"-7-1"), crowded); o.Kind !=
+		delivery.OutcomeOK {
+		t.Fatalf("publish = %+v", o)
+	}
+	if o, list := owner(t, tiny.bridge.requests("post")[0]); fmt.Sprint(o) != "map[name:Bob Smith ref:<nil>]" ||
+		list != "[]" {
+		t.Errorf("a body without the footer's marker: owner %v, mentions %s", o, list)
+	}
+	var none *gen.Layout
+	withOwnerRef(none, "m1", []gen.Mention{{Ref: "m1"}})
+	l := gen.Layout{Owner: nullable.NewNullNullable[gen.LayoutPerson]()}
+	if withOwnerRef(&l, "m1", []gen.Mention{{Ref: "m1"}}); !l.Owner.IsNull() {
+		t.Errorf("a layout without an Owner %+v", l.Owner)
 	}
 }
