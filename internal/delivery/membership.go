@@ -55,6 +55,7 @@ type membershipQueries interface {
 	DropDestinationReplies(ctx context.Context, arg dbgen.DropDestinationRepliesParams) error
 	RecordRetired(ctx context.Context, arg dbgen.RecordRetiredParams) (int64, error)
 	WithholdLeased(ctx context.Context, arg dbgen.WithholdLeasedParams) error
+	RetireLeased(ctx context.Context, arg dbgen.RetireLeasedParams) error
 	GetDestinationState(ctx context.Context, arg dbgen.GetDestinationStateParams) (dbgen.GetDestinationStateRow, error)
 	WipeDestinationSecrets(ctx context.Context, arg dbgen.WipeDestinationSecretsParams) error
 	AbandonConnectionDeliveries(ctx context.Context, arg dbgen.AbandonConnectionDeliveriesParams) (

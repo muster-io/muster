@@ -248,6 +248,18 @@ func (f *fakeDB) DropDestinationReplies(_ context.Context, arg dbgen.DropDestina
 	return nil
 }
 
+func (f *fakeDB) RetireLeased(_ context.Context, arg dbgen.RetireLeasedParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RetireLeased"); err != nil {
+		return err
+	}
+	if d := f.delivery(arg.ID); d.owner == arg.Owner {
+		d.desiredRetire, d.heldBy, d.updated = true, 0, arg.Now
+	}
+	return nil
+}
+
 func (f *fakeDB) RecordRetired(_ context.Context, arg dbgen.RecordRetiredParams) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -258,8 +270,13 @@ func (f *fakeDB) RecordRetired(_ context.Context, arg dbgen.RecordRetiredParams)
 	if d.owner != arg.Owner {
 		return 0, pgx.ErrNoRows
 	}
-	if d.state != "withheld" && d.state != "deleted_in_messenger" {
+	switch {
+	case d.state == "withheld" || d.state == "deleted_in_messenger":
+	case d.desiredRetire:
 		d.state = "retired"
+	default:
+		// Joined again while the final edit was in flight: edited back to the current state by the next call.
+		d.state, d.actualHash, d.actualStatus, d.next = "pending", nil, nil, arg.Now
 	}
 	d.desiredRetire, d.attempts, d.firstFailed, d.errorClass, d.lastError = false, 0, nil, nil, nil
 	d.lastDelivered, d.owner, d.until, d.updated, d.actualKey = at(arg.Now), "", time.Time{}, arg.Now, nil
@@ -1360,4 +1377,85 @@ func TestDeletedDestinationNeverPublished(t *testing.T) {
 		ID: "AGAAAAAAAA0022"}) {
 		t.Errorf("secrets %d, hints %+v", wh.secrets, e.db.hints)
 	}
+}
+
+// TestJoinedAgainDuringFinalEdit is C-26.FR-4 with C-11.FR-14: a Destination added back to the Route while the final
+// edit of a Root message there is in flight leaves the delivery pending, not retired, without an actual state, so the
+// next call edits the Root message back to the current state; the final edit itself is recorded, as it was made.
+func TestJoinedAgainDuringFinalEdit(t *testing.T) {
+	e := memberEnv(t)
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	d := e.only(t)
+	e.db.routeDests[routeID] = nil
+	e.changed(t, routeID, nil, []int64{destMM})
+	if !d.desiredRetire {
+		t.Fatalf("no final edit waits %+v", d)
+	}
+	e.rec.Reset()
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: deliverytest.OK().Outcome, Then: func() {
+		e.db.routeDests[routeID] = []int64{destMM}
+		e.changed(t, routeID, []int64{destMM}, nil)
+	}})
+	e.round(t)
+	if d.state != "pending" || d.desiredRetire || d.actualHash != nil || d.messageID == nil {
+		t.Fatalf("joined again during the final edit %+v", d)
+	}
+	if !slices.Contains(e.eventKinds(), "final_edit") {
+		t.Errorf("the final edit made is not recorded: %v", e.eventKinds())
+	}
+	e.rec.Reset()
+	e.round(t)
+	c := e.callsTo(destMM)
+	if callMethods(c) != "update" || slices.Contains(c[0].Message.Notices, finalText("AGAAAAAAAAAA21")) ||
+		len(c[0].Message.Buttons) == 0 || d.state != "delivered" {
+		t.Errorf("edited back %s %+v, state %s", callMethods(c), c, d.state)
+	}
+}
+
+// TestDeletedDestinationFailedPublication is C-11.FR-14 against a Publication claimed before its Destination's
+// deletion committed that then failed: the worker claims it again once the Destination is deleted and ends it —
+// withheld without a call when the Publication cannot exist, the final edit when it may (an Idempotent adapter, whose
+// Publication the bridge may have made: replayed with the final state) — so nothing of the Destination stays pending
+// and its secrets are wiped.
+func TestDeletedDestinationFailedPublication(t *testing.T) {
+	t.Run("not idempotent", func(t *testing.T) {
+		e := memberEnv(t)
+		e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+		e.rec.Script(deliverytest.MethodPublish, deliverytest.Failure(delivery.OutcomeTransient, "503"))
+		e.round(t)
+		d := e.only(t)
+		if d.state != "pending" || d.publishedAt != nil || d.attempts == 0 {
+			t.Fatalf("after the failed publication %+v", d)
+		}
+		// Its start recorded, as a call whose answer was lost leaves it.
+		d.started = at(business0)
+		mm := e.db.dests[destMM]
+		mm.secrets, mm.deleted = 2, true
+		e.rec.Reset()
+		e.business.Set(d.next)
+		e.round(t)
+		if d.state != "withheld" || len(e.rec.Calls()) != 0 || mm.secrets != 0 {
+			t.Errorf("the failed publication in the deleted destination: %+v, calls %d, secrets %d", d,
+				len(e.rec.Calls()), mm.secrets)
+		}
+	})
+	t.Run("idempotent", func(t *testing.T) {
+		e, d, _ := pendingBridge(t)
+		e.w.PublicURL = publicURL
+		e.rec.Script(deliverytest.MethodPublish, timedOut())
+		e.round(t)
+		if d.state != "pending" || d.started == nil || d.publishedAt != nil {
+			t.Fatalf("after the unanswered publication %+v", d)
+		}
+		e.db.dests[destMM].deleted = true
+		e.rec.Reset()
+		e.business.Set(d.next)
+		e.round(t)
+		c := e.rec.Calls()
+		if len(c) != 1 || c[0].Method != deliverytest.MethodPublish ||
+			c[0].Message.Notices[len(c[0].Message.Notices)-1] != finalText("AGAAAAAAAAAA21") || d.state != "retired" {
+			t.Errorf("the publication that may exist: calls %+v, state %s", c, d.state)
+		}
+	})
 }

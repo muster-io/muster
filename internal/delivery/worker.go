@@ -444,9 +444,17 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 		now := w.Lease.Clocks.Business.Now().UTC()
 		_, idempotent := w.idempotent(row.DestinationType)
 		mayExist := idempotent && row.PublicationStartedAt.Valid
-		if (row.DesiredRetire || row.DestinationDeleted) && unpublished(row) && !mayExist {
-			// Its Destination left, or was deleted, before its Root message was ever published there: it is withheld
-			// without a call (C-11.FR-14).
+		if row.DestinationDeleted && !row.DesiredRetire {
+			// Its Destination was deleted before its Root message was ever published there, after the deletion ended
+			// the others: it gets the final edit, which withholds it, or edits a Publication that may exist (C-11.FR-14).
+			if err := q.RetireLeased(ctx, dbgen.RetireLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
+				Now: now}); err != nil {
+				return fmt.Errorf("give the delivery of a deleted destination its final edit: %w", err)
+			}
+			row.DesiredRetire = true
+		}
+		if row.DesiredRetire && unpublished(row) && !mayExist {
+			// Its Destination left before its Root message was ever published there: it is withheld without a call.
 			if err := q.WithholdLeased(ctx, dbgen.WithholdLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Now: now}); err != nil {
 				return fmt.Errorf("withhold the delivery: %w", err)

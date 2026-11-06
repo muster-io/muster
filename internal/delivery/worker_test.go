@@ -569,7 +569,7 @@ func (f *fakeDB) healthy(dest int64) bool {
 // work says whether a pending delivery is work for the worker: no Storm holds it, and its Destination is not deleted
 // unless it is its final edit.
 func (f *fakeDB) work(d *fakeDelivery) bool {
-	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire || (d.publishedAt == nil && d.started == nil))
+	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire || d.publishedAt == nil)
 }
 
 func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliveriesParams) (

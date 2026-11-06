@@ -245,7 +245,10 @@ None.
   final edit, or was withheld, is not "delivered" for the reach: a rise or a joining Team that reaches it again
   records `destination_joined`, and Enqueue publishes it there afresh (`RejoinDelivery`) with that event's loudness —
   Loud while firing, Quiet while acknowledged or snoozed — held by an active Storm with its summary (review, H1 of the
-  xhigh pass). One whose final edit still waits, its Root message still there, counts as delivered: no
+  xhigh pass). A final edit in flight when the Destination is reached again does not retire the
+  delivery (`RecordRetired` retires only while `desired_retire` holds): it stays pending without an actual state, and
+  the next call edits the Root message back to the current state. One whose final edit still waits, its Root message
+  still there, counts as delivered: no
   destination_joined is recorded, since no new message is sent, and the growth cancels the final edit and edits the
   Root message to the current state, Quietly (re-check, LOW-b; recording a Quiet destination_joined for a firing Alert
   Group would need a variant outside the lifecycle table of reference.md, and a new Publication a second Root message
@@ -256,8 +259,10 @@ None.
   held Alert Group arrives (review M1). A save of a Team or of a Route that commits after the deletion of a Destination
   it names listed its Teams can still leave an entry of the deleted Destination, and an Enqueue that read it before
   the deletion committed a pending delivery there: no read returns such an entry, the next save of the entries drops
-  it, and the worker claims such a delivery only to withhold it without a call (`ClaimDueDeliveries`, `prepare`), once
-  the deletion committed, so that the Destination's secrets are still wiped. A narrow window remains, the race the
+  it, and the worker claims such a delivery, and one whose Publication was claimed before the deletion committed and then
+  failed, only to end it once the deletion committed (`ClaimDueDeliveries`, `prepare`, `RetireLeased`): withheld
+  without a call when its Publication cannot exist, the final edit when it may (an Idempotent adapter), so that the
+  Destination's secrets are still wiped. A narrow window remains, the race the
   Route entries have had since L1: a Team save commits an entry of the Destination after the deletion listed its Teams
   (`ListTeamsOfDestination`), an Enqueue commits a delivery there before the deletion commits, and a worker publishes it
   while `deleted_at` still reads null — a Root message in the deleted Destination that never gets a final edit; rare,

@@ -366,7 +366,7 @@ WITH due AS MATERIALIZED (
     WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
       AND x.held_by_storm_id IS NULL
-      AND (ds.deleted_at IS NULL OR x.desired_retire OR (x.published_at IS NULL AND x.publication_started_at IS NULL))
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
     ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT $6
     FOR UPDATE OF x SKIP LOCKED
@@ -397,9 +397,9 @@ type ClaimDueDeliveriesRow struct {
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 // turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
-// deleted Destination is claimed only for its final edit or, never published there, to be withheld without a call: an
-// Enqueue that read the Destination's entries before its deletion committed can create one after the deletion ended
-// the others (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
+// deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
+// that read the Destination's entries before its deletion committed can create one after the deletion ended the
+// others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
 // FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
 // ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
 // applies to them too.
@@ -3753,7 +3753,7 @@ WITH due AS (
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = $2 AND x.state = 'pending' AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
       AND x.held_by_storm_id IS NULL
-      AND (ds.deleted_at IS NULL OR x.desired_retire OR (x.published_at IS NULL AND x.publication_started_at IS NULL))
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
     UNION ALL
     SELECT b.next_probe_at, NULL::timestamptz
     FROM destinations b
@@ -4369,7 +4369,18 @@ func (q *Queries) RecordRepublished(ctx context.Context, arg RecordRepublishedPa
 
 const recordRetired = `-- name: RecordRetired :one
 UPDATE deliveries
-SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
+SET state = CASE
+                WHEN state IN ('withheld', 'deleted_in_messenger') THEN state
+                WHEN desired_retire THEN 'retired'
+                ELSE 'pending'
+            END,
+    actual_hash = CASE WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN actual_hash END,
+    actual_status = CASE WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN actual_status END,
+    next_attempt_at = CASE
+                          WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN next_attempt_at
+                          ELSE $1::timestamptz
+                      END,
+    desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
     actual_button_key_id = NULL, republication_started_at = NULL,
     last_error = NULL, last_delivered_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
     updated_at = $1::timestamptz
@@ -4386,8 +4397,10 @@ type RecordRetiredParams struct {
 
 // RecordRetired records the final edit of a delivery, or a Root message found deleted at it: the row is retired,
 // keeps the link to its last message and receives nothing more; one withheld or deleted in the messenger while the
-// call was in flight stays so. The final edit carries no buttons, so no key is actual any more. No row when the lease
-// went to another replica.
+// call was in flight stays so. One that its Destination joined again while the call was in flight (RejoinDelivery
+// cleared desired_retire) is not retired: its Root message shows the final edit, so it stays pending, due now, without
+// an actual state, and the next call edits it back to the current state. The final edit carries no buttons, so no key
+// is actual any more. No row when the lease went to another replica.
 func (q *Queries) RecordRetired(ctx context.Context, arg RecordRetiredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, recordRetired,
 		arg.Now,
@@ -5142,6 +5155,31 @@ func (q *Queries) RetireGroupDeliveries(ctx context.Context, arg RetireGroupDeli
 		return nil, err
 	}
 	return items, nil
+}
+
+const retireLeased = `-- name: RetireLeased :exec
+UPDATE deliveries
+SET desired_retire = true, held_by_storm_id = NULL, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
+`
+
+type RetireLeasedParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
+}
+
+// RetireLeased makes a leased delivery of a deleted Destination that was never published there a final edit
+// (C-11.FR-14): withheld when its Publication never succeeded, edited to the final state when it may exist.
+func (q *Queries) RetireLeased(ctx context.Context, arg RetireLeasedParams) error {
+	_, err := q.db.Exec(ctx, retireLeased,
+		arg.Now,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	return err
 }
 
 const retireStormSummary = `-- name: RetireStormSummary :exec

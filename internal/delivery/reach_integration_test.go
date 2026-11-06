@@ -133,7 +133,8 @@ func TestRejoinAfterFinalEdit(t *testing.T) {
 }
 
 // TestDeletedDestinationWithheld is C-11.FR-14 against a delivery created in a Destination while its deletion
-// committed: the worker claims it, never publishes it, and withholds it without a call.
+// committed, and one whose Publication was claimed before and failed: the worker claims each, never publishes it, and
+// withholds it without a call.
 func TestDeletedDestinationWithheld(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -148,6 +149,22 @@ func TestDeletedDestinationWithheld(t *testing.T) {
 		l.round(t, l.a)
 		if r := l.row(t, gid, l.dests[0]); r.state != "withheld" || r.message {
 			t.Errorf("the delivery in the deleted destination: %+v", r)
+		}
+		if calls := l.rec.Calls(); len(calls) != 0 {
+			t.Errorf("calls to the deleted destination: %+v", calls)
+		}
+
+		// A Publication claimed before the deletion committed, which then failed: its start is recorded.
+		l.fresh(t, 1000, 1)
+		l.exec(t, `UPDATE destinations SET deleted_at = NULL WHERE id = $1`, l.dests[0])
+		l.fire(t, "late2", "LateTwo/a")
+		gid = l.group(t, "LateTwo")
+		l.exec(t, `UPDATE deliveries SET publication_started_at = $2, attempts = 1 WHERE destination_id = $1`,
+			l.dests[0], l.business.Now())
+		l.exec(t, `UPDATE destinations SET deleted_at = $2 WHERE id = $1`, l.dests[0], l.business.Now())
+		l.round(t, l.a)
+		if r := l.row(t, gid, l.dests[0]); r.state != "withheld" || r.message {
+			t.Errorf("the failed publication in the deleted destination: %+v", r)
 		}
 		if calls := l.rec.Calls(); len(calls) != 0 {
 			t.Errorf("calls to the deleted destination: %+v", calls)
