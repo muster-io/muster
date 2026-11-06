@@ -947,8 +947,8 @@ func TestCheckIsTheChannelCheck(t *testing.T) {
 // TestLayoutCutWithTheBody covers C-29.FR-6 and C-29.AC-3 for a bridge: as max_body_length shrinks, the body loses its
 // description, then its Alerts, then its summary, then its key labels, and the layout loses each of them with the body
 // — never one without the other — while the title, the status, the fields, the notices, the Owner and the links of the
-// layout stay whole and the buttons stay in `buttons`; a Root message posted to a bridge whose limit forces the cut
-// carries the shortened layout.
+// layout stay whole and the buttons stay in `buttons`, and the notices are those the body keeps; a Root message posted
+// to a bridge whose limit forces the cut carries the shortened layout.
 func TestLayoutCutWithTheBody(t *testing.T) {
 	m := compactMessage(t, messages.ColourAcknowledged)
 	m.Description = strings.Repeat("The queue jobs is full. ", 60)
@@ -987,7 +987,8 @@ func TestLayoutCutWithTheBody(t *testing.T) {
 		}
 		seen[state] = true
 		if l.Title != full.Title || l.Number != full.Number || l.Status != full.Status ||
-			!slices.Equal(l.Fields, full.Fields) || !slices.Equal(l.Notices, full.Notices) ||
+			!slices.Equal(l.Fields, full.Fields) || !slices.Equal(l.Notices, full.Notices[:len(l.Notices)]) ||
+			slices.ContainsFunc(l.Notices, func(n string) bool { return !strings.Contains(c.Body, n) }) ||
 			!slices.Equal(l.Links, full.Links) || !reflect.DeepEqual(l.Owner, full.Owner) || len(c.Buttons) != 7 ||
 			utf8.RuneCountInString(c.Body) > limit {
 			t.Fatalf("limit %d: layout %+v, %d buttons, body %d", limit, l, len(c.Buttons),
@@ -999,6 +1000,22 @@ func TestLayoutCutWithTheBody(t *testing.T) {
 		if !seen[state] {
 			t.Errorf("no limit left the layout at %q: %v", state, seen)
 		}
+	}
+	// Notices too long for the floor go from their end in the body and in the layout alike; a title longer than an
+	// envelope's is cut as the envelope's is.
+	crowded := compactMessage(t, messages.ColourFiring)
+	crowded.Heading.Title = strings.Repeat("t", 600)
+	crowded.Notices = nil
+	for n := range 10 {
+		crowded.Notices = append(crowded.Notices, fmt.Sprintf("Notice %d %s", n, strings.Repeat("n", 70)))
+	}
+	c := content(crowded, infoOf(t, set("limits", "max_body_length", MinBodyLength)), nil)
+	if n := len(c.Layout.Notices); n == 0 || n == 10 || !slices.Equal(c.Layout.Notices, crowded.Notices[:n]) ||
+		!strings.Contains(c.Body, crowded.Notices[n-1]) || strings.Contains(c.Body, crowded.Notices[n]) {
+		t.Fatalf("notices %d of 10 in the layout, body %q", n, c.Body)
+	}
+	if n := utf8.RuneCountInString(c.Layout.Title); n != maxTitle || !strings.HasSuffix(c.Layout.Title, "…") {
+		t.Fatalf("a long title has %d characters in the layout", n)
 	}
 	e := newAdapterEnv(t, set("limits", "max_body_length", 1000))
 	if o := e.adapter.Publish(t.Context(), call(groups.Quiet, "k"), m); o.Kind != delivery.OutcomeOK {

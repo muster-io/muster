@@ -153,6 +153,7 @@ func TestConformanceEveryFeature(t *testing.T) {
 	// The fake keeps the layout of every message and edit: the bridge that renders it.
 	if l := post.Envelope.Layout; l == nil || l.Title != "muster bridge check: post" ||
 		l.Status.Key != gen.LayoutStatusKeyFiring || l.Summary != checkBody || len(l.Links) != 1 ||
+		!slices.Equal(l.Notices, []string{"🧪 Test message"}) ||
 		buttons.Envelope.Layout == nil || len(post.Edits) != 1 || post.Edits[0].Layout == nil ||
 		post.Edits[0].Layout.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyAcknowledged, Word: "Acknowledged"}) {
 		t.Errorf("layouts %+v %+v", post.Envelope.Layout, post.Edits)

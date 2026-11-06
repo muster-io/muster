@@ -198,9 +198,10 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   `mentions` when the message carries their Mention, and `null` in an edit and through a bridge without native
   mentions; its `name` is their display name in Muster, which may differ from the `display_name` of their entry in
   `mentions`. A bridge renders either `body` or `layout`; a bridge that ignores `layout` works as before. Storm
-  summaries and Thread replies have no `layout`, nor has a Root message whose Route has its own Root message template,
-  or that the fallback template shows after a template failed, since part of its content exists only in `body`: render
-  `body` whenever `layout` is absent. The [Bridge protocol](../reference/bridge-protocol.md) reference shows its
+  summaries and Thread replies have no `layout`, nor has a Root message whose Route has its own Root message template
+  or line template, or that the fallback template shows after a template failed, since part of its content exists
+  only in `body`: render `body` whenever `layout` is absent. A test message has "🧪 Test message" as the first of its
+  `notices`. The [Bridge protocol](../reference/bridge-protocol.md) reference shows its
   schema.
 - **The length.** The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
   long Root message drops its description first, then its Alerts, its summary and its key labels, but always keeps its

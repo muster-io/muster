@@ -282,14 +282,15 @@ func (cn *conformance) content(step, colour string, buttons []gen.Button) gen.Me
 }
 
 // checkLayout is the layout of the test message of step in the colour, as Muster sends one with every Root message: the
-// number 1, the step in the title and as its one field, the body's text as its summary and the link; a bridge may
-// render it or ignore it.
+// number 1, the step in the title and as its one field, the body's text as its summary, the mark of a test as its
+// notice, as a test message from a Destination has it, and the link; a bridge may render it or ignore it.
 func checkLayout(step, colour string) *gen.Layout {
 	return &gen.Layout{Number: 1, Title: checkTitle + step,
 		Status: gen.LayoutStatus{Key: gen.LayoutStatusKey(colour), Word: messages.T("en", "status."+colour, nil)},
 		Fields: []gen.LayoutField{{Name: "Step", Value: step}}, Summary: checkBody, Labels: []gen.LayoutLabel{},
-		Alerts: nullable.NewNullNullable[gen.LayoutAlerts](), Notices: []string{}, Assignees: []gen.LayoutPerson{},
-		Owner: nullable.NewNullNullable[gen.LayoutPerson](), Links: []gen.LayoutLink{{Label: "Muster", Url: checkLink}}}
+		Alerts: nullable.NewNullNullable[gen.LayoutAlerts](), Notices: []string{messages.TestMark("en")},
+		Assignees: []gen.LayoutPerson{}, Owner: nullable.NewNullNullable[gen.LayoutPerson](),
+		Links: []gen.LayoutLink{{Label: "Muster", Url: checkLink}}}
 }
 
 // reply is the Thread reply of step under threadRef, null when it is empty.

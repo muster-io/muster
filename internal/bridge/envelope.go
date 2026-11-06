@@ -5,6 +5,7 @@ package bridge
 
 import (
 	"cmp"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -88,15 +89,18 @@ func content(m messages.Message, i Info, head []string) gen.MessageContent {
 }
 
 // layoutOf is the layout of the Root message m (C-29.FR-8) whose body was laid out from short, m shortened for the
-// body's limit: the description, the Alerts, the summary and the key labels of short, so that the layout and the body
-// never disagree, and everything else of m — the title, the status, the fields, the notices, the people and the links
-// are never cut (C-29.FR-6). The people have no reference; values are plain text.
+// body's limit: the description, the Alerts, the summary, the key labels, the notices and the footer of short, so that
+// the layout and the body never disagree, and the rest of m — the status, the fields, the people and the links are
+// never cut (C-29.FR-6) — with the title cut as the envelope's is. The people have no reference; values are plain text,
+// and each link is its URL as a URI, with what RFC 3986 does not allow in it percent-encoded.
 func layoutOf(m, short messages.Message) gen.Layout {
 	cp := m
 	cp.Description, cp.AlertsLine, cp.Summary, cp.KeyLabels = short.Description, short.AlertsLine, short.Summary,
 		short.KeyLabels
+	cp.Notices, cp.Footer, cp.FooterMention, cp.FooterName = short.Notices, short.Footer, short.FooterMention,
+		short.FooterName
 	l := messages.LayoutOf(cp)
-	out := gen.Layout{Number: int(l.Number), Title: l.Title,
+	out := gen.Layout{Number: int(l.Number), Title: cutEnd(strings.TrimSpace(l.Title), maxTitle),
 		Status:  gen.LayoutStatus{Key: gen.LayoutStatusKey(l.Status), Word: l.StatusWord},
 		Summary: l.Summary, Description: l.Description, Fields: make([]gen.LayoutField, 0, len(l.Fields)),
 		Labels: make([]gen.LayoutLabel, 0, len(l.Labels)), Alerts: nullable.NewNullNullable[gen.LayoutAlerts](),
@@ -119,9 +123,39 @@ func layoutOf(m, short messages.Message) gen.Layout {
 		out.Owner = nullable.NewNullableWithValue(gen.LayoutPerson{Name: o.Name, Ref: nullable.NewNullNullable[string]()})
 	}
 	for _, k := range l.Links {
-		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: k.URL})
+		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: uriOf(k.URL)})
 	}
 	return out
+}
+
+// uriOf is the link u as a URI (RFC 3986): its path and fragment percent-encoded as Go writes a URL, and every byte of
+// its query that a URI does not allow percent-encoded too, so that a bridge that checks `format: uri` takes it; a link
+// that does not parse stays as it is.
+func uriOf(u string) string {
+	p, err := url.Parse(u)
+	if err != nil {
+		return u
+	}
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := range len(p.RawQuery) {
+		if c := p.RawQuery[i]; inURIQuery(c) {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0xf])
+		}
+	}
+	p.RawQuery = b.String()
+	return p.String()
+}
+
+// inURIQuery reports whether the byte c may stand in the query of a URI as it is (RFC 3986): an unreserved character,
+// a sub-delimiter, `:`, `@`, `/`, `?`, or the `%` of a percent-encoding.
+func inURIQuery(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
+		strings.IndexByte("-._~!$&'()*+,;=:@/?%", c) >= 0
 }
 
 // withOwnerRef gives the Owner of layout the reference ref, the entry of the footer's user in `mentions`, when list —

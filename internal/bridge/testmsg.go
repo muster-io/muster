@@ -167,10 +167,14 @@ func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery
 }
 
 // testInput is the test message m posted to the channel of tg for a bridge whose info is i: of the kind test, Quiet,
-// without Mentions, with the mark of a test before its body.
+// without Mentions, with the mark of a test before its body and as the first notice of its layout (C-16.FR-1).
 func testInput(tg Target, m messages.Message, i Info) gen.MessageInput {
-	mark := messages.EscapeCommonMark(messages.TestMark(m.Language))
-	return postInput(gen.Test, tg.ChannelID, content(m, i, []string{mark}), false)
+	mark := messages.TestMark(m.Language)
+	c := content(m, i, []string{messages.EscapeCommonMark(mark)})
+	if c.Layout != nil {
+		c.Layout.Notices = append([]string{mark}, c.Layout.Notices...)
+	}
+	return postInput(gen.Test, tg.ChannelID, c, false)
 }
 
 // postRequest is the postMessage of in under key as a test shows it: the token masked.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/muster-io/muster/internal/mentions"
@@ -55,9 +56,9 @@ func TestLayoutOf(t *testing.T) {
 }
 
 // TestHasLayout is C-29.FR-8 and C-29.FR-5: only a Root message of Muster's compact default content has a layout; a
-// Route's own root_message template, the Fallback template and a Desired state stored before the compact layout have
+// Route's own root_message template or line template, the Fallback template and a Desired state stored before the compact layout have
 // content that only the body holds, and so have none, nor does a Thread reply or a Storm summary; the preview of a
-// Route's own template carries no layout either.
+// Route's own template or line template carries no layout either.
 func TestHasLayout(t *testing.T) {
 	r := newRenderer(t)
 	src := source("firing", 3)
@@ -68,6 +69,12 @@ func TestHasLayout(t *testing.T) {
 	fallback := r.fallback(compact, src, LanguageEnglish)
 	earlier := compact
 	earlier.StatusWord = ""
+	lined := src
+	lined.Route.Line = ptr(`{{ .Labels.pod }} is down`)
+	withLine := r.Root(lined, MarkupCommonMark).Message
+	if withLine.AlertsLine == nil || len(withLine.AlertsLine.Lines) == 0 || HasLayout(withLine) {
+		t.Fatalf("a line template %+v %v", withLine.AlertsLine, HasLayout(withLine))
+	}
 	if !HasLayout(compact) || withTemplate.Body == nil || HasLayout(withTemplate) || HasLayout(fallback) ||
 		HasLayout(earlier) || HasLayout(Message{Kind: KindReply, Lines: []string{"x"}}) ||
 		HasLayout(Message{Kind: KindStorm, Lines: []string{"x"}}) {
@@ -80,6 +87,19 @@ func TestHasLayout(t *testing.T) {
 		Template: "{{ .AlertGroup.Title }} is down", Format: MarkupCommonMark})
 	if err != nil || !res.Valid || res.Layout != nil || res.Length == 0 {
 		t.Fatalf("the preview of a Route's own template %+v %v", res, err)
+	}
+	// The preview of a line template is of the kind line, which has no layout; the preview of root_message renders
+	// without the Route's line template, as its output does, so its layout is the compact default's.
+	f.group.Route.Line = ptr(`{{ .Labels.pod }} is down`)
+	res, err = pr.Preview(t.Context(), PreviewRequest{Kind: TemplateLine, AlertGroupID: "AGK7M3QX9P2RTA",
+		Template: `{{ .Labels.pod }} is down`, Format: MarkupCommonMark})
+	if err != nil || !res.Valid || res.Layout != nil || !strings.Contains(res.Output, "p1 is down") {
+		t.Fatalf("the preview of a line template %+v %v", res, err)
+	}
+	res, err = pr.Preview(t.Context(), PreviewRequest{Kind: TemplateRootMessage, AlertGroupID: "AGK7M3QX9P2RTA",
+		Format: MarkupCommonMark})
+	if err != nil || res.Layout == nil || strings.Contains(res.Output, "is down") {
+		t.Fatalf("the preview of root_message beside a line template %+v %v", res, err)
 	}
 }
 

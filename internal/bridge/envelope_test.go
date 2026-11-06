@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -654,6 +656,18 @@ func TestLayoutEnvelope(t *testing.T) {
 	if body := firing.Body; !strings.Contains(body, `Queue \*full\* on #1`) ||
 		!strings.Contains(body, `The queue \_jobs\_ holds`) || firing.Title != "#42 QueueFull" {
 		t.Fatalf("title %q, body %q", firing.Title, body)
+	}
+	odd := compactMessage(t, messages.ColourFiring)
+	odd.Links = append(odd.Links, messages.Link{Text: "Рунбук", URL: "https://wiki.example.org/рунбук/a|b{c}?q=a|b&x={y}#ч"})
+	ol := content(odd, i, nil).Layout
+	got := ol.Links[len(ol.Links)-1].Url
+	u, err := url.Parse(got)
+	if !regexp.MustCompile(`^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$`).MatchString(got) || err != nil ||
+		u.Path != "/рунбук/a|b{c}" || u.Query().Get("q") != "a|b" || u.Query().Get("x") != "{y}" || u.Fragment != "ч" {
+		t.Fatalf("a link with characters a URI does not allow %q", got)
+	}
+	if b, _ := json.Marshal(content(odd, i, nil)); visit(t, bridgeSchema(t, "MessageContent"), b) != nil {
+		t.Fatalf("%s", b)
 	}
 	acked := content(withFooterIn(compactMessage(t, messages.ColourAcknowledged), 1), i, nil)
 	if l := acked.Layout; l == nil || l.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyAcknowledged,

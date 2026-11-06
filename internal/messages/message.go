@@ -625,7 +625,7 @@ func layoutCommonMark(m Message) string {
 	}
 	summary := esc(strings.TrimSpace(m.Summary))
 	if m.StatusWord == "" {
-		// A message without the status word, of L1, keeps its summary in italics in a bridge's body until S-126.
+		// A Desired state stored before the compact layout, without the status word, keeps the italic summary of L1.
 		summary = around("*", summary)
 	}
 	add(summary)
@@ -675,7 +675,7 @@ func layoutCommonMark(m Message) string {
 		text[i] = esc(l)
 	}
 	add(lines("", text))
-	// The links keep their place of L1 in a bridge's body until the Bridge protocol carries the layout (S-126).
+	// The links keep their place of L1 in a bridge's body, before the notices and the footer.
 	links := make([]string, len(m.Links))
 	for i, l := range m.Links {
 		links[i] = link(MarkupCommonMark, l.Text, l.URL)

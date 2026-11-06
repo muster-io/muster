@@ -105,7 +105,8 @@ func TestTestMessage(t *testing.T) {
 	}
 	if l := in.Layout; l == nil || l.Number != 7 || l.Title != "CertExpiry" ||
 		l.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyFiring, Word: "Firing"}) || len(l.Fields) == 0 ||
-		!l.Owner.IsNull() || !l.Alerts.IsNull() || len(l.Links) == 0 || l.Links[0].Label != "Open in Muster" {
+		!l.Owner.IsNull() || !l.Alerts.IsNull() || len(l.Links) == 0 || l.Links[0].Label != "Open in Muster" ||
+		len(l.Notices) == 0 || l.Notices[0] != "🧪 Test message" {
 		t.Fatalf("the layout of a test message %+v", in.Layout)
 	}
 	if !strings.Contains(posts[0].Body, `"layout":{`) {
