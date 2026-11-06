@@ -140,6 +140,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       of the working day or first day of the week, and a rename of a Team, reach the open Alert Groups: their Root
       messages are edited once, Quietly, to show the new labels, start time, Snooze presets or name, instead of at each
       Alert Group's next change.
+    - Migration 0032 adds the [Severity conditions](../concepts/routing-to-teams.md#severity-conditions) of the
+      Destinations of Routes and Teams, "Also to the Teams from the label" of a Route, off, and the Destinations of the
+      Teams, none. Every Destination of a Route has the condition `any`, so a Route delivers as before. Routes take and
+      read `destination_entries`; `destination_ids` stays, derived from `destination_entries`, until 0.3.0 removes it: a
+      request with only `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
+      Outgoing webhooks in events mode may receive the new event `destination_joined`.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -207,7 +213,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     messages after a change of the severity label, the Team label, the Instance labels, the time zone, the start of the
     working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
     of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
-    this version.
+    this version. A 0.1 replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert
+    Groups it changes go to every Destination of their Route, whatever its condition, and not to the Destinations of
+    their Teams, and it records no `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
+    to the Teams from the label" after every replica runs 0.2.0.
 
     **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
     that exact group name, is a subtree: `platform/*` matches `platform` and every group below it. An entry with `*`
@@ -412,6 +421,42 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```sql
         ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v5_check;
         ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v4_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0032 adds the Severity conditions, the Destinations of Teams and `destination_joined` in three
+    transactions: the first adds the columns, the table and the new CHECKs, the second validates them, the third drops
+    the CHECKs they replace. A failure leaves the schema recorded as dirty at version 32. To recover, with the same
+    database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'team_destinations';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 31, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE route_destinations VALIDATE CONSTRAINT route_destinations_severity_condition_check;
+        ALTER TABLE deliveries VALIDATE CONSTRAINT deliveries_entries_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_event_v3_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_system_v3_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v3_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v6_check;
+        ALTER TABLE timeline_entries
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_system_event_v2_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_system_v2_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_v2_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v5_check;
         UPDATE schema_migrations SET dirty = false;
         ```
 

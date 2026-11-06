@@ -1547,6 +1547,8 @@
       
         
       
+        
+      
     
     
     
@@ -1768,6 +1770,33 @@
     
   
   Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/routing-to-teams/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Routing to Teams
 
     
   </span>
@@ -3225,6 +3254,9 @@ used) and the <code>transport</code> (<code>ui</code>, <code>api</code>, <code>m
 its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-belong-to-a-team">Teams</a>).</dd>
 <dt><code>alerts</code></dt>
 <dd>One element per Alert, by fingerprint, with its status, labels, annotations, times and the resolve reason.</dd>
+<dt><code>destination</code></dt>
+<dd>Only on <code>destination_joined</code>: the <code>id</code>, <code>name</code> and <code>type</code> of the Destination the Alert Group joined. No other
+event carries it.</dd>
 </dl>
 <p>The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.</p>
 <h3 id="event-names">Event names<a class="headerlink" href="#event-names" title="Permanent link">&para;</a></h3>
@@ -3273,6 +3305,10 @@ never sent.</p>
 <dt><code>unknown_team_value</code></dt>
 <dd><code>notify</code>: false. An Alert of the Alert Group carries a value of the Team label that names no Team; sent once per
 value and Alert Group.</dd>
+<dt><code>destination_joined</code></dt>
+<dd><code>notify</code>: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
+reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
+Destination, named in <code>destination</code> (<a href="../../concepts/routing-to-teams/">Routing to Teams</a>).</dd>
 </dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>
