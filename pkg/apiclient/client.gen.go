@@ -5986,13 +5986,13 @@ type MessageLayout struct {
 	// Links The links, "Open in Muster" first.
 	Links []MessageLayoutLink `json:"links"`
 
-	// Notices The notices that apply, then the footer as a line.
+	// Notices The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names.
 	Notices []string `json:"notices"`
 
 	// Number The Alert Group's number alone, without `#`.
 	Number int `json:"number"`
 
-	// Owner Who acknowledged the Alert Group, with their Team; null while the footer names them.
+	// Owner Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.
 	Owner  nullable.Nullable[MessageLayoutPerson] `json:"owner"`
 	Status MessageLayoutStatus                    `json:"status"`
 
