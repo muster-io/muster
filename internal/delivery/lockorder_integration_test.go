@@ -28,6 +28,7 @@ import (
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/destinations"
+	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
@@ -1633,4 +1634,62 @@ func TestDestinationDeletionAgainstTeamEnqueueLockOrder(t *testing.T) {
 		}
 		tl.noDeadlock(t)
 	})
+}
+
+// TestSaveAgainstDestinationDeletionLockOrder is C-26.FR-1 and C-11.FR-14 against the deletion of a Destination: a
+// save of a Team, and one of a Route, that names the Destination while its deletion holds it — after it marked it
+// deleted, before it removed it from the Teams and the Routes — waits for the deletion, which locks the Destination
+// before anything the saves hold, and is then refused with unknown_id: no entry of a deleted Destination is written,
+// and nothing ends in a deadlock.
+func TestSaveAgainstDestinationDeletionLockOrder(t *testing.T) {
+	for _, what := range []string{"team", "route"} {
+		t.Run(what, func(t *testing.T) {
+			dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+				tl := setupTeamLive(t, s)
+				g := newTxGate()
+				tl.dsvc.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(tl.d.Pool),
+					Audit: audit.NewWriter(tl.logger, tl.business), Business: tl.business,
+					Routes: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+						if err := g.hold(ctx, tx); err != nil {
+							return err
+						}
+						return tl.routes.DestinationDeleted(ctx, tx, id)
+					},
+					Retire: func(ctx context.Context, tx destinationsdb.DBTX, id int64) error {
+						return tl.svc.RetireDestination(ctx, tx, id)
+					}})
+				rt, err := tl.routes.Get(t.Context(), routePublicIDOf(t, tl.live))
+				if err != nil {
+					t.Fatal(err)
+				}
+				blocked, deleteErr, saveErr := tl.against(t, g, func(ctx context.Context) error {
+					return tl.dsvc.Delete(ctx, destinations.Requester{Actor: audit.System,
+						Transport: audit.TransportSystem}, "DSAAAAAAAAAAA2", nil)
+				}, func(ctx context.Context) error {
+					if what == "team" {
+						_, err := tl.teams.Update(ctx, teamSystem, tl.team.PublicID, nil, teams.Input{Name: "locks",
+							Slug: "locks", Matchers: &[]teams.Matcher{{Label: "disk", Op: "=~", Value: "TL.*"}},
+							DestinationEntries: &[]teams.DestinationEntry{secondEntry()}})
+						return err
+					}
+					_, err := tl.routes.Update(ctx, system, rt.PublicID, nil, routing.Input{Name: rt.Name,
+						Description: &rt.Description, Matchers: rt.Matchers, GroupKey: rt.GroupKey, Policy: rt.Policy,
+						DestinationIDs: []string{"DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2"}})
+					return err
+				})
+				var teamField *teams.FieldError
+				var routeField *routing.FieldError
+				refused := (what == "team" && errors.As(saveErr, &teamField) && teamField.Code == teams.CodeUnknownID) ||
+					(what == "route" && errors.As(saveErr, &routeField) && routeField.Code == routing.CodeUnknownID)
+				if !blocked || deleteErr != nil || !refused {
+					t.Errorf("the save waited %v; deletion %v; save %v", blocked, deleteErr, saveErr)
+				}
+				if n := tl.count(t, `SELECT (SELECT count(*) FROM team_destinations WHERE destination_id = $1) +
+					(SELECT count(*) FROM route_destinations WHERE destination_id = $1)`, tl.dests[1]); n != 0 {
+					t.Errorf("%d entries of the deleted destination", n)
+				}
+				tl.noDeadlock(t)
+			})
+		})
+	}
 }

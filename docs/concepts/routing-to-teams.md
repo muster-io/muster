@@ -49,9 +49,9 @@ Operations has `infra-critical` and `infra-notice`, and the Team `payments` has 
 A warning Alert of `team="payments"` makes one Alert Group with one Root message in `infra-notice` and one in
 `payments-notice`, and none in the critical channels. If a critical Alert joins it, the Alert Group is also published
 in `infra-critical` and `payments-critical`; its messages in the notice channels stay and keep being updated, also
-after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it or its
-Severity level rises: a level that falls again, or a new Alert that brings neither, adds no Destination below critical
-where the Alert Group was not published before.
+after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it —
+which adds that Team's Destinations — or its Severity level rises: a level that falls again, or a new Alert that
+brings neither, adds no Destination below critical where the Alert Group was not published before.
 
 ## One Alert Group, one status
 
@@ -93,7 +93,9 @@ entries, reach the open Alert Groups at once, without a lifecycle event in their
   narrowed back, keeps its Root messages, which stay current until their Alert Groups resolve.
 - A Destination taken away — removed from the Route or from the Team, reached only through the Teams when "Also to the
   Teams from the label" is turned off, or named by a deleted Team — gets the final edit "No longer updated here" with a
-  link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. An entry that still
+  link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. If the Alert Group
+  reaches it again later — its Severity level rises into a condition, or a Team that names it joins — it is published
+  there afresh with `destination_joined`, Loudly while it is firing. An entry that still
   names it keeps the Root message, whether its condition is met or not: in the example above, if the Route also names
   `payments-notice` for `critical`, removing `payments-notice` from the Team keeps the Root message of a warning Alert
   Group there.

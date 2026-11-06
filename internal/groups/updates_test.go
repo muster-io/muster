@@ -350,6 +350,14 @@ func TestMinimumSeverityUpdate(t *testing.T) {
 	u.clock.Advance(time.Minute)
 	u.request("critical")
 	before := len(u.entriesOf(u.elsewhere))
+	// The batch holds the membership locks of the Route and of the Alert Groups' Teams before it changes any.
+	u.db.teamsOf().groups[u.firing.ID] = []fakeGroupTeam{{fakeAlertTeam: fakeAlertTeam{team: search, rule: TeamRuleLabel}}}
+	u.db.teamsOf().groups[u.acked.ID] = []fakeGroupTeam{{fakeAlertTeam: fakeAlertTeam{team: payments,
+		rule: TeamRuleLabel}}}
+	var routeLocks, teamLocks []int64
+	u.db.before["SaveGroup"] = func() {
+		routeLocks, teamLocks = slices.Clone(u.db.reach.locks), slices.Clone(u.db.reach.teamLocks)
+	}
 	if next := u.round(t, u.worker); next != UpdateMaxWait || len(u.db.updates) != 0 {
 		t.Errorf("next %v, rows %d", next, len(u.db.updates))
 	}
@@ -369,6 +377,9 @@ func TestMinimumSeverityUpdate(t *testing.T) {
 	}
 	if u.elsewhere.SeverityLevel != "warning" || len(u.entriesOf(u.elsewhere)) != before {
 		t.Errorf("another route's alert group changed: %+v", u.elsewhere)
+	}
+	if len(routeLocks) != 1 || !slices.Equal(teamLocks, []int64{payments, search}) {
+		t.Errorf("before the first change: route locks %v, team locks %v", routeLocks, teamLocks)
 	}
 	if !strings.Contains(u.log.String(), `"event":"open_group_update_done","kind":"route_minimum_severity",`+
 		`"route":"RTDBAAAAAAAAAA","alert_groups":3`) {

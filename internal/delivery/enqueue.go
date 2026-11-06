@@ -306,7 +306,10 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		return fmt.Errorf("list the destinations alert group #%d reached: %w", g.Number, err)
 	}
 	// An Alert Group that has no delivery anywhere yet is published wherever it reaches, as its first Publication.
-	targets := withGrowth(withReached(reached, had, created || moved || len(had) == 0 || grows(r)), reached, r.Grows)
+	// The whole reach is published by a creation, a move, a first Publication and a rise; a Team that joined adds its
+	// own entries, destination_joined its Destination and a change of a Team's entries the Destination it touched.
+	adds := growth{joined: r.Joined(), teams: joinedTeams(r), grows: r.Grows}
+	targets := withAdded(withReached(reached, had, created || moved || len(had) == 0 || grows(r)), reached, adds)
 	if len(targets) == 0 && !created {
 		return s.wake(ctx, q, left > 0)
 	}
@@ -358,7 +361,9 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		if h.entries, err = json.Marshal(t.entries); err != nil {
 			return fmt.Errorf("encode the entries of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
-		h.rejoin = grownBy(t, r.Grows)
+		// A Destination the rendering adds again, whose delivery got its final edit or was withheld, publishes there
+		// afresh: Loud or Quiet as its destination_joined, Quiet for a change of configuration (C-26.FR-4, FR-5).
+		h.rejoin = !moved && gone(t.had) && len(t.entries) > 0 && (grows(r) || adds.adds(t))
 		h.loud, h.heldBy = publicationOf(r, g, created, moved, joined[d.ID], st, held)
 		if h.heldBy != nil && (created || t.had == nil || (h.rejoin && gone(t.had))) {
 			summaries = append(summaries, stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type})
@@ -515,21 +520,18 @@ func withReached(reached []target, had []dbgen.ListGroupDestinationsRow, grow bo
 	return out
 }
 
-// withGrowth adds to the targets the Destination that a change of a Team's Destination entries added or changed the
-// Team's entry of (groups.Rendering.Grows, C-26.FR-6), when that entry reaches it now — its condition met at the
-// Alert Group's level — and it is not among them: nothing else the reach has without a delivery is added, so that a
-// change of configuration never publishes where it changed nothing, such as below critical after a fall of the level
-// (C-26.FR-4).
-func withGrowth(targets, reached []target, g *groups.Growth) []target {
-	if g == nil || slices.ContainsFunc(targets, func(t target) bool { return t.dest.ID == g.Destination }) {
-		return targets
+// withAdded adds to the targets the Destinations of the reach the growth a adds that are not among them (growth),
+// in id order.
+func withAdded(targets, reached []target, a growth) []target {
+	out := targets
+	for _, t := range reached {
+		if a.adds(t) && !slices.ContainsFunc(out, func(x target) bool { return x.dest.ID == t.dest.ID }) {
+			out = append(slices.Clone(out), t)
+		}
 	}
-	i := slices.IndexFunc(reached, func(t target) bool { return grownBy(t, g) })
-	if i < 0 {
-		return targets
+	if len(out) != len(targets) {
+		slices.SortFunc(out, func(a, b target) int { return cmp.Compare(a.dest.ID, b.dest.ID) })
 	}
-	out := append(slices.Clone(targets), reached[i])
-	slices.SortFunc(out, func(a, b target) int { return cmp.Compare(a.dest.ID, b.dest.ID) })
 	return out
 }
 
@@ -563,17 +565,48 @@ func unpublishedGroup(g *groups.Group) bool {
 	return g.FirstPublishedAt == nil && g.Status != groups.StatusResolved
 }
 
-// grows reports whether a rendering may create the deliveries of Destinations the Alert Group reaches without one
-// (C-26.FR-4, FR-9): one of groups.ReachEvents — a Team that joined, by its Alerts or by the evaluation of the Teams
-// on a save, or a rise of the level, by an Alert or by the Route's Minimum severity — or destination_joined, the
-// same notion by which the dispatcher records destination_joined. A change of a Team's Destination entries adds only
-// the Destination of the entry it added or changed (withGrowth). Any other rendering — a fall of the level, a
-// resolution, a Command, Alerts that bring neither a Team nor a rise, or the re-render of a change of configuration
-// such as a renamed Team or a button set — updates the deliveries the Alert Group has and creates none; only an Alert
-// Group without any delivery yet is published wherever it reaches, as its first Publication.
+// grows reports whether a rendering may create the deliveries of every Destination the Alert Group reaches without
+// one (C-26.FR-4, FR-9): a rise of its level, by an Alert or by the Route's Minimum severity, after which it reaches
+// what its level now meets. A Team that joined it, by its Alerts or by the evaluation of the Teams on a save, adds only
+// the Destinations of its own entries, destination_joined only its Destination, and a change of a Team's Destination
+// entries only the Destination of the entry it added or changed (withAdded), so that none brings back a Destination
+// below critical that a fall of the level did not bring. Any other rendering — a fall of the level, a resolution, a
+// Command, Alerts that bring neither a Team nor a rise, or the re-render of a change of configuration such as a
+// renamed Team or a button set — updates the deliveries the Alert Group has and creates none; only an Alert Group
+// without any delivery yet is published wherever it reaches, as its first Publication.
 func grows(r groups.Rendering) bool {
 	return slices.ContainsFunc(r.Events, func(e groups.Recorded) bool {
-		return e.Event == groups.EventDestinationJoined || slices.Contains(groups.ReachEvents, e.Event)
+		return e.Event == groups.EventSeverityRaised || e.Event == groups.EventUrgencyRaised
+	})
+}
+
+// joinedTeams are the Teams that joined the Alert Group in the rendering.
+func joinedTeams(r groups.Rendering) []int64 {
+	var out []int64
+	for _, e := range r.Events {
+		if e.Event == groups.EventTeamJoined && e.Team != 0 {
+			out = append(out, e.Team)
+		}
+	}
+	return out
+}
+
+// growth is what a rendering adds to the Destinations of the Alert Group besides a rise (grows): those of its
+// destination_joined events, those an entry of a Team that joined reaches, and the one of a change of a Team's
+// Destination entries.
+type growth struct {
+	joined map[int64]groups.Recorded
+	teams  []int64
+	grows  *groups.Growth
+}
+
+// adds reports whether the growth adds the target.
+func (a growth) adds(t target) bool {
+	if _, ok := a.joined[t.dest.ID]; ok || grownBy(t, a.grows) {
+		return true
+	}
+	return slices.ContainsFunc(t.entries, func(e routing.Reaching) bool {
+		return e.Kind == routing.EntryTeam && slices.Contains(a.teams, e.TeamID)
 	})
 }
 
@@ -688,7 +721,7 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		p := dbgen.RejoinDeliveryParams{OrgID: s.orgID, AlertGroupID: g.ID, DestinationID: d.ID,
 			Loud: deliveryEvent(DeliveryAddedDestination).loud(false), Now: now}
 		if how.rejoin {
-			p.HeldByStormID = nullInt(how.heldBy)
+			p.Loud, p.HeldByStormID = how.loud.Bool, nullInt(how.heldBy)
 		}
 		n, err := q.RejoinDelivery(ctx, p)
 		if err != nil {
@@ -696,6 +729,8 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 		if n > 0 {
 			state = statePending
+			// Published afresh, the Root message shows the current state: no Thread reply of the change.
+			how.replies = nil
 			if r.Changed != nil {
 				r.Changed()
 			}

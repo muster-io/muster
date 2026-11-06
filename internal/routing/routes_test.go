@@ -94,6 +94,9 @@ type fakeStore struct {
 	membershipLocks []int64
 	teamDests       map[int64][]int64
 	teamLocks       []int64
+	// shared are the Destinations a save locked FOR SHARE, and seqLocks the order of those locks and the Routes' rows.
+	shared   []string
+	seqLocks []string
 
 	// teams are the Teams that are not deleted by public_id, and userTeams the public_ids of the Teams of each User.
 	teams     map[string]dbgen.LockOwningTeamRow
@@ -197,6 +200,7 @@ func (s *fakeStore) LockRoute(_ context.Context, arg dbgen.LockRouteParams) (int
 	if err := s.call("LockRoute"); err != nil {
 		return 0, err
 	}
+	s.seqLocks = append(s.seqLocks, "route")
 	if r := s.find(arg.PublicID); r != nil && arg.OrgID == orgID {
 		return r.ID, nil
 	}
@@ -493,6 +497,15 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 		return err
 	}
 	return nil
+}
+
+func (s *fakeStore) ShareDestinations(_ context.Context, arg dbgen.ShareDestinationsParams) ([]int64, error) {
+	if err := s.call("ShareDestinations"); err != nil {
+		return nil, err
+	}
+	s.shared = append(s.shared, arg.PublicIds...)
+	s.seqLocks = append(s.seqLocks, "share")
+	return nil, nil
 }
 
 func (s *fakeStore) ResolveDestinations(_ context.Context, arg dbgen.ResolveDestinationsParams) (
@@ -1363,6 +1376,12 @@ func TestRouteDestinations(t *testing.T) {
 	if !slices.Equal(created.DestinationIDs, []string{destA, destB}) || len(*calls) != 0 {
 		t.Fatalf("created %+v, hook %+v", created.DestinationIDs, *calls)
 	}
+	// The Destinations named are locked FOR SHARE, before the Route's row on an update, as a deletion of one of them
+	// locks it before its Routes.
+	if !slices.Equal(store.shared, []string{destB, destA, destB}) {
+		t.Errorf("shared on the creation %v", store.shared)
+	}
+	store.shared, store.seqLocks = nil, nil
 	var diff []audit.Change
 	_ = json.Unmarshal(store.audit[len(store.audit)-1].Diff, &diff)
 	if !slices.ContainsFunc(diff, func(ch audit.Change) bool { return ch.Pointer == "/destination_ids" }) {
@@ -1375,6 +1394,10 @@ func TestRouteDestinations(t *testing.T) {
 	got, err := svc.Update(t.Context(), by, created.PublicID, ptr(created.Version), in)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(store.shared, []string{destA}) || len(store.seqLocks) < 2 || store.seqLocks[0] != "share" ||
+		store.seqLocks[1] != "route" {
+		t.Errorf("shared %v, locks %v", store.shared, store.seqLocks)
 	}
 	e := store.audit[len(store.audit)-1]
 	diff = nil
@@ -1455,8 +1478,8 @@ func TestRouteDestinations(t *testing.T) {
 		t.Errorf("failed hook = %v, links %+v", err, store.links[created.ID])
 	}
 	delete(store.fail, "membership")
-	for _, q := range []string{"ResolveDestinations", "LockRouteMembership", "ListRouteDestinationIDs",
-		"DeleteRouteDestinations", "InsertRouteDestinations"} {
+	for _, q := range []string{"ShareDestinations", "ResolveDestinations", "LockRouteMembership",
+		"ListRouteDestinationIDs", "DeleteRouteDestinations", "InsertRouteDestinations"} {
 		store.fail[q] = errBoom
 		in.DestinationIDs = []string{destA}
 		if q == "InsertRouteDestinations" {

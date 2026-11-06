@@ -91,7 +91,9 @@ func (s *Service) withDestinations(ctx context.Context, q Queries, list []Team) 
 // resolveDestinations reads the Destinations of the entries of a save, each once with its condition, any by default
 // (C-26.FR-1), and returns them by public_id: an id that names no Destination, or a deleted one, is an unknown_id
 // FieldError at the entry's destination_id, one named twice a duplicate, and a condition outside the three an
-// invalid_format one at its severity_condition.
+// invalid_format one at its severity_condition. The Destinations are locked FOR SHARE until the save commits, before
+// the Team's membership lock, so that a deletion of one of them either commits first and the entry is refused, or
+// waits and then removes it (routing's DestinationDeleted).
 func (s *Service) resolveDestinations(ctx context.Context, q Queries, entries []DestinationEntry) (
 	map[string]teamDestination, error) {
 	out := map[string]teamDestination{}
@@ -119,7 +121,7 @@ func (s *Service) resolveDestinations(ctx context.Context, q Queries, entries []
 		}
 		seen[id], canonical[i] = true, id
 	}
-	rows, err := q.ResolveTeamDestinations(ctx, dbgen.ResolveTeamDestinationsParams{OrgID: s.orgID,
+	rows, err := q.ShareTeamDestinations(ctx, dbgen.ShareTeamDestinationsParams{OrgID: s.orgID,
 		PublicIds: canonical})
 	if err != nil {
 		return nil, fmt.Errorf("read the destinations of the team: %w", err)

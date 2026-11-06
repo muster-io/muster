@@ -412,6 +412,16 @@ SELECT id, public_id
 FROM destinations
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
 
+-- ShareTeamDestinations reads, as ResolveTeamDestinations does, the Destinations a save of a Team names, and locks them
+-- FOR SHARE, which the deletion of a Destination's FOR NO KEY UPDATE waits for and which waits for it: the save never
+-- writes an entry of a Destination whose deletion commits meanwhile, which finds such an entry in turn.
+-- name: ShareTeamDestinations :many
+SELECT id, public_id
+FROM destinations
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL
+ORDER BY id
+FOR SHARE;
+
 -- DeleteTeamDestinations removes Destinations from a Team.
 -- name: DeleteTeamDestinations :exec
 DELETE FROM team_destinations

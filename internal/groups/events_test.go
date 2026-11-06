@@ -904,6 +904,21 @@ func TestDestinationJoined(t *testing.T) {
 			t.Errorf("joined %v", h.events(g))
 		}
 	})
+	t.Run("a joining team brings only its own destinations", func(t *testing.T) {
+		// A warning Alert Group published in the critical Destination only, as one whose level fell from critical:
+		// search joining it brings search-notice and never the Route's notice, which the fall did not bring.
+		h := newHarness(t)
+		h.withReach()
+		a := h.teamAlert("x", "", byLabel(payments))
+		h.changes(t, ingest.ChangeFired, a)
+		g := h.groupOf(t, a)
+		h.published(g, destCritical)
+		h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
+		joined := h.joinedEntries(g)
+		if len(joined) != 1 || joined[0].DestinationID.Int64 != destSearch {
+			t.Errorf("joined %v", h.events(g))
+		}
+	})
 	t.Run("a route without the option takes no team's lock", func(t *testing.T) {
 		h := newHarness(t)
 		h.withReach()

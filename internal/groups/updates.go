@@ -167,6 +167,17 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 	if err != nil {
 		return 0, err
 	}
+	// A rise joins Destinations under the membership locks of the Route and the Alert Group's Teams: taken up front,
+	// in id order, so that no dispatch takes a Team's lock below one the batch holds.
+	open := make([]*Group, 0, len(locked))
+	for _, id := range ids {
+		if g := locked[id]; g != nil && g.RouteID == routeID && g.Status != StatusResolved {
+			open = append(open, g)
+		}
+	}
+	if err := s.shareMemberships(ctx, q, open, nil); err != nil {
+		return 0, err
+	}
 	levels, err := firingLevels(ctx, q, s.orgID, ids)
 	if err != nil {
 		return 0, err

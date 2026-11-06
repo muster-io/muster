@@ -707,6 +707,20 @@ func (s *fakeStore) ListTeamDestinations(_ context.Context, arg dbgen.ListTeamDe
 	return out, nil
 }
 
+func (s *fakeStore) ShareTeamDestinations(ctx context.Context, arg dbgen.ShareTeamDestinationsParams) (
+	[]dbgen.ShareTeamDestinationsRow, error) {
+	if err := s.fail["ShareTeamDestinations"]; err != nil {
+		return nil, err
+	}
+	s.seq = append(s.seq, "share")
+	rows, err := s.ResolveTeamDestinations(ctx, dbgen.ResolveTeamDestinationsParams(arg))
+	out := make([]dbgen.ShareTeamDestinationsRow, len(rows))
+	for i, r := range rows {
+		out[i] = dbgen.ShareTeamDestinationsRow(r)
+	}
+	return out, err
+}
+
 func (s *fakeStore) ResolveTeamDestinations(_ context.Context, arg dbgen.ResolveTeamDestinationsParams) (
 	[]dbgen.ResolveTeamDestinationsRow, error) {
 	if err := s.fail["ResolveTeamDestinations"]; err != nil || arg.OrgID != orgID {
@@ -1816,8 +1830,8 @@ func TestTeamDestinations(t *testing.T) {
 			t.Errorf("created with %+v", tc.entries)
 		}
 	}
-	for _, q := range []string{"ResolveTeamDestinations", "DeleteTeamDestinations", "UpsertTeamDestinations",
-		"ListTeamDestinations"} {
+	for _, q := range []string{"ShareTeamDestinations", "ResolveTeamDestinations", "DeleteTeamDestinations",
+		"UpsertTeamDestinations", "ListTeamDestinations"} {
 		s.fail[q] = errBoom
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
 			DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
@@ -1831,8 +1845,9 @@ func TestTeamDestinations(t *testing.T) {
 	}
 }
 
-// TestTeamDestinationsRows is C-26.FR-6 and C-25.FR-10 in the transactions of teams: a save whose Destination entries
-// are added, removed or changed takes the Team's membership lock after the Team's row and before it writes them, and
+// TestTeamDestinationsRows is C-26.FR-6 and C-25.FR-10 in the transactions of teams: a save locks the Destinations it
+// names FOR SHARE first; one whose Destination entries are added, removed or changed takes the Team's membership lock
+// after the Team's row and before it writes them, and
 // then writes one row team_destinations of the Team per Destination whose entry it added or changed, or one of the
 // Team alone when it only removed entries, which wakes the workers; a save that keeps the entries, and the creation of
 // a Team, which no open Alert Group has yet, take no lock and write none. The deletion of a Team removes
@@ -1850,7 +1865,7 @@ func TestTeamDestinationsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(s.seq, []string{"upsert", "row team_evaluation"}) {
+	if !slices.Equal(s.seq, []string{"share", "upsert", "row team_evaluation"}) {
 		t.Errorf("the creation: %v", s.seq)
 	}
 	lock := fmt.Sprintf("lock %d", created.ID)
@@ -1860,15 +1875,16 @@ func TestTeamDestinationsRows(t *testing.T) {
 		want    []string
 	}{
 		{"an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical},
-			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{lock, "upsert",
+			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{"share", lock, "upsert",
 			"row team_destinations 51"}},
 		{"a condition changed and an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN",
 			Condition: ConditionAny}, {DestinationID: "DS0000000000PC", Condition: ConditionCritical},
-			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{lock, "upsert",
-			"row team_destinations 52", "row team_destinations 53"}},
+			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{"share", lock,
+			"upsert", "row team_destinations 52", "row team_destinations 53"}},
 		{"entries removed", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
-			[]string{lock, "delete", "row team_destinations -"}},
-		{"the same entries", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, nil},
+			[]string{"share", lock, "delete", "row team_destinations -"}},
+		{"the same entries", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
+			[]string{"share"}},
 	} {
 		s.seq, s.destinationRows, s.wakes = nil, nil, nil
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
@@ -1883,7 +1899,7 @@ func TestTeamDestinationsRows(t *testing.T) {
 				t.Errorf("%s: row %+v", c.name, r)
 			}
 		}
-		if c.want != nil && !slices.Equal(s.wakes, []string{OpenGroupUpdatesChannel}) {
+		if len(c.want) > 1 && !slices.Equal(s.wakes, []string{OpenGroupUpdatesChannel}) {
 			t.Errorf("%s: wakes %v", c.name, s.wakes)
 		}
 	}

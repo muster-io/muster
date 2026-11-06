@@ -490,8 +490,9 @@ type Recorded struct {
 	Mentions     []Mention
 	Fingerprints []string
 	Reason       string
-	// Destination is the Destination a destination_joined joined.
+	// Destination is the Destination a destination_joined joined, and Team the Team a team_joined joined, 0 for none.
 	Destination *JoinedDestination
+	Team        int64
 }
 
 // JoinedDestination is the Destination of a destination_joined: its internal id, public_id, name and type, and the
@@ -753,9 +754,12 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			for _, m := range mentions {
 				p.Mentions = append(p.Mentions, string(m))
 			}
-			out = append(out, Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant,
-				Loudness: row.Loudness, Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason,
-				Destination: e.Destination})
+			rec := Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant, Loudness: row.Loudness,
+				Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason, Destination: e.Destination}
+			if e.TeamID != nil {
+				rec.Team = *e.TeamID
+			}
+			out = append(out, rec)
 		}
 		if e.System != "" {
 			p.Kind = string(KindSystem)
@@ -807,8 +811,25 @@ func joinsByAlerts(c *change, g *Group) bool {
 	})
 }
 
+// grows is how the change's lifecycle events grow the reach (C-26.FR-4): rise when one raised the Severity level, which
+// adds every Destination whose condition the level now meets, and the Teams that joined, which add only the
+// Destinations of their entries.
+func (c *change) grows() (rise bool, teams []int64) {
+	for _, e := range c.entries {
+		switch {
+		case e.Event == EventSeverityRaised || e.Event == EventUrgencyRaised:
+			rise = true
+		case e.Event == EventTeamJoined && e.TeamID != nil:
+			teams = append(teams, *e.TeamID)
+		}
+	}
+	return rise, teams
+}
+
 // joinDestinations adds to the change of g one destination_joined per Destination its reach now has without a
-// delivery (C-26.FR-5): Loud with new_alert_group while it is firing, Quiet while it is acknowledged or snoozed, in the
+// delivery kept current there, through what the change grew (grows) — every entry its level now meets after a rise,
+// the entries of the Teams that joined otherwise, so that a Team never brings back a Destination of the Route the
+// level stopped meeting (C-26.FR-4) — (C-26.FR-5): Loud with new_alert_group while it is firing, Quiet while it is acknowledged or snoozed, in the
 // order of the Destinations' ids. The reach — the entries of its Route and, with deliver_to_teams, of its Teams whose
 // condition its Severity level meets (routing.Reach) — is read under the Route's membership lock, taken shared after
 // the dispatcher's lock of g, the order Enqueue keeps: no change of the Route's Destinations commits between the reach
@@ -859,7 +880,13 @@ func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, 
 	for id, es := range byTeam {
 		teams = append(teams, routing.TeamEntries{TeamID: id, Entries: es})
 	}
+	rise, joined := c.grows()
 	for _, r := range routing.Reach(string(g.Severity), route, toTeams, teams) {
+		if !rise && !slices.ContainsFunc(r.Entries, func(e routing.Reaching) bool {
+			return e.Kind == routing.EntryTeam && slices.Contains(joined, e.TeamID)
+		}) {
+			continue
+		}
 		if dst := dests[r.DestinationID]; !dst.delivered {
 			dst.Entries = r.Entries
 			c.add(entry{Event: EventDestinationJoined, Variant: statusVariant(g.Status),

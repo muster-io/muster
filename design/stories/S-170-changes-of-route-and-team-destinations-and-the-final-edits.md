@@ -240,7 +240,18 @@ None.
   from critical, never published below critical, is not published there by a save that touched something else
   (C-26.FR-4), and no change removes by a condition (revised in review, H1; the first form published wherever the new
   reach had no delivery). The rows need no barrier of the evaluation (`db.TeamEvaluationLockClass`): the Team's
-  membership lock orders a save against the Snapshots that read its entries. A delivery that a change of
+  membership lock orders a save against the Snapshots that read its entries. A Destination whose delivery got its
+  final edit, or was withheld, is not "delivered" for the reach: a rise or a joining Team that reaches it again
+  records `destination_joined`, and Enqueue publishes it there afresh (`RejoinDelivery`) with that event's loudness —
+  Loud while firing, Quiet while acknowledged or snoozed — held by an active Storm with its summary (review, H1 of the
+  xhigh pass). What a rendering adds follows the same rule: a rise adds what the level now meets; a Team that joins —
+  by its Alerts or by the evaluation of the Teams — adds only the Destinations of its own entries, so that it never
+  brings back a Destination below critical after a fall (an S-121 follow-up, review L3); a change of a Team's entries
+  adds the Destination it touched. During a Storm, a Destination added to a Route gets the Storm summary only where a
+  held Alert Group arrives (review M1). A save of a Team or of a Route locks the Destinations it names FOR SHARE before
+  the Team's membership lock or the Route's row, so that a deletion of one of them and the save serialize and no entry
+  of a deleted Destination is written (review L1), and a batch of `route_minimum_severity` takes the membership locks
+  up front as the other batches do (review L2). A delivery that a change of
   configuration creates or publishes again for an Alert Group created since the active Storm started is held by the
   Storm, with its summary there, even where a final edit cleared its hold (review, M1). A re-render of several open Alert Groups takes every
   Route's membership lock and then every Team's up front, each in id order, so that the walk never takes a lock below one

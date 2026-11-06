@@ -283,8 +283,8 @@ func (s *Service) retireSummaries(ctx context.Context, q queries, routeID int64,
 // the Route's membership lock exclusively. Under the new entries, for each open Alert Group of the Route at its current
 // Severity level and with its Teams: each Destination that an entry the save added or changed, or a Team's entry when
 // the save turned the option on, now reaches (touchedBy) without a delivery kept current there gets a Quiet
-// Publication, within the limiters, with the entries that reach it — during a Storm its Storm summary, holding
-// the Alert Groups the Storm holds — and each delivery whose entries hold an entry the save took away — the Route's
+// Publication, within the limiters, with the entries that reach it — during a Storm, held where the Storm holds the
+// Alert Group, with the Storm summary there, and no summary where no held Alert Group arrives — and each delivery whose entries hold an entry the save took away — the Route's
 // entry of a Destination taken off it, or every Team's entry when the option was turned off — gets the final edit when
 // no entry still names its Destination (settle); a Destination taken off the Route then has the summary of an active
 // Storm retired once nothing of the Route is kept current there. A changed condition removes nothing; a fallen level
@@ -388,12 +388,8 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c
 		if err := s.retireSummaries(ctx, q, routeID, left, n, now); err != nil {
 			return err
 		}
-		for _, id := range c.Added() {
-			if d, ok := n.dests[id]; ok && hasRoot(d) &&
-				!slices.ContainsFunc(summaries, func(x stormDest) bool { return x.id == id }) {
-				summaries = append(summaries, stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type})
-			}
-		}
+		// Only a Destination where a held Alert Group was published gets the Storm summary: a Loud summary where
+		// the Storm holds nothing would be the change of configuration's Loud message (ADR-0018).
 		if len(summaries) > 0 {
 			route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: routeID})
 			if err != nil {

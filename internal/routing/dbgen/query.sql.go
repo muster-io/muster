@@ -1568,6 +1568,43 @@ func (q *Queries) SetRoutePositions(ctx context.Context, arg SetRoutePositionsPa
 	return err
 }
 
+const shareDestinations = `-- name: ShareDestinations :many
+SELECT id
+FROM destinations
+WHERE org_id = $1 AND public_id = ANY($2::text[]) AND deleted_at IS NULL
+ORDER BY id
+FOR SHARE
+`
+
+type ShareDestinationsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+// ShareDestinations locks FOR SHARE, in id order and until the save commits, the Destinations that are not deleted
+// among the public_ids a save of a Route names, before the Route's row: the deletion of a Destination, which locks it
+// FOR NO KEY UPDATE and then the Routes that name it, either commits first, and the save refuses it, or waits for the
+// save and then removes the entry it wrote.
+func (q *Queries) ShareDestinations(ctx context.Context, arg ShareDestinationsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, shareDestinations, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const shareTeamEvaluation = `-- name: ShareTeamEvaluation :exec
 SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
 `

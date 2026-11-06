@@ -1330,13 +1330,15 @@ ORDER BY team_id;
 -- ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
 -- those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
 -- message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
--- there, by Destination.
+-- kept current there — one that got its final edit, or was withheld, does not count, so the Destination joins it again
+-- — by Destination.
 -- name: ListReachEntries :many
 SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d.name, d.type,
        EXISTS (SELECT 1
                FROM deliveries x
                WHERE x.org_id = @org_id AND x.alert_group_id = @alert_group_id::bigint
-                 AND x.destination_id = e.destination_id)::boolean AS delivered
+                 AND x.destination_id = e.destination_id AND NOT x.desired_retire
+                 AND x.state NOT IN ('withheld', 'retired'))::boolean AS delivered
 FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
       FROM route_destinations rd
       WHERE rd.org_id = @org_id AND rd.route_id = @route_id

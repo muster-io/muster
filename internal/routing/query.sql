@@ -299,6 +299,17 @@ SELECT id, public_id
 FROM destinations
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
 
+-- ShareDestinations locks FOR SHARE, in id order and until the save commits, the Destinations that are not deleted
+-- among the public_ids a save of a Route names, before the Route's row: the deletion of a Destination, which locks it
+-- FOR NO KEY UPDATE and then the Routes that name it, either commits first, and the save refuses it, or waits for the
+-- save and then removes the entry it wrote.
+-- name: ShareDestinations :many
+SELECT id
+FROM destinations
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL
+ORDER BY id
+FOR SHARE;
+
 -- ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes with their Severity conditions,
 -- by public_id.
 -- name: ListRouteDestinationIDs :many

@@ -1304,3 +1304,24 @@ func TestFinalEditsFor(t *testing.T) {
 		}
 	}
 }
+
+// TestNoSummaryWithoutHeldGroup is C-11.FR-6 with ADR-0018: during a Storm of warning Alert Groups, a Destination added
+// to the Route for critical, which none of them reaches, gets no Storm summary — no Loud message with the Mentions of
+// a new Alert Group — while one they reach gets it with the held Alert Groups.
+func TestNoSummaryWithoutHeldGroup(t *testing.T) {
+	e := stormStarted(t)
+	st := e.onlyStorm(t)
+	summaryIn := func(dest int64) bool {
+		return slices.ContainsFunc(e.db.deliveries, func(d *fakeDelivery) bool { return d.storm == st.id && d.dest == dest })
+	}
+	e.db.conditions = map[int64]map[int64]string{routeID: {destWH: "critical"}}
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	e.changed(t, routeID, []int64{destWH}, nil)
+	if summaryIn(destWH) || slices.ContainsFunc(e.db.deliveries, func(d *fakeDelivery) bool { return d.dest == destWH }) {
+		t.Errorf("the destination no held alert group reaches got %+v", e.db.deliveries)
+	}
+	e.route(t, e.setCondition(destWH, "any"))
+	if !summaryIn(destWH) {
+		t.Error("the destination the held alert groups reach got no summary")
+	}
+}
