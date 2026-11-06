@@ -755,7 +755,7 @@ func TestEnqueueConfigurationQuiet(t *testing.T) {
 		e.round(t)
 		e.rec.Reset()
 		e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, true, []int64{teamPayments},
-			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments})
 		e.round(t)
 		if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
 			t.Errorf("publication %+v", c)
@@ -769,7 +769,7 @@ func TestEnqueueConfigurationQuiet(t *testing.T) {
 		g := e.leveled(groups.StatusFiring, "warning", true)
 		g.Title = "disk full with its team"
 		e.render(t, g, groups.System, true, []int64{teamPayments},
-			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments})
 		e.round(t)
 		for _, dest := range []int64{destMM, destTeamNotice} {
 			if c := e.published(t, dest); c.Loudness != groups.Quiet {
@@ -783,7 +783,7 @@ func TestEnqueueConfigurationQuiet(t *testing.T) {
 		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
 			groups.Recorded{Seq: 2, Event: groups.EventAlertsAdded, Variant: groups.VariantFiring,
 				Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionNewAlerts}},
-			groups.Recorded{Seq: 3, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+			groups.Recorded{Seq: 3, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments})
 		e.round(t)
 		if c := e.published(t, destTeamNotice); c.Loudness != groups.Loud ||
 			!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
@@ -850,7 +850,7 @@ func TestEnqueueKeepsJoined(t *testing.T) {
 	joined.Destination.Entries = []routing.Reaching{{Kind: routing.EntryTeam, TeamID: teamPayments,
 		Condition: routing.ConditionBelowCritical}}
 	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
-		groups.Recorded{Seq: 1, Event: groups.EventTeamJoined, Loudness: groups.Quiet}, joined)
+		groups.Recorded{Seq: 1, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments}, joined)
 	d := e.deliveryOf(groupID, destTeamNotice)
 	if d == nil || !d.loud.Bool || !strings.Contains(string(d.entries), `"team_id":7`) {
 		t.Fatalf("the joined destination %+v", d)
@@ -886,7 +886,7 @@ func TestEnqueueTeamsEvaluatedDuringStorm(t *testing.T) {
 	}
 	locks := e.db.calls["LockActiveStorm"]
 	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, true, []int64{teamPayments},
-		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments})
 	d := e.deliveryOf(groupID, destTeamNotice)
 	if d == nil || d.heldBy != stormOfTheRoute || e.db.calls["LockActiveStorm"] != locks+1 {
 		t.Fatalf("the team destination is not held: %+v", d)
@@ -909,7 +909,7 @@ func TestEnqueueTeamsEvaluatedDuringStorm(t *testing.T) {
 		alertGroupCount: 25}
 	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, false, nil, created())
 	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, true, []int64{teamPayments},
-		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: teamPayments})
 	if d := e.deliveryOf(groupID, destTeamCrit); d == nil || d.heldBy != 0 {
 		t.Errorf("an urgent alert group is held: %+v", d)
 	}
@@ -1011,5 +1011,372 @@ func TestRecordDeliveredKeepsTeamDestination(t *testing.T) {
 		if !toTeams && (d.state != "pending" || !d.desiredRetire) {
 			t.Errorf("without deliver_to_teams: %+v", d)
 		}
+	}
+}
+
+// TestEnqueueTeamLocks is C-26.FR-6 on Enqueue: on a Route that delivers to the Teams it takes the membership lock of
+// each Team of the Alert Group shared, by Team id, after the Route's and before it reads the Teams' entries, so that a
+// change of a Team's entries and the Enqueue serialize; without the option it takes none. A failing lock fails it.
+func TestEnqueueTeamLocks(t *testing.T) {
+	e := reachEnv(t)
+	e.db.before["ShareTeamMembership"] = func() {
+		if len(e.db.membershipLocks) != 1 {
+			t.Errorf("a team's lock before the route's: %v", e.db.membershipLocks)
+		}
+	}
+	e.db.before["ListTeamDestinations"] = func() {
+		if !slices.Equal(e.db.teamLocks, []int64{3, teamPayments}) {
+			t.Errorf("the teams' entries read under the locks %v", e.db.teamLocks)
+		}
+	}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments, 3},
+		created())
+	if e.db.calls["ListTeamDestinations"] != 1 {
+		t.Error("the teams' entries were not read")
+	}
+
+	e = reachEnv(t)
+	r := e.db.routes[routeID]
+	r.toTeams = false
+	e.db.routes[routeID] = r
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	if len(e.db.teamLocks) != 0 {
+		t.Errorf("team locks without the option %v", e.db.teamLocks)
+	}
+
+	e = reachEnv(t)
+	e.db.fail["ShareTeamMembership"] = errBoom
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning", false),
+		Actor: groups.System, Events: []groups.Recorded{created()}, Teams: []int64{teamPayments}}); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failing team lock: %v", err)
+	}
+}
+
+// TestEnqueueGrowsQuietly is C-26.FR-6, C-25.FR-13 and ADR-0018 on the re-render of a change of a Team's Destination
+// entries (Rendering.Grows): without a lifecycle event it publishes the Alert Group Quietly, without Mentions and
+// Thread replies, in each Destination it now reaches without a delivery, and publishes again, Quietly, one whose
+// delivery got its final edit; a delivery Not delivered before its first Publication is not revived Loud; a Destination
+// whose condition its level does not meet gets nothing, so a level that fell gains no critical Destination; and a
+// re-render of a change of configuration that is not marked so creates nothing.
+func TestEnqueueGrowsQuietly(t *testing.T) {
+	e := reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+	e.round(t)
+	e.rec.Reset()
+	// Not marked as growing, the re-render of a change of configuration creates no delivery.
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning", true),
+		Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	if e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Fatal("a re-render that does not grow created a delivery")
+	}
+	grow := func() int {
+		t.Helper()
+		var changed int
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true, Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice},
+			Changed: func() { changed++ }}); err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	grow()
+	e.round(t)
+	if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 ||
+		len(e.repliesTo(destTeamNotice)) != 0 {
+		t.Errorf("the publication in the team's destination %+v", c)
+	}
+	if e.deliveryOf(groupID, destTeamCrit) != nil || e.deliveryOf(groupID, destCritical) != nil {
+		t.Error("a warning alert group grew into a critical destination")
+	}
+
+	// Its final edit done, the Destination reached again publishes afresh, Quietly.
+	d := e.deliveryOf(groupID, destTeamNotice)
+	d.state, d.desiredRetire = "retired", false
+	e.rec.Reset()
+	if grow() == 0 {
+		t.Error("publishing again changed nothing")
+	}
+	e.round(t)
+	if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+		t.Errorf("published again %+v", c)
+	}
+
+	// Not delivered before its first Publication, created Loud: published Quietly by the change.
+	e = reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	nd := e.deliveryOf(groupID, destTeamNotice)
+	nd.state = "not_delivered"
+	g := e.leveled(groups.StatusFiring, "warning", true)
+	g.Title = "disk full, renamed"
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Teams: []int64{teamPayments}, Configuration: true, Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice}}); err != nil {
+		t.Fatal(err)
+	}
+	if nd.loud.Bool || nd.state != "pending" {
+		t.Errorf("not delivered revived %s, loud %v", nd.state, nd.loud)
+	}
+}
+
+// fallenEnv is reachEnv whose Alert Group of the fixtures of the Team payments was created critical — published in
+// infra-critical and payments-critical — and then fell to warning, which creates nothing below critical (C-26.FR-4).
+func fallenEnv(t *testing.T) *env {
+	t.Helper()
+	e := reachEnv(t)
+	e.w.PublicURL = publicURL
+	e.db.groups[groupID].teams = []int64{teamPayments}
+	e.db.groups[groupID].severity = "critical"
+	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, false, []int64{teamPayments},
+		created())
+	e.db.groups[groupID].severity = "warning"
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+		groups.Recorded{Seq: 2, Event: groups.EventAlertResolved, Loudness: groups.Quiet})
+	e.round(t)
+	if e.deliveryOf(groupID, destCritical) == nil || e.deliveryOf(groupID, destTeamCrit) == nil ||
+		e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Fatalf("deliveries after the fall %+v", e.db.deliveries)
+	}
+	e.rec.Reset()
+	return e
+}
+
+// TestUnrelatedChangeGainsNothing is C-26.FR-4 and FR-6 (decision D3 revised): a change of configuration publishes
+// only in the Destinations whose entries it added or changed, where the Alert Group meets them now. After a fall from
+// critical to warning, a save of the Route that adds an unrelated Destination, and a change of the Team that adds one,
+// publish the Alert Group in that Destination only — never in infra-notice or payments-notice, which the change did
+// not touch and which the fall did not bring either.
+func TestUnrelatedChangeGainsNothing(t *testing.T) {
+	t.Run("route", func(t *testing.T) {
+		e := fallenEnv(t)
+		e.route(t, e.setCondition(criticalTwo(e), "any"))
+		e.round(t)
+		if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Errorf("an unrelated save published below critical: %+v", e.rec.Calls())
+		}
+		if c := e.published(t, 16); c.Loudness != groups.Quiet {
+			t.Errorf("the added destination %+v", c)
+		}
+		// Turning the option off and on again touches the Teams' entries: payments-notice, which the Alert Group
+		// meets now, is published; infra-notice, the Route's untouched entry, still not.
+		e.route(t, e.setToTeams(false))
+		e.route(t, e.setToTeams(true))
+		e.round(t)
+		if e.deliveryOf(groupID, destTeamNotice) == nil || e.deliveryOf(groupID, destMM) != nil {
+			t.Errorf("the option on again: notice %+v, infra-notice %+v", e.deliveryOf(groupID, destTeamNotice),
+				e.deliveryOf(groupID, destMM))
+		}
+	})
+	t.Run("team", func(t *testing.T) {
+		e := fallenEnv(t)
+		criticalTwo(e)
+		e.db.teamDests[teamPayments] = append(e.db.teamDests[teamPayments],
+			routing.Entry{DestinationID: 16, Condition: routing.ConditionAny})
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true,
+			Grows: &groups.Growth{Team: teamPayments, Destination: 16}}); err != nil {
+			t.Fatal(err)
+		}
+		e.round(t)
+		if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Errorf("an unrelated team save published below critical: %+v", e.rec.Calls())
+		}
+		if c := e.published(t, 16); c.Loudness != groups.Quiet {
+			t.Errorf("the added team destination %+v", c)
+		}
+		// A growth whose entry the Alert Group does not meet adds nothing.
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true,
+			Grows: &groups.Growth{Team: teamPayments, Destination: destTeamCrit}}); err != nil {
+			t.Fatal(err)
+		}
+		if e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Error("a growth of another destination published payments-notice")
+		}
+	})
+}
+
+// TestEnqueueGrowsDuringStorm is C-11.FR-6 with C-26.FR-6: during a Storm of the Route, a Team's Destination that the
+// change publishes an Alert Group created since the Storm started in holds it there, with the Storm summary, even after
+// a final edit cleared its hold — a Destination added anew and one added again alike.
+func TestEnqueueGrowsDuringStorm(t *testing.T) {
+	e := reachEnv(t)
+	e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+		alertGroupCount: 25}
+	g := e.leveled(groups.StatusFiring, "warning", false)
+	g.CreatedAt = business0
+	e.db.groups[groupID].teams = []int64{teamPayments}
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Events: []groups.Recorded{created()}, Teams: []int64{teamPayments}}); err != nil {
+		t.Fatal(err)
+	}
+	// Every hold of the Alert Group is gone: its deliveries got their final edits, as RetireDeliveries clears it.
+	for _, d := range e.db.deliveries {
+		if d.group == groupID {
+			d.heldBy, d.state = 0, "withheld"
+		}
+	}
+	g.FirstPublishedAt = at(business0)
+	ensured := e.db.calls["EnsureStormSummary"]
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Teams: []int64{teamPayments}, Configuration: true,
+		Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice}}); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.deliveryOf(groupID, destTeamNotice); d == nil || d.heldBy != stormOfTheRoute || d.state != "pending" {
+		t.Errorf("the destination published again is not held: %+v", d)
+	}
+	if e.db.calls["EnsureStormSummary"] != ensured+1 {
+		t.Errorf("the storm summary of the destination published again was rendered %d times",
+			e.db.calls["EnsureStormSummary"]-ensured)
+	}
+	e.round(t)
+	for _, c := range e.callsTo(destTeamNotice) {
+		if c.Method == deliverytest.MethodPublish && !strings.Contains(textOf(c), "Storm") {
+			t.Errorf("the held alert group was published on its own: %+v", c)
+		}
+	}
+}
+
+// TestJoinedAgainAfterFinalEdit is C-26.FR-4 and FR-5 after C-11.FR-14: a Destination whose delivery got its final edit
+// and that the Alert Group reaches again by a rise or by a Team that joins it — the dispatcher records
+// destination_joined, which counts only deliveries kept current — publishes it there afresh, Loud with new_alert_group
+// while it fires and Quiet while it is acknowledged, held by an active Storm where one holds it, without the Thread
+// replies of the change.
+func TestJoinedAgainAfterFinalEdit(t *testing.T) {
+	rise := func(t *testing.T, e *env, status groups.Status) {
+		t.Helper()
+		e.db.groups[groupID].severity = "critical"
+		e.render(t, e.leveled(status, "critical", true), groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 5, Event: groups.EventSeverityRaised, Loudness: groups.Quiet},
+			joinedEvent(6, destCritical, status))
+	}
+	for _, status := range []groups.Status{groups.StatusFiring, groups.StatusAcknowledged} {
+		t.Run("rise "+string(status), func(t *testing.T) {
+			// The Route names infra-notice and infra-critical for any; the warning Alert Group is in both.
+			e := entriesEnv(t)
+			e.db.conditions[routeID][destCritical] = "any"
+			e.route(t, e.changeOf(routeID, []int64{destCritical}, nil))
+			e.round(t)
+			// infra-critical taken off the Route: its final edit; added back for critical: nothing.
+			e.route(t, e.setCondition(destCritical, ""))
+			e.round(t)
+			if d := e.deliveryOf(groupID, destCritical); d.state != "retired" {
+				t.Fatalf("after the final edit: %s", d.state)
+			}
+			e.route(t, e.setCondition(destCritical, "critical"))
+			if d := e.deliveryOf(groupID, destCritical); d.state != "retired" {
+				t.Fatalf("a condition not met published: %s", d.state)
+			}
+			e.rec.Reset()
+			rise(t, e, status)
+			e.round(t)
+			c := e.published(t, destCritical)
+			if status == groups.StatusFiring && (c.Loudness != groups.Loud ||
+				!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup})) {
+				t.Errorf("the loud join again %+v", c)
+			}
+			if status != groups.StatusFiring && (c.Loudness != groups.Quiet || len(c.Mentions) != 0) {
+				t.Errorf("the quiet join again %+v", c)
+			}
+			if len(e.repliesTo(destCritical)) != 0 {
+				t.Errorf("thread replies in the destination joined again %+v", e.repliesTo(destCritical))
+			}
+		})
+	}
+	t.Run("final edit still waiting", func(t *testing.T) {
+		// infra-critical taken off the Route, its final edit not made yet; added back for critical; a rise, for which
+		// the dispatcher records no destination_joined, as the Root message is still there: the final edit is not
+		// made, and the Root message is edited to the current state, Quietly, without a new Publication.
+		e := entriesEnv(t)
+		e.db.conditions[routeID][destCritical] = "any"
+		e.route(t, e.changeOf(routeID, []int64{destCritical}, nil))
+		e.round(t)
+		e.route(t, e.setCondition(destCritical, ""))
+		d := e.deliveryOf(groupID, destCritical)
+		if !d.desiredRetire || d.messageID == nil {
+			t.Fatalf("the final edit does not wait: %+v", d)
+		}
+		e.route(t, e.setCondition(destCritical, "critical"))
+		e.rec.Reset()
+		e.db.groups[groupID].severity = "critical"
+		e.render(t, e.leveled(groups.StatusFiring, "critical", true), groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 5, Event: groups.EventSeverityRaised, Loudness: groups.Quiet})
+		if d.desiredRetire || d.state != "pending" || d.messageID == nil {
+			t.Fatalf("the waiting final edit was not cancelled: %+v", d)
+		}
+		e.round(t)
+		if c := e.callsTo(destCritical); callMethods(c) != "update" || c[0].Loudness != groups.Quiet ||
+			slices.Contains(c[0].Message.Notices, finalText("AGAAAAAAAAAA21")) {
+			t.Errorf("calls to the destination kept %+v", c)
+		}
+	})
+	t.Run("team", func(t *testing.T) {
+		// payments drops payments-notice: its final edit; then search, which names it, joins with its Alert.
+		e := entriesEnv(t)
+		e.db.teamDests[teamPayments] = e.db.teamDests[teamPayments][1:]
+		if _, err := e.svc.FinalEditsFor(t.Context(), nil, e.leveled(groups.StatusFiring, "warning", true),
+			teamPayments); err != nil {
+			t.Fatal(err)
+		}
+		e.round(t)
+		if d := e.deliveryOf(groupID, destTeamNotice); d.state != "retired" {
+			t.Fatalf("after the final edit: %s", d.state)
+		}
+		e.rec.Reset()
+		e.db.teamDests[3] = []routing.Entry{{DestinationID: destTeamNotice, Condition: routing.ConditionAny}}
+		e.db.groups[groupID].teams = []int64{3, teamPayments}
+		e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{3, teamPayments},
+			groups.Recorded{Seq: 5, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: 3},
+			joinedEvent(6, destTeamNotice, groups.StatusFiring))
+		e.round(t)
+		if c := e.published(t, destTeamNotice); c.Loudness != groups.Loud {
+			t.Errorf("the team's join again %+v", c)
+		}
+	})
+	t.Run("storm", func(t *testing.T) {
+		e := entriesEnv(t)
+		e.db.conditions[routeID][destCritical] = "any"
+		e.route(t, e.changeOf(routeID, []int64{destCritical}, nil))
+		e.round(t)
+		e.route(t, e.setCondition(destCritical, ""))
+		e.round(t)
+		e.route(t, e.setCondition(destCritical, "critical"))
+		e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+			alertGroupCount: 25}
+		ensured := e.db.calls["EnsureStormSummary"]
+		e.db.groups[groupID].severity = "critical"
+		g := e.leveled(groups.StatusFiring, "critical", true)
+		g.Urgent = false
+		e.render(t, g, groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 5, Event: groups.EventSeverityRaised, Loudness: groups.Quiet},
+			joinedEvent(6, destCritical, groups.StatusFiring))
+		if d := e.deliveryOf(groupID, destCritical); d.heldBy != stormOfTheRoute ||
+			e.db.calls["EnsureStormSummary"] == ensured {
+			t.Errorf("joined again during a storm: held by %d, %d summaries", d.heldBy,
+				e.db.calls["EnsureStormSummary"]-ensured)
+		}
+	})
+}
+
+// TestTeamEvaluatedAfterFall is C-26.FR-4 with C-25.FR-13: a Team that the evaluation of the Teams on a save brings to
+// an Alert Group whose level fell from critical publishes it Quietly in the Destinations of that Team's entries only —
+// never in a Destination of the Route or of another Team below critical, which the fall did not bring.
+func TestTeamEvaluatedAfterFall(t *testing.T) {
+	e := fallenEnv(t)
+	criticalTwo(e)
+	e.db.teamDests[3] = []routing.Entry{{DestinationID: 16, Condition: routing.ConditionAny}}
+	e.db.groups[groupID].teams = []int64{3, teamPayments}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, true, []int64{3, teamPayments},
+		groups.Recorded{Seq: 5, Event: groups.EventTeamJoined, Loudness: groups.Quiet, Team: 3})
+	e.round(t)
+	if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Errorf("the evaluated team published below critical: %+v", e.rec.Calls())
+	}
+	if c := e.published(t, 16); c.Loudness != groups.Quiet {
+		t.Errorf("the evaluated team's destination %+v", c)
 	}
 }

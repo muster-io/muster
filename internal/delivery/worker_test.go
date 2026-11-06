@@ -92,9 +92,11 @@ type (
 		route      int64
 		created    time.Time
 		resolvedAt *time.Time
-		// published is set once its first Publication was marked (first_published_at); teams are its Teams.
+		// published is set once its first Publication was marked (first_published_at); teams are its Teams, and
+		// severity its Severity level, warning when empty.
 		published bool
 		teams     []int64
+		severity  string
 	}
 	fakeDelivery struct {
 		id, dest, group                     int64
@@ -198,8 +200,9 @@ type fakeDB struct {
 	storms         map[int64]*fakeStorm
 	timers         map[int64]time.Time
 	timersNotified int
-	// membershipLocks are the Routes whose membership lock Enqueue took shared, in order.
+	// membershipLocks are the Routes whose membership lock Enqueue took shared, in order, and teamLocks the Teams'.
 	membershipLocks []int64
+	teamLocks       []int64
 	// webhookEvents are the events of outgoing webhooks, and system the system entries delivery recorded.
 	webhookEvents []*fakeEvent
 	system        []groups.SystemEntry
@@ -403,6 +406,16 @@ func (f *fakeDB) ShareRouteMembership(_ context.Context, arg dbgen.ShareRouteMem
 	return f.call("ShareRouteMembership")
 }
 
+func (f *fakeDB) ShareTeamMembership(_ context.Context, arg dbgen.ShareTeamMembershipParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if arg.LockClass != db.TeamMembershipLockClass {
+		return errors.New("not the team membership lock")
+	}
+	f.teamLocks = append(f.teamLocks, arg.TeamID)
+	return f.call("ShareTeamMembership")
+}
+
 func (f *fakeDB) EnsureDelivery(_ context.Context, arg dbgen.EnsureDeliveryParams) (dbgen.EnsureDeliveryRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -556,7 +569,7 @@ func (f *fakeDB) healthy(dest int64) bool {
 // work says whether a pending delivery is work for the worker: no Storm holds it, and its Destination is not deleted
 // unless it is its final edit.
 func (f *fakeDB) work(d *fakeDelivery) bool {
-	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire)
+	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire || d.publishedAt == nil)
 }
 
 func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliveriesParams) (
@@ -628,7 +641,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
 		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
-		ActualButtonKeyID: txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
+		DestinationDeleted: ds.deleted,
+		ActualButtonKeyID:  txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
 		PastEditWindow: d.pastEditWindow, RepublicationStartedAt: tz(d.restarted)}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}

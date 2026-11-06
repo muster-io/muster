@@ -76,18 +76,10 @@ func sendsEvents(d dbgen.ListRouteDestinationsRow) bool {
 	return d.Type == TypeWebhook && (d.WebhookMode.String == webhookEvents || d.WebhookMode.String == webhookBoth)
 }
 
-// splitDestinations separates the Destinations of a Route that have deliveries — messengers and outgoing webhooks
-// with a template — from those that receive events; an outgoing webhook in mode both is in both.
-func splitDestinations(all []dbgen.ListRouteDestinationsRow) (deliveries, events []dbgen.ListRouteDestinationsRow) {
-	for _, d := range all {
-		if sendsEvents(d) {
-			events = append(events, d)
-		}
-		if d.Type != TypeWebhook || d.WebhookMode.String != webhookEvents {
-			deliveries = append(deliveries, d)
-		}
-	}
-	return deliveries, events
+// hasRoot reports whether a Destination has Root messages: a messenger, or an outgoing webhook with a template; one
+// in the events mode receives the events of an Alert Group instead.
+func hasRoot(d dbgen.ListRouteDestinationsRow) bool {
+	return d.Type != TypeWebhook || d.WebhookMode.String != webhookEvents
 }
 
 // newWebhookID is a new webhook-id: msg_ and 26 random characters.

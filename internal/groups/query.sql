@@ -1301,6 +1301,19 @@ ORDER BY team_id;
 -- name: ShareRouteMembership :exec
 SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@route_id::bigint));
 
+-- ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+-- db.TeamMembershipLockClass), which a change of the Team's Destination entries takes exclusively, before the Team's
+-- entries are read: after the Route's membership lock, by Team id.
+-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared(@lock_class::int, hashint8(@team_id::bigint));
+
+-- ListGroupsTeamIDs lists the Teams of the Alert Groups, deleted ones included, by Alert Group and Team.
+-- name: ListGroupsTeamIDs :many
+SELECT alert_group_id, team_id
+FROM alert_group_teams
+WHERE org_id = @org_id AND alert_group_id = ANY(@alert_group_ids::bigint[])
+ORDER BY alert_group_id, team_id;
+
 -- GetRouteDeliverToTeams reads "Also to the Teams from the label" of a Route, deleted or not.
 -- name: GetRouteDeliverToTeams :one
 SELECT deliver_to_teams
@@ -1316,14 +1329,18 @@ ORDER BY team_id;
 
 -- ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
 -- those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
--- message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
--- there, by Destination.
+-- message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a Root message
+-- there: one whose final edit was made, or that was withheld, does not count, so the Destination joins it again with a
+-- new Publication; one whose final edit still waits counts, as its Root message stays, and the growth keeps it current
+-- instead of giving it the final edit (delivery's Enqueue) — by Destination.
 -- name: ListReachEntries :many
 SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d.name, d.type,
        EXISTS (SELECT 1
                FROM deliveries x
                WHERE x.org_id = @org_id AND x.alert_group_id = @alert_group_id::bigint
-                 AND x.destination_id = e.destination_id)::boolean AS delivered
+                 AND x.destination_id = e.destination_id AND x.state NOT IN ('withheld', 'retired')
+                 AND (NOT x.desired_retire OR x.published_at IS NOT NULL
+                      OR x.publication_started_at IS NOT NULL))::boolean AS delivered
 FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
       FROM route_destinations rd
       WHERE rd.org_id = @org_id AND rd.route_id = @route_id

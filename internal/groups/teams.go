@@ -184,7 +184,9 @@ func (t *teamsEvaluated) apply(ctx context.Context, q Queries, g *Group, c *chan
 // evaluateTeams evaluates the Teams of the Alert Groups ids again (C-25.FR-13), in the transaction of q: it locks them
 // in id order, classifies the labels of the Alerts firing in each with the classification of the Teams as of the
 // transaction, and runs TeamsEvaluated through the dispatcher on each open one that has an Alert of a Team, in the
-// order (Route, id), as the re-render of a button set goes, since the re-render step takes the Routes' locks. Of an
+// order (Route, id), as the re-render of a button set goes, after it took the membership locks of their Routes and then
+// of their Teams — those they have and those the evaluation brings — each in id order (shareMemberships), so that
+// no dispatch takes a Team's lock below one the batch holds. Of an
 // Alert Group a person resolved that is still in its Grace period it only records the Teams on its firing tails,
 // which the end of the Grace period groups again with them; the Alert Group itself does not change. Only an Alert
 // whose own status is firing is classified: one that a Snapshot fires again is left to that Snapshot's routing, which
@@ -192,24 +194,60 @@ func (t *teamsEvaluated) apply(ctx context.Context, q Queries, g *Group, c *chan
 // (updateBatch). It returns the Alert Groups a Team joined, by id; after collects what runs once the transaction
 // committed.
 func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, after *committed) ([]int64, error) {
+	ev, err := s.classifyTeams(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.shareMemberships(ctx, q, ev.open, ev.teams()); err != nil {
+		return nil, err
+	}
+	return s.joinTeams(ctx, q, ev, after)
+}
+
+// teamsBatch is a batch of the evaluation of the Teams: its open Alert Groups with classified firing Alerts, locked,
+// in the order (Route, id), and the classified Alerts of each.
+type teamsBatch struct {
+	open   []*Group
+	firing map[int64][]classifiedAlert
+}
+
+// teams are the Teams the classified Alerts of the batch belong to, in id order.
+func (e teamsBatch) teams() []int64 {
+	var out []int64
+	for _, alerts := range e.firing {
+		for _, a := range alerts {
+			for _, m := range a.teams {
+				out = append(out, m.TeamID)
+			}
+		}
+	}
+	return slices.Compact(slices.Sorted(slices.Values(out)))
+}
+
+// classifyTeams locks the Alert Groups ids in id order, classifies the labels of the Alerts firing in them with the
+// classification of the Teams as of the transaction of q, adds the missing alert_teams rows of the firing tails of an
+// Alert Group a person resolved that is still in its Grace period, and returns the batch of the open ones. The
+// Teams the evaluation brings are known before any dispatch, so their membership locks can be taken up front, by id,
+// after the Routes' (shareMemberships).
+func (s *Service) classifyTeams(ctx context.Context, q Queries, ids []int64) (teamsBatch, error) {
 	if len(ids) == 0 {
-		return nil, nil
+		return teamsBatch{}, nil
 	}
 	locked, err := lock(ctx, q, s.orgID, ids)
 	if err != nil {
-		return nil, err
+		return teamsBatch{}, err
 	}
 	st, err := q.GetTeamsStamp(ctx, s.orgID)
 	if err != nil {
-		return nil, fmt.Errorf("read the stamp of the teams: %w", err)
+		return teamsBatch{}, fmt.Errorf("read the stamp of the teams: %w", err)
 	}
 	classes, err := s.classifier.At(ctx, s.classify(q), teams.Stamp{Label: st.TeamLabel, Version: st.TeamsVersion})
 	if err != nil {
-		return nil, err
+		return teamsBatch{}, err
 	}
 	rows, err := q.ListGroupFiringAlerts(ctx, dbgen.ListGroupFiringAlertsParams{OrgID: s.orgID, AlertGroupIds: ids})
 	if err != nil {
-		return nil, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
+		return teamsBatch{}, fmt.Errorf("read the alerts firing in the alert groups: %w", err)
 	}
 	firing := map[int64][]classifiedAlert{}
 	for _, r := range rows {
@@ -218,7 +256,7 @@ func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, aft
 		}
 		var labels map[string]string
 		if err := json.Unmarshal(r.Labels, &labels); err != nil {
-			return nil, fmt.Errorf("read the labels of alert %d: %w", r.AlertID, err)
+			return teamsBatch{}, fmt.Errorf("read the labels of alert %d: %w", r.AlertID, err)
 		}
 		if c := classes.Classify(labels); len(c.Teams) > 0 {
 			firing[r.AlertGroupID] = append(firing[r.AlertGroupID], classifiedAlert{id: r.AlertID, teams: c.Teams})
@@ -245,16 +283,22 @@ func (s *Service) evaluateTeams(ctx context.Context, q Queries, ids []int64, aft
 	if len(tails.AlertIds) > 0 {
 		tails.OrgID = s.orgID
 		if err := q.AddAlertTeams(ctx, tails); err != nil {
-			return nil, fmt.Errorf("add the teams of the alerts in grace periods: %w", err)
+			return teamsBatch{}, fmt.Errorf("add the teams of the alerts in grace periods: %w", err)
 		}
 	}
 	slices.SortFunc(open, func(a, b *Group) int {
 		return cmp.Or(cmp.Compare(a.RouteID, b.RouteID), cmp.Compare(a.ID, b.ID))
 	})
+	return teamsBatch{open: open, firing: firing}, nil
+}
+
+// joinTeams changes each open Alert Group of the evaluation ev through the dispatcher as the system transition
+// TeamsEvaluated, and returns those a Team joined; after collects what runs once the transaction committed.
+func (s *Service) joinTeams(ctx context.Context, q Queries, ev teamsBatch, after *committed) ([]int64, error) {
 	now := s.d.clock.Now().UTC()
 	var joined []int64
-	for _, g := range open {
-		t := &teamsEvaluated{orgID: s.orgID, alerts: sortedAlerts(firing[g.ID]), now: now}
+	for _, g := range ev.open {
+		t := &teamsEvaluated{orgID: s.orgID, alerts: sortedAlerts(ev.firing[g.ID]), now: now}
 		if err := s.d.dispatch(ctx, q, g, System, t, after); errors.Is(err, errNotOpen) {
 			continue
 		} else if err != nil {

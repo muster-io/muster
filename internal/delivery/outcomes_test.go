@@ -651,7 +651,7 @@ func TestRecordAfterTheRowEnded(t *testing.T) {
 			e.round(t)
 			d := e.only(t)
 			e.db.routeDests[routeID] = nil
-			if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, nil, []int64{destMM}); err != nil {
+			if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, nil, []int64{destMM})); err != nil {
 				t.Fatal(err)
 			}
 			e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{

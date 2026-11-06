@@ -1019,7 +1019,7 @@ func TestWebhookEventsStorm(t *testing.T) {
 func TestWebhookEventsJoin(t *testing.T) {
 	e := newEventsEnv(t, nil)
 	e.db.routeDests[routeID] = []int64{destWH}
-	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH}, nil); err != nil {
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, []int64{destWH}, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.db.deliveries) != 0 || len(e.db.webhookEvents) != 0 {

@@ -16,14 +16,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
+	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/ingest"
 	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
@@ -31,6 +35,7 @@ import (
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
 	routingdb "github.com/muster-io/muster/internal/routing/dbgen"
+	"github.com/muster-io/muster/internal/teams"
 )
 
 // The lock order of the delivery worker (worker.go) against the dispatcher: a Command — a timer's alike — locks its
@@ -431,8 +436,8 @@ func TestMembershipAgainstStormCalmLockOrder(t *testing.T) {
 
 		changed, proceed := make(chan struct{}), make(chan struct{})
 		var held int32
-		l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, id int64, added, removed []int64) error {
-			err := l.svc.RouteDestinationsChanged(ctx, tx, id, added, removed)
+		l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+			err := l.svc.RouteDestinationsChanged(ctx, tx, c)
 			if err == nil {
 				err = tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
 			}
@@ -473,8 +478,8 @@ func TestMembershipAgainstStormCalmLockOrder(t *testing.T) {
 		blocked := l.blockedOrDone(t, calmed, held)
 		close(proceed)
 		wg.Wait()
-		l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, id int64, added, removed []int64) error {
-			return l.svc.RouteDestinationsChanged(ctx, tx, id, added, removed)
+		l.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+			return l.svc.RouteDestinationsChanged(ctx, tx, c)
 		})
 		t.Logf("the calm check waited for the route change: %v", blocked)
 		if editErr != nil || calmErr != nil {
@@ -1331,4 +1336,301 @@ func (d *deadlocks) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes 
 		d.count.Add(1)
 	}
 	return routed, err
+}
+
+// txGate holds the first transaction that reaches it, after recording its backend, until proceed is closed.
+type txGate struct {
+	once    sync.Once
+	pid     int32
+	entered chan struct{}
+	proceed chan struct{}
+}
+
+func newTxGate() *txGate { return &txGate{entered: make(chan struct{}), proceed: make(chan struct{})} }
+
+// hold holds the transaction of q on the gate's first call; later calls go straight on.
+func (g *txGate) hold(ctx context.Context, q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}) error {
+	var err error
+	g.once.Do(func() {
+		err = q.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid)
+		close(g.entered)
+		<-g.proceed
+	})
+	return err
+}
+
+// against runs held, whose transaction stops at the gate g, and once it holds there runs other, until other ends or
+// waits for a lock the held transaction holds; then held goes on. It reports whether other waited, and the errors of
+// both; neither may end in a deadlock.
+func (l *live) against(t *testing.T, g *txGate, held, other func(ctx context.Context) error) (bool, error, error) {
+	t.Helper()
+	ctx := t.Context()
+	var wg sync.WaitGroup
+	var heldErr, otherErr error
+	wg.Go(func() { heldErr = held(ctx) })
+	select {
+	case <-g.entered:
+	case <-time.After(10 * time.Second):
+		close(g.proceed)
+		wg.Wait()
+		t.Fatalf("the held transaction never reached its gate: %v", heldErr)
+	}
+	done := make(chan struct{})
+	wg.Go(func() {
+		defer close(done)
+		otherErr = other(ctx)
+	})
+	blocked := l.blockedOrDone(t, done, g.pid)
+	close(g.proceed)
+	wg.Wait()
+	for _, err := range []error{heldErr, otherErr} {
+		if pe, ok := errors.AsType[*pgconn.PgError](err); ok && pe.Code == "40P01" {
+			t.Errorf("a deadlock: %v", err)
+		}
+	}
+	return blocked, heldErr, otherErr
+}
+
+// teamLive is the harness with the Team "locks", whose Team matcher takes the Alerts whose disk is TL…, its Destination
+// entries, "Also to the Teams from the label" on the Route db, the Teams service and the worker of the open Alert Group
+// updates, with delivery's final edits wired as the runtime wires them.
+type teamLive struct {
+	*live
+	teams   *teams.Service
+	team    teams.Team
+	updates *groups.UpdateWorker
+}
+
+var teamSystem = teams.Requester{Actor: audit.System, Transport: audit.TransportSystem}
+
+func setupTeamLive(t *testing.T, s dbtest.Server, entries ...teams.DestinationEntry) *teamLive {
+	t.Helper()
+	l := setupLive(t, s)
+	l.fresh(t, 1000, 1)
+	l.a.Published = l.groups.MarkPublished
+	l.groups.SetFinalEdits(l.svc)
+	tl := &teamLive{live: l, teams: teams.New(teams.Config{OrgID: l.orgID, Store: teams.NewStore(l.d.Pool),
+		Audit: audit.NewWriter(l.logger, l.business), Business: l.business}),
+		updates: &groups.UpdateWorker{Service: l.groups, Log: l.logger, Lease: db.Lease{Owner: "u1",
+			Duration: groups.UpdateLease, Clocks: clock.Clocks{Business: l.business, Real: clock.Real{}}}}}
+	var err error
+	if tl.team, err = tl.teams.Create(t.Context(), teamSystem, teams.Input{Name: "locks", Slug: "locks",
+		Matchers:           &[]teams.Matcher{{Label: "disk", Op: "=~", Value: "TL.*"}},
+		DestinationEntries: &entries}); err != nil {
+		t.Fatal(err)
+	}
+	l.exec(t, `UPDATE routes SET deliver_to_teams = true WHERE id = $1`, l.routeID)
+	tl.drainUpdates(t)
+	return tl
+}
+
+// drainUpdates runs the open Alert Group updates until none is left.
+func (tl *teamLive) drainUpdates(t *testing.T) {
+	t.Helper()
+	if _, err := tl.updates.Round(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := tl.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+		t.Fatalf("%d open alert group updates left\n%s", n, tl.log)
+	}
+}
+
+// published fires the Alert TL1/a of the Team, publishes its Alert Group and returns it.
+func (tl *teamLive) published(t *testing.T) string {
+	t.Helper()
+	tl.fireAlerts(t, "tl", alert{name: "TL1/a", team: "db"})
+	gid := tl.group(t, "TL1")
+	tl.round(t, tl.a)
+	if tl.count(t, `SELECT count(*) FROM alert_group_teams x JOIN alert_groups g ON g.id = x.alert_group_id
+		WHERE g.public_id = $1 AND g.first_published_at IS NOT NULL`, gid) != 1 {
+		t.Fatalf("the alert group of the team is not published with its team\n%s", tl.log)
+	}
+	return gid
+}
+
+// secondEntry is the Destination entry of the Team of the second Destination, DSAAAAAAAAAAA2, for any level.
+func secondEntry() teams.DestinationEntry {
+	return teams.DestinationEntry{DestinationID: "DSAAAAAAAAAAA2", Condition: teams.ConditionAny}
+}
+
+// txGateRenderer holds the first render through it, inside Enqueue, which holds the Route's and the Teams' membership
+// locks by then, at the gate g.
+type txGateRenderer struct {
+	delivery.Renderer
+	g *txGate
+}
+
+func (r txGateRenderer) Roots(ctx context.Context, db messages.DBTX, v delivery.GroupView,
+	markups []messages.Markup) (delivery.Roots, error) {
+	if err := r.g.hold(ctx, db); err != nil {
+		return delivery.Roots{}, err
+	}
+	return r.Renderer.Roots(ctx, db, v, markups)
+}
+
+// heldEnqueue is the re-render step whose first rendering takes the Route's membership lock shared and then stops at
+// the gate, before Enqueue takes the Teams' locks.
+func (l *live) heldEnqueue(g *txGate) groups.Rerender {
+	return func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))`,
+			db.RouteMembershipLockClass, r.Group.RouteID); err != nil {
+			return err
+		}
+		if err := g.hold(ctx, tx); err != nil {
+			return err
+		}
+		return l.svc.Enqueue(ctx, tx, r)
+	}
+}
+
+// TestTeamSaveAgainstGroupingLockOrder is C-26.FR-6 against grouping: a save that adds a Destination to the Team commits
+// while an Alert of the Team is grouped into its published Alert Group, whose Enqueue holds the Team's membership lock
+// shared. The save waits for it; that Enqueue reads the Team's entries before the save, and the save's row
+// team_destinations then publishes the Alert Group in the added Destination, once and Quietly, without
+// destination_joined: the Destination is left out of neither. Nothing ends in a deadlock.
+func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		tl := setupTeamLive(t, s)
+		gid := tl.published(t)
+		g := newTxGate()
+		svc := delivery.New(delivery.Config{OrgID: tl.orgID, Store: delivery.NewStore(tl.d.Pool, tl.d.Pool),
+			Business: tl.business, Log: tl.logger,
+			Renderer: txGateRenderer{Renderer: delivery.MessageRenderer{Renderer: tl.renderer}, g: g}})
+		tl.groups.SetRerender(svc.Enqueue)
+		defer tl.groups.SetRerender(tl.svc.Enqueue)
+		tl.storeAlerts(t, "tl", alert{name: "TL1/a", team: "db"}, alert{name: "TL1/b", team: "db"})
+		blocked, groupErr, saveErr := tl.against(t, g, tl.drain, func(ctx context.Context) error {
+			_, err := tl.teams.Update(ctx, teamSystem, tl.team.PublicID, nil, teams.Input{Name: "locks",
+				Slug: "locks", Matchers: &[]teams.Matcher{{Label: "disk", Op: "=~", Value: "TL.*"}},
+				DestinationEntries: &[]teams.DestinationEntry{secondEntry()}})
+			return err
+		})
+		if !blocked || groupErr != nil || saveErr != nil {
+			t.Fatalf("the save waited %v; grouping %v; save %v", blocked, groupErr, saveErr)
+		}
+		if n := tl.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND d.destination_id = $2`, gid, tl.dests[1]); n != 0 {
+			t.Errorf("the enqueue that read the entries before the save delivered to the added destination: %d", n)
+		}
+		tl.drainUpdates(t)
+		if r := tl.row(t, gid, tl.dests[1]); r.loud || r.state != "pending" {
+			t.Errorf("the added destination after the row: %+v", r)
+		}
+		if n := tl.count(t, `SELECT count(*) FROM timeline_entries x JOIN alert_groups g ON g.id = x.alert_group_id
+			WHERE g.public_id = $1 AND x.event = 'destination_joined'`, gid); n != 0 {
+			t.Errorf("%d destination_joined", n)
+		}
+		tl.noDeadlock(t)
+	})
+}
+
+// TestDeleteTeamAgainstGroupingLockOrder is C-25.FR-10 against grouping: the Team owns the Route db and names the
+// second Destination, where its published Alert Group has a Root message; while a Snapshot of the Team groups into the
+// Alert Group — it holds the Route's row FOR SHARE and its membership lock shared, not yet the Team's — the Team is
+// deleted. The deletion releases the Route before it takes the Team's membership lock, so it waits for the Snapshot at
+// the Route's row and holds nothing the Snapshot waits for; its row team_destinations then gives the Root message its
+// final edit. Taking the Team's lock before the Route's row would deadlock.
+func TestDeleteTeamAgainstGroupingLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		tl := setupTeamLive(t, s, secondEntry())
+		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
+		gid := tl.published(t)
+		g := newTxGate()
+		tl.groups.SetRerender(tl.heldEnqueue(g))
+		defer tl.groups.SetRerender(tl.svc.Enqueue)
+		tl.storeAlerts(t, "tl", alert{name: "TL1/a", team: "db"}, alert{name: "TL1/b", team: "db"})
+		blocked, groupErr, deleteErr := tl.against(t, g, tl.drain, func(ctx context.Context) error {
+			return tl.teams.Delete(ctx, teamSystem, tl.team.PublicID, nil)
+		})
+		if !blocked || groupErr != nil || deleteErr != nil {
+			t.Fatalf("the deletion waited %v; grouping %v; deletion %v", blocked, groupErr, deleteErr)
+		}
+		tl.drainUpdates(t)
+		if r := tl.row(t, gid, tl.dests[1]); !r.retire {
+			t.Errorf("the destination of the deleted team keeps its root message: %+v", r)
+		}
+		if r := tl.row(t, gid, tl.dests[0]); r.retire {
+			t.Errorf("the route's destination got the final edit: %+v", r)
+		}
+		tl.noDeadlock(t)
+	})
+}
+
+// TestDeleteTeamAgainstRouteSaveLockOrder is C-25.FR-10 against a save of a Route the Team owns, which turns a
+// condition and so runs the membership hook, holding the Route's row and its membership lock exclusively, and takes
+// the Team's membership lock shared for the Team of its open Alert Group. The deletion of the Team waits at the Route's
+// row before it takes the Team's lock, so the save goes on; taking the Team's lock first would deadlock.
+func TestDeleteTeamAgainstRouteSaveLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		tl := setupTeamLive(t, s, secondEntry())
+		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
+		tl.published(t)
+		g := newTxGate()
+		tl.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+			if err := g.hold(ctx, tx); err != nil {
+				return err
+			}
+			return tl.svc.RouteDestinationsChanged(ctx, tx, c)
+		})
+		defer tl.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
+			return tl.svc.RouteDestinationsChanged(ctx, tx, c)
+		})
+		rt, err := tl.routes.Get(t.Context(), routePublicIDOf(t, tl.live))
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocked, saveErr, deleteErr := tl.against(t, g, func(ctx context.Context) error {
+			_, err := tl.routes.Update(ctx, system, rt.PublicID, nil, routing.Input{Name: rt.Name,
+				Description: &rt.Description, Matchers: rt.Matchers, GroupKey: rt.GroupKey, Policy: rt.Policy,
+				DestinationEntries: &[]routing.DestinationEntry{{DestinationID: "DSAAAAAAAAAAA1",
+					Condition: routing.ConditionBelowCritical}}})
+			return err
+		}, func(ctx context.Context) error {
+			return tl.teams.Delete(ctx, teamSystem, tl.team.PublicID, nil)
+		})
+		if !blocked || saveErr != nil || deleteErr != nil {
+			t.Errorf("the deletion waited %v; save %v; deletion %v", blocked, saveErr, deleteErr)
+		}
+		tl.noDeadlock(t)
+	})
+}
+
+// TestDestinationDeletionAgainstTeamEnqueueLockOrder is C-26.FR-6 against the deletion of a Destination that the Route
+// names for critical and the Team for any, which the warning Alert Group reaches through the Team only: an
+// acknowledgement holds the Alert Group and the Route's membership lock shared, before Enqueue takes the Team's. The
+// deletion takes the Routes' membership locks before the Teams', so it waits for the acknowledgement holding nothing
+// the acknowledgement waits for; it then removes the Destination from the Team and gives its Root message the final
+// edit. Taking the Teams' locks first would deadlock.
+func TestDestinationDeletionAgainstTeamEnqueueLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		tl := setupTeamLive(t, s, secondEntry())
+		tl.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at, severity_condition)
+			VALUES ($1, $2, $3, $4, 'critical')`, tl.routeID, tl.dests[1], tl.orgID, t0)
+		gid := tl.published(t)
+		if r := tl.row(t, gid, tl.dests[1]); !r.message {
+			t.Fatalf("the team's destination is not published: %+v", r)
+		}
+		g := newTxGate()
+		tl.groups.SetRerender(tl.heldEnqueue(g))
+		defer tl.groups.SetRerender(tl.svc.Enqueue)
+		blocked, ackErr, deleteErr := tl.against(t, g, func(ctx context.Context) error {
+			_, err := tl.groups.Acknowledge(ctx, tl.alice, gid)
+			return err
+		}, func(ctx context.Context) error {
+			return tl.dsvc.Delete(ctx, destinations.Requester{Actor: audit.System, Transport: audit.TransportSystem},
+				"DSAAAAAAAAAAA2", nil)
+		})
+		if !blocked || ackErr != nil || deleteErr != nil {
+			t.Fatalf("the deletion waited %v; acknowledgement %v; deletion %v", blocked, ackErr, deleteErr)
+		}
+		if r := tl.row(t, gid, tl.dests[1]); !r.retire {
+			t.Errorf("the deleted destination keeps its root message: %+v", r)
+		}
+		if n := tl.count(t, `SELECT count(*) FROM team_destinations WHERE destination_id = $1`, tl.dests[1]); n != 0 {
+			t.Errorf("%d team entries of the deleted destination", n)
+		}
+		tl.noDeadlock(t)
+	})
 }

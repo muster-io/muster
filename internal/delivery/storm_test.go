@@ -105,6 +105,13 @@ func (f *fakeDB) EnsureStormSummary(_ context.Context, arg dbgen.EnsureStormSumm
 	}
 	for _, d := range f.deliveries {
 		if d.storm == arg.StormID.Int64 && d.dest == arg.DestinationID {
+			if d.state == "retired" || d.state == "withheld" {
+				d.loud = pgtype.Bool{Bool: d.publishedAt == nil, Valid: true}
+				d.state, d.messageID, d.messageURL, d.publishedAt, d.started = "pending", nil, nil, nil, nil
+				d.actualVersion, d.actualHash, d.hash, d.actualStatus = 0, nil, nil, nil
+				d.desiredRetire, d.next, d.threadState, d.anchorID, d.chainLastID = false, arg.Now, "none", nil, nil
+				d.responseValues, d.threadOpened, d.lateNote, d.republished = map[string]string{}, false, false, false
+			}
 			return dbgen.EnsureStormSummaryRow{ID: d.id, DesiredHash: d.hash}, nil
 		}
 	}
@@ -125,7 +132,7 @@ func (f *fakeDB) ListStormSummaries(_ context.Context, arg dbgen.ListStormSummar
 	for _, d := range f.deliveries {
 		if d.storm == arg.StormID {
 			out = append(out, dbgen.ListStormSummariesRow{ID: d.id, DesiredHash: d.hash, DestinationID: d.dest,
-				DestinationType: f.dests[d.dest].typ})
+				DestinationType: f.dests[d.dest].typ, State: d.state})
 		}
 	}
 	return out, nil
@@ -297,6 +304,12 @@ func (f *fakeDB) RetireStormSummary(_ context.Context, arg dbgen.RetireStormSumm
 		return err
 	}
 	st := f.activeStorm(arg.RouteID)
+	if slices.ContainsFunc(f.deliveries, func(x *fakeDelivery) bool {
+		return x.dest == arg.DestinationID && x.storm == 0 && f.open(x.group) &&
+			f.groups[x.group].route == arg.RouteID && !x.desiredRetire && !terminal(x)
+	}) {
+		return nil
+	}
 	for _, d := range f.deliveries {
 		if st != nil && d.storm == st.id && d.dest == arg.DestinationID && !terminal(d) {
 			d.state = "retired"
@@ -798,7 +811,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	e.rec.Reset()
 
 	e.db.routeDests[routeID] = []int64{destMM, destWH}
-	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH}, nil); err != nil {
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, []int64{destWH}, nil)); err != nil {
 		t.Fatal(err)
 	}
 	e.round(t)
@@ -832,7 +845,7 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	// It leaves during the Storm: final edits of its Root messages, its summary retired, nothing more there.
 	e.rec.Reset()
 	e.db.routeDests[routeID] = []int64{destMM}
-	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, nil, []int64{destWH}); err != nil {
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, nil, []int64{destWH})); err != nil {
 		t.Fatal(err)
 	}
 	var whSummary *fakeDelivery
@@ -857,12 +870,73 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 	if whSummary.state != "retired" {
 		t.Errorf("summary revived %+v", whSummary)
 	}
-	for _, q := range []string{"LockActiveStorm", "RetireStormSummary"} {
-		e.db.fail[q] = errBoom
-		if err := e.svc.RouteDestinationsChanged(t.Context(), nil, routeID, []int64{destWH},
-			[]int64{destMM}); !errors.Is(err, errBoom) {
-			t.Errorf("%s = %v", q, err)
-		}
-		delete(e.db.fail, q)
+	e.db.routeDests[routeID] = []int64{destWH}
+	e.db.fail["LockActiveStorm"] = errBoom
+	if err := e.svc.RouteDestinationsChanged(t.Context(), nil, e.changeOf(routeID, []int64{destWH},
+		[]int64{destMM})); !errors.Is(err, errBoom) {
+		t.Errorf("LockActiveStorm = %v", err)
+	}
+	// The summary of a Destination taken off the Route during a Storm is retired in the same change.
+	f := stormStarted(t)
+	f.db.routeDests[routeID] = nil
+	f.db.fail["RetireStormSummary"] = errBoom
+	if err := f.svc.RouteDestinationsChanged(t.Context(), nil, f.changeOf(routeID, nil,
+		[]int64{destMM})); !errors.Is(err, errBoom) {
+		t.Errorf("RetireStormSummary = %v", err)
+	}
+}
+
+// TestStormSummaryRevived is C-11.FR-6 with C-26.FR-6: a Destination taken off the Route during a Storm has its Storm
+// summary retired; added back during the same Storm, it gets the summary published afresh — Quietly, as it was
+// published before and a change of configuration publishes Quietly (ADR-0018), and Loudly only when it was never
+// published there, its first Publication — and a creation of another Alert Group meanwhile leaves the retired summary
+// as it is.
+func TestStormSummaryRevived(t *testing.T) {
+	for _, published := range []bool{true, false} {
+		t.Run(fmt.Sprintf("published %v", published), func(t *testing.T) {
+			e := stormStarted(t)
+			st := e.onlyStorm(t)
+			summary := func() *fakeDelivery {
+				for _, d := range e.db.deliveries {
+					if d.storm == st.id && d.dest == destMM {
+						return d
+					}
+				}
+				return nil
+			}
+			if s := summary(); s == nil || s.publishedAt == nil {
+				t.Fatalf("no published summary %+v", s)
+			}
+			if !published {
+				s := summary()
+				s.publishedAt, s.started, s.messageID = nil, nil, nil
+			}
+			e.db.routeDests[routeID] = nil
+			e.changed(t, routeID, nil, []int64{destMM})
+			want := map[bool]string{true: "retired", false: "withheld"}[published]
+			if s := summary(); s.state != want {
+				t.Fatalf("the summary of the destination that left: %s, want %s", s.state, want)
+			}
+			e.addGroup(t, 5003, false)
+			if s := summary(); s.state != want {
+				t.Errorf("a creation revived the summary that left: %s", s.state)
+			}
+			e.rec.Reset()
+			e.db.routeDests[routeID] = []int64{destMM}
+			e.changed(t, routeID, []int64{destMM}, nil)
+			if s := summary(); s.state != "pending" || s.messageID != nil || s.loud.Bool != !published {
+				t.Fatalf("the summary of the destination added back: %s, loud %v", s.state, s.loud)
+			}
+			e.round(t)
+			i := slices.IndexFunc(e.callsTo(destMM), func(c deliverytest.Call) bool {
+				return c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on")
+			})
+			if i < 0 {
+				t.Fatalf("the summary was not published again: %+v", e.callsTo(destMM))
+			}
+			if c := e.callsTo(destMM)[i]; (c.Loudness == groups.Loud) != !published {
+				t.Errorf("the summary published again is %s", c.Loudness)
+			}
+		})
 	}
 }

@@ -38,13 +38,27 @@ const (
 )
 
 // Lock order. A transaction that locks rows of more than one of these tables locks them in this order, the
-// dispatcher's: the Alert Groups by id (groups' LockGroups), then their deliveries, then the Thread replies of a
-// delivery. Enqueue takes the Route's membership lock before its deliveries, and a Storm's row comes before the
-// deliveries it changes. The dispatcher itself takes the Route's membership lock shared after its lock of the Alert
-// Group and before it reads the reach of a transition that Alerts made, from which it records destination_joined
-// (C-26.FR-5), so that no change of the Route's Destinations commits between that reach and the one Enqueue applies
-// under the same lock, which it takes again; the Destinations of Teams take no lock of their own yet. Every Enqueue
-// takes the Route's Storm right after the membership lock, before the first delivery it locks: the creation of an Alert
+// dispatcher's: the Alert Groups by id (groups' LockGroups), then the Route's membership lock, then the Teams'
+// membership locks by Team id, then the Route's active Storm, then their deliveries, then the Thread replies of a
+// delivery. Enqueue takes the Route's membership lock before its deliveries and, when the Route delivers to the Teams,
+// the membership lock of each Team of the Alert Group shared after it, and a Storm's row comes before the deliveries it
+// changes. The dispatcher itself takes the Route's membership lock shared after its lock of the Alert Group and before
+// it reads the reach of a transition that Alerts made, from which it records destination_joined (C-26.FR-5), then the
+// Teams' locks shared when the Route delivers to the Teams, so that no change of the Route's or a Team's Destinations
+// commits between that reach and the one Enqueue applies under the same locks, which it takes again. A re-render of
+// several open Alert Groups (groups' rerenderIDs) and a batch of the evaluation of the Teams (evaluateTeams) take
+// every Route's lock and then every Team's lock up front, each in id order, the Teams the evaluation brings included.
+// A Team save takes the Team's lock exclusively after the Team's row and then writes only its entries and its
+// open_group_updates rows, and the deletion of a Team takes it last, after the rows of the Destinations and the Routes
+// it owns, which grouping holds FOR SHARE or locks before the Team's lock: neither waits for anything after it, so
+// neither closes a cycle. A Route save, which holds its row and the Route's lock exclusively, takes the Teams' locks
+// shared after them, as grouping does. The deletion of a Destination takes the Routes' membership locks and then the
+// Teams', exclusively and in Team id order, before the deliveries it retires. Grouping takes the Teams' locks shared
+// per Alert Group, so a Snapshot that changes Alert Groups of different Teams takes them out of id order across them,
+// and can close a cycle with such a deletion: a deadlock that PostgreSQL detects. The deletion then runs again, up to
+// 3 times (destinations' Delete), and a Snapshot chosen as the victim is retried once its lease runs out, as for the
+// Routes' locks. Every Enqueue takes the Route's Storm right after the membership locks, before the first delivery it
+// locks: the creation of an Alert
 // Group joins or starts it (JoinStorm, StartStorm), any other rendering takes the active one FOR SHARE
 // (LockActiveStorm), so that a calm check, which locks the Storm FOR NO KEY UPDATE and then its held deliveries, never
 // holds the Storm while waiting for a delivery such a transaction locked. Only the creation of an Alert Group updates a
@@ -430,8 +444,17 @@ func (w *Worker) prepare(ctx context.Context, org, id int64, win *editWindow) (a
 		now := w.Lease.Clocks.Business.Now().UTC()
 		_, idempotent := w.idempotent(row.DestinationType)
 		mayExist := idempotent && row.PublicationStartedAt.Valid
+		if row.DestinationDeleted && !row.DesiredRetire {
+			// Its Destination was deleted before its Root message was ever published there, after the deletion ended
+			// the others: it gets the final edit, which withholds it, or edits a Publication that may exist (C-11.FR-14).
+			if err := q.RetireLeased(ctx, dbgen.RetireLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
+				Now: now}); err != nil {
+				return fmt.Errorf("give the delivery of a deleted destination its final edit: %w", err)
+			}
+			row.DesiredRetire = true
+		}
 		if row.DesiredRetire && unpublished(row) && !mayExist {
-			// Its Destination left before its Root message was ever published there.
+			// Its Destination left before its Root message was ever published there: it is withheld without a call.
 			if err := q.WithholdLeased(ctx, dbgen.WithholdLeasedParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
 				Now: now}); err != nil {
 				return fmt.Errorf("withhold the delivery: %w", err)

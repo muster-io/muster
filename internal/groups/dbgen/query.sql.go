@@ -2896,6 +2896,44 @@ func (q *Queries) ListGroupsStartedDesc(ctx context.Context, arg ListGroupsStart
 	return items, nil
 }
 
+const listGroupsTeamIDs = `-- name: ListGroupsTeamIDs :many
+SELECT alert_group_id, team_id
+FROM alert_group_teams
+WHERE org_id = $1 AND alert_group_id = ANY($2::bigint[])
+ORDER BY alert_group_id, team_id
+`
+
+type ListGroupsTeamIDsParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListGroupsTeamIDsRow struct {
+	AlertGroupID int64
+	TeamID       int64
+}
+
+// ListGroupsTeamIDs lists the Teams of the Alert Groups, deleted ones included, by Alert Group and Team.
+func (q *Queries) ListGroupsTeamIDs(ctx context.Context, arg ListGroupsTeamIDsParams) ([]ListGroupsTeamIDsRow, error) {
+	rows, err := q.db.Query(ctx, listGroupsTeamIDs, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGroupsTeamIDsRow{}
+	for rows.Next() {
+		var i ListGroupsTeamIDsRow
+		if err := rows.Scan(&i.AlertGroupID, &i.TeamID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIntegrationRefs = `-- name: ListIntegrationRefs :many
 SELECT id, public_id, name
 FROM integrations
@@ -3296,7 +3334,9 @@ SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d
        EXISTS (SELECT 1
                FROM deliveries x
                WHERE x.org_id = $1 AND x.alert_group_id = $2::bigint
-                 AND x.destination_id = e.destination_id)::boolean AS delivered
+                 AND x.destination_id = e.destination_id AND x.state NOT IN ('withheld', 'retired')
+                 AND (NOT x.desired_retire OR x.published_at IS NOT NULL
+                      OR x.publication_started_at IS NOT NULL))::boolean AS delivered
 FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
       FROM route_destinations rd
       WHERE rd.org_id = $1 AND rd.route_id = $3
@@ -3331,8 +3371,10 @@ type ListReachEntriesRow struct {
 
 // ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
 // those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
-// message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
-// there, by Destination.
+// message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a Root message
+// there: one whose final edit was made, or that was withheld, does not count, so the Destination joins it again with a
+// new Publication; one whose final edit still waits counts, as its Root message stays, and the growth keeps it current
+// instead of giving it the final edit (delivery's Enqueue) — by Destination.
 func (q *Queries) ListReachEntries(ctx context.Context, arg ListReachEntriesParams) ([]ListReachEntriesRow, error) {
 	rows, err := q.db.Query(ctx, listReachEntries, arg.OrgID, arg.AlertGroupID, arg.RouteID)
 	if err != nil {
@@ -5145,6 +5187,23 @@ func (q *Queries) ShareRouteStorm(ctx context.Context, arg ShareRouteStormParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const shareTeamMembership = `-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+// db.TeamMembershipLockClass), which a change of the Team's Destination entries takes exclusively, before the Team's
+// entries are read: after the Route's membership lock, by Team id.
+func (q *Queries) ShareTeamMembership(ctx context.Context, arg ShareTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareTeamMembership, arg.LockClass, arg.TeamID)
+	return err
 }
 
 const updateMemberships = `-- name: UpdateMemberships :exec

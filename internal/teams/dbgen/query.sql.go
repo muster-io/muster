@@ -46,6 +46,22 @@ func (q *Queries) ClearByHand(ctx context.Context, arg ClearByHandParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const deleteAllTeamDestinations = `-- name: DeleteAllTeamDestinations :exec
+DELETE FROM team_destinations
+WHERE org_id = $1 AND team_id = $2
+`
+
+type DeleteAllTeamDestinationsParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DeleteAllTeamDestinations removes every Destination of a deleted Team.
+func (q *Queries) DeleteAllTeamDestinations(ctx context.Context, arg DeleteAllTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, deleteAllTeamDestinations, arg.OrgID, arg.TeamID)
+	return err
+}
+
 const deleteTeam = `-- name: DeleteTeam :exec
 UPDATE teams
 SET deleted_at = $1, updated_at = $1, own_working_hours = false, working_days = NULL, working_start = NULL,
@@ -229,6 +245,25 @@ func (q *Queries) DeleteUserTeams(ctx context.Context, arg DeleteUserTeamsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const dropDeletedTeamDestinations = `-- name: DropDeletedTeamDestinations :exec
+DELETE FROM team_destinations td
+USING destinations d
+WHERE td.org_id = $1 AND td.team_id = $2 AND d.org_id = td.org_id AND d.id = td.destination_id
+  AND d.deleted_at IS NOT NULL
+`
+
+type DropDeletedTeamDestinationsParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DropDeletedTeamDestinations removes from a Team the entries of Destinations that are deleted: one a save wrote while
+// the Destination's deletion committed, which no read returns.
+func (q *Queries) DropDeletedTeamDestinations(ctx context.Context, arg DropDeletedTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, dropDeletedTeamDestinations, arg.OrgID, arg.TeamID)
+	return err
 }
 
 const getMember = `-- name: GetMember :one
@@ -442,6 +477,39 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertTeamDestinationsUpdate = `-- name: InsertTeamDestinationsUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = 'team_destinations' AND u.leased_by IS NULL AND u.team_id = $2
+      AND u.destination_id IS NOT DISTINCT FROM $3::bigint
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, destination_id, requested_at)
+SELECT $1, 'team_destinations', $2, $3::bigint, $4::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertTeamDestinationsUpdateParams struct {
+	OrgID         int64
+	TeamID        pgtype.Int8
+	DestinationID pgtype.Int8
+	RequestedAt   time.Time
+}
+
+// InsertTeamDestinationsUpdate inserts the open_group_updates row team_destinations of a Team and, when the change
+// added or changed the Team's entry of a Destination, of that Destination, unless such a row is still unclaimed, which
+// it locks so that no worker claims it before the change commits: the run then reads the entries as they are.
+func (q *Queries) InsertTeamDestinationsUpdate(ctx context.Context, arg InsertTeamDestinationsUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertTeamDestinationsUpdate,
+		arg.OrgID,
+		arg.TeamID,
+		arg.DestinationID,
+		arg.RequestedAt,
+	)
+	return err
 }
 
 const insertTeamIdpEntries = `-- name: InsertTeamIdpEntries :exec
@@ -1289,6 +1357,23 @@ func (q *Queries) LockTeamMember(ctx context.Context, arg LockTeamMemberParams) 
 		&i.IdpMatches,
 	)
 	return i, err
+}
+
+const lockTeamMembership = `-- name: LockTeamMembership :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// LockTeamMembership takes, until the transaction ends, the membership lock of a Team exclusively (class
+// db.TeamMembershipLockClass) before its Destination entries change: whatever reads them for an Alert Group takes it
+// shared, so that the change and an Enqueue that reaches the Team's Destinations serialize.
+func (q *Queries) LockTeamMembership(ctx context.Context, arg LockTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, lockTeamMembership, arg.LockClass, arg.TeamID)
+	return err
 }
 
 const lockTeamUser = `-- name: LockTeamUser :one

@@ -231,9 +231,13 @@ func (r Row) mentionsOf(e groups.Recorded) []string {
 // deliveries take FOR KEY SHARE; the move to the Default route holds the Route's row and then the Alert Groups, but
 // never this lock, which an Enqueue takes without the row. While it waits nobody waits for a delivery row it holds: an
 // Enqueue locks the deliveries of its Route only after the lock, and a change of the Destinations locks those of its
-// Route only after it. Right after the membership lock it takes the Route's Storm, before any delivery: the creation
-// joins or starts it, any other rendering locks the active one FOR SHARE, as a change of the Route's Destinations
-// does. The deliveries and Thread replies it then locks follow the lock order of worker.go.
+// Route only after it. When the Route delivers to the Teams, it then takes the membership lock of each Team of the
+// Alert Group shared, by Team id (ShareTeamMembership), which a change of the Team's Destination entries, its deletion
+// and the deletion of a Destination it names take exclusively, before it reads the Teams' entries: an Enqueue and such
+// a change serialize as they do for the Route, and the change takes none of the rows an Enqueue holds before it takes
+// the lock (lock order of worker.go). Then it takes the Route's Storm, before any delivery: the creation joins or
+// starts it, any other rendering locks the active one FOR SHARE, as a change of the Route's Destinations does. The
+// deliveries and Thread replies it then locks follow the lock order of worker.go.
 func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
 	q := s.store.queries(tx)
 	g := r.Group
@@ -262,6 +266,11 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
 	if err != nil {
 		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
+	}
+	if route.DeliverToTeams {
+		if err := s.shareTeams(ctx, q, r.Teams); err != nil {
+			return fmt.Errorf("alert group #%d: %w", g.Number, err)
+		}
 	}
 	reached, err := s.reachOf(ctx, q, r, route.DeliverToTeams)
 	if err != nil {
@@ -297,7 +306,10 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		return fmt.Errorf("list the destinations alert group #%d reached: %w", g.Number, err)
 	}
 	// An Alert Group that has no delivery anywhere yet is published wherever it reaches, as its first Publication.
-	targets := withReached(reached, had, created || moved || len(had) == 0 || grows(r))
+	// The whole reach is published by a creation, a move, a first Publication and a rise; a Team that joined adds its
+	// own entries, destination_joined its Destination and a change of a Team's entries the Destination it touched.
+	adds := growth{joined: r.Joined(), teams: joinedTeams(r), grows: r.Grows}
+	targets := withAdded(withReached(reached, had, created || moved || len(had) == 0 || grows(r)), reached, adds)
 	if len(targets) == 0 && !created {
 		return s.wake(ctx, q, left > 0)
 	}
@@ -307,7 +319,7 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		if sendsEvents(t.dest) {
 			eventDests = append(eventDests, t.dest)
 		}
-		if t.dest.Type != TypeWebhook || t.dest.WebhookMode.String != webhookEvents {
+		if hasRoot(t.dest) {
 			dests = append(dests, t)
 		}
 	}
@@ -349,8 +361,13 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		if h.entries, err = json.Marshal(t.entries); err != nil {
 			return fmt.Errorf("encode the entries of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
+		// A Destination the rendering adds again, whose delivery got its final edit or was withheld, publishes there
+		// afresh: Loud or Quiet as its destination_joined, Quiet for a change of configuration (C-26.FR-4, FR-5). One
+		// whose final edit still waits keeps its Root message, current again, and the final edit is not made: the
+		// dispatcher counts it as delivered and records no destination_joined for it.
+		h.rejoin = !moved && gone(t.had) && len(t.entries) > 0 && (grows(r) || adds.adds(t))
 		h.loud, h.heldBy = publicationOf(r, g, created, moved, joined[d.ID], st, held)
-		if h.heldBy != nil && (created || t.had == nil) {
+		if h.heldBy != nil && (created || t.had == nil || (h.rejoin && gone(t.had))) {
 			summaries = append(summaries, stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type})
 		}
 		if err := s.enqueue(ctx, q, r, dst, d.Health == healthBroken, h); err != nil {
@@ -433,9 +450,10 @@ func (s *Service) reachOf(ctx context.Context, q queries, r groups.Rendering, to
 }
 
 // withJoined adds to the reach the Destinations the dispatcher recorded destination_joined for that the reach read
-// here no longer has, with the entries the dispatcher read: a Team saved between the two reads, whose Destinations take
-// no lock yet, must not leave a destination_joined in the Timeline and the outgoing webhook events without its Root
-// message. A Destination deleted meanwhile is left out.
+// here no longer has, with the entries the dispatcher read: a destination_joined must not stay in the Timeline and the
+// outgoing webhook events without its Root message. Both reads are under the membership locks of the Route and its
+// Teams, which no change of their Destinations commits between, so this is only a guard. A Destination deleted
+// meanwhile is left out.
 func (s *Service) withJoined(ctx context.Context, q queries, r groups.Rendering, reached []target) ([]target, error) {
 	var missing []int64
 	entries := map[int64][]routing.Reaching{}
@@ -504,6 +522,34 @@ func withReached(reached []target, had []dbgen.ListGroupDestinationsRow, grow bo
 	return out
 }
 
+// withAdded adds to the targets the Destinations of the reach the growth a adds that are not among them (growth),
+// in id order.
+func withAdded(targets, reached []target, a growth) []target {
+	out := targets
+	for _, t := range reached {
+		if a.adds(t) && !slices.ContainsFunc(out, func(x target) bool { return x.dest.ID == t.dest.ID }) {
+			out = append(slices.Clone(out), t)
+		}
+	}
+	if len(out) != len(targets) {
+		slices.SortFunc(out, func(a, b target) int { return cmp.Compare(a.dest.ID, b.dest.ID) })
+	}
+	return out
+}
+
+// grownBy reports whether the target is the Destination of the growth g and an entry of its Team reaches it now.
+func grownBy(t target, g *groups.Growth) bool {
+	return g != nil && t.dest.ID == g.Destination && slices.ContainsFunc(t.entries, func(e routing.Reaching) bool {
+		return e.Kind == routing.EntryTeam && e.TeamID == g.Team
+	})
+}
+
+// gone reports whether the delivery a target had left its Destination: its final edit is done or waits, or it was
+// withheld, so that publishing it again needs a Storm summary where a Storm holds it.
+func gone(had *dbgen.ListGroupDestinationsRow) bool {
+	return had != nil && had.Delivered && (ended(had.State) || had.Retiring)
+}
+
 // heldBy is the Storm that holds the Alert Group in a Destination it has a delivery in, nil when none does.
 func heldBy(had []dbgen.ListGroupDestinationsRow) *int64 {
 	for _, h := range had {
@@ -521,16 +567,48 @@ func unpublishedGroup(g *groups.Group) bool {
 	return g.FirstPublishedAt == nil && g.Status != groups.StatusResolved
 }
 
-// grows reports whether a rendering may create the deliveries of Destinations the Alert Group reaches without one
-// (C-26.FR-4, FR-9): one of groups.ReachEvents — a Team that joined, by its Alerts or by the evaluation of the Teams
-// on a save, or a rise of the level, by an Alert or by the Route's Minimum severity — or destination_joined, the
-// same notion by which the dispatcher records destination_joined. Any other rendering — a fall of the level, a
-// resolution, a Command, Alerts that bring neither a Team nor a rise, or the re-render of a change of configuration
-// such as a renamed Team or a button set — updates the deliveries the Alert Group has and creates none; only an Alert
-// Group without any delivery yet is published wherever it reaches, as its first Publication.
+// grows reports whether a rendering may create the deliveries of every Destination the Alert Group reaches without
+// one (C-26.FR-4, FR-9): a rise of its level, by an Alert or by the Route's Minimum severity, after which it reaches
+// what its level now meets. A Team that joined it, by its Alerts or by the evaluation of the Teams on a save, adds only
+// the Destinations of its own entries, destination_joined only its Destination, and a change of a Team's Destination
+// entries only the Destination of the entry it added or changed (withAdded), so that none brings back a Destination
+// below critical that a fall of the level did not bring. Any other rendering — a fall of the level, a resolution, a
+// Command, Alerts that bring neither a Team nor a rise, or the re-render of a change of configuration such as a
+// renamed Team or a button set — updates the deliveries the Alert Group has and creates none; only an Alert Group
+// without any delivery yet is published wherever it reaches, as its first Publication.
 func grows(r groups.Rendering) bool {
 	return slices.ContainsFunc(r.Events, func(e groups.Recorded) bool {
-		return e.Event == groups.EventDestinationJoined || slices.Contains(groups.ReachEvents, e.Event)
+		return e.Event == groups.EventSeverityRaised || e.Event == groups.EventUrgencyRaised
+	})
+}
+
+// joinedTeams are the Teams that joined the Alert Group in the rendering.
+func joinedTeams(r groups.Rendering) []int64 {
+	var out []int64
+	for _, e := range r.Events {
+		if e.Event == groups.EventTeamJoined && e.Team != 0 {
+			out = append(out, e.Team)
+		}
+	}
+	return out
+}
+
+// growth is what a rendering adds to the Destinations of the Alert Group besides a rise (grows): those of its
+// destination_joined events, those an entry of a Team that joined reaches, and the one of a change of a Team's
+// Destination entries.
+type growth struct {
+	joined map[int64]groups.Recorded
+	teams  []int64
+	grows  *groups.Growth
+}
+
+// adds reports whether the growth adds the target.
+func (a growth) adds(t target) bool {
+	if _, ok := a.joined[t.dest.ID]; ok || grownBy(t, a.grows) {
+		return true
+	}
+	return slices.ContainsFunc(t.entries, func(e routing.Reaching) bool {
+		return e.Kind == routing.EntryTeam && slices.Contains(a.teams, e.TeamID)
 	})
 }
 
@@ -554,8 +632,8 @@ func (s *Service) activeStorm(ctx context.Context, q queries, routeID int64) (*s
 // Destination it joins by a move; the loudness of its destination_joined in a Destination it joined, held by the
 // Route's Storm (C-26.FR-5); Quiet for a change of configuration (C-26.FR-9, ADR-0018); Loud as part of a first
 // Publication still to come; and Quiet otherwise. Outside the creation and destination_joined, a delivery is held when
-// the active Storm holds the Alert Group elsewhere, so that a Destination new to a held Alert Group holds it too, as a
-// Destination added to the Route does. A delivery that exists keeps its own loudness.
+// the active Storm holds the Alert Group elsewhere or the Alert Group was created since the Storm started, so that a
+// Destination new to a held Alert Group holds it too, as a Destination added to the Route does (C-11.FR-6). A delivery that exists keeps its own loudness.
 func publicationOf(r groups.Rendering, g *groups.Group, created, moved bool, joined groups.Recorded, st *storm,
 	held *int64) (pgtype.Bool, *int64) {
 	quiet := pgtype.Bool{Bool: deliveryEvent(DeliveryAddedDestination).loud(false), Valid: true}
@@ -563,7 +641,9 @@ func publicationOf(r groups.Rendering, g *groups.Group, created, moved bool, joi
 	var storm, holds *int64
 	if st != nil && !g.Urgent {
 		storm = &st.id
-		if held != nil && *held == st.id {
+		// The Storm holds an Alert Group created since it started, as the change of a Route's Destinations reads it
+		// (ListOpenGroupsOfRoute), even where a final edit cleared its hold, and one it holds elsewhere.
+		if (held != nil && *held == st.id) || !g.CreatedAt.Before(st.started) {
 			holds = storm
 		}
 	}
@@ -600,19 +680,22 @@ type reply struct {
 }
 
 // enqueueing is how a rendering reaches each Destination: its Root messages by markup, whether the Alert Group was
-// created or moved, the loudness of the Publication of a delivery it creates and the Storm that holds it, the entries
+// created or moved or the delivery joins again, the loudness of the Publication of a delivery it creates and the Storm that holds it, the entries
 // that reach the Destination, encoded, its Thread replies, the time, the Thread batching window and the transaction of
 // the change, which the request of an outgoing webhook is rendered through.
 type enqueueing struct {
 	roots          Roots
 	created, moved bool
-	loud           pgtype.Bool
-	heldBy         *int64
-	entries        []byte
-	replies        []reply
-	now            time.Time
-	window         time.Duration
-	tx             dbgen.DBTX
+	// rejoin publishes again, Quietly, a delivery that left its Destination, in the Destination a change of a Team's
+	// Destination entries added or changed the Team's entry of (groups.Rendering.Grows).
+	rejoin  bool
+	loud    pgtype.Bool
+	heldBy  *int64
+	entries []byte
+	replies []reply
+	now     time.Time
+	window  time.Duration
+	tx      dbgen.DBTX
 }
 
 // enqueue sets the Desired state of the Alert Group in one Destination and queues its Thread replies; while the
@@ -636,14 +719,23 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		how.replies = nil
 	}
 	state := row.State
-	if how.moved && !row.Inserted {
-		n, err := q.RejoinDelivery(ctx, dbgen.RejoinDeliveryParams{OrgID: s.orgID, AlertGroupID: g.ID,
-			DestinationID: d.ID, Loud: deliveryEvent(DeliveryAddedDestination).loud(false), Now: now})
+	if (how.moved || how.rejoin) && !row.Inserted {
+		p := dbgen.RejoinDeliveryParams{OrgID: s.orgID, AlertGroupID: g.ID, DestinationID: d.ID,
+			Loud: deliveryEvent(DeliveryAddedDestination).loud(false), Now: now}
+		if how.rejoin {
+			p.Loud, p.HeldByStormID = how.loud.Bool, nullInt(how.heldBy)
+		}
+		n, err := q.RejoinDelivery(ctx, p)
 		if err != nil {
 			return fmt.Errorf("publish alert group #%d in %s again: %w", g.Number, d.PublicID, err)
 		}
 		if n > 0 {
 			state = statePending
+			// Published afresh, the Root message shows the current state: no Thread reply of the change.
+			how.replies = nil
+			if r.Changed != nil {
+				r.Changed()
+			}
 		}
 	}
 	held := row.HeldByStormID.Valid

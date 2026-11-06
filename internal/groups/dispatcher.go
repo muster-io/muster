@@ -122,6 +122,8 @@ type Queries interface {
 	ShareRouteMembership(ctx context.Context, arg dbgen.ShareRouteMembershipParams) error
 	GetRouteDeliverToTeams(ctx context.Context, arg dbgen.GetRouteDeliverToTeamsParams) (bool, error)
 	ListGroupTeamIDs(ctx context.Context, arg dbgen.ListGroupTeamIDsParams) ([]int64, error)
+	ShareTeamMembership(ctx context.Context, arg dbgen.ShareTeamMembershipParams) error
+	ListGroupsTeamIDs(ctx context.Context, arg dbgen.ListGroupsTeamIDsParams) ([]dbgen.ListGroupsTeamIDsRow, error)
 	ListReachEntries(ctx context.Context, arg dbgen.ListReachEntriesParams) ([]dbgen.ListReachEntriesRow, error)
 	// Notify sends a live-update hint once the transaction commits.
 	Notify(ctx context.Context, h db.Hint) error
@@ -433,10 +435,14 @@ func (c committed) run(ctx context.Context) {
 // for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
 // Configuration marks a rendering that a change of configuration made, as the evaluation of the Teams of the open
 // Alert Groups on a save (C-25.FR-13) and the re-render of a button set do: whatever its lifecycle events, it
-// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018). Teams are the Teams of the Alert Group
-// by id, from which, with its Severity level, the re-render step applies the reach (routing.Reach, C-26.FR-2); the
-// Destinations the change joined are those of its destination_joined events, and a change of configuration records
-// none (C-26.FR-5).
+// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018). Grows, when set, marks the re-render,
+// without a lifecycle event, of a change of a Team's Destination entries that added or changed the Team's entry of one
+// Destination (C-26.FR-6): delivery publishes the Alert Group Quietly in that Destination when that entry reaches it
+// now and it has no delivery there, or one whose final edit was done, and nowhere else; it is a change of
+// configuration too. Teams are the Teams of the
+// Alert Group by id, from which, with its Severity level, the re-render step applies the reach (routing.Reach,
+// C-26.FR-2); the Destinations the change joined are those of its destination_joined events, and a change of
+// configuration records none (C-26.FR-5).
 type Rendering struct {
 	Group         *Group
 	Actor         Actor
@@ -446,7 +452,14 @@ type Rendering struct {
 	Fallback      func(f TemplateFailure)
 	Changed       func()
 	Configuration bool
+	Grows         *Growth
 	Teams         []int64
+}
+
+// Growth is what a change of a Team's Destination entries may add to the reach of the open Alert Groups that have the
+// Team (C-26.FR-6): the Team's entry of the Destination it added or changed, by internal ids.
+type Growth struct {
+	Team, Destination int64
 }
 
 // Joined are the Destinations the change joined by its Alerts, each with its destination_joined event.
@@ -477,8 +490,9 @@ type Recorded struct {
 	Mentions     []Mention
 	Fingerprints []string
 	Reason       string
-	// Destination is the Destination a destination_joined joined.
+	// Destination is the Destination a destination_joined joined, and Team the Team a team_joined joined, 0 for none.
 	Destination *JoinedDestination
+	Team        int64
 }
 
 // JoinedDestination is the Destination of a destination_joined: its internal id, public_id, name and type, and the
@@ -498,6 +512,20 @@ type Rerender func(ctx context.Context, tx DBTX, r Rendering) error
 // SetRerender fills the re-render step of the dispatcher, before anything changes an Alert Group.
 func (s *Service) SetRerender(r Rerender) {
 	s.d.rerender = func(ctx context.Context, q Queries, rd Rendering) error { return r(ctx, q.DB(), rd) }
+}
+
+// FinalEdits gives the final edit of C-11.FR-14 (C-26.FR-6, C-25.FR-10), in the transaction tx that re-rendered the
+// open Alert Group g after a change of the Destination entries of its Team team, to each delivery of g whose entries
+// hold an entry of the Team that no entry still names: neither an entry of its Route nor, while the Route delivers to
+// the Teams, an entry of one of its Teams, met or not. It returns how many deliveries it changed. Delivery implements
+// it; groups declares it, since it cannot import delivery.
+type FinalEdits interface {
+	FinalEditsFor(ctx context.Context, tx DBTX, g *Group, team int64) (int, error)
+}
+
+// SetFinalEdits fills the final edits of the open Alert Group updates team_destinations, before any runs.
+func (s *Service) SetFinalEdits(f FinalEdits) {
+	s.finalEdits = f
 }
 
 // snapshotKey carries, in the context of a Snapshot's transaction, the Stored Snapshot behind its changes.
@@ -604,7 +632,7 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 		return fmt.Errorf("save alert group #%d: %w", g.Number, err)
 	}
 	if d.rerender != nil {
-		failures, _, err := d.render(ctx, q, g, actor, recorded, c.configuration, after)
+		failures, _, err := d.render(ctx, q, g, actor, recorded, rendering{configuration: c.configuration}, after)
 		if err != nil {
 			return err
 		}
@@ -626,13 +654,20 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	return nil
 }
 
+// rendering is how a change of configuration renders: whether it is one (Rendering.Configuration) and what it may add
+// to the reach (Rendering.Grows).
+type rendering struct {
+	configuration bool
+	grows         *Growth
+}
+
 // render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
 // and returns the Route templates that failed, which the caller records (recordFallbacks), and whether it changed a
-// Desired state; configuration marks a change of configuration (Rendering.Configuration); after collects what runs
-// once the transaction committed. The dispatcher calls it for every change, and the re-render of a changed button set
-// without a lifecycle event (updates.go).
+// Desired state; how marks a change of configuration (Rendering.Configuration, Rendering.Grows); after collects what
+// runs once the transaction committed. The dispatcher calls it for every change, and the re-render of a changed button
+// set without a lifecycle event (updates.go).
 func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Actor, recorded []Recorded,
-	configuration bool, after *committed) ([]TemplateFailure, bool, error) {
+	how rendering, after *committed) ([]TemplateFailure, bool, error) {
 	received, err := d.receivedAt(ctx, q)
 	if err != nil {
 		return nil, false, err
@@ -645,7 +680,8 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	changed := false
 	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
 		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
-		Changed: func() { changed = true }, Configuration: configuration, Teams: teams}); err != nil {
+		Changed: func() { changed = true }, Configuration: how.configuration || how.grows != nil, Grows: how.grows,
+		Teams: teams}); err != nil {
 		return nil, false, err
 	}
 	return failures, changed, nil
@@ -718,9 +754,12 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 			for _, m := range mentions {
 				p.Mentions = append(p.Mentions, string(m))
 			}
-			out = append(out, Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant,
-				Loudness: row.Loudness, Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason,
-				Destination: e.Destination})
+			rec := Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant, Loudness: row.Loudness,
+				Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason, Destination: e.Destination}
+			if e.TeamID != nil {
+				rec.Team = *e.TeamID
+			}
+			out = append(out, rec)
 		}
 		if e.System != "" {
 			p.Kind = string(KindSystem)
@@ -772,12 +811,31 @@ func joinsByAlerts(c *change, g *Group) bool {
 	})
 }
 
+// grows is how the change's lifecycle events grow the reach (C-26.FR-4): rise when one raised the Severity level, which
+// adds every Destination whose condition the level now meets, and the Teams that joined, which add only the
+// Destinations of their entries.
+func (c *change) grows() (rise bool, teams []int64) {
+	for _, e := range c.entries {
+		switch {
+		case e.Event == EventSeverityRaised || e.Event == EventUrgencyRaised:
+			rise = true
+		case e.Event == EventTeamJoined && e.TeamID != nil:
+			teams = append(teams, *e.TeamID)
+		}
+	}
+	return rise, teams
+}
+
 // joinDestinations adds to the change of g one destination_joined per Destination its reach now has without a
-// delivery (C-26.FR-5): Loud with new_alert_group while it is firing, Quiet while it is acknowledged or snoozed, in the
+// delivery kept current there, through what the change grew (grows) — every entry its level now meets after a rise,
+// the entries of the Teams that joined otherwise, so that a Team never brings back a Destination of the Route the
+// level stopped meeting (C-26.FR-4) — (C-26.FR-5): Loud with new_alert_group while it is firing, Quiet while it is acknowledged or snoozed, in the
 // order of the Destinations' ids. The reach — the entries of its Route and, with deliver_to_teams, of its Teams whose
 // condition its Severity level meets (routing.Reach) — is read under the Route's membership lock, taken shared after
 // the dispatcher's lock of g, the order Enqueue keeps: no change of the Route's Destinations commits between the reach
-// recorded here and the one the re-render step applies under the same lock.
+// recorded here and the one the re-render step applies under the same lock. When the Route delivers to the Teams, the
+// membership lock of each Team of g is taken shared next, by Team id, so that no change of a Team's Destination entries
+// commits between the two either.
 func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, c *change) error {
 	if err := q.ShareRouteMembership(ctx, dbgen.ShareRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
 		RouteID: g.RouteID}); err != nil {
@@ -786,6 +844,15 @@ func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, 
 	toTeams, err := q.GetRouteDeliverToTeams(ctx, dbgen.GetRouteDeliverToTeamsParams{OrgID: d.orgID, ID: g.RouteID})
 	if err != nil {
 		return fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
+	}
+	if toTeams {
+		teams, err := q.ListGroupTeamIDs(ctx, dbgen.ListGroupTeamIDsParams{OrgID: d.orgID, AlertGroupID: g.ID})
+		if err != nil {
+			return fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+		}
+		if err := shareTeams(ctx, q, teams); err != nil {
+			return err
+		}
 	}
 	rows, err := q.ListReachEntries(ctx, dbgen.ListReachEntriesParams{OrgID: d.orgID, RouteID: g.RouteID,
 		AlertGroupID: g.ID})
@@ -813,11 +880,28 @@ func (d *dispatcher) joinDestinations(ctx context.Context, q Queries, g *Group, 
 	for id, es := range byTeam {
 		teams = append(teams, routing.TeamEntries{TeamID: id, Entries: es})
 	}
+	rise, joined := c.grows()
 	for _, r := range routing.Reach(string(g.Severity), route, toTeams, teams) {
+		if !rise && !slices.ContainsFunc(r.Entries, func(e routing.Reaching) bool {
+			return e.Kind == routing.EntryTeam && slices.Contains(joined, e.TeamID)
+		}) {
+			continue
+		}
 		if dst := dests[r.DestinationID]; !dst.delivered {
 			dst.Entries = r.Entries
 			c.add(entry{Event: EventDestinationJoined, Variant: statusVariant(g.Status),
 				System: SystemDestinationJoined, Destination: &dst.JoinedDestination})
+		}
+	}
+	return nil
+}
+
+// shareTeams takes the membership locks of the Teams ids shared, in id order (db.TeamMembershipLockClass).
+func shareTeams(ctx context.Context, q Queries, ids []int64) error {
+	for _, id := range slices.Sorted(slices.Values(ids)) {
+		if err := q.ShareTeamMembership(ctx, dbgen.ShareTeamMembershipParams{LockClass: db.TeamMembershipLockClass,
+			TeamID: id}); err != nil {
+			return fmt.Errorf("lock the destinations of team %d: %w", id, err)
 		}
 	}
 	return nil

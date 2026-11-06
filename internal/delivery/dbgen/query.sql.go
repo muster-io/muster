@@ -130,6 +130,28 @@ func (q *Queries) AbandonWebhookEvents(ctx context.Context, arg AbandonWebhookEv
 	return items, nil
 }
 
+const appendDeliveryEntries = `-- name: AppendDeliveryEntries :exec
+UPDATE deliveries
+SET entries = entries || coalesce((SELECT jsonb_agg(e.value)
+                                   FROM jsonb_array_elements($1::jsonb) AS e
+                                   WHERE NOT deliveries.entries @> jsonb_build_array(e.value - 'severity_condition')),
+                                  '[]'::jsonb)
+WHERE org_id = $2 AND id = $3
+`
+
+type AppendDeliveryEntriesParams struct {
+	Entries []byte
+	OrgID   int64
+	ID      int64
+}
+
+// AppendDeliveryEntries appends to the entries of a delivery the @entries it does not hold yet, each Route or Team
+// once (C-26.FR-3): the entries that still name its Destination after one that reached it was taken away.
+func (q *Queries) AppendDeliveryEntries(ctx context.Context, arg AppendDeliveryEntriesParams) error {
+	_, err := q.db.Exec(ctx, appendDeliveryEntries, arg.Entries, arg.OrgID, arg.ID)
+	return err
+}
+
 const attachCopy = `-- name: AttachCopy :many
 UPDATE deliveries d
 SET thread_state = 'attached', thread_anchor_id = $1::text, thread_chain_last_id = NULL,
@@ -343,7 +365,8 @@ WITH due AS MATERIALIZED (
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
-      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+      AND x.held_by_storm_id IS NULL
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
     ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT $6
     FOR UPDATE OF x SKIP LOCKED
@@ -374,7 +397,9 @@ type ClaimDueDeliveriesRow struct {
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 // turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
-// deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
+// deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
+// that read the Destination's entries before its deletion committed can create one after the deletion ended the
+// others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
 // FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
 // ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
 // applies to them too.
@@ -982,7 +1007,46 @@ INSERT INTO deliveries (org_id, destination_id, storm_id, state, urgent, publica
                         updated_at)
 VALUES ($1, $2, $3, 'pending', false, true, $4, $4, $4)
 ON CONFLICT (storm_id, destination_id) WHERE storm_id IS NOT NULL
-DO UPDATE SET updated_at = deliveries.updated_at
+DO UPDATE SET updated_at             = deliveries.updated_at,
+              state                  = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN 'pending'
+                                            ELSE deliveries.state END,
+              message_id             = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.message_id END,
+              message_url            = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.message_url END,
+              published_at           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.published_at END,
+              publication_started_at = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.publication_started_at END,
+              actual_version         = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_version END,
+              actual_hash            = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_hash END,
+              actual_status          = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.actual_status END,
+              past_edit_window       = deliveries.past_edit_window AND deliveries.state NOT IN ('retired', 'withheld'),
+              thread_state           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN 'none'
+                                            ELSE deliveries.thread_state END,
+              thread_anchor_id       = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.thread_anchor_id END,
+              republication_started_at = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                              ELSE deliveries.republication_started_at END,
+              desired_hash           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.desired_hash END,
+              publication_loud       = CASE WHEN deliveries.state IN ('retired', 'withheld')
+                                                THEN deliveries.published_at IS NULL
+                                            ELSE deliveries.publication_loud END,
+              response_values        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN '{}'
+                                            ELSE deliveries.response_values END,
+              thread_opened          = deliveries.thread_opened AND deliveries.state NOT IN ('retired', 'withheld'),
+              thread_chain_last_id   = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.thread_chain_last_id END,
+              late_note              = deliveries.late_note AND deliveries.state NOT IN ('retired', 'withheld'),
+              republished_after_delete = deliveries.republished_after_delete
+                                         AND deliveries.state NOT IN ('retired', 'withheld'),
+              desired_retire         = deliveries.desired_retire AND deliveries.state NOT IN ('retired', 'withheld'),
+              next_attempt_at        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN $4
+                                            ELSE deliveries.next_attempt_at END
 RETURNING id, desired_hash
 `
 
@@ -999,7 +1063,11 @@ type EnsureStormSummaryRow struct {
 }
 
 // EnsureStormSummary creates the Storm summary of a Storm in a Destination when it is missing, Loud at its first
-// Publication, and locks it either way.
+// Publication, and locks it either way. One that left the Destination — retired or withheld when the Destination left
+// the reach of the Route's Alert Groups during the Storm — is published there afresh: its message, its Thread and its
+// desired hash are cleared as RejoinDelivery clears them, so that the caller stores its Desired state again; Loud only
+// when it was never published, its first Publication (C-11.FR-6), and Quiet otherwise, as a change of configuration
+// publishes (ADR-0018).
 func (q *Queries) EnsureStormSummary(ctx context.Context, arg EnsureStormSummaryParams) (EnsureStormSummaryRow, error) {
 	row := q.db.QueryRow(ctx, ensureStormSummary,
 		arg.OrgID,
@@ -1236,7 +1304,7 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        d.actual_status, d.past_edit_window, d.republication_started_at, ds.id AS destination_id,
        ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
-       ds.telegram_discussion_chat_id,
+       ds.telegram_discussion_chat_id, (ds.deleted_at IS NOT NULL)::boolean AS destination_deleted,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
        g.resolved_at AS group_resolved_at, (g.id IS NOT NULL AND g.first_published_at IS NULL)::boolean AS group_unpublished
@@ -1288,6 +1356,7 @@ type GetLeasedDeliveryRow struct {
 	DestinationHealth        string
 	TelegramChannelChatID    pgtype.Int8
 	TelegramDiscussionChatID pgtype.Int8
+	DestinationDeleted       bool
 	AlertGroupPublicID       string
 	Number                   int64
 	GroupStatus              string
@@ -1346,6 +1415,7 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.DestinationHealth,
 		&i.TelegramChannelChatID,
 		&i.TelegramDiscussionChatID,
+		&i.DestinationDeleted,
 		&i.AlertGroupPublicID,
 		&i.Number,
 		&i.GroupStatus,
@@ -2544,6 +2614,57 @@ func (q *Queries) ListDestinationsByID(ctx context.Context, arg ListDestinations
 	return items, nil
 }
 
+const listEntryDeliveries = `-- name: ListEntryDeliveries :many
+SELECT id, alert_group_id::bigint AS alert_group_id, destination_id, state, desired_retire, entries
+FROM deliveries
+WHERE org_id = $1 AND alert_group_id = ANY($2::bigint[])
+ORDER BY alert_group_id, destination_id
+`
+
+type ListEntryDeliveriesParams struct {
+	OrgID         int64
+	AlertGroupIds []int64
+}
+
+type ListEntryDeliveriesRow struct {
+	ID            int64
+	AlertGroupID  int64
+	DestinationID int64
+	State         string
+	DesiredRetire bool
+	Entries       []byte
+}
+
+// ListEntryDeliveries lists the deliveries of the Alert Groups, with their state, whether their final edit waits and
+// the entries that reached them, by Alert Group and Destination (C-26.FR-6): what a change of the Destinations of a
+// Route or a Team publishes again or gives the final edit.
+func (q *Queries) ListEntryDeliveries(ctx context.Context, arg ListEntryDeliveriesParams) ([]ListEntryDeliveriesRow, error) {
+	rows, err := q.db.Query(ctx, listEntryDeliveries, arg.OrgID, arg.AlertGroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEntryDeliveriesRow{}
+	for rows.Next() {
+		var i ListEntryDeliveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AlertGroupID,
+			&i.DestinationID,
+			&i.State,
+			&i.DesiredRetire,
+			&i.Entries,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntryTeams = `-- name: ListEntryTeams :many
 SELECT id, public_id, name, slug, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM teams
@@ -2737,9 +2858,45 @@ func (q *Queries) ListGroupDestinations(ctx context.Context, arg ListGroupDestin
 	return items, nil
 }
 
+const listGroupTeams = `-- name: ListGroupTeams :many
+SELECT team_id
+FROM alert_group_teams
+WHERE org_id = $1 AND alert_group_id = $2
+ORDER BY team_id
+`
+
+type ListGroupTeamsParams struct {
+	OrgID        int64
+	AlertGroupID int64
+}
+
+// ListGroupTeams lists the Teams of an Alert Group by id, deleted ones included.
+func (q *Queries) ListGroupTeams(ctx context.Context, arg ListGroupTeamsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listGroupTeams, arg.OrgID, arg.AlertGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupsOfRoute = `-- name: ListOpenGroupsOfRoute :many
 
-SELECT g.id, g.public_id, g.number, g.title, g.status, g.urgent,
+SELECT g.id, g.public_id, g.number, g.title, g.status, g.urgent, g.severity_level,
+       coalesce((SELECT array_agg(t.team_id ORDER BY t.team_id)
+                 FROM alert_group_teams t
+                 WHERE t.org_id = g.org_id AND t.alert_group_id = g.id), '{}')::bigint[] AS team_ids,
        coalesce(NOT g.urgent AND $1::bigint IS NOT NULL
                 AND (g.created_at >= $2::timestamptz
                      OR EXISTS (SELECT 1
@@ -2759,19 +2916,22 @@ type ListOpenGroupsOfRouteParams struct {
 }
 
 type ListOpenGroupsOfRouteRow struct {
-	ID       int64
-	PublicID string
-	Number   int64
-	Title    string
-	Status   string
-	Urgent   bool
-	Held     bool
+	ID            int64
+	PublicID      string
+	Number        int64
+	Title         string
+	Status        string
+	Urgent        bool
+	SeverityLevel string
+	TeamIds       []int64
+	Held          bool
 }
 
 // Destinations joining and leaving Routes, and deleted Destinations (C-11.FR-14, C-09.FR-19, C-11.FR-20).
-// ListOpenGroupsOfRoute lists the open Alert Groups of a Route, as delivery renders them, in id order, with whether the
-// active Storm @storm_id of the Route, started at @storm_started, holds it: not Urgent, and created since the Storm
-// started or held by it in another Destination. held is false when there is no Storm.
+// ListOpenGroupsOfRoute lists the open Alert Groups of a Route, as delivery renders them, in id order, with their
+// Severity level, their Teams by id, deleted ones included, and whether the active Storm @storm_id of the Route,
+// started at @storm_started, holds it: not Urgent, and created since the Storm started or held by it in another
+// Destination. held is false when there is no Storm.
 func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsOfRouteParams) ([]ListOpenGroupsOfRouteRow, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfRoute,
 		arg.StormID,
@@ -2793,6 +2953,8 @@ func (q *Queries) ListOpenGroupsOfRoute(ctx context.Context, arg ListOpenGroupsO
 			&i.Title,
 			&i.Status,
 			&i.Urgent,
+			&i.SeverityLevel,
+			&i.TeamIds,
 			&i.Held,
 		); err != nil {
 			return nil, err
@@ -2999,7 +3161,8 @@ func (q *Queries) ListStormActivity(ctx context.Context, orgID int64) ([]ListSto
 }
 
 const listStormSummaries = `-- name: ListStormSummaries :many
-SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type, ds.public_id AS destination_public_id
+SELECT d.id, d.desired_hash, d.destination_id, ds.type AS destination_type, ds.public_id AS destination_public_id,
+       d.state
 FROM deliveries d
 JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
 WHERE d.org_id = $1 AND d.storm_id = $2::bigint
@@ -3017,6 +3180,7 @@ type ListStormSummariesRow struct {
 	DestinationID       int64
 	DestinationType     string
 	DestinationPublicID string
+	State               string
 }
 
 // ListStormSummaries lists the Storm summaries of a Storm, in every Destination it reached, with the Destination, its
@@ -3036,6 +3200,7 @@ func (q *Queries) ListStormSummaries(ctx context.Context, arg ListStormSummaries
 			&i.DestinationID,
 			&i.DestinationType,
 			&i.DestinationPublicID,
+			&i.State,
 		); err != nil {
 			return nil, err
 		}
@@ -3587,7 +3752,8 @@ WITH due AS (
     FROM deliveries x
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = $2 AND x.state = 'pending' AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
-      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+      AND x.held_by_storm_id IS NULL
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
     UNION ALL
     SELECT b.next_probe_at, NULL::timestamptz
     FROM destinations b
@@ -4203,7 +4369,18 @@ func (q *Queries) RecordRepublished(ctx context.Context, arg RecordRepublishedPa
 
 const recordRetired = `-- name: RecordRetired :one
 UPDATE deliveries
-SET state = CASE WHEN state IN ('withheld', 'deleted_in_messenger') THEN state ELSE 'retired' END, desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
+SET state = CASE
+                WHEN state IN ('withheld', 'deleted_in_messenger') THEN state
+                WHEN desired_retire THEN 'retired'
+                ELSE 'pending'
+            END,
+    actual_hash = CASE WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN actual_hash END,
+    actual_status = CASE WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN actual_status END,
+    next_attempt_at = CASE
+                          WHEN desired_retire OR state IN ('withheld', 'deleted_in_messenger') THEN next_attempt_at
+                          ELSE $1::timestamptz
+                      END,
+    desired_retire = false, attempts = 0, first_failed_at = NULL, last_error_class = NULL,
     actual_button_key_id = NULL, republication_started_at = NULL,
     last_error = NULL, last_delivered_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
     updated_at = $1::timestamptz
@@ -4220,8 +4397,10 @@ type RecordRetiredParams struct {
 
 // RecordRetired records the final edit of a delivery, or a Root message found deleted at it: the row is retired,
 // keeps the link to its last message and receives nothing more; one withheld or deleted in the messenger while the
-// call was in flight stays so. The final edit carries no buttons, so no key is actual any more. No row when the lease
-// went to another replica.
+// call was in flight stays so. One that its Destination joined again while the call was in flight (RejoinDelivery
+// cleared desired_retire) is not retired: its Root message shows the final edit, so it stays pending, due now, without
+// an actual state, and the next call edits it back to the current state. The final edit carries no buttons, so no key
+// is actual any more. No row when the lease went to another replica.
 func (q *Queries) RecordRetired(ctx context.Context, arg RecordRetiredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, recordRetired,
 		arg.Now,
@@ -4851,6 +5030,47 @@ func (q *Queries) ResetWebhookEventBudgets(ctx context.Context, arg ResetWebhook
 	return err
 }
 
+const retireDeliveries = `-- name: RetireDeliveries :many
+UPDATE deliveries
+SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
+    desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
+    held_by_storm_id = NULL,
+    next_attempt_at  = $1,
+    updated_at       = $1
+WHERE org_id = $2 AND id = ANY($3::bigint[]) AND NOT desired_retire
+  AND state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+RETURNING id
+`
+
+type RetireDeliveriesParams struct {
+	Now   time.Time
+	OrgID int64
+	Ids   []int64
+}
+
+// RetireDeliveries gives deliveries of open Alert Groups whose Destination no entry names any more their final edit
+// (C-11.FR-14, C-26.FR-6): a published Root message is edited once more, and one never published there is withheld.
+// It returns the deliveries it changed; one that ended meanwhile is left as it is.
+func (q *Queries) RetireDeliveries(ctx context.Context, arg RetireDeliveriesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, retireDeliveries, arg.Now, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const retireDestinationDeliveries = `-- name: RetireDestinationDeliveries :many
 UPDATE deliveries d
 SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
@@ -4937,58 +5157,29 @@ func (q *Queries) RetireGroupDeliveries(ctx context.Context, arg RetireGroupDeli
 	return items, nil
 }
 
-const retireRouteDeliveries = `-- name: RetireRouteDeliveries :many
-UPDATE deliveries d
-SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
-    desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
-    held_by_storm_id = NULL,
-    next_attempt_at  = $1,
-    updated_at       = $1
-FROM alert_groups g
-WHERE d.org_id = $2 AND d.destination_id = $3 AND g.org_id = $2 AND g.id = d.alert_group_id
-  AND g.route_id = $4 AND g.status <> 'resolved'
-  AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
-RETURNING d.id, g.public_id
+const retireLeased = `-- name: RetireLeased :exec
+UPDATE deliveries
+SET desired_retire = true, held_by_storm_id = NULL, updated_at = $1
+WHERE org_id = $2 AND id = $3 AND lease_owner = $4::text
 `
 
-type RetireRouteDeliveriesParams struct {
-	Now           time.Time
-	OrgID         int64
-	DestinationID int64
-	RouteID       int64
+type RetireLeasedParams struct {
+	Now   time.Time
+	OrgID int64
+	ID    int64
+	Owner string
 }
 
-type RetireRouteDeliveriesRow struct {
-	ID       int64
-	PublicID string
-}
-
-// RetireRouteDeliveries gives the deliveries of the open Alert Groups of a Route in a Destination that left it their
-// final edit (C-11.FR-14): a published Root message is edited once more, and one never published there is withheld.
-// It returns each delivery with the public_id of its Alert Group, for the alert-group hints.
-func (q *Queries) RetireRouteDeliveries(ctx context.Context, arg RetireRouteDeliveriesParams) ([]RetireRouteDeliveriesRow, error) {
-	rows, err := q.db.Query(ctx, retireRouteDeliveries,
+// RetireLeased makes a leased delivery of a deleted Destination that was never published there a final edit
+// (C-11.FR-14): withheld when its Publication never succeeded, edited to the final state when it may exist.
+func (q *Queries) RetireLeased(ctx context.Context, arg RetireLeasedParams) error {
+	_, err := q.db.Exec(ctx, retireLeased,
 		arg.Now,
 		arg.OrgID,
-		arg.DestinationID,
-		arg.RouteID,
+		arg.ID,
+		arg.Owner,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []RetireRouteDeliveriesRow{}
-	for rows.Next() {
-		var i RetireRouteDeliveriesRow
-		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return err
 }
 
 const retireStormSummary = `-- name: RetireStormSummary :exec
@@ -4997,6 +5188,12 @@ SET state = CASE WHEN d.published_at IS NULL THEN 'withheld' ELSE 'retired' END,
 FROM storms s
 WHERE d.org_id = $2 AND d.destination_id = $3 AND d.storm_id = s.id AND s.org_id = $2
   AND s.route_id = $4 AND s.ended_at IS NULL AND d.state NOT IN ('withheld', 'deleted_in_messenger', 'retired')
+  AND NOT EXISTS (SELECT 1
+                  FROM deliveries x
+                  JOIN alert_groups g ON g.org_id = x.org_id AND g.id = x.alert_group_id
+                  WHERE x.org_id = $2 AND x.destination_id = $3 AND g.route_id = $4
+                    AND g.status <> 'resolved' AND NOT x.desired_retire
+                    AND x.state NOT IN ('withheld', 'deleted_in_messenger', 'retired'))
 `
 
 type RetireStormSummaryParams struct {
@@ -5006,8 +5203,9 @@ type RetireStormSummaryParams struct {
 	RouteID       int64
 }
 
-// RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it: retired when
-// published there, withheld otherwise; it receives nothing more.
+// RetireStormSummary ends the Storm summary of the active Storm of a Route in a Destination that left it, once no
+// open Alert Group of the Route has a delivery there that is kept current: retired when published there, withheld
+// otherwise; it receives nothing more.
 func (q *Queries) RetireStormSummary(ctx context.Context, arg RetireStormSummaryParams) error {
 	_, err := q.db.Exec(ctx, retireStormSummary,
 		arg.Now,
@@ -5337,6 +5535,24 @@ type ShareRouteMembershipParams struct {
 // then locks the Alert Groups, which a Command holds before its Enqueue.
 func (q *Queries) ShareRouteMembership(ctx context.Context, arg ShareRouteMembershipParams) error {
 	_, err := q.db.Exec(ctx, shareRouteMembership, arg.LockClass, arg.RouteID)
+	return err
+}
+
+const shareTeamMembership = `-- name: ShareTeamMembership :exec
+SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
+`
+
+type ShareTeamMembershipParams struct {
+	LockClass int32
+	TeamID    int64
+}
+
+// ShareTeamMembership takes, until the transaction ends, the shared membership lock of a Team (class
+// db.TeamMembershipLockClass), which a change of the Team's Destination entries, the Team's deletion and the deletion
+// of a Destination it names take exclusively: after the Route's membership lock, by Team id, before the Team's entries
+// are read.
+func (q *Queries) ShareTeamMembership(ctx context.Context, arg ShareTeamMembershipParams) error {
+	_, err := q.db.Exec(ctx, shareTeamMembership, arg.LockClass, arg.TeamID)
 	return err
 }
 

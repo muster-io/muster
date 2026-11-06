@@ -5,6 +5,7 @@ package delivery
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/internalalerts"
@@ -23,22 +25,29 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 )
 
-// Destinations joining and leaving Routes (C-11.FR-14, C-09.FR-19): a Destination added to a Route publishes the
-// Route's open Alert Groups there Quietly; one removed from it, or deleted, gives each of their open Root messages one
-// final Quiet edit — "No longer updated here; current state in Muster: {link}" — after which the delivery is retired
-// and receives nothing more, and one never published there is withheld. The secrets of a deleted Destination are wiped
-// once none of its deliveries is pending.
+// Destinations joining and leaving Routes and Teams (C-11.FR-14, C-26.FR-6, C-09.FR-19): a change of a Route's or a
+// Team's Destination entries, or of the Route's "Also to the Teams from the label", publishes the open Alert Groups
+// Quietly in each Destination their reach now has without a delivery there, and gives the final Quiet edit — "No
+// longer updated here; current state in Muster: {link}" — to each delivery whose entries hold an entry the change took
+// away when no entry that still exists names its Destination for the Alert Group, met or not; otherwise the delivery
+// stays and is kept current until its final state (C-26.FR-4). A condition alone never removes a Root message. After
+// the final edit the delivery is retired and receives nothing more, and one never published there is withheld. A
+// deleted Destination gets the final edit everywhere, and its secrets are wiped once none of its deliveries is pending.
 
 // connectionDeleted is the error of the final edits a deleted Connection abandons.
 const connectionDeleted = "the Connection was deleted"
 
-// membershipQueries are the queries of Destinations joining and leaving Routes.
+// membershipQueries are the queries of Destinations joining and leaving Routes and Teams.
 type membershipQueries interface {
 	ListOpenGroupsOfRoute(ctx context.Context, arg dbgen.ListOpenGroupsOfRouteParams) (
 		[]dbgen.ListOpenGroupsOfRouteRow, error)
+	ListGroupTeams(ctx context.Context, arg dbgen.ListGroupTeamsParams) ([]int64, error)
+	ListEntryDeliveries(ctx context.Context, arg dbgen.ListEntryDeliveriesParams) ([]dbgen.ListEntryDeliveriesRow,
+		error)
+	AppendDeliveryEntries(ctx context.Context, arg dbgen.AppendDeliveryEntriesParams) error
+	ShareTeamMembership(ctx context.Context, arg dbgen.ShareTeamMembershipParams) error
 	RejoinDelivery(ctx context.Context, arg dbgen.RejoinDeliveryParams) (int64, error)
-	RetireRouteDeliveries(ctx context.Context, arg dbgen.RetireRouteDeliveriesParams) (
-		[]dbgen.RetireRouteDeliveriesRow, error)
+	RetireDeliveries(ctx context.Context, arg dbgen.RetireDeliveriesParams) ([]int64, error)
 	RetireGroupDeliveries(ctx context.Context, arg dbgen.RetireGroupDeliveriesParams) ([]int64, error)
 	RetireDestinationDeliveries(ctx context.Context, arg dbgen.RetireDestinationDeliveriesParams) ([]int64, error)
 	SettleDestinationLeftovers(ctx context.Context, arg dbgen.SettleDestinationLeftoversParams) error
@@ -46,6 +55,7 @@ type membershipQueries interface {
 	DropDestinationReplies(ctx context.Context, arg dbgen.DropDestinationRepliesParams) error
 	RecordRetired(ctx context.Context, arg dbgen.RecordRetiredParams) (int64, error)
 	WithholdLeased(ctx context.Context, arg dbgen.WithholdLeasedParams) error
+	RetireLeased(ctx context.Context, arg dbgen.RetireLeasedParams) error
 	GetDestinationState(ctx context.Context, arg dbgen.GetDestinationStateParams) (dbgen.GetDestinationStateRow, error)
 	WipeDestinationSecrets(ctx context.Context, arg dbgen.WipeDestinationSecretsParams) error
 	AbandonConnectionDeliveries(ctx context.Context, arg dbgen.AbandonConnectionDeliveriesParams) (
@@ -59,135 +69,465 @@ func (w *Worker) link(publicID string) string {
 	return strings.TrimSuffix(w.PublicURL, "/") + "/alert-groups/" + publicID
 }
 
-// RouteDestinationsChanged is the membership hook of the Routes (C-11.FR-14), in the transaction tx of the Route's
-// change, which holds the Route's membership lock: the Destinations added to the Route routeID publish its open Alert
-// Groups Quietly — during a Storm they get its Storm summary and hold the Alert Groups it holds — and those removed
-// give their open Root messages the final edit and retire the summary of an active Storm, with the alert-group hint of
-// each Alert Group whose delivery that retires or withholds. It wakes the delivery workers once tx commits. The
-// Route's active Storm is locked FOR SHARE before any delivery is written (LockActiveStorm), after the membership lock
-// and before the deliveries, as in the lock order of worker.go: a calm check waits until the deliveries this change
-// holds for the Storm are committed, or ends the Storm before this change reads it.
-func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, routeID int64, added,
-	removed []int64) error {
-	if len(added) == 0 && len(removed) == 0 {
-		return nil
-	}
-	q := s.store.queries(tx)
-	var st *storm
-	active, err := q.LockActiveStorm(ctx, dbgen.LockActiveStormParams{OrgID: s.orgID, RouteID: routeID})
-	switch {
-	case err == nil:
-		st = &storm{id: active.ID, started: active.StartedAt, count: active.AlertGroupCount,
-			urgent: active.UrgentCount}
-	case !errors.Is(err, pgx.ErrNoRows):
-		return fmt.Errorf("lock the storm of route %d: %w", routeID, err)
-	}
-	now := s.clock.Now().UTC()
-	for _, d := range removed {
-		rows, err := q.RetireRouteDeliveries(ctx, dbgen.RetireRouteDeliveriesParams{OrgID: s.orgID, RouteID: routeID,
-			DestinationID: d, Now: now})
-		if err != nil {
-			return fmt.Errorf("retire the deliveries of route %d in destination %d: %w", routeID, d, err)
+// shareTeams takes the membership locks of the Teams ids shared, in id order (db.TeamMembershipLockClass), after the
+// Route's and before the Teams' entries are read.
+func (s *Service) shareTeams(ctx context.Context, q queries, ids []int64) error {
+	for _, id := range slices.Sorted(slices.Values(ids)) {
+		if err := q.ShareTeamMembership(ctx, dbgen.ShareTeamMembershipParams{LockClass: db.TeamMembershipLockClass,
+			TeamID: id}); err != nil {
+			return fmt.Errorf("lock the destinations of team %d: %w", id, err)
 		}
-		ids := make([]int64, 0, len(rows))
-		for _, r := range rows {
-			ids = append(ids, r.ID)
-			if err := hintGroup(ctx, q, s.orgID, r.PublicID); err != nil {
-				return err
+	}
+	return nil
+}
+
+// naming is what names the Destinations of a Route's open Alert Groups after a change: the Route's entries and, while
+// it delivers to the Teams, the entries of each Team, with the rows of their Destinations.
+type naming struct {
+	route   []routing.Entry
+	toTeams bool
+	teams   map[int64][]routing.Entry
+	dests   map[int64]dbgen.ListRouteDestinationsRow
+}
+
+// namingOf reads the entries of the Route routeID and, with toTeams, of the Teams teams, through q.
+func (s *Service) namingOf(ctx context.Context, q queries, routeID int64, toTeams bool, teams []int64) (naming,
+	error) {
+	n := naming{toTeams: toTeams, teams: map[int64][]routing.Entry{}, dests: map[int64]dbgen.ListRouteDestinationsRow{}}
+	rows, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: routeID})
+	if err != nil {
+		return naming{}, fmt.Errorf("list the destinations of route %d: %w", routeID, err)
+	}
+	for _, d := range rows {
+		n.dests[d.ID] = d
+		n.route = append(n.route, routing.Entry{DestinationID: d.ID,
+			Condition: routing.SeverityCondition(d.SeverityCondition)})
+	}
+	if !toTeams || len(teams) == 0 {
+		return n, nil
+	}
+	trs, err := q.ListTeamDestinations(ctx, dbgen.ListTeamDestinationsParams{OrgID: s.orgID, TeamIds: teams})
+	if err != nil {
+		return naming{}, fmt.Errorf("list the destinations of the teams of route %d: %w", routeID, err)
+	}
+	for _, t := range trs {
+		if _, ok := n.dests[t.ID]; !ok {
+			n.dests[t.ID] = dbgen.ListRouteDestinationsRow{ID: t.ID, PublicID: t.PublicID, Name: t.Name, Type: t.Type,
+				ConnectionID: t.ConnectionID, Health: t.Health, WebhookMode: t.WebhookMode,
+				WebhookReplies: t.WebhookReplies, Buttons: t.Buttons, OrganizationButtons: t.OrganizationButtons}
+		}
+		n.teams[t.TeamID] = append(n.teams[t.TeamID], routing.Entry{DestinationID: t.ID,
+			Condition: routing.SeverityCondition(t.SeverityCondition)})
+	}
+	return n, nil
+}
+
+// reach is the reach of an open Alert Group of the Severity level and the Teams teams under n (routing.Reach).
+func (n naming) reach(level string, teams []int64) []routing.Reached {
+	var ts []routing.TeamEntries
+	for _, id := range teams {
+		if es := n.teams[id]; len(es) > 0 {
+			ts = append(ts, routing.TeamEntries{TeamID: id, Entries: es})
+		}
+	}
+	return routing.Reach(level, n.route, n.toTeams, ts)
+}
+
+// names are the entries that still name the Destination dest for an open Alert Group of the Teams teams, met or not:
+// the Route's first, then, while the Route delivers to the Teams, those of its Teams by id.
+func (n naming) names(dest int64, teams []int64) []routing.Reaching {
+	var out []routing.Reaching
+	for _, e := range n.route {
+		if e.DestinationID == dest {
+			out = append(out, routing.Reaching{Kind: routing.EntryRoute, Condition: orAny(e.Condition)})
+		}
+	}
+	if !n.toTeams {
+		return out
+	}
+	for _, id := range slices.Sorted(slices.Values(teams)) {
+		for _, e := range n.teams[id] {
+			if e.DestinationID == dest {
+				out = append(out, routing.Reaching{Kind: routing.EntryTeam, TeamID: id, Condition: orAny(e.Condition)})
 			}
 		}
-		if err := s.dropReplies(ctx, q, ids); err != nil {
-			return err
+	}
+	return out
+}
+
+// orAny is the condition, any for an empty one.
+func orAny(c routing.SeverityCondition) routing.SeverityCondition {
+	if c == "" {
+		return routing.ConditionAny
+	}
+	return c
+}
+
+// entryDelivery is a delivery of an open Alert Group with the entries that reached it.
+type entryDelivery struct {
+	dbgen.ListEntryDeliveriesRow
+	reaching []routing.Reaching
+}
+
+// live reports whether the delivery is kept current: it has not ended and waits for no final edit.
+func (d entryDelivery) live() bool {
+	return !d.DesiredRetire && !ended(d.State)
+}
+
+// revivable reports whether the delivery left its Destination — its final edit is done or waits, or it was withheld —
+// so that a Destination reached again publishes there afresh, or edits a Root message whose final edit still waits.
+func (d entryDelivery) revivable() bool {
+	return d.DesiredRetire || d.State == "retired" || d.State == "withheld"
+}
+
+// holds reports whether an entry of the kind, and of the Team team for a Team's entry, reached the delivery; a
+// delivery made before the entries were recorded holds its Route's entry (deliveries.entries is empty).
+func (d entryDelivery) holds(kind string, team int64) bool {
+	if kind == routing.EntryRoute && len(d.reaching) == 0 {
+		return true
+	}
+	return slices.ContainsFunc(d.reaching, func(e routing.Reaching) bool {
+		return e.Kind == kind && (kind == routing.EntryRoute || team == 0 || e.TeamID == team)
+	})
+}
+
+// missing are the entries of names that the delivery does not hold yet, each Route or Team once.
+func (d entryDelivery) missing(names []routing.Reaching) []routing.Reaching {
+	var out []routing.Reaching
+	for _, e := range names {
+		if !slices.ContainsFunc(d.reaching, func(h routing.Reaching) bool {
+			return h.Kind == e.Kind && h.TeamID == e.TeamID
+		}) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// entryDeliveries are the deliveries of the Alert Groups ids by Alert Group, each with the entries that reached it.
+func (s *Service) entryDeliveries(ctx context.Context, q queries, ids []int64) (map[int64][]entryDelivery, error) {
+	rows, err := q.ListEntryDeliveries(ctx, dbgen.ListEntryDeliveriesParams{OrgID: s.orgID, AlertGroupIds: ids})
+	if err != nil {
+		return nil, fmt.Errorf("list the deliveries of the alert groups: %w", err)
+	}
+	out := map[int64][]entryDelivery{}
+	for _, r := range rows {
+		d := entryDelivery{ListEntryDeliveriesRow: r}
+		if err := json.Unmarshal(r.Entries, &d.reaching); err != nil {
+			return nil, fmt.Errorf("read the entries of delivery %d: %w", r.ID, err)
+		}
+		out[r.AlertGroupID] = append(out[r.AlertGroupID], d)
+	}
+	return out, nil
+}
+
+// settle applies the rule of the final edits to the deliveries cands of one open Alert Group of the Teams teams that
+// lost an entry (C-26.FR-6, C-11.FR-14): a delivery whose Destination an entry still names stays, with the entries that
+// name it appended, so that the loss of those later finds it; the others get the final edit. It returns the
+// Destinations of the deliveries it retired.
+func (s *Service) settle(ctx context.Context, q queries, group string, cands []entryDelivery, n naming,
+	teams []int64, now time.Time) ([]int64, error) {
+	var ids, dests []int64
+	for _, d := range cands {
+		if names := n.names(d.DestinationID, teams); len(names) > 0 {
+			missing := d.missing(names)
+			if len(missing) == 0 {
+				continue
+			}
+			b, _ := json.Marshal(missing) // a slice of fixed structs always encodes
+			if err := q.AppendDeliveryEntries(ctx, dbgen.AppendDeliveryEntriesParams{OrgID: s.orgID, ID: d.ID,
+				Entries: b}); err != nil {
+				return nil, fmt.Errorf("record the entries of delivery %d: %w", d.ID, err)
+			}
+			continue
+		}
+		ids = append(ids, d.ID)
+		dests = append(dests, d.DestinationID)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	retired, err := q.RetireDeliveries(ctx, dbgen.RetireDeliveriesParams{OrgID: s.orgID, Ids: ids, Now: now})
+	if err != nil {
+		return nil, fmt.Errorf("give the final edit to the deliveries of alert group %s: %w", group, err)
+	}
+	if len(retired) == 0 {
+		return nil, nil
+	}
+	if err := hintGroup(ctx, q, s.orgID, group); err != nil {
+		return nil, err
+	}
+	if err := s.dropReplies(ctx, q, retired); err != nil {
+		return nil, err
+	}
+	return dests, nil
+}
+
+// retireSummaries retires the Storm summary of the Route routeID's active Storm in each Destination of dests the
+// Route no longer names, once no open Alert Group of the Route is kept current there (RetireStormSummary).
+func (s *Service) retireSummaries(ctx context.Context, q queries, routeID int64, dests []int64, n naming,
+	now time.Time) error {
+	for _, d := range slices.Compact(slices.Sorted(slices.Values(dests))) {
+		if slices.ContainsFunc(n.route, func(e routing.Entry) bool { return e.DestinationID == d }) {
+			continue
 		}
 		if err := q.RetireStormSummary(ctx, dbgen.RetireStormSummaryParams{OrgID: s.orgID, RouteID: routeID,
 			DestinationID: d, Now: now}); err != nil {
 			return fmt.Errorf("retire the storm summary of route %d in destination %d: %w", routeID, d, err)
 		}
 	}
-	if len(added) > 0 {
-		if err := s.publishRoute(ctx, tx, q, routeID, st, added, now); err != nil {
+	return nil
+}
+
+// RouteDestinationsChanged is the membership hook of the Routes (C-26.FR-6, C-11.FR-14), in the transaction tx of a
+// save of the Route c.RouteID that changed its Destination entries or "Also to the Teams from the label", which holds
+// the Route's membership lock exclusively. Under the new entries, for each open Alert Group of the Route at its current
+// Severity level and with its Teams: each Destination that an entry the save added or changed, or a Team's entry when
+// the save turned the option on, now reaches (touchedBy) without a delivery kept current there gets a Quiet
+// Publication, within the limiters, with the entries that reach it — during a Storm, held where the Storm holds the
+// Alert Group, with the Storm summary there, and no summary where no held Alert Group arrives — and each delivery whose entries hold an entry the save took away — the Route's
+// entry of a Destination taken off it, or every Team's entry when the option was turned off — gets the final edit when
+// no entry still names its Destination (settle); a Destination taken off the Route then has the summary of an active
+// Storm retired once nothing of the Route is kept current there. A changed condition removes nothing; a fallen level
+// gains no Destination its condition no longer meets. Locks: after the Route's membership lock, the membership locks
+// of the Teams of its open Alert Groups shared, by Team id, when the Route delivers to the Teams, so that no Team save
+// commits between the read of its entries and the deliveries; then the Route's active Storm FOR SHARE
+// (LockActiveStorm), before any delivery is written, as in the lock order of worker.go: a calm check waits until the
+// deliveries this change holds for the Storm are committed, or ends the Storm before this change reads it. It wakes the
+// delivery workers once tx commits.
+func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c routing.MembershipChange) error {
+	if !c.Changed() {
+		return nil
+	}
+	q := s.store.queries(tx)
+	routeID := c.RouteID
+	open, err := q.ListOpenGroupsOfRoute(ctx, dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID, RouteID: routeID})
+	if err != nil {
+		return fmt.Errorf("list the open alert groups of route %d: %w", routeID, err)
+	}
+	var teams []int64
+	for _, g := range open {
+		for _, t := range g.TeamIds {
+			if !slices.Contains(teams, t) {
+				teams = append(teams, t)
+			}
+		}
+	}
+	if c.ToTeamsAfter {
+		if err := s.shareTeams(ctx, q, teams); err != nil {
 			return err
 		}
 	}
-	return s.wake(ctx, q, true)
-}
-
-// publishRoute publishes the open Alert Groups of the Route routeID Quietly in the Destinations added to it; during a
-// Storm of the Route each of them gets its Storm summary, and the Alert Groups the Storm holds are held there too.
-// Each Alert Group is rendered once for the markups of the added Destinations, through tx; the counter and log lines
-// of a Route template that fails here are left to the next render through the dispatcher, which records them in the
-// Timeline too. st is the Route's active Storm, locked, or nil.
-func (s *Service) publishRoute(ctx context.Context, tx dbgen.DBTX, q queries, routeID int64, st *storm,
-	added []int64, now time.Time) error {
-	p := dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID, RouteID: routeID}
-	if st != nil {
-		p.StormID = pgtype.Int8{Int64: st.id, Valid: true}
-		p.StormStarted = pgtype.Timestamptz{Time: st.started, Valid: true}
-	}
-	open, err := q.ListOpenGroupsOfRoute(ctx, p)
-	if err != nil {
-		return fmt.Errorf("list the open alert groups of route %d: %w", routeID, err)
+	var st *storm
+	active, err := q.LockActiveStorm(ctx, dbgen.LockActiveStormParams{OrgID: s.orgID, RouteID: routeID})
+	switch {
+	case err == nil:
+		st = &storm{id: active.ID, started: active.StartedAt, count: active.AlertGroupCount,
+			urgent: active.UrgentCount}
+		if open, err = q.ListOpenGroupsOfRoute(ctx, dbgen.ListOpenGroupsOfRouteParams{OrgID: s.orgID,
+			RouteID: routeID, StormID: pgtype.Int8{Int64: st.id, Valid: true},
+			StormStarted: pgtype.Timestamptz{Time: st.started, Valid: true}}); err != nil {
+			return fmt.Errorf("list the open alert groups of route %d: %w", routeID, err)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("lock the storm of route %d: %w", routeID, err)
 	}
 	if len(open) == 0 && st == nil {
 		return nil
 	}
-	dests, err := q.ListRouteDestinations(ctx, dbgen.ListRouteDestinationsParams{OrgID: s.orgID, RouteID: routeID})
+	n, err := s.namingOf(ctx, q, routeID, c.ToTeamsAfter, teams)
 	if err != nil {
-		return fmt.Errorf("list the destinations of route %d: %w", routeID, err)
+		return err
 	}
-	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: routeID})
+	ids := make([]int64, len(open))
+	for i, g := range open {
+		ids[i] = g.ID
+	}
+	had, err := s.entryDeliveries(ctx, q, ids)
 	if err != nil {
-		return fmt.Errorf("read the route %d: %w", routeID, err)
+		return err
 	}
-	// An outgoing webhook in the events mode publishes nothing: it receives the events from now on.
-	dests, _ = splitDestinations(dests)
-	dests = slices.DeleteFunc(dests, func(d dbgen.ListRouteDestinationsRow) bool { return !slices.Contains(added, d.ID) })
+	removed := c.Removed()
+	teamsOff := c.ToTeamsBefore && !c.ToTeamsAfter
+	touched := touchedBy(c)
+	now := s.clock.Now().UTC()
+	changed := false
+	var left []int64
+	var summaries []stormDest
+	for _, g := range open {
+		view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
+			Status: groups.Status(g.Status), Urgent: g.Urgent}
+		var cands []entryDelivery
+		for _, d := range had[g.ID] {
+			if d.live() && ((slices.Contains(removed, d.DestinationID) && d.holds(routing.EntryRoute, 0)) ||
+				(teamsOff && d.holds(routing.EntryTeam, 0))) {
+				cands = append(cands, d)
+			}
+		}
+		retired, err := s.settle(ctx, q, g.PublicID, cands, n, g.TeamIds, now)
+		if err != nil {
+			return err
+		}
+		left = append(left, retired...)
+		changed = changed || len(retired) > 0
+		var heldBy *int64
+		if g.Held {
+			heldBy = &st.id
+		}
+		gained, err := s.gain(ctx, tx, q, view, n.reach(g.SeverityLevel, g.TeamIds), touched, had[g.ID], n, heldBy,
+			now)
+		if err != nil {
+			return err
+		}
+		changed = changed || len(gained) > 0
+		if heldBy != nil {
+			summaries = append(summaries, gained...)
+		}
+	}
+	if st != nil {
+		left = append(left, removed...)
+		if err := s.retireSummaries(ctx, q, routeID, left, n, now); err != nil {
+			return err
+		}
+		// Only a Destination where a held Alert Group was published gets the Storm summary: a Loud summary where
+		// the Storm holds nothing would be the change of configuration's Loud message (ADR-0018).
+		if len(summaries) > 0 {
+			route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: routeID})
+			if err != nil {
+				return fmt.Errorf("read the route %d: %w", routeID, err)
+			}
+			slices.SortFunc(summaries, func(a, b stormDest) int { return cmp.Compare(a.id, b.id) })
+			if err := s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
+				language: route.Language}, summaries, now); err != nil {
+				return err
+			}
+			changed = true
+		}
+	}
+	return s.wake(ctx, q, changed)
+}
+
+// touchedBy reports, for the save c of a Route, whether an entry that reaches a Destination is one the save added or
+// whose condition it changed, or a Team's entry when the save turned "Also to the Teams from the label" on: what a
+// change of configuration may add to the reach of the open Alert Groups (C-26.FR-6). Every other entry was there
+// before the save, and the reach did not grow by it then — after a fall of the level, say — so it does not now either
+// (C-26.FR-4).
+func touchedBy(c routing.MembershipChange) func(dest int64, e routing.Reaching) bool {
+	route := map[int64]bool{}
+	for _, a := range c.After {
+		if i := slices.IndexFunc(c.Before, func(b routing.Entry) bool { return b.DestinationID == a.DestinationID }); i < 0 ||
+			orAny(c.Before[i].Condition) != orAny(a.Condition) {
+			route[a.DestinationID] = true
+		}
+	}
+	teamsOn := !c.ToTeamsBefore && c.ToTeamsAfter
+	return func(dest int64, e routing.Reaching) bool {
+		if e.Kind == routing.EntryTeam {
+			return teamsOn
+		}
+		return route[dest]
+	}
+}
+
+// gain publishes the open Alert Group g Quietly in each Destination of its reach reached that an entry the save
+// touched reaches (touched) and that has no delivery of it kept current there, with the entries that reach it (join),
+// held by the Storm heldBy when one holds g; an outgoing
+// webhook in the events mode publishes nothing, it receives the events from now on. g is rendered once for the
+// markups of those Destinations, through tx; the counter and log lines of a Route template that fails here are left to
+// the next render through the dispatcher, which records them in the Timeline too. It returns the Destinations it
+// published in.
+func (s *Service) gain(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, reached []routing.Reached,
+	touched func(dest int64, e routing.Reaching) bool, had []entryDelivery, n naming, heldBy *int64,
+	now time.Time) ([]stormDest, error) {
+	var dests []dbgen.ListRouteDestinationsRow
+	var entries [][]byte
+	for _, rc := range reached {
+		d, ok := n.dests[rc.DestinationID]
+		if !ok || !hasRoot(d) || !slices.ContainsFunc(rc.Entries, func(e routing.Reaching) bool {
+			return touched(rc.DestinationID, e)
+		}) {
+			continue
+		}
+		if i := slices.IndexFunc(had, func(x entryDelivery) bool { return x.DestinationID == d.ID }); i >= 0 &&
+			!had[i].revivable() {
+			continue
+		}
+		b, _ := json.Marshal(rc.Entries) // a slice of fixed structs always encodes
+		dests, entries = append(dests, d), append(entries, b)
+	}
+	if len(dests) == 0 {
+		return nil, nil
+	}
 	types := make([]string, len(dests))
 	for i, d := range dests {
 		types[i] = d.Type
 	}
-	roots := make([]Roots, len(open))
-	for i, g := range open {
-		view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
-			Status: groups.Status(g.Status), Urgent: g.Urgent}
-		if roots[i], err = s.renderer.Roots(ctx, tx, view, markupsOf(types)); err != nil {
-			return fmt.Errorf("render alert group #%d: %w", g.Number, err)
-		}
+	roots, err := s.renderer.Roots(ctx, tx, g, markupsOf(types))
+	if err != nil {
+		return nil, fmt.Errorf("render alert group #%d: %w", g.Number, err)
 	}
-	for _, d := range dests {
+	out := make([]stormDest, len(dests))
+	for i, d := range dests {
 		dst := Destination{ID: d.ID, PublicID: d.PublicID, Name: d.Name, Type: d.Type, Connection: int8Of(d.ConnectionID),
 			Buttons: buttonSetOf(d.Buttons, d.OrganizationButtons)}
-		for i, g := range open {
-			view := GroupView{ID: g.ID, PublicID: g.PublicID, Number: g.Number, Title: g.Title,
-				Status: groups.Status(g.Status), Urgent: g.Urgent}
-			var heldBy *int64
-			if g.Held {
-				heldBy = &st.id
-			}
-			if err := s.join(ctx, tx, q, view, dst, routeEntry(d), roots[i], heldBy, now); err != nil {
-				return err
-			}
+		if err := s.join(ctx, tx, q, g, dst, entries[i], roots, heldBy, now); err != nil {
+			return nil, err
+		}
+		out[i] = stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type}
+	}
+	return out, nil
+}
+
+// FinalEditsFor gives, in the transaction tx that re-rendered the open Alert Group g after a change of the Destination
+// entries of its Team team or the Team's deletion (groups.FinalEdits, C-26.FR-6, C-25.FR-10), the final edit to each
+// delivery of g whose entries hold an entry of the Team when no entry still names its Destination — an entry of its
+// Route or, while the Route delivers to the Teams, of one of its Teams, met or not; a delivery whose Destination one
+// still names stays, with those entries appended (settle). The re-render step took the Route's membership lock and the
+// Teams' before, and the Route's Storm; a Destination the Route does not name has the summary of an active Storm
+// retired once nothing of the Route is kept current there. It returns how many deliveries got the final edit, none
+// the second time, and wakes the delivery workers once tx commits when there are some.
+func (s *Service) FinalEditsFor(ctx context.Context, tx groups.DBTX, g *groups.Group, team int64) (int, error) {
+	q := s.store.queries(tx)
+	had, err := s.entryDeliveries(ctx, q, []int64{g.ID})
+	if err != nil {
+		return 0, err
+	}
+	var cands []entryDelivery
+	for _, d := range had[g.ID] {
+		if d.live() && d.holds(routing.EntryTeam, team) {
+			cands = append(cands, d)
 		}
 	}
-	if st != nil {
-		return s.renderSummaries(ctx, q, st, stormRoute{publicID: route.PublicID, name: route.Name,
-			language: route.Language}, stormDestsOf(dests), now)
+	if len(cands) == 0 {
+		return 0, nil
 	}
-	return nil
+	route, err := q.GetRouteDelivery(ctx, dbgen.GetRouteDeliveryParams{OrgID: s.orgID, ID: g.RouteID})
+	if err != nil {
+		return 0, fmt.Errorf("read the route of alert group #%d: %w", g.Number, err)
+	}
+	teams, err := q.ListGroupTeams(ctx, dbgen.ListGroupTeamsParams{OrgID: s.orgID, AlertGroupID: g.ID})
+	if err != nil {
+		return 0, fmt.Errorf("read the teams of alert group #%d: %w", g.Number, err)
+	}
+	n, err := s.namingOf(ctx, q, g.RouteID, route.DeliverToTeams, teams)
+	if err != nil {
+		return 0, err
+	}
+	now := s.clock.Now().UTC()
+	left, err := s.settle(ctx, q, g.PublicID, cands, n, teams, now)
+	if err != nil || len(left) == 0 {
+		return 0, err
+	}
+	if err := s.retireSummaries(ctx, q, g.RouteID, left, n, now); err != nil {
+		return 0, err
+	}
+	return len(left), s.wake(ctx, q, true)
 }
 
-// routeEntry is the entry of the Route that a Destination added to it reaches the Route's open Alert Groups by, encoded
-// for deliveries.entries: until a later version applies its Severity condition at the save, the added Destination is
-// published in each of them whatever the condition (C-11.FR-14).
-func routeEntry(d dbgen.ListRouteDestinationsRow) []byte {
-	b, _ := json.Marshal([]routing.Reaching{{Kind: routing.EntryRoute, // a fixed struct always encodes
-		Condition: routing.SeverityCondition(d.SeverityCondition)}})
-	return b
-}
-
-// join makes the delivery of an open Alert Group current in a Destination that joined its Route: a Quiet
-// Publication, held by the Storm heldBy when one holds the Alert Group, or an edit of a Root message whose final edit
-// still waited; the Route's entry is appended to those of the delivery.
+// join makes the delivery of an open Alert Group current in a Destination its reach gained by a change of
+// configuration: a Quiet Publication, held by the Storm heldBy when one holds the Alert Group, or an edit of a Root
+// message whose final edit still waited; the entries that reach it are appended to those of the delivery. A change of
+// configuration publishes Quietly (ADR-0018), even a delivery Not delivered before its first Publication.
 func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, d Destination, entries []byte,
 	roots Roots, heldBy *int64, now time.Time) error {
 	groupID := g.ID
@@ -213,8 +553,7 @@ func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupVie
 	}
 	if _, err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
 		DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), Open: true,
-		Firing: loud, Urgent: g.Urgent,
-		Now: now}); err != nil {
+		Firing: loud, Urgent: g.Urgent, Quiet: true, Now: now}); err != nil {
 		return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 	}
 	return nil
