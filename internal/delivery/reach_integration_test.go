@@ -109,10 +109,25 @@ func TestRejoinAfterFinalEdit(t *testing.T) {
 			t.Errorf("the waiting final edit was not cancelled: %s", before)
 		}
 		l.round(t, l.a)
+		// The first Alert Group, still open and critical, lost its deliveries to fresh: the save that names the second
+		// Destination for critical publishes it there, as it should; only this Alert Group's calls count.
+		var id int64
+		if err := l.d.Pool.QueryRow(t.Context(), `SELECT id FROM alert_groups WHERE public_id = $1`, gid).Scan(
+			&id); err != nil {
+			t.Fatal(err)
+		}
+		edited := 0
 		for _, c := range l.rec.Calls() {
-			if c.Destination.ID == l.dests[1] && (c.Method != deliverytest.MethodUpdate || c.Loudness != groups.Quiet) {
+			if c.Destination.ID != l.dests[1] || c.Links.AlertGroup != id {
+				continue
+			}
+			edited++
+			if c.Method != deliverytest.MethodUpdate || c.Loudness != groups.Quiet {
 				t.Errorf("a call to the destination kept: %s %s; before the round: %s", c.Method, c.Loudness, before)
 			}
+		}
+		if edited != 1 {
+			t.Errorf("%d calls to the destination kept", edited)
 		}
 	})
 }
