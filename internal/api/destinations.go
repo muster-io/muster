@@ -586,6 +586,10 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 	for _, r := range d.Routes {
 		routes = append(routes, gen.EntityRef{Id: r.PublicID, Name: r.Name})
 	}
+	teamRefs := make([]gen.TeamRef, 0, len(d.Teams))
+	for _, t := range d.Teams {
+		teamRefs = append(teamRefs, gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted})
+	}
 	var templateError *gen.TemplateErrorState
 	if d.TemplateError != nil {
 		templateError = &gen.TemplateErrorState{Since: d.TemplateError.Since, Error: d.TemplateError.Error,
@@ -604,7 +608,7 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			TeamId: deref(d.MattermostTeamID), ChannelId: deref(d.MattermostChannelID),
 			TeamName: nullableString(d.MattermostTeamName), ChannelName: nullableString(d.MattermostChannelName),
 			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
-			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
+			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeTelegram:
 		err = out.FromTelegramDestination(gen.TelegramDestination{Id: d.PublicID, Name: d.Name,
@@ -614,27 +618,28 @@ func destinationOf(d destinations.Destination) (gen.Destination, error) {
 			DiscussionGroupId:    nullableString(d.TelegramDiscussionGroupID),
 			DiscussionGroupTitle: nullableString(d.TelegramDiscussionGroupTitle),
 			Mentions:             mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
-			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
+			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeBridge:
 		err = out.FromBridgeDestination(gen.BridgeDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.BridgeDestinationTypeBridge, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.BridgeChannelID), ChannelName: nullableString(d.BridgeChannelName),
 			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
-			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
+			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeSlack:
 		err = out.FromSlackDestination(gen.SlackDestination{Id: d.PublicID, Name: d.Name,
 			Type: gen.SlackDestinationTypeSlack, ConnectionId: deref(d.Connection),
 			ChannelId: deref(d.SlackChannelID), ChannelName: nullableString(d.SlackChannelName),
 			Mentions: mentions, Buttons: buttonSet, Limiter: limiter, Health: healthOf(d.Health), Routes: routes,
-			TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
+			Teams: teamRefs, TemplateError: templateError, CreatedAt: d.CreatedAt, Etag: &tag, OwningTeam: owner,
 			OwningTeamId: ownerID})
 	case destinations.TypeWebhook:
 		var w gen.WebhookDestination
 		if w, err = webhookOf(d); err == nil {
 			w.Id, w.Name, w.Type = d.PublicID, d.Name, gen.WebhookDestinationTypeWebhook
 			w.Mentions, w.Limiter, w.Health, w.Routes = mentions, limiter, healthOf(d.Health), routes
+			w.Teams = teamRefs
 			w.TemplateError, w.CreatedAt, w.Etag = templateError, d.CreatedAt, &tag
 			w.OwningTeam, w.OwningTeamId = owner, ownerID
 			err = out.FromWebhookDestination(w)

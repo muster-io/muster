@@ -377,3 +377,35 @@ WHERE NOT EXISTS (SELECT 1 FROM pending);
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec
 SELECT pg_notify(@channel::text, '');
+
+-- The Destinations of the Teams (C-26.FR-1).
+
+-- ListTeamDestinations lists the Destinations that are not deleted of the Teams with their Severity conditions and
+-- their health, by Team, then by public_id.
+-- name: ListTeamDestinations :many
+SELECT td.team_id, td.destination_id, td.severity_condition, d.public_id, d.name, d.type, d.health, d.broken_since,
+       d.broken_reason
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+WHERE td.org_id = @org_id AND td.team_id = ANY(@team_ids::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, d.public_id;
+
+-- ResolveTeamDestinations reads the Destinations that are not deleted among the public_ids, for the Destinations of
+-- a Team.
+-- name: ResolveTeamDestinations :many
+SELECT id, public_id
+FROM destinations
+WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
+
+-- DeleteTeamDestinations removes Destinations from a Team.
+-- name: DeleteTeamDestinations :exec
+DELETE FROM team_destinations
+WHERE org_id = @org_id AND team_id = @team_id AND destination_id = ANY(@destination_ids::bigint[]);
+
+-- UpsertTeamDestinations adds Destinations to a Team with their Severity conditions, added now, and changes the
+-- condition of those it keeps, which keep when they were added.
+-- name: UpsertTeamDestinations :exec
+INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+SELECT @org_id, @team_id, d.id, d.condition, @now
+FROM (SELECT unnest(@destination_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS d
+ON CONFLICT (team_id, destination_id) DO UPDATE SET severity_condition = excluded.severity_condition;

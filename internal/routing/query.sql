@@ -13,7 +13,8 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
        r.created_at, r.version, r.template_error_since, r.template_error, s.started_at AS storm_since,
        s.alert_group_count AS storm_alert_group_count, r.owning_team_id, t.public_id AS owning_team_public_id,
        t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label,
+       r.deliver_to_teams, r.run_team_chains
 FROM routes r
 JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
@@ -36,7 +37,8 @@ SELECT r.id, r.public_id, r.name, r.description, r.position, r.is_default, r.min
           AND (o.is_default, o.position, o.id) < (r.is_default, r.position, r.id))::bigint AS place,
        s.started_at AS storm_since, s.alert_group_count AS storm_alert_group_count,
        r.owning_team_id, t.public_id AS owning_team_public_id, t.name AS owning_team_name, t.slug AS owning_team_slug,
-       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label
+       (t.deleted_at IS NOT NULL)::boolean AS owning_team_deleted, r.message_labels, org.severity_label, org.team_label,
+       r.deliver_to_teams, r.run_team_chains
 FROM routes r
 JOIN organizations org ON org.id = r.org_id
 LEFT JOIN storms s ON s.org_id = r.org_id AND s.route_id = r.id AND s.ended_at IS NULL
@@ -82,7 +84,8 @@ INSERT INTO routes (
     thread_batching_window_seconds, storm_threshold, language, template_root_message, template_line,
     template_ack_timeout_notice,
     ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled, reminders_first_interval_seconds,
-    reminders_cap_seconds, auto_unacknowledge, owning_team_id, message_labels, created_at, updated_at
+    reminders_cap_seconds, auto_unacknowledge, owning_team_id, message_labels, deliver_to_teams, run_team_chains,
+    created_at, updated_at
 )
 SELECT @org_id, @public_id, @name, @description,
        coalesce((SELECT CASE WHEN @first::boolean THEN min(p.position) - 1 ELSE max(p.position) + 1 END
@@ -94,7 +97,8 @@ SELECT @org_id, @public_id, @name, @description,
        sqlc.narg('template_root_message'), sqlc.narg('template_line'), sqlc.narg('template_ack_timeout_notice'),
        @ack_timeout_enabled, @ack_timeout_first_interval_seconds, @reminders_enabled,
        @reminders_first_interval_seconds, @reminders_cap_seconds, @auto_unacknowledge,
-       sqlc.narg('owning_team_id')::bigint, sqlc.narg('message_labels')::text[], @now, @now
+       sqlc.narg('owning_team_id')::bigint, sqlc.narg('message_labels')::text[], @deliver_to_teams, @run_team_chains,
+       @now, @now
 RETURNING id;
 
 -- EnsureDefaultRoute creates the Default route of the Organization when it has none, and returns its public_id only
@@ -132,6 +136,7 @@ SET name = @name, description = @description, minimum_severity = @minimum_severi
     reminders_enabled = @reminders_enabled, reminders_first_interval_seconds = @reminders_first_interval_seconds,
     reminders_cap_seconds = @reminders_cap_seconds, auto_unacknowledge = @auto_unacknowledge,
     owning_team_id = sqlc.narg('owning_team_id')::bigint, message_labels = sqlc.narg('message_labels')::text[],
+    deliver_to_teams = @deliver_to_teams, run_team_chains = @run_team_chains,
     updated_at = @now, version = version + 1
 WHERE org_id = @org_id AND id = @id;
 
@@ -294,18 +299,27 @@ SELECT id, public_id
 FROM destinations
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
 
--- ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes, by public_id.
+-- ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes with their Severity conditions,
+-- by public_id.
 -- name: ListRouteDestinationIDs :many
-SELECT rd.route_id, rd.destination_id, d.public_id
+SELECT rd.route_id, rd.destination_id, d.public_id, rd.severity_condition
 FROM route_destinations rd
 JOIN destinations d ON d.org_id = rd.org_id AND d.id = rd.destination_id
 WHERE rd.org_id = @org_id AND rd.route_id = ANY(@route_ids::bigint[]) AND d.deleted_at IS NULL
 ORDER BY rd.route_id, d.public_id;
 
--- InsertRouteDestinations adds Destinations to a Route, added now.
+-- InsertRouteDestinations adds Destinations to a Route with their Severity conditions, one each, added now.
 -- name: InsertRouteDestinations :exec
-INSERT INTO route_destinations (route_id, destination_id, org_id, added_at)
-SELECT @route_id, unnest(@destination_ids::bigint[]), @org_id, @now;
+INSERT INTO route_destinations (route_id, destination_id, org_id, severity_condition, added_at)
+SELECT @route_id, d.id, @org_id, d.condition, @now
+FROM (SELECT unnest(@destination_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS d;
+
+-- SetRouteDestinationConditions changes the Severity conditions of Destinations a Route keeps, one each.
+-- name: SetRouteDestinationConditions :exec
+UPDATE route_destinations rd
+SET severity_condition = d.condition
+FROM (SELECT unnest(@destination_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS d
+WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND rd.destination_id = d.id;
 
 -- DeleteRouteDestinations removes Destinations from a Route.
 -- name: DeleteRouteDestinations :exec

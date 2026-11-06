@@ -90,6 +90,8 @@ type fakeDB struct {
 	fail     map[string]error
 	calls    map[string]int
 	locked   [][]int64
+	// storms are the locks of active Storms, in their order.
+	storms []stormLock
 	// before runs before a query of that name, for changes that race the transaction.
 	before map[string]func()
 	// details and summaries are the retention periods in days, timeZone organization.time_zone, workdayStart and
@@ -114,6 +116,8 @@ type fakeDB struct {
 	retired map[[2]int64]bool
 	// teams are the Teams of the Alerts and of the Alert Groups (teams_test.go).
 	teams fakeTeams
+	// reach is what the reach of an Alert Group is computed from (events_test.go).
+	reach fakeReach
 }
 
 func newDB() *fakeDB {
@@ -353,6 +357,32 @@ func (f *fakeDB) RollbackGrouping(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.call("RollbackGrouping")
+}
+
+func (f *fakeDB) LockRouteStorm(_ context.Context, arg dbgen.LockRouteStormParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LockRouteStorm"); err != nil {
+		return nil, err
+	}
+	f.storms = append(f.storms, stormLock{route: arg.RouteID, update: true})
+	return nil, nil
+}
+
+func (f *fakeDB) ShareRouteStorm(_ context.Context, arg dbgen.ShareRouteStormParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ShareRouteStorm"); err != nil {
+		return nil, err
+	}
+	f.storms = append(f.storms, stormLock{route: arg.RouteID})
+	return nil, nil
+}
+
+// stormLock is a lock of the active Storm of a Route, for update or shared.
+type stormLock struct {
+	route  int64
+	update bool
 }
 
 func (f *fakeDB) LockCounter(context.Context, int64) (int64, error) {
@@ -852,7 +882,7 @@ func (f *fakeDB) timeline(group int64, kinds []string, at pgtype.Timestamptz, so
 			PreviousOwnerUserID: e.PreviousOwnerUserID, SnoozeUntil: e.SnoozeUntil, Fingerprints: e.Fingerprints,
 			ReplacedLabel: e.ReplacedLabel, LabelConflicts: e.LabelConflicts, PeriodFrom: e.PeriodFrom,
 			PeriodTo: e.PeriodTo, Detail: e.Detail, TeamID: e.TeamID, TeamRule: e.TeamRule,
-			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue})
+			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue, DestinationID: e.DestinationID})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListTimelineDescRow) int {
 		c := cmp.Or(a.At.Compare(b.At), cmp.Compare(a.ID, b.ID))

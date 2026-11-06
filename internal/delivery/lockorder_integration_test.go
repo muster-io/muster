@@ -7,18 +7,26 @@ package delivery_test
 
 import (
 	"context"
+	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
 	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/ingest"
+	ingestdb "github.com/muster-io/muster/internal/ingest/dbgen"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
@@ -366,7 +374,7 @@ func TestReplyRecordAgainstDeliveryLockOrder(t *testing.T) {
 		}
 		q := deliverydb.New(tx)
 		if _, err := q.EnsureDelivery(ctx, deliverydb.EnsureDeliveryParams{OrgID: l.orgID, DestinationID: l.dests[0],
-			AlertGroupID: pgtype.Int8{Int64: group, Valid: true}, Now: l.business.Now()}); err != nil {
+			AlertGroupID: pgtype.Int8{Int64: group, Valid: true}, Entries: []byte("[]"), Now: l.business.Now()}); err != nil {
 			t.Fatal(err)
 		}
 		var roundErr error
@@ -825,4 +833,502 @@ func TestRerenderAgainstStormCalmLockOrder(t *testing.T) {
 			check(t, l, stormID, group, active)
 		})
 	})
+}
+
+// TestReachAgainstRouteSaveLockOrder (C-26.FR-3): a critical Alert joins a published Alert Group and raises its level,
+// and its transition is held after the dispatcher read the reach, before Enqueue, while a save of the Route adds a
+// Destination. The dispatcher took the Route's membership lock shared before it read the reach, so the save, which
+// takes it exclusively, waits for the transition, and its membership hook then publishes the Alert Group in the added
+// Destination: the Destination gets exactly one delivery, no destination_joined is recorded for a Destination the reach
+// did not have, and nothing ends in a deadlock. Before the re-render, the transition already holds the Route's
+// membership lock shared.
+func TestReachAgainstRouteSaveLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		l.a.Published = l.groups.MarkPublished
+		l.fire(t, "reach", "Reach/a")
+		gid := l.group(t, "Reach")
+		l.round(t, l.a)
+		if l.count(t, `SELECT count(*) FROM alert_groups WHERE public_id = $1 AND first_published_at IS NOT NULL`,
+			gid) != 1 {
+			t.Fatalf("the alert group is not published\n%s", l.log)
+		}
+		rt, err := l.routes.Get(ctx, routePublicIDOf(t, l))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		entered, proceed := make(chan struct{}), make(chan struct{})
+		var held int32
+		var gate sync.Once
+		l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+			first := false
+			gate.Do(func() { first = true })
+			if first {
+				err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
+				close(entered)
+				<-proceed
+				if err != nil {
+					return err
+				}
+			}
+			return l.svc.Enqueue(ctx, tx, r)
+		})
+		// A critical Alert raises the level: a change by which the reach can grow, which the dispatcher reads.
+		l.storeAlerts(t, "reach", alert{name: "Reach/a", team: "db"},
+			alert{name: "Reach/b", team: "db", severity: "critical"})
+		var wg sync.WaitGroup
+		var fireErr, saveErr error
+		wg.Go(func() { fireErr = l.drain(ctx) })
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			close(proceed)
+			t.Fatal("the transition never reached its re-render")
+		}
+		// Enqueue has not run yet: the shared membership lock the transition holds is the dispatcher's.
+		if n := l.count(t, `SELECT count(*) FROM pg_locks WHERE pid = $1 AND locktype = 'advisory' AND mode = 'ShareLock'
+			AND classid = $2`, held, db.RouteMembershipLockClass); n != 1 {
+			t.Errorf("the transition holds %d shared membership locks before its re-render", n)
+		}
+		saved := make(chan struct{})
+		wg.Go(func() {
+			defer close(saved)
+			_, saveErr = l.routes.Update(ctx, system, rt.PublicID, &rt.Version, routing.Input{Name: rt.Name,
+				Description: &rt.Description, Matchers: rt.Matchers, GroupKey: rt.GroupKey,
+				DestinationIDs: []string{"DSAAAAAAAAAAA1", "DSAAAAAAAAAAA2"}, Policy: rt.Policy})
+		})
+		blocked := l.blockedOrDone(t, saved, held)
+		close(proceed)
+		wg.Wait()
+		l.groups.SetRerender(l.svc.Enqueue)
+		if !blocked {
+			t.Error("the route save did not wait for the transition that read the reach")
+		}
+		if fireErr != nil || saveErr != nil {
+			t.Errorf("the transition: %v; the route save: %v", fireErr, saveErr)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.public_id = $1 AND d.destination_id = $2`, gid, l.dests[1]); n != 1 {
+			t.Errorf("%d deliveries in the added destination\n%s", n, l.log)
+		}
+		if n := l.count(t, `SELECT count(*) FROM timeline_entries t JOIN alert_groups g ON g.id = t.alert_group_id
+			WHERE g.public_id = $1 AND t.event = 'destination_joined'`, gid); n != 0 {
+			t.Errorf("%d destination_joined for a destination the reach did not have", n)
+		}
+		l.noDeadlock(t)
+	})
+}
+
+// routePublicIDOf is the public_id of the Route db of the harness.
+func routePublicIDOf(t *testing.T, l *live) string {
+	t.Helper()
+	var id string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT public_id FROM routes WHERE id = $1`, l.routeID).Scan(&id); err !=
+		nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestHeldGroupsAgainstStormCalmLockOrder: one Snapshot changes an Alert Group a Storm holds — its Enqueue locks its
+// held delivery — and creates another Alert Group of the same Route, which joins the Storm, while the calm check of
+// that Storm ends it. Enqueue takes the Route's active Storm FOR SHARE before the first delivery it locks, so the calm
+// check, which locks the Storm FOR NO KEY UPDATE and then the held deliveries, waits for the Snapshot's transaction,
+// whose JoinStorm then needs no other lock than its own: no deadlock, and no delivery stays held by an ended Storm.
+func TestHeldGroupsAgainstStormCalmLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		routeID, _ := l.newRoute(t, "heldstorm", 2, "DSAAAAAAAAAAA1")
+		for _, a := range []alert{{name: "HS0/a", team: "heldstorm"}, {name: "HS1/a", team: "heldstorm"},
+			{name: "HS2/a", team: "heldstorm"}, {name: "HS3/a", team: "heldstorm"}} {
+			l.fireAlerts(t, "hs-"+a.name, a)
+			l.business.Advance(time.Second)
+		}
+		var stormID int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT id FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+			routeID).Scan(&stormID); err != nil {
+			t.Fatalf("no storm: %v", err)
+		}
+		if l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE d.held_by_storm_id = $1 AND g.title LIKE 'HS3%'`, stormID) != 1 {
+			t.Fatal("the storm does not hold HS3")
+		}
+		l.business.Advance(delivery.StormWindow + delivery.StormCalmPeriod + time.Minute)
+
+		// The Snapshot holds its transaction after the first Enqueue, the update of the held HS3, before the creation.
+		entered, proceed := make(chan struct{}), make(chan struct{})
+		var held int32
+		var gate sync.Once
+		l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+			if err := l.svc.Enqueue(ctx, tx, r); err != nil {
+				return err
+			}
+			first := false
+			gate.Do(func() { first = true })
+			if first {
+				// The test is about an update of a held Alert Group before a creation in one transaction.
+				if slices.ContainsFunc(r.Events, func(e groups.Recorded) bool { return e.Event == groups.EventCreated }) {
+					t.Errorf("the first rendering is a creation")
+				}
+				err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
+				close(entered)
+				<-proceed
+				return err
+			}
+			return nil
+		})
+		l.storeAlerts(t, "hs-mixed", alert{name: "HS3/b", team: "heldstorm"}, alert{name: "HS9/a", team: "heldstorm"})
+		var wg sync.WaitGroup
+		var fireErr, calmErr error
+		wg.Go(func() { fireErr = l.drain(ctx) })
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			close(proceed)
+			t.Fatal("the snapshot never reached its first enqueue")
+		}
+		calmed := make(chan struct{})
+		wg.Go(func() {
+			defer close(calmed)
+			tx, err := l.d.Pool.Begin(ctx)
+			if err != nil {
+				calmErr = err
+				return
+			}
+			defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+			if _, calmErr = l.svc.CheckStormCalm(ctx, tx, stormID); calmErr == nil {
+				calmErr = tx.Commit(ctx)
+			}
+		})
+		blocked := l.blockedOrDone(t, calmed, held)
+		close(proceed)
+		wg.Wait()
+		l.groups.SetRerender(l.svc.Enqueue)
+		if !blocked {
+			t.Error("the calm check did not wait for the snapshot that holds the storm")
+		}
+		if fireErr != nil || calmErr != nil {
+			t.Errorf("the snapshot: %v; the calm check: %v", fireErr, calmErr)
+		}
+		stuck := l.count(t, `SELECT count(*) FROM deliveries d JOIN storms s ON s.id = d.held_by_storm_id
+			WHERE s.ended_at IS NOT NULL`)
+		if stuck != 0 || l.count(t, `SELECT count(*) FROM alert_groups WHERE title LIKE 'HS9%'`) != 1 {
+			t.Errorf("deliveries held by an ended storm %d\n%s", stuck, l.log)
+		}
+		l.noDeadlock(t)
+	})
+}
+
+// TestTwoSnapshotsInAStormLockOrder (finding H1 of a review): two Snapshots on one Route during its Storm, from two
+// Integrations, which two workers process at once, on a Route with deliver_to_teams. The first creates an Alert Group
+// and, before it, brings a Team to an Alert Group the Storm holds (team_joined), which grows it into the Team's
+// Destination: the Storm holds it there too, and its Enqueue creates and locks the Storm summary of that Destination.
+// The second creates nothing, so it takes no counter row, and brings the Team to another held Alert Group, which needs
+// the same Storm summary. Grouping takes the active Storm of a Route it creates in FOR NO KEY UPDATE, and of any other
+// FOR SHARE, before its first dispatch, so the second waits for the first at its share of the Storm, before any
+// delivery, instead of sharing the Storm and waiting for the summary while the first waits for that share to join
+// the Storm: both commit, nothing ends in a deadlock, the Team's Destination has one Storm summary and the Storm holds
+// both Alert Groups there. A lane retries a Snapshot that ended in a deadlock, which hides it from the outcome, so the
+// test counts the deadlocks of the grouping Sink and each Alert Group must render exactly once.
+func TestTwoSnapshotsInAStormLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		// The Team takes the Alerts TS3/b and TS4/b by a Team matcher; only the Team reaches the second Destination.
+		team := l.dests[1]
+		l.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+			VALUES ($1, 'TMAAAAAAAAAAA9', 'storm', 'storm', $2, $2)`, l.orgID, l.business.Now())
+		l.exec(t, `INSERT INTO team_matchers (org_id, team_id, label, op, value, position)
+			SELECT org_id, id, 'disk', '=~', 'TS[34]/b', 0 FROM teams WHERE public_id = 'TMAAAAAAAAAAA9'`)
+		l.exec(t, `INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+			SELECT org_id, id, $1, 'any', $2 FROM teams WHERE public_id = 'TMAAAAAAAAAAA9'`, team, l.business.Now())
+		l.exec(t, `UPDATE organizations SET teams_version = teams_version + 1 WHERE id = $1`, l.orgID)
+		policy := routing.Profiles()[0].Policy
+		policy.StormThreshold = 2
+		toTeams := true
+		rt, err := l.routes.Create(ctx, system, routing.Input{Name: "twostorm", GroupKey: []string{"alertname"},
+			Policy: policy, Matchers: []routing.Matcher{{Label: "team", Op: "=", Value: "twostorm"}},
+			DestinationIDs: []string{"DSAAAAAAAAAAA1"}, DeliverToTeams: &toTeams})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range []alert{{name: "TS0/a", team: "twostorm"}, {name: "TS1/a", team: "twostorm"},
+			{name: "TS2/a", team: "twostorm"}, {name: "TS3/a", team: "twostorm"}, {name: "TS4/a", team: "twostorm"}} {
+			l.fireAlerts(t, "ts-"+a.name, a)
+			l.business.Advance(time.Second)
+		}
+		var stormID int64
+		if err := l.d.Pool.QueryRow(ctx, `SELECT id FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+			rt.ID).Scan(&stormID); err != nil {
+			t.Fatalf("no storm: %v", err)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE d.held_by_storm_id = $1 AND (g.title LIKE 'TS3%' OR g.title LIKE 'TS4%')`, stormID); n != 2 {
+			t.Fatalf("the storm holds %d of TS3 and TS4", n)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1`, team); n != 0 {
+			t.Fatalf("%d deliveries in the team's destination before the team joins", n)
+		}
+		before := l.count(t, `SELECT alert_group_count FROM storms WHERE id = $1`, stormID)
+		// A worker processes the Snapshots of one Integration at a time: the second Snapshot comes from another.
+		var other int64
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO integrations (org_id, public_id, name, connection_mode,
+			static_labels, duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state,
+			created_at, updated_at)
+			SELECT org_id, 'NTAAAAAAAAAAB2', 'second', connection_mode, static_labels, duplicate_window_seconds,
+				heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+			FROM integrations WHERE id = $1 RETURNING id`, l.intID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+
+		// The first Snapshot holds its transaction after its first Enqueue, the team_joined of the held TS3, which locked
+		// the new Storm summary, before its creation.
+		entered, proceed := make(chan struct{}), make(chan struct{})
+		var held int32
+		var gate sync.Once
+		// A lane retries a Snapshot that ended in a deadlock: a retried one renders its Alert Groups again.
+		var mu sync.Mutex
+		renders := map[int64]int{}
+		dl := &deadlocks{Sink: l.sink}
+		l.sink = dl
+		l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+			mu.Lock()
+			renders[r.Group.Number]++
+			mu.Unlock()
+			if err := l.svc.Enqueue(ctx, tx, r); err != nil {
+				return err
+			}
+			first := false
+			gate.Do(func() { first = true })
+			if first {
+				if slices.ContainsFunc(r.Events, func(e groups.Recorded) bool { return e.Event == groups.EventCreated }) {
+					t.Errorf("the first rendering is a creation")
+				}
+				var summaries int
+				err := tx.QueryRow(ctx, `SELECT pg_backend_pid(), (SELECT count(*) FROM deliveries
+					WHERE storm_id = $1 AND destination_id = $2)`, stormID, team).Scan(&held, &summaries)
+				if summaries != 1 {
+					t.Errorf("the first snapshot made %d storm summaries in the team's destination", summaries)
+				}
+				close(entered)
+				<-proceed
+				return err
+			}
+			return nil
+		})
+		l.storeAlerts(t, "ts-first", alert{name: "TS3/b", team: "twostorm"},
+			alert{name: "TSA/a", team: "twostorm"})
+		var wg sync.WaitGroup
+		var firstErr, secondErr error
+		wg.Go(func() { firstErr = l.drain(ctx) })
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			close(proceed)
+			t.Fatal("the first snapshot never reached its first enqueue")
+		}
+		own := l.intID
+		l.intID = other
+		l.storeAlerts(t, "ts-second", alert{name: "TS4/b", team: "twostorm"})
+		l.intID = own
+		second := make(chan struct{})
+		wg.Go(func() {
+			defer close(second)
+			secondErr = l.drain(ctx)
+		})
+		blocked := l.blockedOrDone(t, second, held)
+		// The second Snapshot waits at the Storm, which the first holds for its creation, not at a delivery.
+		var waiting string
+		if err := l.d.Pool.QueryRow(ctx, `SELECT coalesce(string_agg(split_part(query, E'\n', 1), '; '), '')
+			FROM pg_stat_activity WHERE datname = current_database() AND $1::int4 = ANY(pg_blocking_pids(pid))`,
+			held).Scan(&waiting); err != nil {
+			t.Error(err)
+		}
+		close(proceed)
+		wg.Wait()
+		l.groups.SetRerender(l.svc.Enqueue)
+		t.Logf("the second snapshot waited for the first: %v, in %q", blocked, waiting)
+		if !blocked || !strings.Contains(waiting, "ShareRouteStorm") {
+			t.Errorf("the second snapshot did not wait for the first at the storm: %q", waiting)
+		}
+		l.sink = dl.Sink
+		if n := dl.count.Load(); n != 0 {
+			t.Errorf("%d snapshot transactions ended in a deadlock", n)
+		}
+		retried := slices.ContainsFunc(slices.Collect(maps.Values(renders)), func(n int) bool { return n != 1 })
+		if len(renders) != 3 || retried {
+			t.Errorf("renderings by alert group number %v: a snapshot was retried after a deadlock", renders)
+		}
+		if firstErr != nil || secondErr != nil {
+			t.Errorf("the first snapshot: %v; the second: %v", firstErr, secondErr)
+		}
+		if l.count(t, `SELECT count(*) FROM stored_snapshots WHERE state <> 'processed'`) != 0 {
+			t.Errorf("a snapshot is not processed\n%s", l.log)
+		}
+		if n := l.count(t, `SELECT count(*) FROM alert_groups WHERE title LIKE 'TSA%'`); n != 1 {
+			t.Errorf("%d new alert groups", n)
+		}
+		if after := l.count(t, `SELECT alert_group_count FROM storms WHERE id = $1`, stormID); after != before+1 {
+			t.Errorf("the storm counts %d, want %d", after, before+1)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries WHERE storm_id = $1 AND destination_id = $2`, stormID,
+			team); n != 1 {
+			t.Errorf("%d storm summaries in the team's destination", n)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE d.destination_id = $1 AND d.held_by_storm_id = $2 AND (g.title LIKE 'TS3%' OR g.title LIKE 'TS4%')`,
+			team, stormID); n != 2 {
+			t.Errorf("the storm holds %d of TS3 and TS4 in the team's destination\n%s", n, l.log)
+		}
+		if n := l.count(t, `SELECT count(*) FROM timeline_entries e JOIN alert_groups g ON g.id = e.alert_group_id
+			WHERE e.event = 'team_joined' AND (g.title LIKE 'TS3%' OR g.title LIKE 'TS4%')`); n != 2 {
+			t.Errorf("%d team_joined", n)
+		}
+		l.noDeadlock(t)
+	})
+}
+
+// TestTwoStormsLockOrder (a finding of a review): two Routes, both in a Storm, and two Snapshots from two Integrations.
+// The one that creates nothing changes an Alert Group of each Route, the lower Alert Group id on the higher Route; the
+// other creates an Alert Group on each. Grouping takes the Storms of all the Routes a Snapshot dispatches in, in Route
+// id order, before its first dispatch — shared where it only changes Alert Groups — so the creating Snapshot, which
+// updates both, waits for the other before it holds one of them, instead of holding the lower Route's Storm while the
+// other shares the higher one and then waits for the lower: both commit, each Alert Group renders once, and each
+// Storm counts its new Alert Group. The deadlock it prevents ends the creating Snapshot before any rendering, and its
+// lane retries it, so the test counts the deadlocks of the grouping Sink.
+func TestTwoStormsLockOrder(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		l.fresh(t, 1000, 1)
+		low, _ := l.newRoute(t, "stormlow", 2, "DSAAAAAAAAAAA1")
+		high, _ := l.newRoute(t, "stormhigh", 2, "DSAAAAAAAAAAA1")
+		if low >= high {
+			t.Fatalf("route ids %d, %d", low, high)
+		}
+		// The Alert Groups of the higher Route come first, so they have the lower ids.
+		for _, a := range []alert{{name: "SH0/a", team: "stormhigh"}, {name: "SH1/a", team: "stormhigh"},
+			{name: "SH2/a", team: "stormhigh"}, {name: "SL0/a", team: "stormlow"}, {name: "SL1/a", team: "stormlow"},
+			{name: "SL2/a", team: "stormlow"}} {
+			l.fireAlerts(t, "tw-"+a.name, a)
+			l.business.Advance(time.Second)
+		}
+		storms := map[int64]int64{}
+		for _, r := range []int64{low, high} {
+			var id int64
+			if err := l.d.Pool.QueryRow(ctx, `SELECT id FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+				r).Scan(&id); err != nil {
+				t.Fatalf("no storm on route %d: %v", r, err)
+			}
+			storms[r] = l.count(t, `SELECT alert_group_count FROM storms WHERE id = $1`, id)
+		}
+		var other int64
+		if err := l.d.Pool.QueryRow(ctx, `INSERT INTO integrations (org_id, public_id, name, connection_mode,
+			static_labels, duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state,
+			created_at, updated_at)
+			SELECT org_id, 'NTAAAAAAAAAAB3', 'second', connection_mode, static_labels, duplicate_window_seconds,
+				heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at, updated_at
+			FROM integrations WHERE id = $1 RETURNING id`, l.intID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+
+		// The Snapshot that creates nothing holds its transaction after its first Enqueue, of the higher Route's
+		// Alert Group, before the lower Route's.
+		entered, proceed := make(chan struct{}), make(chan struct{})
+		var held int32
+		var gate sync.Once
+		var mu sync.Mutex
+		renders := map[int64]int{}
+		dl := &deadlocks{Sink: l.sink}
+		l.sink = dl
+		l.groups.SetRerender(func(ctx context.Context, tx groups.DBTX, r groups.Rendering) error {
+			mu.Lock()
+			renders[r.Group.Number]++
+			mu.Unlock()
+			if err := l.svc.Enqueue(ctx, tx, r); err != nil {
+				return err
+			}
+			first := false
+			gate.Do(func() { first = true })
+			if first {
+				if r.Group.RouteID != high {
+					t.Errorf("the first rendering is on route %d", r.Group.RouteID)
+				}
+				err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&held)
+				close(entered)
+				<-proceed
+				return err
+			}
+			return nil
+		})
+		own := l.intID
+		l.intID = other
+		l.storeAlerts(t, "tw-changes", alert{name: "SH2/b", team: "stormhigh"}, alert{name: "SL2/b", team: "stormlow"})
+		l.intID = own
+		var wg sync.WaitGroup
+		var changeErr, createErr error
+		wg.Go(func() { changeErr = l.drain(ctx) })
+		select {
+		case <-entered:
+		case <-time.After(10 * time.Second):
+			close(proceed)
+			t.Fatal("the snapshot that creates nothing never reached its first enqueue")
+		}
+		l.storeAlerts(t, "tw-creations", alert{name: "SHN/a", team: "stormhigh"}, alert{name: "SLN/a", team: "stormlow"})
+		created := make(chan struct{})
+		wg.Go(func() {
+			defer close(created)
+			createErr = l.drain(ctx)
+		})
+		blocked := l.blockedOrDone(t, created, held)
+		close(proceed)
+		wg.Wait()
+		l.groups.SetRerender(l.svc.Enqueue)
+		if !blocked {
+			t.Error("the creating snapshot did not wait for the one that shares the storms")
+		}
+		l.sink = dl.Sink
+		if n := dl.count.Load(); n != 0 {
+			t.Errorf("%d snapshot transactions ended in a deadlock", n)
+		}
+		retried := slices.ContainsFunc(slices.Collect(maps.Values(renders)), func(n int) bool { return n != 1 })
+		if len(renders) != 4 || retried {
+			t.Errorf("renderings by alert group number %v: a snapshot was retried after a deadlock", renders)
+		}
+		if changeErr != nil || createErr != nil {
+			t.Errorf("the snapshot that creates nothing: %v; the creating one: %v", changeErr, createErr)
+		}
+		if l.count(t, `SELECT count(*) FROM stored_snapshots WHERE state <> 'processed'`) != 0 {
+			t.Errorf("a snapshot is not processed\n%s", l.log)
+		}
+		for r, before := range storms {
+			if after := l.count(t, `SELECT alert_group_count FROM storms WHERE route_id = $1 AND ended_at IS NULL`,
+				r); after != before+1 {
+				t.Errorf("the storm of route %d counts %d, want %d", r, after, before+1)
+			}
+		}
+		l.noDeadlock(t)
+	})
+}
+
+// deadlocks is the grouping Sink of the harness that counts the Snapshot transactions that ended in a deadlock, which
+// a lane retries without a trace in the outcome.
+type deadlocks struct {
+	ingest.Sink
+	count atomic.Int32
+}
+
+func (d *deadlocks) AlertChanges(ctx context.Context, tx ingestdb.DBTX, changes []ingest.AlertChange) (ingest.Routed,
+	error) {
+	routed, err := d.Sink.AlertChanges(ctx, tx, changes)
+	if pe, ok := errors.AsType[*pgconn.PgError](err); ok && pe.Code == "40P01" {
+		d.count.Add(1)
+	}
+	return routed, err
 }

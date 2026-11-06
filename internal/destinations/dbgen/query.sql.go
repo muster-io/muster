@@ -514,6 +514,53 @@ func (q *Queries) ListDestinationRoutes(ctx context.Context, arg ListDestination
 	return items, nil
 }
 
+const listDestinationTeams = `-- name: ListDestinationTeams :many
+SELECT td.destination_id, t.public_id, t.name, t.slug
+FROM team_destinations td
+JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id
+WHERE td.org_id = $1 AND td.destination_id = ANY($2::bigint[]) AND t.deleted_at IS NULL
+ORDER BY t.name, t.id
+`
+
+type ListDestinationTeamsParams struct {
+	OrgID          int64
+	DestinationIds []int64
+}
+
+type ListDestinationTeamsRow struct {
+	DestinationID int64
+	PublicID      string
+	Name          string
+	Slug          string
+}
+
+// ListDestinationTeams lists the Teams that are not deleted that name the Destinations as Destinations of the Team
+// (C-26.FR-1), by name.
+func (q *Queries) ListDestinationTeams(ctx context.Context, arg ListDestinationTeamsParams) ([]ListDestinationTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listDestinationTeams, arg.OrgID, arg.DestinationIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDestinationTeamsRow{}
+	for rows.Next() {
+		var i ListDestinationTeamsRow
+		if err := rows.Scan(
+			&i.DestinationID,
+			&i.PublicID,
+			&i.Name,
+			&i.Slug,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDestinations = `-- name: ListDestinations :many
 
 

@@ -11,9 +11,12 @@
 package delivery
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -31,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
 	"github.com/muster-io/muster/internal/publicid"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // Channel is the LISTEN/NOTIFY channel that wakes the delivery workers of every replica when a Desired state changes
@@ -403,6 +407,7 @@ type queries interface {
 	editWindowQueries
 	bridgePressQueries
 	slackPressQueries
+	reachQueries
 	RecordThreadOpened(ctx context.Context, arg dbgen.RecordThreadOpenedParams) error
 	SetDestinationTemplateError(ctx context.Context, arg dbgen.SetDestinationTemplateErrorParams) (
 		[]dbgen.SetDestinationTemplateErrorRow, error)
@@ -520,7 +525,9 @@ const StateWaitingForBroken = "waiting_for_broken_destination"
 // State is the delivery state of an Alert Group in one Destination (C-11.FR-16). PastEditWindow is a pending or
 // delivered Bridge Root message past its edit window (C-22.FR-9).
 type State struct {
-	Destination       Ref
+	Destination Ref
+	// Entries are the entries that reached the Destination, with the condition each first had (C-26.FR-3).
+	Entries           []Entry
 	State             string
 	ThreadNotAttached bool
 	PossibleDuplicate bool
@@ -528,6 +535,22 @@ type State struct {
 	MessageURL        *string
 	Error             *string
 	UpdatedAt         time.Time
+}
+
+// Entry is an entry that reached a Destination of an Alert Group: the Route's, or a Team's with the Team, and its
+// Severity condition.
+type Entry struct {
+	Kind      string
+	Team      *TeamRef
+	Condition string
+}
+
+// TeamRef names the Team of an entry, deleted or not.
+type TeamRef struct {
+	PublicID string
+	Name     string
+	Slug     string
+	Deleted  bool
 }
 
 // Ref names a Destination with its health.
@@ -558,9 +581,13 @@ func (s *Service) States(ctx context.Context, publicID string) ([]State, error) 
 	if err != nil {
 		return nil, fmt.Errorf("read the deliveries of the alert group %s: %w", id, err)
 	}
+	entries, err := s.entriesOf(ctx, q, rows)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]State, 0, len(rows))
-	for _, r := range rows {
-		st := State{Destination: Ref{PublicID: r.DestinationPublicID, Name: r.DestinationName,
+	for i, r := range rows {
+		st := State{Entries: entries[i], Destination: Ref{PublicID: r.DestinationPublicID, Name: r.DestinationName,
 			Type: r.DestinationType, Health: r.Health, BrokenSince: timeOf(r.BrokenSince),
 			BrokenReason: textOf(r.BrokenReason)},
 			State: r.State, ThreadNotAttached: r.ThreadState == "unattached", PossibleDuplicate: r.PossibleDuplicate,
@@ -575,6 +602,58 @@ func (s *Service) States(ctx context.Context, publicID string) ([]State, error) 
 		out = append(out, st)
 	}
 	return out, nil
+}
+
+// entriesOf decodes the entries of each delivery and names the Teams of theirs: the Route's first, then the Teams' in
+// the order they reached it.
+func (s *Service) entriesOf(ctx context.Context, q queries, rows []dbgen.ListGroupDeliveriesRow) ([][]Entry, error) {
+	decoded := make([][]routing.Reaching, len(rows))
+	var ids []int64
+	for i, r := range rows {
+		if err := json.Unmarshal(r.Entries, &decoded[i]); err != nil {
+			return nil, fmt.Errorf("read the entries of a delivery to %s: %w", r.DestinationPublicID, err)
+		}
+		for _, e := range decoded[i] {
+			if e.Kind == routing.EntryTeam {
+				ids = append(ids, e.TeamID)
+			}
+		}
+	}
+	teams := map[int64]TeamRef{}
+	if len(ids) > 0 {
+		slices.Sort(ids)
+		refs, err := q.ListEntryTeams(ctx, dbgen.ListEntryTeamsParams{OrgID: s.orgID, Ids: slices.Compact(ids)})
+		if err != nil {
+			return nil, fmt.Errorf("read the teams of the deliveries: %w", err)
+		}
+		for _, t := range refs {
+			teams[t.ID] = TeamRef{PublicID: t.PublicID, Name: t.Name, Slug: t.Slug, Deleted: t.Deleted}
+		}
+	}
+	out := make([][]Entry, len(rows))
+	for i, es := range decoded {
+		out[i] = []Entry{}
+		// The Route's entry first; the Teams' keep the order they reached the Destination in.
+		slices.SortStableFunc(es, func(a, b routing.Reaching) int {
+			return cmp.Compare(entryRank(a), entryRank(b))
+		})
+		for _, e := range es {
+			entry := Entry{Kind: e.Kind, Condition: string(e.Condition)}
+			if t, ok := teams[e.TeamID]; ok && e.Kind == routing.EntryTeam {
+				entry.Team = &t
+			}
+			out[i] = append(out[i], entry)
+		}
+	}
+	return out, nil
+}
+
+// entryRank orders the Route's entry before the Teams'.
+func entryRank(e routing.Reaching) int {
+	if e.Kind == routing.EntryRoute {
+		return 0
+	}
+	return 1
 }
 
 // queueSeries are the Destinations whose muster_delivery_queue series this replica exports.

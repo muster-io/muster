@@ -54,6 +54,19 @@ const (
 	EventUnknownTeamValue Event = "unknown_team_value"
 )
 
+// EventDestinationJoined is the lifecycle event of C-26.FR-5 (revised C-09.FR-22): an Alert Group that reaches a
+// Destination after its first Publication elsewhere, because its Alerts raised its Severity level into the
+// Destination's condition or brought a Team, publishes there — Loud with the Mentions of a new Alert Group while it is
+// firing, Quiet while it is acknowledged or snoozed. One is recorded per Destination it joins.
+const EventDestinationJoined Event = "destination_joined"
+
+// ReachEvents are the lifecycle events by which the Destinations an Alert Group reaches can grow (C-26.FR-4, FR-5): a
+// Team that joins it, which adds the Team's Destinations, and a rise of its Severity level, which adds the Destinations
+// whose condition it now meets. The dispatcher records destination_joined only after one of them that Alerts made, and
+// delivery creates the deliveries of newly reached Destinations only after one of them, so that both read the same
+// notion of a growing reach; Alerts that join without a Team or a rise add no Destination.
+var ReachEvents = []Event{EventTeamJoined, EventSeverityRaised, EventUrgencyRaised}
+
 // Kind is the Timeline kind of an entry.
 type Kind string
 
@@ -118,7 +131,8 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11 and C-25, a closed list:
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11, C-25 and C-26, a closed
+// list:
 // every transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of
 // timeline_entries back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of
 // the notices it stands for (ack_timeout or owner).
@@ -142,6 +156,9 @@ var Table = []Row{
 	{EventResolved, VariantAny, KindStatus, Quiet, nil},
 	{EventMovedToDefaultRoute, VariantAny, KindSystem, Quiet, nil},
 	{EventUnknownTeamValue, VariantAny, KindSystem, Quiet, nil},
+	{EventDestinationJoined, VariantFiring, KindSystem, Loud, []Mention{MentionNewAlertGroup}},
+	{EventDestinationJoined, VariantAcknowledged, KindSystem, Quiet, nil},
+	{EventDestinationJoined, VariantSnoozed, KindSystem, Quiet, nil},
 	{EventUnacknowledged, VariantOwnerReleased, KindStatus, Loud, nil},
 	{EventAcknowledged, VariantAny, KindStatus, Quiet, nil},
 	{EventTakeover, VariantAny, KindStatus, Loud, []Mention{MentionPreviousOwner}},
@@ -168,7 +185,7 @@ func rowOf(e Event, v Variant) Row {
 	panic(fmt.Sprintf("groups: no lifecycle event %s (%s)", e, v))
 }
 
-// statusVariant is the variant of the rows that depend on a status: alerts_added and reopened.
+// statusVariant is the variant of the rows that depend on a status: alerts_added, reopened and destination_joined.
 func statusVariant(s Status) Variant {
 	switch s {
 	case StatusAcknowledged:
@@ -185,12 +202,14 @@ type SystemEvent string
 
 // The system entries this capability writes, fallback_template_used, which the dispatcher records when the
 // re-render step reports a Route template that failed (C-12.FR-6), and unknown_team_value, the system entry of the
-// lifecycle event of the same name (C-25.FR-7).
+// lifecycle event of the same name (C-25.FR-7), and destination_joined, the system entry of its lifecycle event
+// (C-26.FR-5).
 const (
 	SystemMovedToDefaultRoute  SystemEvent = "moved_to_default_route"
 	SystemMusterUnavailable    SystemEvent = "muster_unavailable"
 	SystemFallbackTemplateUsed SystemEvent = "fallback_template_used"
 	SystemUnknownTeamValue     SystemEvent = "unknown_team_value"
+	SystemDestinationJoined    SystemEvent = "destination_joined"
 )
 
 // ReasonMinimumSeverity is the reason of a severity_raised, or of the Quiet urgency_raised that removes nothing, that

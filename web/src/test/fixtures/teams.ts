@@ -30,6 +30,8 @@ export function team(overrides: Partial<Team> = {}): Team {
     working_hours: workingHours(),
     matchers: [],
     idp_entries: [],
+    destination_entries: [],
+    destinations: [],
     user_count: 0,
     created_at: "2026-10-13T09:00:00Z",
     etag: '"1"',

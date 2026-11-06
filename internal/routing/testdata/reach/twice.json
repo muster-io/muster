@@ -1,0 +1,47 @@
+[
+  {
+    "name": "a Destination named by the Route for critical and by a Team below critical is reached at warning by the Team",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 15, "severity_condition": "critical"}],
+    "team_entries": {"1": [{"destination_id": 15, "severity_condition": "below_critical"}]},
+    "teams": [1],
+    "want": [{"destination_id": 15, "entries": [{"kind": "team", "team_id": 1, "severity_condition": "below_critical"}]}]
+  },
+  {
+    "name": "the same Destination is reached at critical by the Route",
+    "level": "critical",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 15, "severity_condition": "critical"}],
+    "team_entries": {"1": [{"destination_id": 15, "severity_condition": "below_critical"}]},
+    "teams": [1],
+    "want": [{"destination_id": 15, "entries": [{"kind": "route", "severity_condition": "critical"}]}]
+  },
+  {
+    "name": "a Destination that the Route and a Team both reach is reached once with both entries",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 15, "severity_condition": "any"}],
+    "team_entries": {"1": [{"destination_id": 15, "severity_condition": "below_critical"}]},
+    "teams": [1],
+    "want": [{"destination_id": 15, "entries": [
+      {"kind": "route", "severity_condition": "any"},
+      {"kind": "team", "team_id": 1, "severity_condition": "below_critical"}
+    ]}]
+  },
+  {
+    "name": "a Destination of two Teams is reached once with the entries of both, by Team",
+    "level": "info",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "2": [{"destination_id": 15, "severity_condition": "any"}],
+      "1": [{"destination_id": 15, "severity_condition": "below_critical"}]
+    },
+    "teams": [2, 1],
+    "want": [{"destination_id": 15, "entries": [
+      {"kind": "team", "team_id": 1, "severity_condition": "below_critical"},
+      {"kind": "team", "team_id": 2, "severity_condition": "any"}
+    ]}]
+  }
+]

@@ -308,7 +308,9 @@ func TestSuggestionFailures(t *testing.T) {
 // TestInternalAlertsSuggestion is C-13.FR-11, C-13.AC-9 and C-08.FR-11: internal_alerts applies while a Destination
 // exists and some Internal alert, with the labels it is raised with about each entity, would go to the Default route;
 // it suggests "Muster internal alerts" for alertname=~"Muster.*" grouped per Internal alert and entity. The Route for
-// MusterHeartbeatLost leaves it standing for the others, so both suggestions apply at once.
+// MusterHeartbeatLost leaves it standing for the others, so both suggestions apply at once. It sets
+// deliver_to_teams on (C-26.FR-2), so that the MusterScheduleGap of each Schedule, grouped by schedule with its Team's
+// slug under the Team label, reaches its own Team's Destinations.
 func TestInternalAlertsSuggestion(t *testing.T) {
 	svc, store, _ := newService(t)
 	ctx := t.Context()
@@ -325,7 +327,8 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=~", Value: "Muster.*"}}) ||
 		in.MinimumSeverity != nil ||
 		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route", "schedule"}) ||
-		in.DestinationIDs == nil || len(in.DestinationIDs) != 0 || !in.Policy.AckTimeout.Enabled {
+		in.DestinationIDs == nil || len(in.DestinationIDs) != 0 || !in.Policy.AckTimeout.Enabled ||
+		in.DeliverToTeams == nil || !*in.DeliverToTeams {
 		t.Errorf("suggested %+v", in)
 	}
 
@@ -438,7 +441,7 @@ func TestAcceptInternalAlertsSuggestion(t *testing.T) {
 			}
 			if names(list) != c.want || rt.Name != InternalAlertsRouteName ||
 				!slices.Equal(rt.DestinationIDs, []string{"DSAAAAAAAAAAA1"}) || rt.Urgent ||
-				rt.MinimumSeverity != MinimumNone {
+				rt.MinimumSeverity != MinimumNone || !rt.DeliverToTeams || !rt.RunTeamChains {
 				t.Errorf("accepted %+v, list %s", rt, names(list))
 			}
 			if got := suggestionIDs(t, svc, nil); len(got) != 0 {

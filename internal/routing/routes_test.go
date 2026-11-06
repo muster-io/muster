@@ -106,10 +106,11 @@ type fakeStore struct {
 	unknown       map[int64]string
 }
 
-// link is a row of route_destinations.
+// link is a row of route_destinations; an empty condition is any.
 type link struct {
-	dest  int64
-	added time.Time
+	dest      int64
+	added     time.Time
+	condition string
 }
 
 func newStore() *fakeStore {
@@ -261,7 +262,8 @@ func (s *fakeStore) InsertRoute(_ context.Context, arg dbgen.InsertRouteParams) 
 		AckTimeoutEnabled: arg.AckTimeoutEnabled, AckTimeoutFirstIntervalSeconds: arg.AckTimeoutFirstIntervalSeconds,
 		RemindersEnabled: arg.RemindersEnabled, RemindersFirstIntervalSeconds: arg.RemindersFirstIntervalSeconds,
 		RemindersCapSeconds: arg.RemindersCapSeconds, AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now,
-		Version: 1, MessageLabels: arg.MessageLabels,
+		Version: 1, MessageLabels: arg.MessageLabels, DeliverToTeams: arg.DeliverToTeams,
+		RunTeamChains: arg.RunTeamChains,
 	}})
 	s.own(&s.rows[len(s.rows)-1].ListRoutesRow, arg.OwningTeamID)
 	return s.nextID, nil
@@ -317,7 +319,7 @@ func (s *fakeStore) EnsureDefaultRoute(_ context.Context, arg dbgen.EnsureDefaul
 		StormThreshold: arg.StormThreshold, Language: arg.Language, AckTimeoutEnabled: arg.AckTimeoutEnabled,
 		AckTimeoutFirstIntervalSeconds: arg.AckTimeoutFirstIntervalSeconds, RemindersEnabled: arg.RemindersEnabled,
 		RemindersFirstIntervalSeconds: arg.RemindersFirstIntervalSeconds, RemindersCapSeconds: arg.RemindersCapSeconds,
-		AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now, Version: 1,
+		AutoUnacknowledge: arg.AutoUnacknowledge, CreatedAt: arg.Now, Version: 1, RunTeamChains: true,
 	}})
 	return arg.PublicID, nil
 }
@@ -342,6 +344,7 @@ func (s *fakeStore) UpdateRoute(_ context.Context, arg dbgen.UpdateRouteParams) 
 			r.RemindersFirstIntervalSeconds, r.RemindersCapSeconds = arg.RemindersFirstIntervalSeconds,
 				arg.RemindersCapSeconds
 			r.AutoUnacknowledge, r.MessageLabels = arg.AutoUnacknowledge, arg.MessageLabels
+			r.DeliverToTeams, r.RunTeamChains = arg.DeliverToTeams, arg.RunTeamChains
 			s.own(&r.ListRoutesRow, arg.OwningTeamID)
 			r.Version++
 		}
@@ -522,7 +525,8 @@ func (s *fakeStore) ListRouteDestinationIDs(_ context.Context, arg dbgen.ListRou
 		var rows []dbgen.ListRouteDestinationIDsRow
 		for _, l := range s.links[route] {
 			if p := s.publicOf(l.dest); !s.deleted[p] {
-				rows = append(rows, dbgen.ListRouteDestinationIDsRow{RouteID: route, DestinationID: l.dest, PublicID: p})
+				rows = append(rows, dbgen.ListRouteDestinationIDsRow{RouteID: route, DestinationID: l.dest, PublicID: p,
+					SeverityCondition: cmp.Or(l.condition, "any")})
 			}
 		}
 		slices.SortFunc(rows, func(a, b dbgen.ListRouteDestinationIDsRow) int { return cmp.Compare(a.PublicID, b.PublicID) })
@@ -536,8 +540,25 @@ func (s *fakeStore) InsertRouteDestinations(_ context.Context, arg dbgen.InsertR
 		return err
 	}
 	links := slices.Clone(s.links[arg.RouteID])
-	for _, d := range arg.DestinationIds {
-		links = append(links, link{dest: d, added: arg.Now})
+	for i, d := range arg.DestinationIds {
+		links = append(links, link{dest: d, added: arg.Now, condition: arg.Conditions[i]})
+	}
+	s.links[arg.RouteID] = links
+	return nil
+}
+
+func (s *fakeStore) SetRouteDestinationConditions(_ context.Context,
+	arg dbgen.SetRouteDestinationConditionsParams) error {
+	if err := s.call("SetRouteDestinationConditions"); err != nil || arg.OrgID != orgID {
+		return err
+	}
+	links := slices.Clone(s.links[arg.RouteID])
+	for i, d := range arg.DestinationIds {
+		for j := range links {
+			if links[j].dest == d {
+				links[j].condition = arg.Conditions[i]
+			}
+		}
 	}
 	s.links[arg.RouteID] = links
 	return nil
@@ -602,7 +623,7 @@ func getRowOf(r dbgen.ListRoutesRow, place int64) dbgen.GetRouteRow {
 		StormSince: r.StormSince, StormAlertGroupCount: r.StormAlertGroupCount, OwningTeamID: r.OwningTeamID,
 		OwningTeamPublicID: r.OwningTeamPublicID, OwningTeamName: r.OwningTeamName, OwningTeamSlug: r.OwningTeamSlug,
 		OwningTeamDeleted: r.OwningTeamDeleted, MessageLabels: r.MessageLabels, SeverityLabel: r.SeverityLabel,
-		TeamLabel: r.TeamLabel}
+		TeamLabel: r.TeamLabel, DeliverToTeams: r.DeliverToTeams, RunTeamChains: r.RunTeamChains}
 }
 
 func newService(t *testing.T) (*Service, *fakeStore, *clock.Manual) {
@@ -1293,7 +1314,8 @@ func withDestinations(t *testing.T) (*Service, *fakeStore, *clock.Manual, *[]mem
 // TestRouteDestinations is C-08.FR-1 and C-11.FR-14: createRoute and updateRoute write destination_ids in the Route's
 // transaction — added, kept with their added_at, or removed — and run delivery's membership hook with the changes; an
 // edit that changes only destination_ids is saved with a new version and records route.updated with /destination_ids
-// in its diff; an id that names no Destination, a deleted one or a malformed one is a 422 unknown_id at its pointer.
+// and /destination_entries in its diff; an id that names no Destination, a deleted one or a malformed one is a 422
+// unknown_id at its pointer. An empty list removes every Destination.
 func TestRouteDestinations(t *testing.T) {
 	svc, store, c, calls := withDestinations(t)
 	in := input("r")
@@ -1324,7 +1346,8 @@ func TestRouteDestinations(t *testing.T) {
 	diff = nil
 	_ = json.Unmarshal(e.Diff, &diff)
 	if got.Version != created.Version+1 || !slices.Equal(got.DestinationIDs, []string{destA}) ||
-		e.Action != ActionUpdated || len(diff) != 1 || diff[0].Pointer != "/destination_ids" ||
+		e.Action != ActionUpdated || len(diff) != 2 || diff[0].Pointer != "/destination_ids" ||
+		diff[1].Pointer != "/destination_entries" ||
 		store.hints[len(store.hints)-1].ID != created.PublicID {
 		t.Errorf("updated %+v, audit %s %+v", got, e.Action, diff)
 	}
@@ -1365,7 +1388,7 @@ func TestRouteDestinations(t *testing.T) {
 	}
 
 	// A failing hook rolls the change back; so does a failing write.
-	in.DestinationIDs = nil
+	in.DestinationIDs = []string{}
 	store.fail["membership"] = errBoom
 	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, in); !errors.Is(err, errBoom) ||
 		len(store.links[created.ID]) != 2 {
@@ -1931,5 +1954,110 @@ func TestRenameRerenders(t *testing.T) {
 	if _, err := svc.Update(t.Context(), by, r.PublicID, nil, input("Infrastructure")); err != nil ||
 		len(store.updates) != 1 || store.updates[0].Kind != KindMessageLabels || store.updates[0].RouteID.Int64 != r.ID {
 		t.Errorf("renamed: %v, rows %+v", err, store.updates)
+	}
+}
+
+// TestRouteDestinationEntries is C-26.FR-1, FR-2 and C-08.FR-1 revised: a Route takes destination_entries with their
+// Severity conditions, any by default; destination_ids alone keeps the stored condition of each Destination it keeps
+// and gives a new one any; both together take the entries; neither keeps the stored entries. A changed condition is
+// written without the membership hook, a Destination named twice in the entries is a duplicate and an unknown condition
+// is refused. deliver_to_teams is off and run_team_chains on by default, an update that omits them keeps them, and every
+// change is in the Audit log diff.
+func TestRouteDestinationEntries(t *testing.T) {
+	svc, store, _, calls := withDestinations(t)
+	ctx := t.Context()
+	diffOf := func() map[string]audit.Change {
+		var diff []audit.Change
+		_ = json.Unmarshal(store.audit[len(store.audit)-1].Diff, &diff)
+		out := map[string]audit.Change{}
+		for _, ch := range diff {
+			out[ch.Pointer] = ch
+		}
+		return out
+	}
+	in := input("teams")
+	in.DestinationEntries = &[]DestinationEntry{{DestinationID: destA, Condition: ConditionCritical},
+		{DestinationID: destB}}
+	created, err := svc.Create(ctx, by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DestinationEntry{{DestinationID: destA, Condition: ConditionCritical},
+		{DestinationID: destB, Condition: ConditionAny}}
+	if !slices.Equal(created.DestinationEntries, want) || !slices.Equal(created.DestinationIDs, []string{destA, destB}) ||
+		created.DeliverToTeams || !created.RunTeamChains || len(*calls) != 1 {
+		t.Fatalf("created %+v %v, hook %+v", created.DestinationEntries, created.DestinationIDs, *calls)
+	}
+	if d := diffOf(); d["/destination_entries"].After == nil || d["/run_team_chains"].After != true {
+		t.Errorf("creation diff %+v", d)
+	}
+
+	// destination_ids alone keeps the condition of A and gives the new one any.
+	upd := input("teams")
+	upd.DestinationIDs = []string{destA}
+	got, err := svc.Update(ctx, by, created.PublicID, nil, upd)
+	if err != nil || !slices.Equal(got.DestinationEntries, want[:1]) {
+		t.Fatalf("destination_ids alone %+v, %v", got.DestinationEntries, err)
+	}
+	upd.DestinationIDs = []string{destB, destA}
+	if got, err = svc.Update(ctx, by, created.PublicID, nil, upd); err != nil || !slices.Equal(got.DestinationEntries, want) {
+		t.Fatalf("destination_ids adding B %+v, %v", got.DestinationEntries, err)
+	}
+
+	// Both: the entries win; a changed condition is written without the hook, and the options change.
+	hooks := len(*calls)
+	upd.DestinationEntries = &[]DestinationEntry{{DestinationID: destA, Condition: ConditionBelowCritical},
+		{DestinationID: destB, Condition: ConditionCritical}}
+	upd.DestinationIDs = []string{destA}
+	upd.DeliverToTeams, upd.RunTeamChains = new(true), new(false)
+	if got, err = svc.Update(ctx, by, created.PublicID, nil, upd); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got.DestinationEntries, *upd.DestinationEntries) || !got.DeliverToTeams || got.RunTeamChains ||
+		len(*calls) != hooks || store.calls["SetRouteDestinationConditions"] != 1 {
+		t.Errorf("both %+v %v %v, hooks %d", got.DestinationEntries, got.DeliverToTeams, got.RunTeamChains,
+			len(*calls)-hooks)
+	}
+	d := diffOf()
+	if _, ok := d["/destination_ids"]; ok {
+		t.Errorf("a change of conditions only changed the ids: %+v", d)
+	}
+	for _, p := range []string{"/destination_entries", "/deliver_to_teams", "/run_team_chains"} {
+		if _, ok := d[p]; !ok {
+			t.Errorf("no %s in the diff %+v", p, d)
+		}
+	}
+
+	// Neither: the entries and the options are kept, and nothing changes.
+	keep := input("teams")
+	version := got.Version
+	if got, err = svc.Update(ctx, by, created.PublicID, nil, keep); err != nil || got.Version != version ||
+		!slices.Equal(got.DestinationEntries, *upd.DestinationEntries) || !got.DeliverToTeams || got.RunTeamChains {
+		t.Errorf("neither %+v, %v", got, err)
+	}
+
+	for name, c := range map[string]struct {
+		entries []DestinationEntry
+		pointer string
+		code    string
+	}{
+		"twice":     {[]DestinationEntry{{DestinationID: destA}, {DestinationID: strings.ToLower(destA)}}, "/destination_entries/1/destination_id", CodeDuplicate},
+		"unknown":   {[]DestinationEntry{{DestinationID: destA}, {DestinationID: destGone}}, "/destination_entries/1/destination_id", CodeUnknownID},
+		"malformed": {[]DestinationEntry{{DestinationID: "nope"}}, "/destination_entries/0/destination_id", CodeUnknownID},
+		"condition": {[]DestinationEntry{{DestinationID: destA, Condition: "warning"}}, "/destination_entries/0/severity_condition", CodeInvalidFormat},
+	} {
+		bad := input("teams")
+		bad.DestinationEntries = &c.entries
+		if f := fieldError(t, func() error {
+			_, err := svc.Update(ctx, by, created.PublicID, nil, bad)
+			return err
+		}()); f.Pointer != c.pointer || f.Code != c.code {
+			t.Errorf("%s: %+v", name, f)
+		}
+	}
+	store.fail["SetRouteDestinationConditions"] = errBoom
+	upd.DestinationEntries = &[]DestinationEntry{{DestinationID: destA}, {DestinationID: destB}}
+	if _, err := svc.Update(ctx, by, created.PublicID, nil, upd); !errors.Is(err, errBoom) {
+		t.Errorf("a failing write of the conditions: %v", err)
 	}
 }

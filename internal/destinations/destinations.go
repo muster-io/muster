@@ -121,9 +121,11 @@ type Destination struct {
 	LimiterPerSeconds   int64
 	Health              Health
 	Routes              []RouteRef
-	TemplateError       *TemplateError
-	CreatedAt           time.Time
-	Version             int64
+	// Teams are the Teams that name the Destination as a Destination of the Team (C-26.FR-1), by name.
+	Teams         []TeamRef
+	TemplateError *TemplateError
+	CreatedAt     time.Time
+	Version       int64
 	// OwningTeam is the Team that owns the Destination (C-25.FR-2), nil when none does.
 	OwningTeam *TeamRef
 }
@@ -162,6 +164,8 @@ type Store interface {
 	GetDestination(ctx context.Context, arg dbgen.GetDestinationParams) (dbgen.GetDestinationRow, error)
 	ListDestinationRoutes(ctx context.Context, arg dbgen.ListDestinationRoutesParams) (
 		[]dbgen.ListDestinationRoutesRow, error)
+	ListDestinationTeams(ctx context.Context, arg dbgen.ListDestinationTeamsParams) ([]dbgen.ListDestinationTeamsRow,
+		error)
 	ListRouteDestinationRefs(ctx context.Context, arg dbgen.ListRouteDestinationRefsParams) (
 		[]dbgen.ListRouteDestinationRefsRow, error)
 	ListDestinationInfo(ctx context.Context, orgID int64) ([]dbgen.ListDestinationInfoRow, error)
@@ -248,7 +252,7 @@ func (s *Service) Get(ctx context.Context, publicID string) (Destination, error)
 	return list[0], nil
 }
 
-// withRoutes sets the Routes of each Destination.
+// withRoutes sets the Routes of each Destination and the Teams that name it.
 func (s *Service) withRoutes(ctx context.Context, list []Destination) error {
 	if len(list) == 0 {
 		return nil
@@ -270,6 +274,22 @@ func (s *Service) withRoutes(ctx context.Context, list []Destination) error {
 		list[i].Routes = by[list[i].ID]
 		if list[i].Routes == nil {
 			list[i].Routes = []RouteRef{}
+		}
+	}
+	teams, err := s.store.ListDestinationTeams(ctx, dbgen.ListDestinationTeamsParams{OrgID: s.orgID,
+		DestinationIds: ids})
+	if err != nil {
+		return fmt.Errorf("list the teams of the destinations: %w", err)
+	}
+	byTeam := map[int64][]TeamRef{}
+	for _, t := range teams {
+		byTeam[t.DestinationID] = append(byTeam[t.DestinationID], TeamRef{PublicID: t.PublicID, Name: t.Name,
+			Slug: t.Slug})
+	}
+	for i := range list {
+		list[i].Teams = byTeam[list[i].ID]
+		if list[i].Teams == nil {
+			list[i].Teams = []TeamRef{}
 		}
 	}
 	return nil

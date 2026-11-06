@@ -29,6 +29,7 @@ var (
 type fakeStore struct {
 	rows   []dbgen.GetDestinationRow
 	routes []dbgen.ListDestinationRoutesRow
+	teams  []dbgen.ListDestinationTeamsRow
 	refs   []dbgen.ListRouteDestinationRefsRow
 	info   []dbgen.ListDestinationInfoRow
 	lists  []dbgen.ListDestinationsParams
@@ -73,6 +74,17 @@ func (f *fakeStore) ListDestinationRoutes(_ context.Context, arg dbgen.ListDesti
 	return out, f.fail["ListDestinationRoutes"]
 }
 
+func (f *fakeStore) ListDestinationTeams(_ context.Context, arg dbgen.ListDestinationTeamsParams) (
+	[]dbgen.ListDestinationTeamsRow, error) {
+	var out []dbgen.ListDestinationTeamsRow
+	for _, r := range f.teams {
+		if slices.Contains(arg.DestinationIds, r.DestinationID) {
+			out = append(out, r)
+		}
+	}
+	return out, f.fail["ListDestinationTeams"]
+}
+
 func (f *fakeStore) ListRouteDestinationRefs(_ context.Context, arg dbgen.ListRouteDestinationRefsParams) (
 	[]dbgen.ListRouteDestinationRefsRow, error) {
 	var out []dbgen.ListRouteDestinationRefsRow
@@ -109,6 +121,8 @@ func newStore() *fakeStore {
 			SigningSecretUpdatedAt: since, Mentions: []byte(`{}`), LimiterLimit: 60, LimiterPerSeconds: 60,
 			Health: "healthy", TemplateErrorSince: since, TemplateError: txt("no value"), CreatedAt: t0, Version: 4},
 	}, routes: []dbgen.ListDestinationRoutesRow{{DestinationID: 1, PublicID: "RTAAAAAAAAAAA1", Name: "payments"}},
+		teams: []dbgen.ListDestinationTeamsRow{{DestinationID: 1, PublicID: "TMAAAAAAAAAAA1", Name: "Payments",
+			Slug: "payments"}},
 		refs: []dbgen.ListRouteDestinationRefsRow{{RouteID: 7, PublicID: "DSAAAAAAAAAAA2", Name: "alerts",
 			Type: "telegram", Health: "broken", BrokenSince: since, BrokenReason: txt("chat not found")}}}
 }
@@ -198,6 +212,10 @@ func TestList(t *testing.T) {
 		mm.Routes[0].Name != "payments" || len(tg.Routes) != 0 || tg.Routes == nil || mm.TelegramChannelChatID != nil {
 		t.Errorf("mattermost %+v telegram routes %v", mm, tg.Routes)
 	}
+	// The Teams that name a Destination as a Destination of the Team (C-26.FR-1).
+	if len(mm.Teams) != 1 || mm.Teams[0].Slug != "payments" || tg.Teams == nil || len(tg.Teams) != 0 {
+		t.Errorf("mattermost teams %+v telegram teams %v", mm.Teams, tg.Teams)
+	}
 	if tg.Health.State != "broken" || tg.Health.Since == nil || *tg.Health.Reason != "chat not found" ||
 		*tg.TelegramDiscussionGroupID != "-100200" || *tg.TelegramChannelChatID != "-100100" {
 		t.Errorf("telegram %+v", tg)
@@ -225,6 +243,10 @@ func TestList(t *testing.T) {
 	if page, err := s.List(t.Context(), ListFilter{Route: &bad}); err != nil || len(page.Destinations) != 0 ||
 		page.Destinations == nil || len(f.lists) != 3 {
 		t.Errorf("an unknown route = %+v, %v", page, err)
+	}
+	f.fail["ListDestinationTeams"] = errBoom
+	if _, err := s.List(t.Context(), ListFilter{}); !errors.Is(err, errBoom) {
+		t.Errorf("teams failed = %v", err)
 	}
 	f.fail["ListDestinationRoutes"] = errBoom
 	if _, err := s.List(t.Context(), ListFilter{}); !errors.Is(err, errBoom) {

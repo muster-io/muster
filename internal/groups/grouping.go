@@ -198,8 +198,9 @@ type resolution struct {
 }
 
 // engine applies the changes of one transaction to the Alert Groups. It takes its locks in one order — the Routes
-// FOR SHARE, the counter row when Alerts are grouped, then the Alert Groups by id — so that two transactions never
-// wait for each other; a concurrent change found after the lock costs another lookup.
+// FOR SHARE, the counter row when Alerts are grouped, the Alert Groups by id, then the active Storms of the Routes of
+// the Alert Groups it changes or creates, by Route id — so that two transactions never wait for each other; a
+// concurrent change found after the lock costs another lookup.
 type engine struct {
 	s   *Service
 	q   Queries
@@ -680,6 +681,9 @@ func (e *engine) apply(ctx context.Context) error {
 		targets = append(targets, id)
 	}
 	slices.Sort(targets)
+	if err := e.lockStorms(ctx, targets); err != nil {
+		return err
+	}
 	if err := e.loadMembers(ctx, targets); err != nil {
 		return err
 	}
@@ -703,6 +707,42 @@ func (e *engine) apply(ctx context.Context) error {
 			if err := e.create(ctx, s); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// lockStorms locks the active Storm of every Route whose Alert Groups the transaction changes or creates, in Route id
+// order, after the Routes and the Alert Groups and before the first dispatch (delivery's worker.go): FOR NO KEY UPDATE
+// where it creates an Alert Group, whose creation updates the Storm in Enqueue (JoinStorm), FOR SHARE elsewhere, which
+// Enqueue's own FOR SHARE then holds already. Taken lazily, per Alert Group in id order, two Storms could be taken in
+// opposite orders by two Snapshots, or shared first and updated later while another transaction that shares the Storm
+// waits for a Storm summary an earlier rendering locked. A Route without an active Storm has no row to lock: no other
+// transaction can share the Storm this one may start, as it is not committed, and only a creation starts one, under
+// the counter row this one holds.
+func (e *engine) lockStorms(ctx context.Context, targets []int64) error {
+	creates := map[int64]bool{}
+	add := func(route int64, create bool) { creates[route] = creates[route] || create }
+	for _, id := range targets {
+		if g := e.groups[id]; g != nil {
+			add(g.RouteID, false)
+		}
+	}
+	if e.source != nil {
+		add(e.source.RouteID, false)
+	}
+	for _, s := range e.slots {
+		add(s.route.ID, s.target == 0)
+	}
+	for _, id := range slices.Sorted(maps.Keys(creates)) {
+		if creates[id] {
+			if _, err := e.q.LockRouteStorm(ctx, dbgen.LockRouteStormParams{OrgID: e.s.orgID, RouteID: id}); err != nil {
+				return fmt.Errorf("lock the storm of route %d: %w", id, err)
+			}
+			continue
+		}
+		if _, err := e.q.ShareRouteStorm(ctx, dbgen.ShareRouteStormParams{OrgID: e.s.orgID, RouteID: id}); err != nil {
+			return fmt.Errorf("share the storm of route %d: %w", id, err)
 		}
 	}
 	return nil

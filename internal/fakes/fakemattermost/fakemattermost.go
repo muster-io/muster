@@ -58,7 +58,19 @@ const (
 	ChannelAlertsProd = "ch-alerts-prod"
 	// ChannelNoBot is a channel the bot is not a member of.
 	ChannelNoBot = "ch-nobot"
+
+	// The channels of the checks of routing to Teams by Severity (C-26): operations' and two Teams', for critical
+	// Alert Groups and below critical; the bot is a member of each.
+	ChannelInfraCritical    = "ch-infra-critical"
+	ChannelInfraNotice      = "ch-infra-notice"
+	ChannelPaymentsCritical = "ch-payments-critical"
+	ChannelPaymentsNotice   = "ch-payments-notice"
+	ChannelSearchNotice     = "ch-search-notice"
 )
+
+// teamChannels are the channels of the checks of routing to Teams, each named as its id without ch-.
+var teamChannels = []string{ChannelInfraCritical, ChannelInfraNotice, ChannelPaymentsCritical, ChannelPaymentsNotice,
+	ChannelSearchNotice}
 
 const (
 	// Version is the Mattermost version the facts were verified on.
@@ -205,6 +217,10 @@ func fixtures() state {
 		c.TeamID, c.Type = TeamID, "O"
 		channels[c.ID] = &c
 	}
+	for _, id := range teamChannels {
+		name := strings.TrimPrefix(id, "ch-")
+		channels[id] = &Channel{ID: id, Name: name, DisplayName: name, TeamID: TeamID, Type: "O"}
+	}
 	everyone := func(withBot bool) map[string]bool {
 		m := map[string]bool{AliceUserID: true, BobUserID: true}
 		if withBot {
@@ -212,16 +228,20 @@ func fixtures() state {
 		}
 		return m
 	}
+	members := map[string]map[string]bool{
+		ChannelAlerts:     withSecondBot(everyone(true)),
+		ChannelAlertsProd: everyone(true),
+		ChannelNoBot:      everyone(false),
+	}
+	for _, id := range teamChannels {
+		members[id] = everyone(true)
+	}
 	return state{
 		config:   Config{RevokedTokens: []string{}},
 		channels: channels,
-		members: map[string]map[string]bool{
-			ChannelAlerts:     withSecondBot(everyone(true)),
-			ChannelAlertsProd: everyone(true),
-			ChannelNoBot:      everyone(false),
-		},
-		posts:   map[string]*post{},
-		buckets: map[string]*bucket{},
+		members:  members,
+		posts:    map[string]*post{},
+		buckets:  map[string]*bucket{},
 	}
 }
 

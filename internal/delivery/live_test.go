@@ -803,6 +803,10 @@ func TestLive(t *testing.T) {
 				if row.EventMentions {
 					ev.Mentions = []groups.Mention{groups.MentionOwner}
 				}
+				if row.Event == groups.EventDestinationJoined {
+					// destination_joined publishes in the Destination it names.
+					ev.Destination = &groups.JoinedDestination{ID: l.dests[0], PublicID: "DSAAAAAAAAAAA1"}
+				}
 				render := func(g *groups.Group, evs ...groups.Recorded) {
 					err := pgxTx(t, l, func(tx groups.DBTX) error {
 						return l.svc.Enqueue(t.Context(), tx, groups.Rendering{Group: g, Actor: actor, Events: evs})
@@ -938,6 +942,7 @@ func TestLive(t *testing.T) {
 			// The review of S-035.
 			{"resolve_before_first_publication", l.resolveBeforeFirstPublication},
 			{"in_flight_races", l.inFlightRaces},
+			{"team_destination_race", l.teamDestinationRace},
 			{"late_note_reopened", l.lateNoteReopened},
 			{"storm_membership", l.stormMembership},
 			{"storm_summary_after_end", l.stormSummaryAfterEnd},
@@ -2458,6 +2463,36 @@ func (l *live) inFlightRaces(t *testing.T) {
 		t.Fatalf("edit in flight while retired: %+v %s", r, methods(l.rec.Calls()))
 	}
 	t.Log("edit in flight while its destination was deleted: stays retired, nothing more")
+}
+
+// teamDestinationRace is C-11.FR-14 with a Team Destination (C-26.FR-2): a Publication in flight to a Destination that
+// only a Team of the Alert Group reaches, on a Route with deliver_to_teams, whose delivery is withheld meanwhile keeps
+// its message current instead of giving it the final edit, as RecordDelivered reads the Teams of the Alert Group.
+func (l *live) teamDestinationRace(t *testing.T) {
+	l.fresh(t, 1000, 1)
+	l.attach(t)
+	ds := l.newDestNamed(t, "DSAAAAAAAAAAR9")
+	l.fire(t, "tdr", "TeamRace/a")
+	gid := l.group(t, "TeamRace")
+	l.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+		VALUES ($1, 'TMAAAAAAAAAAA8', 'race', 'race', $2, $2) ON CONFLICT DO NOTHING`, l.orgID, l.business.Now())
+	l.exec(t, `INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+		SELECT org_id, id, $1, 'any', $2 FROM teams WHERE public_id = 'TMAAAAAAAAAAA8'`, ds, l.business.Now())
+	l.exec(t, `INSERT INTO alert_group_teams (org_id, alert_group_id, team_id, rule, joined_at)
+		SELECT g.org_id, g.id, t.id, 'label', $2 FROM alert_groups g, teams t
+		WHERE g.public_id = $1 AND t.public_id = 'TMAAAAAAAAAAA8'`, gid, l.business.Now())
+	l.exec(t, `UPDATE routes SET deliver_to_teams = true WHERE id = $1`, l.routeID)
+	defer l.exec(t, `UPDATE routes SET deliver_to_teams = false WHERE id = $1`, l.routeID)
+	l.fire(t, "tdr", "TeamRace/a", "TeamRace/b")
+	l.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Then: func() {
+			l.exec(t, `UPDATE deliveries SET state = 'withheld' WHERE destination_id = $1`, ds)
+		}})
+	l.round(t, l.a)
+	if r := l.row(t, gid, ds); r.state != "delivered" || r.retire || !r.message {
+		t.Fatalf("the raced publication in the team destination: %+v %s", r, methods(l.rec.Calls()))
+	}
+	t.Log("publication in flight to a team destination while withheld: message kept current, no final edit")
 }
 
 // lateNoteReopened is C-11.FR-11 when the Alert Group opens again before its late Publication: the note is gone and

@@ -32,8 +32,17 @@ type Body struct {
 	Actor      Actor           `json:"actor"`
 	AlertGroup AlertGroup      `json:"alert_group"`
 	Alerts     []Alert         `json:"alerts"`
+	// Destination is set only on destination_joined: the Destination the Alert Group joined (C-15.FR-2, C-26.FR-5).
+	Destination *DestinationRef `json:"destination,omitempty"`
 	// Test is set only on the test event of a Destination test (C-16.FR-1), which belongs to no Alert Group's order.
 	Test bool `json:"test,omitempty"`
+}
+
+// DestinationRef names the Destination of a destination_joined (WebhookDestinationRef).
+type DestinationRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // Actor is who made the change of an event (WebhookActor): a User or a Service account with the token and the
@@ -176,6 +185,9 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 			AlertGroup: ag, Alerts: alerts}
 		if !e.Notify {
 			b.Mentions = []MentionTarget{}
+		}
+		if d := e.Event.Destination; d != nil && e.Event.Event == groups.EventDestinationJoined {
+			b.Destination = &DestinationRef{ID: d.PublicID, Name: d.Name, Type: d.Type}
 		}
 		return json.Marshal(b)
 	}, nil

@@ -45,4 +45,4 @@ export type Route = RouteInput & ({
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}), 'minimum_severity' | 'urgent' | 'own_message_labels' | 'message_labels'>>;
+}), 'minimum_severity' | 'urgent' | 'destination_entries' | 'destination_ids' | 'deliver_to_teams' | 'run_team_chains' | 'own_message_labels' | 'message_labels'>>;

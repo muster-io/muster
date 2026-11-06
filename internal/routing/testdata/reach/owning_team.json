@@ -1,0 +1,28 @@
+[
+  {
+    "name": "the owning Team of a Route without deliver_to_teams adds nothing",
+    "level": "warning",
+    "deliver_to_teams": false,
+    "owning_team": 1,
+    "route": [{"destination_id": 11, "severity_condition": "any"}],
+    "team_entries": {"1": [{"destination_id": 21, "severity_condition": "any"}]},
+    "teams": [1],
+    "want": [{"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "any"}]}]
+  },
+  {
+    "name": "the owning Team adds nothing when it is not a Team of the Alert Group",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "owning_team": 1,
+    "route": [{"destination_id": 11, "severity_condition": "any"}],
+    "team_entries": {
+      "1": [{"destination_id": 21, "severity_condition": "any"}],
+      "2": [{"destination_id": 31, "severity_condition": "any"}]
+    },
+    "teams": [2],
+    "want": [
+      {"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "any"}]},
+      {"destination_id": 31, "entries": [{"kind": "team", "team_id": 2, "severity_condition": "any"}]}
+    ]
+  }
+]

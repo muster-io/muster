@@ -195,27 +195,47 @@ func TestLockOrder(t *testing.T) {
 	h.db.calls = map[string]int{}
 	h.db.locked = nil
 	var order []string
-	for _, q := range []string{"LockRoutes", "LockCounter", "LockGroups"} {
-		h.db.before[q] = func() { order = append(order, q) }
+	h.db.storms = nil
+	for _, q := range []string{"LockRoutes", "LockCounter", "LockGroups", "LockRouteStorm", "SaveGroup"} {
+		h.db.before[q] = func() {
+			if !slices.Contains(order, q) {
+				order = append(order, q)
+			}
+		}
 	}
 	x := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "c", "n": "2"})
 	y := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a", "n": "2"})
 	z := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "new"})
 	h.changes(t, ingest.ChangeFired, x, y, z)
-	if !slices.Equal(order, []string{"LockRoutes", "LockCounter", "LockGroups"}) {
+	// The Storm of the Route the Snapshot creates an Alert Group in comes after the Alert Groups and before the first
+	// change of one, once, for update.
+	if !slices.Equal(order, []string{"LockRoutes", "LockCounter", "LockGroups", "LockRouteStorm", "SaveGroup"}) {
 		t.Errorf("lock order %v", order)
+	}
+	if !slices.Equal(h.db.storms, []stormLock{{route: 2, update: true}}) {
+		t.Errorf("storm locks %v", h.db.storms)
 	}
 	last := h.db.locked[len(h.db.locked)-1]
 	if !slices.IsSorted(last) || len(last) != 2 {
 		t.Errorf("locked %v", last)
 	}
-	// Joining an open Alert Group takes no counter row, from a savepoint; a Snapshot that only resolves takes neither.
-	h.db.calls = map[string]int{}
+	// Joining an open Alert Group takes no counter row, from a savepoint, and shares its Route's Storm up front; a
+	// Snapshot that only resolves takes neither the counter row nor a Route.
+	h.db.calls, h.db.storms = map[string]int{}, nil
 	w := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a", "n": "3"})
 	h.changes(t, ingest.ChangeFired, w)
 	if h.db.calls["LockCounter"] != 0 || h.db.calls["SavepointGrouping"] != 1 || h.db.calls["NextNumber"] != 0 ||
-		h.db.calls["RollbackGrouping"] != 0 {
-		t.Errorf("calls %v", h.db.calls)
+		h.db.calls["RollbackGrouping"] != 0 || !slices.Equal(h.db.storms, []stormLock{{route: 2}}) {
+		t.Errorf("calls %v, storm locks %v", h.db.calls, h.db.storms)
+	}
+	// Storms are taken in Route id order, whatever the order of the Alert Groups: shared where the Snapshot only
+	// changes Alert Groups, for update where it creates one.
+	h.db.storms = nil
+	u := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a", "n": "4"})
+	v := h.alert(1, "warning", map[string]string{"alertname": "B", "cluster": "new"})
+	h.changes(t, ingest.ChangeFired, u, v)
+	if !slices.Equal(h.db.storms, []stormLock{{route: 1, update: true}, {route: 2}}) {
+		t.Errorf("storm locks %v", h.db.storms)
 	}
 	h.db.calls = map[string]int{}
 	h.resolve(t, w)
@@ -427,11 +447,24 @@ func TestReplacement(t *testing.T) {
 	}
 }
 
+// TestShareStormFailure: a failed share of a Storm before a join fails the Snapshot.
+func TestShareStormFailure(t *testing.T) {
+	h := newHarness(t)
+	h.changes(t, ingest.ChangeFired, h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a"}))
+	h.db.fail["ShareRouteStorm"] = errBoom
+	w := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "a", "n": "2"})
+	if _, err := h.svc.AlertChanges(t.Context(), nil, []ingest.AlertChange{{Kind: ingest.ChangeFired,
+		AlertID: w}}); !errors.Is(err, errBoom) {
+		t.Errorf("ShareRouteStorm failing = %v", err)
+	}
+}
+
 // TestFailures: every query error reaches the caller, so that the Snapshot rolls back.
 func TestFailures(t *testing.T) {
 	queries := []string{"ListChangedAlerts", "ListFiringMemberships", "LockRoutes", "LockDefaultRoute", "Restamp",
-		"FindOpenGroup", "FindReopenableGroup", "EnsureCounter", "LockCounter", "LockGroups", "NextNumber", "InsertGroup",
-		"InsertMemberships", "InsertTimelineEntry", "SaveGroup", "GetRoutePolicy", "GetGroupingSettings",
+		"FindOpenGroup", "FindReopenableGroup", "EnsureCounter", "LockCounter", "LockGroups", "LockRouteStorm",
+		"NextNumber", "InsertGroup", "InsertMemberships", "InsertTimelineEntry", "SaveGroup", "GetRoutePolicy",
+		"GetGroupingSettings",
 		"ListGroupFiringAlerts", "UpdateMemberships", "ResolveMemberships", "UpsertTimer", "NotifyTimers",
 		"DeleteTimer", "IsActiveUser"}
 	for _, query := range queries {

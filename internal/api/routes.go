@@ -321,15 +321,22 @@ func routeInputFor(in routing.Input) gen.RouteInput {
 		minimum = gen.MinimumSeverity(*in.MinimumSeverity)
 	}
 	urgent := minimum == gen.MinimumSeverityCritical
+	ids := in.DestinationIDs
+	if ids == nil {
+		ids = []string{}
+	}
+	entries := make([]gen.DestinationEntry, 0, len(ids))
+	for _, id := range ids {
+		entries = append(entries, gen.DestinationEntry{DestinationId: id,
+			SeverityCondition: new(gen.SeverityConditionAny)})
+	}
+	deliver, chains := in.DeliverToTeams != nil && *in.DeliverToTeams, in.RunTeamChains == nil || *in.RunTeamChains
 	out := gen.RouteInput{Name: in.Name, Description: &description, MinimumSeverity: &minimum, Urgent: &urgent,
-		GroupKey:       in.GroupKey,
-		DestinationIds: in.DestinationIDs, Matchers: make([]gen.Matcher, 0, len(in.Matchers)),
+		GroupKey: in.GroupKey, DestinationIds: &ids, DestinationEntries: &entries, DeliverToTeams: &deliver,
+		RunTeamChains: &chains, Matchers: make([]gen.Matcher, 0, len(in.Matchers)),
 		Policy: routePolicyOf(in.Policy), OwnMessageLabels: in.OwnMessageLabels}
 	if in.MessageLabels != nil {
 		out.MessageLabels = &in.MessageLabels
-	}
-	if out.DestinationIds == nil {
-		out.DestinationIds = []gen.PublicId{}
 	}
 	for _, m := range in.Matchers {
 		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})
@@ -358,6 +365,8 @@ func routeOf(rt routing.Route) gen.Route {
 		MinimumSeverity: gen.MinimumSeverity(rt.MinimumSeverity), Urgent: rt.Urgent,
 		GroupKey: key, Matchers: make([]gen.Matcher, 0, len(rt.Matchers)),
 		DestinationIds: []gen.PublicId{}, Destinations: []gen.DestinationRef{}, Policy: routePolicyOf(rt.Policy),
+		DestinationEntries: make([]gen.DestinationEntry, 0, len(rt.DestinationEntries)),
+		DeliverToTeams:     rt.DeliverToTeams, RunTeamChains: rt.RunTeamChains,
 		StormActive: rt.Storm != nil, OpenAlertGroupCount: int(rt.OpenAlertGroupCount), CreatedAt: rt.CreatedAt.UTC(),
 		Etag: &tag, OwnMessageLabels: rt.OwnMessageLabels, MessageLabels: rt.MessageLabels,
 	}
@@ -380,6 +389,10 @@ func routeOf(rt routing.Route) gen.Route {
 	}
 	for _, m := range rt.Matchers {
 		out.Matchers = append(out.Matchers, gen.Matcher{Label: m.Label, Op: gen.MatcherOp(m.Op), Value: m.Value})
+	}
+	for _, e := range rt.DestinationEntries {
+		out.DestinationEntries = append(out.DestinationEntries, gen.DestinationEntry{DestinationId: e.DestinationID,
+			SeverityCondition: new(gen.SeverityCondition(e.Condition))})
 	}
 	return out
 }
@@ -409,8 +422,8 @@ func routePolicyOf(p routing.Policy) gen.RoutePolicy {
 func routeInputOf(in gen.RouteInput) routing.Input {
 	t := in.Policy.Templates
 	out := routing.Input{Name: in.Name, Description: in.Description, Urgent: in.Urgent != nil && *in.Urgent,
-		GroupKey:       in.GroupKey,
-		DestinationIDs: in.DestinationIds, Policy: routingPolicyOf(in.Policy), OwningTeamID: owningTeamOf(in.OwningTeamId),
+		GroupKey: in.GroupKey, DeliverToTeams: in.DeliverToTeams, RunTeamChains: in.RunTeamChains,
+		Policy: routingPolicyOf(in.Policy), OwningTeamID: owningTeamOf(in.OwningTeamId),
 		Keep: routing.KeepTemplates{RootMessage: !t.RootMessage.IsSpecified(), Line: !t.Line.IsSpecified(),
 			AckTimeoutNotice: !t.AckTimeoutNotice.IsSpecified()}, OwnMessageLabels: in.OwnMessageLabels}
 	if in.MessageLabels != nil {
@@ -418,6 +431,19 @@ func routeInputOf(in gen.RouteInput) routing.Input {
 	}
 	if in.MinimumSeverity != nil {
 		out.MinimumSeverity = new(string(*in.MinimumSeverity))
+	}
+	if in.DestinationIds != nil {
+		out.DestinationIDs = append([]string{}, *in.DestinationIds...)
+	}
+	if in.DestinationEntries != nil {
+		entries := make([]routing.DestinationEntry, len(*in.DestinationEntries))
+		for i, e := range *in.DestinationEntries {
+			entries[i] = routing.DestinationEntry{DestinationID: e.DestinationId}
+			if e.SeverityCondition != nil {
+				entries[i].Condition = routing.SeverityCondition(*e.SeverityCondition)
+			}
+		}
+		out.DestinationEntries = &entries
 	}
 	for _, m := range in.Matchers {
 		out.Matchers = append(out.Matchers, routing.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value})

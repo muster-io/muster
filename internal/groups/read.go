@@ -45,6 +45,8 @@ type readQueries interface {
 	ListGroupAlertTeams(ctx context.Context, arg dbgen.ListGroupAlertTeamsParams) ([]dbgen.ListGroupAlertTeamsRow,
 		error)
 	ListTeamRefs(ctx context.Context, arg dbgen.ListTeamRefsParams) ([]dbgen.ListTeamRefsRow, error)
+	ListTimelineDestinations(ctx context.Context, arg dbgen.ListTimelineDestinationsParams) (
+		[]dbgen.ListTimelineDestinationsRow, error)
 }
 
 // The notices of the Alert Group page (AlertGroupNotice).
@@ -544,9 +546,23 @@ type TimelineEntry struct {
 	TeamRule    *string
 	TeamMatcher *string
 	TeamValue   *string
+	// Destination is the Destination of a destination_joined (C-26.FR-5).
+	Destination *TimelineDestination
 	position    TimelinePosition
-	// teamID is the id of Team, which entryTeams names.
-	teamID int64
+	// teamID is the id of Team, which entryTeams names, and destinationID the id of Destination, which
+	// entryDestinations names.
+	teamID        int64
+	destinationID int64
+}
+
+// TimelineDestination is the Destination of a Timeline entry with its type and health, deleted or not.
+type TimelineDestination struct {
+	PublicID     string
+	Name         string
+	Type         string
+	Health       string
+	BrokenSince  *time.Time
+	BrokenReason *string
 }
 
 // TimelinePage is a page of a Timeline; Next is nil on the last page.
@@ -623,6 +639,9 @@ func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilte
 	if err := s.entryTeams(ctx, out.Entries); err != nil {
 		return TimelinePage{}, err
 	}
+	if err := s.entryDestinations(ctx, out.Entries); err != nil {
+		return TimelinePage{}, err
+	}
 	return out, nil
 }
 
@@ -665,7 +684,7 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			MissedCount: int8Of(r.MissedCount), PeriodFrom: timeOf(r.PeriodFrom), PeriodTo: timeOf(r.PeriodTo),
 			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID},
 			TeamRule: textOf(r.TeamRule), TeamMatcher: textOf(r.TeamMatcher), TeamValue: textOf(r.TeamValue),
-			teamID: r.TeamID.Int64}
+			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64}
 		if r.Event.Valid {
 			e.Mentions = orEmpty(r.Mentions)
 		}
@@ -836,4 +855,34 @@ func orEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// entryDestinations names the Destinations of the destination_joined entries.
+func (s *Service) entryDestinations(ctx context.Context, entries []TimelineEntry) error {
+	var ids []int64
+	for _, e := range entries {
+		if e.destinationID != 0 {
+			ids = append(ids, e.destinationID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	rows, err := s.store.ListTimelineDestinations(ctx, dbgen.ListTimelineDestinationsParams{OrgID: s.orgID,
+		Ids: slices.Compact(ids)})
+	if err != nil {
+		return fmt.Errorf("read the destinations of the timeline: %w", err)
+	}
+	refs := make(map[int64]TimelineDestination, len(rows))
+	for _, r := range rows {
+		refs[r.ID] = TimelineDestination{PublicID: r.PublicID, Name: r.Name, Type: r.Type, Health: r.Health,
+			BrokenSince: timeOf(r.BrokenSince), BrokenReason: textOf(r.BrokenReason)}
+	}
+	for i := range entries {
+		if ref, ok := refs[entries[i].destinationID]; ok {
+			entries[i].Destination = &ref
+		}
+	}
+	return nil
 }

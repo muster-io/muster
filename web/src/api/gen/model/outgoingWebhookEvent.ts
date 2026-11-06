@@ -6,6 +6,7 @@ import type { OutgoingWebhookEventVersion } from './outgoingWebhookEventVersion'
 import type { WebhookActor } from './webhookActor';
 import type { WebhookAlert } from './webhookAlert';
 import type { WebhookAlertGroup } from './webhookAlertGroup';
+import type { WebhookDestinationRef } from './webhookDestinationRef';
 import type { WebhookEventName } from './webhookEventName';
 import type { WebhookMentionTarget } from './webhookMentionTarget';
 
@@ -28,6 +29,8 @@ export interface OutgoingWebhookEvent {
   alert_group: WebhookAlertGroup;
   /** One element per Alert, by fingerprint. */
   alerts: WebhookAlert[];
+  /** The Destination the Alert Group joined, only on `destination_joined`. */
+  destination?: WebhookDestinationRef;
   /** True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert Group's order. */
   test?: boolean;
 }

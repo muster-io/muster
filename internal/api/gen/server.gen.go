@@ -650,6 +650,24 @@ func (e ConnectionType) Valid() bool {
 	}
 }
 
+// Defines values for DeliveryEntryKind.
+const (
+	DeliveryEntryKindRoute DeliveryEntryKind = "route"
+	DeliveryEntryKindTeam  DeliveryEntryKind = "team"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryEntryKind enum.
+func (e DeliveryEntryKind) Valid() bool {
+	switch e {
+	case DeliveryEntryKindRoute:
+		return true
+	case DeliveryEntryKindTeam:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeliveryErrorClass.
 const (
 	DeliveryErrorClassBlocked       DeliveryErrorClass = "blocked"
@@ -1174,6 +1192,7 @@ const (
 	LifecycleEventAnnotationsChanged  LifecycleEvent = "annotations_changed"
 	LifecycleEventAutoUnacknowledged  LifecycleEvent = "auto_unacknowledged"
 	LifecycleEventCreated             LifecycleEvent = "created"
+	LifecycleEventDestinationJoined   LifecycleEvent = "destination_joined"
 	LifecycleEventMovedToDefaultRoute LifecycleEvent = "moved_to_default_route"
 	LifecycleEventNoteAdded           LifecycleEvent = "note_added"
 	LifecycleEventNoticesMissed       LifecycleEvent = "notices_missed"
@@ -1214,6 +1233,8 @@ func (e LifecycleEvent) Valid() bool {
 	case LifecycleEventAutoUnacknowledged:
 		return true
 	case LifecycleEventCreated:
+		return true
+	case LifecycleEventDestinationJoined:
 		return true
 	case LifecycleEventMovedToDefaultRoute:
 		return true
@@ -2570,6 +2591,27 @@ func (e SessionState) Valid() bool {
 	}
 }
 
+// Defines values for SeverityCondition.
+const (
+	SeverityConditionAny           SeverityCondition = "any"
+	SeverityConditionBelowCritical SeverityCondition = "below_critical"
+	SeverityConditionCritical      SeverityCondition = "critical"
+)
+
+// Valid indicates whether the value is a known member of the SeverityCondition enum.
+func (e SeverityCondition) Valid() bool {
+	switch e {
+	case SeverityConditionAny:
+		return true
+	case SeverityConditionBelowCritical:
+		return true
+	case SeverityConditionCritical:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SeverityLevel.
 const (
 	SeverityLevelCritical SeverityLevel = "critical"
@@ -3277,6 +3319,7 @@ func (e TimelineSystemEntryKind) Valid() bool {
 
 // Defines values for TimelineSystemEntrySystemEvent.
 const (
+	TimelineSystemEntrySystemEventDestinationJoined    TimelineSystemEntrySystemEvent = "destination_joined"
 	TimelineSystemEntrySystemEventFallbackTemplateUsed TimelineSystemEntrySystemEvent = "fallback_template_used"
 	TimelineSystemEntrySystemEventMovedToDefaultRoute  TimelineSystemEntrySystemEvent = "moved_to_default_route"
 	TimelineSystemEntrySystemEventMusterUnavailable    TimelineSystemEntrySystemEvent = "muster_unavailable"
@@ -3287,6 +3330,8 @@ const (
 // Valid indicates whether the value is a known member of the TimelineSystemEntrySystemEvent enum.
 func (e TimelineSystemEntrySystemEvent) Valid() bool {
 	switch e {
+	case TimelineSystemEntrySystemEventDestinationJoined:
+		return true
 	case TimelineSystemEntrySystemEventFallbackTemplateUsed:
 		return true
 	case TimelineSystemEntrySystemEventMovedToDefaultRoute:
@@ -3553,6 +3598,7 @@ const (
 	WebhookEventNameAnnotationsChanged  WebhookEventName = "annotations_changed"
 	WebhookEventNameAutoUnacknowledged  WebhookEventName = "auto_unacknowledged"
 	WebhookEventNameCreated             WebhookEventName = "created"
+	WebhookEventNameDestinationJoined   WebhookEventName = "destination_joined"
 	WebhookEventNameMovedToDefaultRoute WebhookEventName = "moved_to_default_route"
 	WebhookEventNameNoteAdded           WebhookEventName = "note_added"
 	WebhookEventNameNoticesMissed       WebhookEventName = "notices_missed"
@@ -3594,6 +3640,8 @@ func (e WebhookEventName) Valid() bool {
 	case WebhookEventNameAutoUnacknowledged:
 		return true
 	case WebhookEventNameCreated:
+		return true
+	case WebhookEventNameDestinationJoined:
 		return true
 	case WebhookEventNameMovedToDefaultRoute:
 		return true
@@ -4017,6 +4065,9 @@ type AlertGroupCounts struct {
 // AlertGroupDelivery defines model for AlertGroupDelivery.
 type AlertGroupDelivery struct {
 	Destination DestinationRef `json:"destination"`
+
+	// Entries The entries that reached the Destination, the Route's first; empty for a delivery made before 0.2.0 until the Alert Group's next change.
+	Entries []DeliveryEntry `json:"entries"`
 
 	// Error Provider error text of Not delivered. Secrets, the Signing secret and tokens are masked. Untrusted: render as plain text.
 	Error nullable.Nullable[string] `json:"error,omitempty"`
@@ -4481,10 +4532,13 @@ type BridgeDestination struct {
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
-	OwningTeamId  nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
-	Routes        []EntityRef                         `json:"routes"`
-	TemplateError *TemplateErrorState                 `json:"template_error,omitempty"`
-	Type          BridgeDestinationType               `json:"type"`
+	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
+	Routes       []EntityRef                         `json:"routes"`
+
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams         []TeamRef             `json:"teams"`
+	TemplateError *TemplateErrorState   `json:"template_error,omitempty"`
+	Type          BridgeDestinationType `json:"type"`
 }
 
 // BridgeDestinationType defines model for BridgeDestination.Type.
@@ -4842,6 +4896,21 @@ type ConnectionPath string
 // ConnectionType defines model for ConnectionType.
 type ConnectionType string
 
+// DeliveryEntry An entry that reached a Destination of an Alert Group (C-26.FR-3, FR-4), with the condition it had when it first did. Entries are added and never removed, so a Destination keeps the entries that once reached it after the Severity level fell or the Team's Alerts resolved.
+type DeliveryEntry struct {
+	// Kind `route`, the Alert Group's Route, or `team`, a Team of the Alert Group on a Route with `deliver_to_teams`.
+	Kind DeliveryEntryKind `json:"kind"`
+
+	// SeverityCondition The Severity condition of a Destination of a Route or a Team (C-26.FR-1), checked against the Severity level of the Alert Group, the highest level of its firing Alerts raised to the Route's Minimum severity. `any` meets every level, `critical` only critical, `below_critical` every level but critical.
+	SeverityCondition SeverityCondition `json:"severity_condition"`
+
+	// Team The Team of a `team` entry, null for `route`.
+	Team nullable.Nullable[TeamRef] `json:"team"`
+}
+
+// DeliveryEntryKind `route`, the Alert Group's Route, or `team`, a Team of the Alert Group on a Route with `deliver_to_teams`.
+type DeliveryEntryKind string
+
 // DeliveryErrorClass How a delivery attempt ended. `limited`: no limiter token was free within `delivery.interactive_budget`, so nothing was sent (a test only; the attempt did not reach the remote side).
 type DeliveryErrorClass string
 
@@ -4904,6 +4973,15 @@ type DestinationCreated struct {
 	SigningSecret nullable.Nullable[string] `json:"signing_secret"`
 }
 
+// DestinationEntry A Destination of a Route or a Team with its Severity condition.
+type DestinationEntry struct {
+	// DestinationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	DestinationId PublicId `json:"destination_id"`
+
+	// SeverityCondition Omitted, `any`.
+	SeverityCondition *SeverityCondition `json:"severity_condition,omitempty"`
+}
+
 // DestinationHealth defines model for DestinationHealth.
 type DestinationHealth struct {
 	// Reason The error, or "unavailable after repeated failures: {last error}". Untrusted where it comes from the remote side. Secrets, the Signing secret and tokens are masked.
@@ -4912,7 +4990,7 @@ type DestinationHealth struct {
 	State  HealthState                  `json:"state"`
 }
 
-// DestinationInput A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through the Route's `destination_ids`.
+// DestinationInput A Destination as written; `type` selects the variant and cannot change on update. Routes and Teams attach it through their `destination_entries`.
 type DestinationInput struct {
 	union json.RawMessage
 }
@@ -4963,9 +5041,12 @@ type DestinationReadFields struct {
 	Id PublicId `json:"id"`
 
 	// OwningTeam The Team that owns the Destination, null when none does.
-	OwningTeam    nullable.Nullable[TeamRef] `json:"owning_team"`
-	Routes        []EntityRef                `json:"routes"`
-	TemplateError *TemplateErrorState        `json:"template_error,omitempty"`
+	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
+	Routes     []EntityRef                `json:"routes"`
+
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams         []TeamRef           `json:"teams"`
+	TemplateError *TemplateErrorState `json:"template_error,omitempty"`
 }
 
 // DestinationRef defines model for DestinationRef.
@@ -5707,12 +5788,15 @@ type MattermostDestination struct {
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
-	OwningTeamId  nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
-	Routes        []EntityRef                         `json:"routes"`
-	TeamId        string                              `json:"team_id"`
-	TeamName      nullable.Nullable[string]           `json:"team_name,omitempty"`
-	TemplateError *TemplateErrorState                 `json:"template_error,omitempty"`
-	Type          MattermostDestinationType           `json:"type"`
+	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
+	Routes       []EntityRef                         `json:"routes"`
+	TeamId       string                              `json:"team_id"`
+	TeamName     nullable.Nullable[string]           `json:"team_name,omitempty"`
+
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams         []TeamRef                 `json:"teams"`
+	TemplateError *TemplateErrorState       `json:"template_error,omitempty"`
+	Type          MattermostDestinationType `json:"type"`
 }
 
 // MattermostDestinationType defines model for MattermostDestination.Type.
@@ -6430,6 +6514,9 @@ type OutgoingWebhookEvent struct {
 	// Alerts One element per Alert, by fingerprint.
 	Alerts []WebhookAlert `json:"alerts"`
 
+	// Destination The Destination the Alert Group joined, only on `destination_joined`.
+	Destination *WebhookDestinationRef `json:"destination,omitempty"`
+
 	// Event One of the lifecycle event names (see `LifecycleEvent`) or `test`, which only a Destination test sends. New names are added within `version` 1; receivers ignore names they do not know.
 	Event    WebhookEventName       `json:"event"`
 	Mentions []WebhookMentionTarget `json:"mentions"`
@@ -6974,8 +7061,17 @@ type RotationShift struct {
 
 // Route defines model for Route.
 type Route struct {
-	CreatedAt      time.Time  `json:"created_at"`
-	Description    *string    `json:"description,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeliverToTeams "Also to the Teams from the label" (`route.deliver_to_teams`, C-26.FR-2): an Alert Group of the Route also goes to the Destinations of each of its Teams whose Severity condition its Severity level meets. Omitted on a create, false; omitted on an update, kept. The owning Team of the Route adds nothing.
+	DeliverToTeams bool    `json:"deliver_to_teams"`
+	Description    *string `json:"description,omitempty"`
+
+	// DestinationEntries The Route's Destinations (C-26.FR-1), each once with its Severity condition, checked against the Severity level of each Alert Group of the Route. Replaced as a whole; an update that omits it and `destination_ids` keeps them. A Destination that is unknown or deleted is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's `destination_id`. A Destination may be named by several Routes and Teams, each with its own condition; it gets one Root message for an Alert Group whichever entries reach it.
+	DestinationEntries []DestinationEntry `json:"destination_entries"`
+
+	// DestinationIds Derived from `destination_entries` on reads. When a request has no `destination_entries`, it sets them, keeping the stored condition of each Destination it keeps and `any` for a new one; beside `destination_entries` it is ignored. Removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	DestinationIds []PublicId `json:"destination_ids"`
 
 	// Destinations The Route's Destinations with their health, for the Broken warning.
@@ -7017,6 +7113,9 @@ type Route struct {
 	// Position Zero-based position in evaluation order; the Default route is last.
 	Position int `json:"position"`
 
+	// RunTeamChains "Run the Teams' Escalation chains" (`route.run_team_chains`), read with `deliver_to_teams`: stored and returned, and acting once Escalation chains run. Omitted on a create, true; omitted on an update, kept.
+	RunTeamChains bool `json:"run_team_chains"`
+
 	// Storm Set while the Route's Storm is active (`storm_active`), for the Storm banner.
 	Storm       *RouteStorm `json:"storm,omitempty"`
 	StormActive bool        `json:"storm_active"`
@@ -7031,8 +7130,16 @@ type Route struct {
 
 // RouteInput defines model for RouteInput.
 type RouteInput struct {
-	Description    *string    `json:"description,omitempty"`
-	DestinationIds []PublicId `json:"destination_ids"`
+	// DeliverToTeams "Also to the Teams from the label" (`route.deliver_to_teams`, C-26.FR-2): an Alert Group of the Route also goes to the Destinations of each of its Teams whose Severity condition its Severity level meets. Omitted on a create, false; omitted on an update, kept. The owning Team of the Route adds nothing.
+	DeliverToTeams *bool   `json:"deliver_to_teams,omitempty"`
+	Description    *string `json:"description,omitempty"`
+
+	// DestinationEntries The Route's Destinations (C-26.FR-1), each once with its Severity condition, checked against the Severity level of each Alert Group of the Route. Replaced as a whole; an update that omits it and `destination_ids` keeps them. A Destination that is unknown or deleted is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's `destination_id`. A Destination may be named by several Routes and Teams, each with its own condition; it gets one Root message for an Alert Group whichever entries reach it.
+	DestinationEntries *[]DestinationEntry `json:"destination_entries,omitempty"`
+
+	// DestinationIds Derived from `destination_entries` on reads. When a request has no `destination_entries`, it sets them, keeping the stored condition of each Destination it keeps and `any` for a new one; beside `destination_entries` it is ignored. Removed in 0.3.0.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	DestinationIds *[]PublicId `json:"destination_ids,omitempty"`
 
 	// GroupKey Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty value.
 	GroupKey []string `json:"group_key"`
@@ -7055,6 +7162,9 @@ type RouteInput struct {
 	// OwningTeamId The Team that owns the Route (C-25.FR-2), which only organizes and filters and never adds delivery; `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
 	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
 	Policy       RoutePolicy                         `json:"policy"`
+
+	// RunTeamChains "Run the Teams' Escalation chains" (`route.run_team_chains`), read with `deliver_to_teams`: stored and returned, and acting once Escalation chains run. Omitted on a create, true; omitted on an update, kept.
+	RunTeamChains *bool `json:"run_team_chains,omitempty"`
 
 	// Urgent From 0.2.0 a read gives true exactly when `minimum_severity` is `critical`. In a request, `true` without `minimum_severity` is read as `minimum_severity` `critical`, as a 0.1 client meant it; `false`, or either value beside `minimum_severity`, changes nothing. Removed in 0.3.0.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
@@ -7473,6 +7583,9 @@ type SessionTotp struct {
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
+// SeverityCondition The Severity condition of a Destination of a Route or a Team (C-26.FR-1), checked against the Severity level of the Alert Group, the highest level of its firing Alerts raised to the Route's Minimum severity. `any` meets every level, `critical` only critical, `below_critical` every level but critical.
+type SeverityCondition string
+
 // SeverityLevel defines model for SeverityLevel.
 type SeverityLevel string
 
@@ -7719,10 +7832,13 @@ type SlackDestination struct {
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
-	OwningTeamId  nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
-	Routes        []EntityRef                         `json:"routes"`
-	TemplateError *TemplateErrorState                 `json:"template_error,omitempty"`
-	Type          SlackDestinationType                `json:"type"`
+	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
+	Routes       []EntityRef                         `json:"routes"`
+
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams         []TeamRef            `json:"teams"`
+	TemplateError *TemplateErrorState  `json:"template_error,omitempty"`
+	Type          SlackDestinationType `json:"type"`
 }
 
 // SlackDestinationType defines model for SlackDestination.Type.
@@ -7969,6 +8085,12 @@ type Team struct {
 	// Description Omit it on an update to keep it.
 	Description string `json:"description"`
 
+	// DestinationEntries The Destinations of the Team (C-26.FR-1), each once with its Severity condition, where the Alert Groups of the Team arrive from the Routes that deliver to the Teams from the label (`deliver_to_teams`). Replaced as a whole; omit it on an update to keep the entries, and a creation without it has none. A Destination that is unknown or deleted is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's `destination_id`. A change reaches the open Alert Groups at their next change.
+	DestinationEntries []DestinationEntry `json:"destination_entries"`
+
+	// Destinations The Destinations of the Team's `destination_entries`, by name, with their health.
+	Destinations []DestinationRef `json:"destinations"`
+
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
@@ -8010,6 +8132,9 @@ type TeamIdpEntry struct {
 type TeamInput struct {
 	// Description Omit it on an update to keep it.
 	Description *string `json:"description,omitempty"`
+
+	// DestinationEntries The Destinations of the Team (C-26.FR-1), each once with its Severity condition, where the Alert Groups of the Team arrive from the Routes that deliver to the Teams from the label (`deliver_to_teams`). Replaced as a whole; omit it on an update to keep the entries, and a creation without it has none. A Destination that is unknown or deleted is refused with `422` `unknown_id`, and one named twice with `duplicate`, at the entry's `destination_id`. A change reaches the open Alert Groups at their next change.
+	DestinationEntries *[]DestinationEntry `json:"destination_entries,omitempty"`
 
 	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
 	IdpEntries *[]TeamIdpEntry `json:"idp_entries,omitempty"`
@@ -8261,10 +8386,13 @@ type TelegramDestination struct {
 	OwningTeam nullable.Nullable[TeamRef] `json:"owning_team"`
 
 	// OwningTeamId The Team that owns the Destination (C-25.FR-2), which only organizes and filters; owning it never makes it one of the Team's Destinations. `null` clears it, and an update that omits it keeps it. An unknown or deleted Team is refused with `422` `unknown_id`.
-	OwningTeamId  nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
-	Routes        []EntityRef                         `json:"routes"`
-	TemplateError *TemplateErrorState                 `json:"template_error,omitempty"`
-	Type          TelegramDestinationType             `json:"type"`
+	OwningTeamId nullable.Nullable[NullablePublicId] `json:"owning_team_id,omitempty"`
+	Routes       []EntityRef                         `json:"routes"`
+
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams         []TeamRef               `json:"teams"`
+	TemplateError *TemplateErrorState     `json:"template_error,omitempty"`
+	Type          TelegramDestinationType `json:"type"`
 }
 
 // TelegramDestinationType defines model for TelegramDestination.Type.
@@ -8626,9 +8754,12 @@ type TimelineStatusEntryKind string
 // TimelineSystemEntry defines model for TimelineSystemEntry.
 type TimelineSystemEntry struct {
 	// Actor Who caused the entry. `system` entries carry the reason in `reason`.
-	Actor  TimelineActor             `json:"actor"`
-	At     time.Time                 `json:"at"`
-	Detail nullable.Nullable[string] `json:"detail,omitempty"`
+	Actor TimelineActor `json:"actor"`
+	At    time.Time     `json:"at"`
+
+	// Destination The Destination the Alert Group joined, for `destination_joined`.
+	Destination *DestinationRef           `json:"destination,omitempty"`
+	Detail      nullable.Nullable[string] `json:"detail,omitempty"`
 
 	// Event Set for lifecycle events of kind `system`.
 	Event *LifecycleEvent `json:"event,omitempty"`
@@ -8913,6 +9044,9 @@ type WebhookDestination struct {
 	Routes              []EntityRef         `json:"routes"`
 	SigningSecretStatus SigningSecretStatus `json:"signing_secret_status"`
 
+	// Teams The Teams that name the Destination as a Destination of the Team, by name.
+	Teams []TeamRef `json:"teams"`
+
 	// Template Required when `mode` is `template` or `both`.
 	Template      *WebhookTemplateConfig `json:"template,omitempty"`
 	TemplateError *TemplateErrorState    `json:"template_error,omitempty"`
@@ -8982,6 +9116,14 @@ type WebhookDestinationInputMode string
 
 // WebhookDestinationInputType defines model for WebhookDestinationInput.Type.
 type WebhookDestinationInputType string
+
+// WebhookDestinationRef A Destination as an outgoing webhook event names it.
+type WebhookDestinationRef struct {
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id   PublicId        `json:"id"`
+	Name string          `json:"name"`
+	Type DestinationType `json:"type"`
+}
 
 // WebhookEventName One of the lifecycle event names (see `LifecycleEvent`) or `test`, which only a Destination test sends. New names are added within `version` 1; receivers ignore names they do not know.
 type WebhookEventName string

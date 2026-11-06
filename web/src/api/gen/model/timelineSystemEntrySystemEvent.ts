@@ -12,4 +12,5 @@ export const TimelineSystemEntrySystemEvent = {
   fallback_template_used: 'fallback_template_used',
   template_value_missing: 'template_value_missing',
   unknown_team_value: 'unknown_team_value',
+  destination_joined: 'destination_joined',
 } as const;

@@ -239,3 +239,44 @@ func TestBodyTeams(t *testing.T) {
 		}
 	}
 }
+
+// TestBodyDestinationJoined is C-15.FR-2 revised by C-26.FR-5: destination_joined carries the Destination the Alert
+// Group joined in its destination {id, name, type}, valid against OutgoingWebhookEvent, Loud with its Mentions while
+// it fires; no other event carries a destination, even one recorded with a Destination by mistake.
+func TestBodyDestinationJoined(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	render, err := s.eventBodies(t.Context(), f, bodyFixture(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest := &groups.JoinedDestination{ID: 9, PublicID: "DSAAAAAAAAAAA9", Name: "search-notice", Type: "mattermost"}
+	for _, c := range []struct {
+		event groups.Event
+		want  string
+	}{
+		{groups.EventDestinationJoined, `{"id":"DSAAAAAAAAAAA9","name":"search-notice","type":"mattermost"}`},
+		{groups.EventAlertsAdded, ``},
+	} {
+		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 5, Event: c.event, Destination: dest},
+			Notify: true, Mentions: []mentions.Target{{Kind: mentions.TargetEveryone, Everyone: "all"}},
+			OccurredAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal(raw, &v)
+		if err := schema.VisitJSON(v); err != nil {
+			t.Fatalf("%s: %v\n%s", c.event, err, raw)
+		}
+		var b struct {
+			Event       string          `json:"event"`
+			Notify      bool            `json:"notify"`
+			Destination json.RawMessage `json:"destination"`
+		}
+		_ = json.Unmarshal(raw, &b)
+		if b.Event != string(c.event) || !b.Notify || string(b.Destination) != c.want {
+			t.Errorf("%s: %s", c.event, raw)
+		}
+	}
+}

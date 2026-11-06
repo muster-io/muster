@@ -115,7 +115,8 @@ func TestClientReads(t *testing.T) {
 		ts[0].Name != fakemattermost.TeamName || ts[0].DisplayName != "Dev" {
 		t.Errorf("Teams = %+v, %+v", ts, r)
 	}
-	if cs, r := c.Channels(ctx, class, fakemattermost.TeamID); !r.OK() || len(cs) != 2 ||
+	// The two channels of the fixtures, then the five of routing to Teams, by name.
+	if cs, r := c.Channels(ctx, class, fakemattermost.TeamID); !r.OK() || len(cs) != 7 ||
 		cs[0].ID != fakemattermost.ChannelAlerts || cs[1].ID != fakemattermost.ChannelAlertsProd ||
 		cs[0].Type != mattermost.ChannelOpen || cs[0].TeamID != fakemattermost.TeamID {
 		t.Errorf("Channels = %+v, %+v", cs, r)

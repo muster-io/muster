@@ -1,0 +1,416 @@
+[
+  {
+    "name": "a route entry any at info",
+    "level": "info",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "any"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "any"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry any at warning",
+    "level": "warning",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "any"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "any"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry any at critical",
+    "level": "critical",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "any"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "any"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry critical at info",
+    "level": "info",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": []
+  },
+  {
+    "name": "a route entry critical at warning",
+    "level": "warning",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": []
+  },
+  {
+    "name": "a route entry critical at critical",
+    "level": "critical",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "critical"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry below_critical at info",
+    "level": "info",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "below_critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "below_critical"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry below_critical at warning",
+    "level": "warning",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "below_critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": [
+      {
+        "destination_id": 11,
+        "entries": [
+          {
+            "kind": "route",
+            "severity_condition": "below_critical"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a route entry below_critical at critical",
+    "level": "critical",
+    "deliver_to_teams": false,
+    "route": [
+      {
+        "destination_id": 11,
+        "severity_condition": "below_critical"
+      }
+    ],
+    "team_entries": {},
+    "teams": [],
+    "want": []
+  },
+  {
+    "name": "a team entry any at info",
+    "level": "info",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "any"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "any",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry any at warning",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "any"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "any",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry any at critical",
+    "level": "critical",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "any"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "any",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry critical at info",
+    "level": "info",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": []
+  },
+  {
+    "name": "a team entry critical at warning",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": []
+  },
+  {
+    "name": "a team entry critical at critical",
+    "level": "critical",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "critical",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry below_critical at info",
+    "level": "info",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "below_critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "below_critical",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry below_critical at warning",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "below_critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": [
+      {
+        "destination_id": 21,
+        "entries": [
+          {
+            "kind": "team",
+            "severity_condition": "below_critical",
+            "team_id": 1
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "a team entry below_critical at critical",
+    "level": "critical",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {
+      "1": [
+        {
+          "destination_id": 21,
+          "severity_condition": "below_critical"
+        }
+      ]
+    },
+    "teams": [
+      1
+    ],
+    "want": []
+  }
+]

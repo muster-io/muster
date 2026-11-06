@@ -189,7 +189,7 @@ export const getCreateDestinationUrl = () => {
 }
 
 /**
- * `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes attach Destinations through `destination_ids`.
+ * `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
  * @summary Create Destination
  */
 export const createDestination = async (destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCreated> => {

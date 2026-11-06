@@ -42,6 +42,7 @@ export function alertGroupDelivery(
       type: "mattermost",
       health: { state: "healthy" },
     },
+    entries: [],
     state: "delivered",
     thread_not_attached: false,
     possible_duplicate: false,

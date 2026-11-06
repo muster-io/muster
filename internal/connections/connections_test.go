@@ -1350,7 +1350,8 @@ func TestChannels(t *testing.T) {
 		return out
 	}
 	all, err := e.svc.Channels(ctx, c.PublicID, "", "")
-	if err != nil || !slices.Equal(names(all), []string{"alerts", "alerts-prod"}) || all[0].TeamName != "dev" ||
+	if err != nil || !slices.Equal(names(all), []string{"alerts", "alerts-prod", "infra-critical", "infra-notice",
+		"payments-critical", "payments-notice", "search-notice"}) || all[0].TeamName != "dev" ||
 		all[0].TeamID != fakemattermost.TeamID || all[0].DisplayName != "Alerts" {
 		t.Fatalf("channels = %+v, %v", all, err)
 	}

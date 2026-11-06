@@ -4,17 +4,25 @@
 package delivery_test
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/organization"
+	"github.com/muster-io/muster/internal/routing"
 )
 
 // person is a User acting through the UI: the actor of a Command.
@@ -22,10 +30,11 @@ var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 
 // TestTableMatchesLifecycleEvents: the table of delivery has a row for every row of the lifecycle event tables of
 // C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
-// C-17.FR-11 and the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
-// revised) — complete the 34; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
+// C-17.FR-11, the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
+// revised) — and the three of destination_joined of C-26, a new Root message, complete the 37; a Loud event is always a
+// new message and an edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 34 {
+	if len(delivery.Table) != 37 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}
@@ -78,6 +87,11 @@ func TestLifecycleRows(t *testing.T) {
 				Mentions: row.Mentions, Fingerprints: []string{"fp9"}}
 			if row.Event == groups.EventResolved {
 				ev.Variant = groups.VariantAny
+			}
+			if row.Event == groups.EventDestinationJoined {
+				// destination_joined publishes in the Destination it names, after a Publication elsewhere.
+				ev.Destination = &groups.JoinedDestination{ID: destMM, PublicID: "DSAAAAAAAAAA11", Name: "ops",
+					Type: delivery.TypeMattermost}
 			}
 			if row.EventMentions {
 				ev.Mentions = []groups.Mention{groups.MentionAckTimeout}
@@ -301,5 +315,701 @@ func TestMessageSettingsRerenderIsQuiet(t *testing.T) {
 				t.Errorf("published %+v", p)
 			}
 		})
+	}
+}
+
+// appendEntries appends to the entries of a delivery those of add that it lacks, by kind and Team, as EnsureDelivery
+// does.
+func appendEntries(have, add []byte) ([]byte, error) {
+	var cur, more []routing.Reaching
+	if len(have) > 0 {
+		if err := json.Unmarshal(have, &cur); err != nil {
+			return nil, err
+		}
+	}
+	if err := json.Unmarshal(add, &more); err != nil {
+		return nil, err
+	}
+	for _, e := range more {
+		if !slices.ContainsFunc(cur, func(c routing.Reaching) bool { return c.Kind == e.Kind && c.TeamID == e.TeamID }) {
+			cur = append(cur, e)
+		}
+	}
+	if cur == nil {
+		cur = []routing.Reaching{}
+	}
+	return json.Marshal(cur)
+}
+
+// teamReaches reports whether a Team of the Alert Group names the Destination on a Route with deliver_to_teams, as
+// RecordDelivered reads it.
+func (f *fakeDB) teamReaches(g *fakeGroup, dest int64) bool {
+	if !f.routes[g.route].toTeams {
+		return false
+	}
+	for _, team := range g.teams {
+		if slices.ContainsFunc(f.teamDests[team], func(e routing.Entry) bool { return e.DestinationID == dest }) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeDB) routeRow(d *fakeDest) dbgen.ListRouteDestinationsRow {
+	return dbgen.ListRouteDestinationsRow{ID: d.id, PublicID: d.publicID, Name: d.name, Type: d.typ,
+		ConnectionID: nullInt(d.connection), Health: d.health, WebhookMode: pgtype.Text{String: d.mode,
+			Valid: d.mode != ""}, WebhookReplies: d.typ == delivery.TypeWebhook && !d.noReplies, Buttons: d.buttons,
+		OrganizationButtons: f.orgButtons}
+}
+
+func (f *fakeDB) ListTeamDestinations(_ context.Context, arg dbgen.ListTeamDestinationsParams) (
+	[]dbgen.ListTeamDestinationsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListTeamDestinations"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListTeamDestinationsRow
+	for _, team := range slices.Sorted(slices.Values(arg.TeamIds)) {
+		for _, e := range f.teamDests[team] {
+			if d := f.dests[e.DestinationID]; d != nil && !d.deleted {
+				r := f.routeRow(d)
+				out = append(out, dbgen.ListTeamDestinationsRow{TeamID: team, ID: r.ID, PublicID: r.PublicID,
+					Name: r.Name, Type: r.Type, ConnectionID: r.ConnectionID, Health: r.Health,
+					WebhookMode: r.WebhookMode, WebhookReplies: r.WebhookReplies, Buttons: r.Buttons,
+					OrganizationButtons: r.OrganizationButtons, SeverityCondition: string(e.Condition)})
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListGroupDestinations(_ context.Context, arg dbgen.ListGroupDestinationsParams) (
+	[]dbgen.ListGroupDestinationsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListGroupDestinations"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListGroupDestinationsRow
+	for _, id := range slices.Sorted(maps.Keys(f.dests)) {
+		d := f.dests[id]
+		if d.deleted {
+			continue
+		}
+		var had *fakeDelivery
+		for _, x := range f.deliveries {
+			if x.group == arg.AlertGroupID && x.dest == id {
+				had = x
+			}
+		}
+		events := slices.ContainsFunc(f.webhookEvents, func(e *fakeEvent) bool {
+			return e.group == arg.AlertGroupID && e.dest == id
+		})
+		if had == nil && !events {
+			continue
+		}
+		r := f.routeRow(d)
+		row := dbgen.ListGroupDestinationsRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Type: r.Type,
+			ConnectionID: r.ConnectionID, Health: r.Health, WebhookMode: r.WebhookMode,
+			WebhookReplies: r.WebhookReplies, Buttons: r.Buttons, OrganizationButtons: r.OrganizationButtons}
+		if had != nil {
+			row.Delivered, row.State, row.HeldByStormID, row.Retiring = true, had.state, heldOf(had), had.desiredRetire
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListDestinationsByID(_ context.Context, arg dbgen.ListDestinationsByIDParams) (
+	[]dbgen.ListDestinationsByIDRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListDestinationsByID"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListDestinationsByIDRow
+	for _, id := range arg.Ids {
+		if d := f.dests[id]; d != nil && !d.deleted {
+			r := f.routeRow(d)
+			out = append(out, dbgen.ListDestinationsByIDRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name,
+				Type: r.Type, ConnectionID: r.ConnectionID, Health: r.Health, WebhookMode: r.WebhookMode,
+				WebhookReplies: r.WebhookReplies, Buttons: r.Buttons, OrganizationButtons: r.OrganizationButtons})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListEntryTeams(_ context.Context, arg dbgen.ListEntryTeamsParams) ([]dbgen.ListEntryTeamsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListEntryTeams"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListEntryTeamsRow
+	for _, id := range arg.Ids {
+		if t, ok := f.teamRefs[id]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+// The Destinations of the reach tests: the Route's infra-notice is destMM below critical and infra-critical
+// critical; the Team payments has payments-notice below critical and payments-critical critical.
+const (
+	destCritical    = 13
+	destTeamNotice  = 14
+	destTeamCrit    = 15
+	teamPayments    = 7
+	stormOfTheRoute = 900
+)
+
+// reachEnv is newEnv with the Route's Destinations conditioned, "Also to the Teams from the label" on and the Team
+// payments with its two Destinations; the Alert Group of the fixtures is warning.
+func reachEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	conn := int64(connID)
+	for id, name := range map[int64]string{destCritical: "infra-critical", destTeamNotice: "payments-notice",
+		destTeamCrit: "payments-critical"} {
+		e.db.dests[id] = &fakeDest{id: id, publicID: fmt.Sprintf("DSAAAAAAAAAA%02d", id), name: name,
+			typ: delivery.TypeMattermost, connection: &conn, health: "healthy", limit: 600, per: 60}
+	}
+	e.db.dests[destMM].limit = 600
+	e.db.routeDests[routeID] = []int64{destMM, destCritical}
+	e.db.conditions = map[int64]map[int64]string{routeID: {destMM: "below_critical", destCritical: "critical"}}
+	r := e.db.routes[routeID]
+	r.toTeams = true
+	e.db.routes[routeID] = r
+	e.db.teamDests = map[int64][]routing.Entry{teamPayments: {
+		{DestinationID: destTeamNotice, Condition: routing.ConditionBelowCritical},
+		{DestinationID: destTeamCrit, Condition: routing.ConditionCritical}}}
+	e.db.teamRefs = map[int64]dbgen.ListEntryTeamsRow{teamPayments: {ID: teamPayments, PublicID: "TMAAAAAAAAAAA7",
+		Name: "Payments", Slug: "payments"}}
+	return e
+}
+
+// render renders the Alert Group of the fixtures as the dispatcher does, with its Severity level, Teams and events.
+func (e *env) render(t *testing.T, g *groups.Group, actor groups.Actor, configuration bool, teams []int64,
+	events ...groups.Recorded) {
+	t.Helper()
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: actor, Events: events,
+		Teams: teams, Configuration: configuration}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// leveled is the Alert Group of the fixtures in a status at a Severity level, published once published is set.
+func (e *env) leveled(status groups.Status, level string, published bool) *groups.Group {
+	g := e.group(status, "disk full "+level)
+	g.Severity = organization.SeverityLevel(level)
+	g.Urgent = level == "critical"
+	if published {
+		g.FirstPublishedAt = at(business0)
+	}
+	return g
+}
+
+// joinedEvent is the destination_joined of the Destination dest, Loud while firing.
+func joinedEvent(seq, dest int64, status groups.Status) groups.Recorded {
+	r := groups.Recorded{Seq: seq, Event: groups.EventDestinationJoined, Variant: groups.VariantFiring,
+		Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionNewAlertGroup},
+		Destination: &groups.JoinedDestination{ID: dest, PublicID: fmt.Sprintf("DSAAAAAAAAAA%02d", dest)}}
+	if status != groups.StatusFiring {
+		r.Variant, r.Loudness, r.Mentions = groups.Variant(status), groups.Quiet, nil
+	}
+	return r
+}
+
+// published is the one Publication to a Destination.
+func (e *env) published(t *testing.T, dest int64) deliverytest.Call {
+	t.Helper()
+	var out []deliverytest.Call
+	for _, c := range e.callsTo(dest) {
+		if c.Method == deliverytest.MethodPublish {
+			out = append(out, c)
+		}
+	}
+	if len(out) != 1 {
+		t.Fatalf("%d publications to %d: %+v", len(out), dest, e.callsTo(dest))
+	}
+	return out[0]
+}
+
+// repliesTo are the Thread replies queued in a Destination.
+func (e *env) repliesTo(dest int64) []*fakeReply {
+	var out []*fakeReply
+	for _, r := range e.db.replies {
+		if r.dest == dest {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestEnqueueReach is C-26.FR-2, FR-3, AC-1, AC-2 and AC-10 in Enqueue: a warning Alert Group of the Team payments on
+// a Route with "Also to the Teams from the label" is published Loudly in the Route's and the Team's Destinations below
+// critical and nowhere else, each delivery with the entry that reached it, which the delivery state names; with the
+// option off it reaches only the Route's.
+func TestEnqueueReach(t *testing.T) {
+	e := reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	e.round(t)
+	for _, dest := range []int64{destMM, destTeamNotice} {
+		if c := e.published(t, dest); c.Loudness != groups.Loud ||
+			!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
+			t.Errorf("publication to %d %+v", dest, c)
+		}
+	}
+	if e.deliveryOf(groupID, destCritical) != nil || e.deliveryOf(groupID, destTeamCrit) != nil {
+		t.Error("a critical Destination got a warning Alert Group")
+	}
+	states, err := e.svc.States(t.Context(), "AGAAAAAAAAAA21")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, st := range states {
+		var parts []string
+		for _, en := range st.Entries {
+			p := en.Kind + "/" + en.Condition
+			if en.Team != nil {
+				p += "/" + en.Team.Slug
+			}
+			parts = append(parts, p)
+		}
+		got[st.Destination.Name] = strings.Join(parts, ",")
+	}
+	if want := map[string]string{"ops": "route/below_critical", "payments-notice": "team/below_critical/payments"}; !maps.Equal(got, want) {
+		t.Errorf("entries %v", got)
+	}
+
+	// Without the option only the Route's Destinations are reached.
+	e = reachEnv(t)
+	r := e.db.routes[routeID]
+	r.toTeams = false
+	e.db.routes[routeID] = r
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	if e.deliveryOf(groupID, destMM) == nil || e.deliveryOf(groupID, destTeamNotice) != nil ||
+		e.db.calls["ListTeamDestinations"] != 0 {
+		t.Errorf("deliveries %+v", e.db.deliveries)
+	}
+}
+
+// TestEnqueueDestinationJoined is C-26.FR-4, FR-5, AC-4, AC-5 and C-11.FR-20 revised: destination_joined publishes the
+// Alert Group in the Destination it names, Loud with new_alert_group while it fires and Quiet while it is acknowledged,
+// without the Thread replies of the change, while the Destinations it had get the update and the replies; a rise to
+// critical publishes in the critical Destinations and keeps the ones below critical current, with their entries.
+func TestEnqueueDestinationJoined(t *testing.T) {
+	for _, status := range []groups.Status{groups.StatusFiring, groups.StatusAcknowledged} {
+		t.Run(string(status), func(t *testing.T) {
+			e := reachEnv(t)
+			e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+			e.round(t)
+			e.rec.Reset()
+			added := groups.Recorded{Seq: 2, Event: groups.EventAlertsAdded, Variant: groups.VariantFiring,
+				Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionNewAlerts}}
+			if status != groups.StatusFiring {
+				added = groups.Recorded{Seq: 2, Event: groups.EventAlertsAdded, Variant: groups.VariantAcknowledged,
+					Loudness: groups.Quiet}
+			}
+			e.render(t, e.leveled(status, "warning", true), groups.System, false, []int64{teamPayments}, added,
+				joinedEvent(3, destTeamNotice, status))
+			e.round(t)
+			c := e.published(t, destTeamNotice)
+			if status == groups.StatusFiring && (c.Loudness != groups.Loud ||
+				!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup})) {
+				t.Errorf("loud join %+v", c)
+			}
+			if status != groups.StatusFiring && (c.Loudness != groups.Quiet || len(c.Mentions) != 0) {
+				t.Errorf("quiet join %+v", c)
+			}
+			if len(e.repliesTo(destTeamNotice)) != 0 || len(e.repliesTo(destMM)) != 1 {
+				t.Errorf("replies %+v", e.db.replies)
+			}
+		})
+	}
+
+	t.Run("rise", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+			created())
+		e.round(t)
+		e.rec.Reset()
+		rise := groups.Recorded{Seq: 4, Event: groups.EventSeverityRaised, Loudness: groups.Quiet}
+		e.render(t, e.leveled(groups.StatusFiring, "critical", true), groups.System, false, []int64{teamPayments},
+			rise, joinedEvent(5, destCritical, groups.StatusFiring), joinedEvent(6, destTeamCrit, groups.StatusFiring))
+		e.round(t)
+		for _, dest := range []int64{destCritical, destTeamCrit} {
+			if c := e.published(t, dest); c.Loudness != groups.Loud {
+				t.Errorf("rise into %d %+v", dest, c)
+			}
+		}
+		for _, dest := range []int64{destMM, destTeamNotice} {
+			calls := e.callsTo(dest)
+			if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate ||
+				!strings.Contains(textOf(calls[0]), "critical") {
+				t.Errorf("the Root message below critical in %d %+v", dest, calls)
+			}
+		}
+		if d := e.deliveryOf(groupID, destMM); !strings.Contains(string(d.entries), `"route"`) {
+			t.Errorf("entries %s", d.entries)
+		}
+
+		// The critical Alert resolves: every Root message stays and is edited to the current state.
+		e.rec.Reset()
+		e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 7, Event: groups.EventAlertResolved, Loudness: groups.Quiet})
+		e.round(t)
+		for _, dest := range []int64{destMM, destCritical, destTeamNotice, destTeamCrit} {
+			if calls := e.callsTo(dest); len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate {
+				t.Errorf("after the fall %d %+v", dest, calls)
+			}
+		}
+	})
+}
+
+// TestEnqueueReopenRise is C-26.FR-4 and FR-5 for a Reopen: a Reopen above the level the Alert Group resolved at
+// records its rise, Quiet, with destination_joined for the Destinations of the higher level, which get their first
+// Publication Loud, while the Destinations it had get the update and the Reopen's Thread reply; a Reopen at the same or
+// a lower level records no rise and publishes nowhere new.
+func TestEnqueueReopenRise(t *testing.T) {
+	reopened := groups.Recorded{Seq: 3, Event: groups.EventReopened, Variant: groups.VariantFiring,
+		Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionReopen}}
+	t.Run("higher", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+			created())
+		e.round(t)
+		e.rec.Reset()
+		raised := groups.Recorded{Seq: 4, Event: groups.EventUrgencyRaised, Variant: groups.VariantRemovesNone,
+			Loudness: groups.Quiet}
+		e.render(t, e.leveled(groups.StatusFiring, "critical", true), groups.System, false, []int64{teamPayments},
+			reopened, raised, joinedEvent(5, destCritical, groups.StatusFiring),
+			joinedEvent(6, destTeamCrit, groups.StatusFiring))
+		e.round(t)
+		for _, dest := range []int64{destCritical, destTeamCrit} {
+			if c := e.published(t, dest); c.Loudness != groups.Loud ||
+				!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
+				t.Errorf("reopen into %d %+v", dest, c)
+			}
+			if len(e.repliesTo(dest)) != 0 {
+				t.Errorf("replies in %d", dest)
+			}
+		}
+		for _, dest := range []int64{destMM, destTeamNotice} {
+			if len(e.repliesTo(dest)) != 1 {
+				t.Errorf("the reopen's reply in %d %+v", dest, e.db.replies)
+			}
+		}
+	})
+	for _, c := range []struct{ name, from, to string }{{"same", "warning", "warning"},
+		{"lower", "critical", "warning"}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := reachEnv(t)
+			e.render(t, e.leveled(groups.StatusFiring, c.from, false), groups.System, false, []int64{teamPayments},
+				created())
+			e.round(t)
+			had := len(e.db.deliveries)
+			e.render(t, e.leveled(groups.StatusFiring, c.to, true), groups.System, false, []int64{teamPayments},
+				reopened)
+			if n := len(e.db.deliveries); n != had {
+				t.Errorf("the reopen made %d deliveries, had %d: %+v", n, had, e.db.deliveries)
+			}
+		})
+	}
+}
+
+// TestEnqueueConfigurationQuiet is C-26.FR-9, AC-11, C-25.FR-13 and AC-13, ADR-0018: a Destination that a change of
+// configuration brings into the reach — a raised Minimum severity, a Team evaluated on a save — gets a Quiet
+// Publication without Thread replies; a delivery Not delivered and never published is not made Loud by it; one that a
+// Team or a rise adds before the first Publication is part of it, Loud; and a Command that finds a reached
+// Destination without a delivery publishes there Quietly.
+func TestEnqueueConfigurationQuiet(t *testing.T) {
+	t.Run("minimum severity", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+			created())
+		e.round(t)
+		e.rec.Reset()
+		raised := groups.Recorded{Seq: 2, Event: groups.EventUrgencyRaised, Variant: groups.VariantRemovesNone,
+			Loudness: groups.Quiet, Reason: groups.ReasonMinimumSeverity}
+		e.render(t, e.leveled(groups.StatusFiring, "critical", true), groups.System, false, []int64{teamPayments},
+			raised)
+		e.round(t)
+		for _, dest := range []int64{destCritical, destTeamCrit} {
+			if c := e.published(t, dest); c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+				t.Errorf("publication to %d %+v", dest, c)
+			}
+			if len(e.repliesTo(dest)) != 0 {
+				t.Errorf("replies in %d", dest)
+			}
+		}
+	})
+	t.Run("teams evaluated", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+		e.round(t)
+		e.rec.Reset()
+		e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, true, []int64{teamPayments},
+			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+		e.round(t)
+		if c := e.published(t, destTeamNotice); c.Loudness != groups.Quiet || len(c.Mentions) != 0 {
+			t.Errorf("publication %+v", c)
+		}
+	})
+	t.Run("not delivered is not revived loud", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+		d := e.deliveryOf(groupID, destMM)
+		d.state = "not_delivered"
+		g := e.leveled(groups.StatusFiring, "warning", true)
+		g.Title = "disk full with its team"
+		e.render(t, g, groups.System, true, []int64{teamPayments},
+			groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+		e.round(t)
+		for _, dest := range []int64{destMM, destTeamNotice} {
+			if c := e.published(t, dest); c.Loudness != groups.Quiet {
+				t.Errorf("publication to %d %+v", dest, c)
+			}
+		}
+	})
+	t.Run("before the first publication", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 2, Event: groups.EventAlertsAdded, Variant: groups.VariantFiring,
+				Loudness: groups.Loud, Mentions: []groups.Mention{groups.MentionNewAlerts}},
+			groups.Recorded{Seq: 3, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+		e.round(t)
+		if c := e.published(t, destTeamNotice); c.Loudness != groups.Loud ||
+			!slices.Equal(c.Mentions, []groups.Mention{groups.MentionNewAlertGroup}) {
+			t.Errorf("publication %+v", c)
+		}
+	})
+	t.Run("a command creates no delivery", func(t *testing.T) {
+		e := reachEnv(t)
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+		e.round(t)
+		e.rec.Reset()
+		e.render(t, e.leveled(groups.StatusAcknowledged, "warning", true), person, false, []int64{teamPayments},
+			groups.Recorded{Seq: 2, Event: groups.EventAcknowledged, Loudness: groups.Quiet})
+		e.round(t)
+		if e.deliveryOf(groupID, destTeamNotice) != nil || len(e.callsTo(destMM)) != 1 {
+			t.Errorf("deliveries %+v, calls %+v", e.db.deliveries, e.rec.Calls())
+		}
+	})
+}
+
+// TestEnqueueFallAddsNothing is C-26.FR-4 (decision M2 of the review): the Destinations grow only by Alerts, a Team, a
+// rise or a change of configuration; a critical Alert Group whose critical Alert resolves, leaving it warning, updates
+// its Root messages in the critical Destinations and creates no delivery in the Destinations below critical.
+func TestEnqueueFallAddsNothing(t *testing.T) {
+	e := reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, false, []int64{teamPayments},
+		created())
+	e.round(t)
+	e.rec.Reset()
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+		groups.Recorded{Seq: 2, Event: groups.EventAlertResolved, Loudness: groups.Quiet})
+	e.round(t)
+	if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Errorf("a fall created deliveries below critical: %+v", e.db.deliveries)
+	}
+	for _, dest := range []int64{destCritical, destTeamCrit} {
+		if calls := e.callsTo(dest); len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate {
+			t.Errorf("the critical root message in %d %+v", dest, calls)
+		}
+	}
+
+	// Neither Alerts that bring no Team nor rise the level (C-26.FR-5), nor the re-render of a change of configuration
+	// that moves no reach — a renamed Team, "Labels in the message", a button set — add a Destination after the fall.
+	g := e.leveled(groups.StatusFiring, "warning", true)
+	g.Title = "after the fall"
+	e.render(t, g, groups.System, false, []int64{teamPayments}, groups.Recorded{Seq: 3,
+		Event: groups.EventAlertsAdded, Variant: groups.VariantFiring, Loudness: groups.Loud,
+		Mentions: []groups.Mention{groups.MentionNewAlerts}})
+	g.Title = "renamed team"
+	e.render(t, g, groups.System, true, []int64{teamPayments})
+	if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Errorf("new alerts or a re-render created deliveries below critical: %+v", e.db.deliveries)
+	}
+}
+
+// TestEnqueueKeepsJoined (finding L2 of the review): a Destination the dispatcher recorded destination_joined for gets
+// its delivery, with the entries the dispatcher read, even when the reach Enqueue reads again no longer has it — a
+// Team saved between the two reads; a Destination deleted meanwhile gets none.
+func TestEnqueueKeepsJoined(t *testing.T) {
+	e := reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+	e.db.teamDests = map[int64][]routing.Entry{}
+	joined := joinedEvent(2, destTeamNotice, groups.StatusFiring)
+	joined.Destination.Entries = []routing.Reaching{{Kind: routing.EntryTeam, TeamID: teamPayments,
+		Condition: routing.ConditionBelowCritical}}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+		groups.Recorded{Seq: 1, Event: groups.EventTeamJoined, Loudness: groups.Quiet}, joined)
+	d := e.deliveryOf(groupID, destTeamNotice)
+	if d == nil || !d.loud.Bool || !strings.Contains(string(d.entries), `"team_id":7`) {
+		t.Fatalf("the joined destination %+v", d)
+	}
+	e = reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+	e.db.teamDests = map[int64][]routing.Entry{}
+	e.db.dests[destTeamNotice].deleted = true
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+		joinedEvent(2, destTeamNotice, groups.StatusFiring))
+	if d := e.deliveryOf(groupID, destTeamNotice); d != nil {
+		t.Errorf("a deleted destination got a delivery %+v", d)
+	}
+	e.db.fail["ListDestinationsByID"] = errBoom
+	err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning", true),
+		Actor: groups.System, Events: []groups.Recorded{joinedEvent(2, destTeamCrit, groups.StatusFiring)}})
+	if !errors.Is(err, errBoom) {
+		t.Errorf("a failing read: %v", err)
+	}
+}
+
+// TestEnqueueTeamsEvaluatedDuringStorm is C-26.FR-5 and C-11.FR-6 (finding H1 of the review): the evaluation of the
+// Teams on a save, a change of configuration, that brings a Team Destination to an Alert Group a Storm of the Route
+// holds creates the delivery held by the Storm, under the Storm locked FOR SHARE, with the Storm summary there, and
+// publishes nothing of its own; an Urgent Alert Group is not held.
+func TestEnqueueTeamsEvaluatedDuringStorm(t *testing.T) {
+	e := reachEnv(t)
+	e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+		alertGroupCount: 25}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, nil, created())
+	if d := e.deliveryOf(groupID, destMM); d == nil || d.heldBy != stormOfTheRoute {
+		t.Fatalf("not held in the route's destination: %+v", d)
+	}
+	locks := e.db.calls["LockActiveStorm"]
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, true, []int64{teamPayments},
+		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+	d := e.deliveryOf(groupID, destTeamNotice)
+	if d == nil || d.heldBy != stormOfTheRoute || e.db.calls["LockActiveStorm"] != locks+1 {
+		t.Fatalf("the team destination is not held: %+v", d)
+	}
+	if !slices.ContainsFunc(e.db.deliveries, func(x *fakeDelivery) bool {
+		return x.storm == stormOfTheRoute && x.dest == destTeamNotice
+	}) {
+		t.Errorf("no storm summary in the team destination: %+v", e.db.deliveries)
+	}
+	e.round(t)
+	for _, c := range e.callsTo(destTeamNotice) {
+		if c.Method == deliverytest.MethodPublish && !strings.Contains(textOf(c), "Storm") {
+			t.Errorf("the held alert group was published on its own: %+v", c)
+		}
+	}
+
+	// An Urgent Alert Group is published there on its own.
+	e = reachEnv(t)
+	e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+		alertGroupCount: 25}
+	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, false, nil, created())
+	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, true, []int64{teamPayments},
+		groups.Recorded{Seq: 2, Event: groups.EventTeamJoined, Loudness: groups.Quiet})
+	if d := e.deliveryOf(groupID, destTeamCrit); d == nil || d.heldBy != 0 {
+		t.Errorf("an urgent alert group is held: %+v", d)
+	}
+}
+
+// TestEnqueueStormTeamDestination is C-26.FR-5 and C-11.FR-6 revised: during a Storm of the Route a new Alert Group
+// is held in a Team Destination too, which gets the Storm summary; an Alert Group that joins a Team Destination during
+// the Storm is held there with the summary unless it is Urgent, which is published there on its own.
+func TestEnqueueStormTeamDestination(t *testing.T) {
+	e := reachEnv(t)
+	e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+		alertGroupCount: 25}
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	for _, dest := range []int64{destMM, destTeamNotice} {
+		if d := e.deliveryOf(groupID, dest); d == nil || d.heldBy != stormOfTheRoute {
+			t.Errorf("not held in %d: %+v", dest, d)
+		}
+	}
+	summaryIn := func(dest int64) bool {
+		return slices.ContainsFunc(e.db.deliveries, func(d *fakeDelivery) bool {
+			return d.storm == stormOfTheRoute && d.dest == dest
+		})
+	}
+	if !summaryIn(destMM) || !summaryIn(destTeamNotice) || summaryIn(destTeamCrit) {
+		t.Errorf("summaries %+v", e.db.deliveries)
+	}
+
+	// Another Alert Group, published before the Storm, joins the Team's critical Destination by a rise: held there.
+	e.db.groups[22] = &fakeGroup{id: 22, publicID: "AGAAAAAAAAAA22", number: 8, title: "g", status: "firing",
+		route: routeID, created: business0, published: true}
+	g := e.view(22, groups.StatusFiring)
+	g.Severity, g.Urgent, g.FirstPublishedAt = "critical", true, at(business0)
+	e.render(t, g, groups.System, false, []int64{teamPayments}, joinedEvent(3, destTeamCrit, groups.StatusFiring))
+	if d := e.deliveryOf(22, destTeamCrit); d == nil || d.heldBy != 0 {
+		t.Errorf("an Urgent join was held: %+v", d)
+	}
+	g.Urgent = false
+	g.Severity = "warning"
+	e.render(t, g, groups.System, false, []int64{teamPayments}, joinedEvent(4, destTeamNotice, groups.StatusFiring))
+	if d := e.deliveryOf(22, destTeamNotice); d == nil || d.heldBy != stormOfTheRoute ||
+		e.db.calls["LockActiveStorm"] == 0 {
+		t.Errorf("a join during the storm is not held: %+v", d)
+	}
+
+	for _, q := range []string{"LockActiveStorm", "ListStormSummaries", "ListTeamDestinations",
+		"ListGroupDestinations"} {
+		e := reachEnv(t)
+		e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+			alertGroupCount: 25}
+		e.db.groups[22] = &fakeGroup{id: 22, publicID: "AGAAAAAAAAAA22", number: 8, title: "g", status: "firing",
+			route: routeID, created: business0}
+		e.db.fail[q] = errBoom
+		var err error
+		if q == "ListStormSummaries" {
+			err = e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+				false), Actor: groups.System, Events: []groups.Recorded{created()}, Teams: []int64{teamPayments}})
+		} else {
+			g := e.view(22, groups.StatusFiring)
+			g.Severity, g.FirstPublishedAt = "warning", at(business0)
+			err = e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+				Events: []groups.Recorded{joinedEvent(4, destTeamNotice, groups.StatusFiring)},
+				Teams:  []int64{teamPayments}})
+		}
+		if !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", q, err)
+		}
+	}
+	e = reachEnv(t)
+	e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+		created())
+	e.db.fail["ListEntryTeams"] = errBoom
+	if _, err := e.svc.States(t.Context(), "AGAAAAAAAAAA21"); !errors.Is(err, errBoom) {
+		t.Errorf("states: %v", err)
+	}
+}
+
+// TestRecordDeliveredKeepsTeamDestination is C-11.FR-14 with a Team Destination (finding M1 of the review): a
+// Publication in flight whose delivery is withheld meanwhile keeps the message it created in a Destination that a Team
+// of the Alert Group reaches on a Route with deliver_to_teams, instead of giving it the final edit as a Destination
+// that left the Route; without the option it is a Destination the Route no longer reaches, and gets the final edit.
+func TestRecordDeliveredKeepsTeamDestination(t *testing.T) {
+	for _, toTeams := range []bool{true, false} {
+		e := reachEnv(t)
+		e.db.routeDests[routeID] = nil
+		e.db.groups[groupID].teams = []int64{teamPayments}
+		e.render(t, e.leveled(groups.StatusFiring, "warning", false), groups.System, false, []int64{teamPayments},
+			created())
+		r := e.db.routes[routeID]
+		r.toTeams = toTeams
+		e.db.routes[routeID] = r
+		e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+			Then: func() { e.deliveryOf(groupID, destTeamNotice).state = "withheld" }})
+		e.round(t)
+		d := e.deliveryOf(groupID, destTeamNotice)
+		if toTeams && (d.state != "delivered" || d.desiredRetire || d.messageID == nil) {
+			t.Errorf("with deliver_to_teams: %+v", d)
+		}
+		if !toTeams && (d.state != "pending" || !d.desiredRetire) {
+			t.Errorf("without deliver_to_teams: %+v", d)
+		}
 	}
 }

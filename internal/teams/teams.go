@@ -147,7 +147,9 @@ type FieldError struct {
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Detail }
 
 // Team is a Team as the API reads it. Own are its own Working hours, nil when it follows the Organization's;
-// WorkingHours are the effective ones. Matchers are its Team matchers in their order (C-25.FR-5).
+// WorkingHours are the effective ones. Matchers are its Team matchers in their order (C-25.FR-5). DestinationEntries
+// are the Destinations of the Team with their Severity conditions by public_id, and Destinations the same Destinations
+// by name (C-26.FR-1).
 type Team struct {
 	ID           int64
 	PublicID     string
@@ -161,6 +163,9 @@ type Team struct {
 	UserCount    int64
 	CreatedAt    time.Time
 	Version      int64
+
+	DestinationEntries []DestinationEntry
+	Destinations       []DestinationRef
 }
 
 // Matcher is a Team matcher (C-25.FR-5): a condition on one label in the syntax of Route Matchers.
@@ -170,9 +175,10 @@ type Matcher struct {
 	Value string `json:"value"`
 }
 
-// Input is what createTeam and updateTeam write. A nil Description or IdpEntries keeps the stored one on an update and
-// is empty on a creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the Team's own on an update; nil
-// Matchers keep the stored ones on an update and are none on a creation, and others replace them as a whole.
+// Input is what createTeam and updateTeam write. A nil Description, IdpEntries or DestinationEntries keeps the stored
+// one on an update and is empty on a creation; WorkingHours are read only with OwnWorkingHours, and nil keeps the
+// Team's own on an update; nil Matchers keep the stored ones on an update and are none on a creation, and others
+// replace them as a whole.
 type Input struct {
 	Name            string
 	Slug            string
@@ -181,6 +187,8 @@ type Input struct {
 	WorkingHours    *WorkingHours
 	Matchers        *[]Matcher
 	IdpEntries      *[]IdpEntry
+	// DestinationEntries replace the Destinations of the Team as a whole (C-26.FR-1).
+	DestinationEntries *[]DestinationEntry
 }
 
 // Person is someone in a Team with their Role, how they are in it, the identity provider entries that matched them and
@@ -277,6 +285,12 @@ type Queries interface {
 	JoinThroughIdp(ctx context.Context, arg dbgen.JoinThroughIdpParams) error
 	SetIdpMatches(ctx context.Context, arg dbgen.SetIdpMatchesParams) error
 	LeaveThroughIdp(ctx context.Context, arg dbgen.LeaveThroughIdpParams) error
+	ListTeamDestinations(ctx context.Context, arg dbgen.ListTeamDestinationsParams) ([]dbgen.ListTeamDestinationsRow,
+		error)
+	ResolveTeamDestinations(ctx context.Context, arg dbgen.ResolveTeamDestinationsParams) (
+		[]dbgen.ResolveTeamDestinationsRow, error)
+	DeleteTeamDestinations(ctx context.Context, arg dbgen.DeleteTeamDestinationsParams) error
+	UpsertTeamDestinations(ctx context.Context, arg dbgen.UpsertTeamDestinationsParams) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -435,6 +449,9 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	if err := s.withMatchers(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
 	}
+	if err := s.withDestinations(ctx, s.store, page.Teams); err != nil {
+		return Page{}, err
+	}
 	return page, nil
 }
 
@@ -488,6 +505,9 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Team, er
 	}
 	out := []Team{teamOf(teamRow(r), org, entries[r.ID])}
 	if err := s.withMatchers(ctx, q, out); err != nil {
+		return Team{}, err
+	}
+	if err := s.withDestinations(ctx, q, out); err != nil {
 		return Team{}, err
 	}
 	return out[0], nil
@@ -678,6 +698,13 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 		if in.Description != nil {
 			description = *in.Description
 		}
+		var dests map[string]teamDestination
+		if in.DestinationEntries != nil {
+			var err error
+			if dests, err = s.resolveDestinations(ctx, q, *in.DestinationEntries); err != nil {
+				return err
+			}
+		}
 		now := s.clock.Now().UTC()
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
 			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: now}
@@ -695,6 +722,9 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 			if err := s.replaceIdpEntries(ctx, q, id, *in.IdpEntries); err != nil {
 				return err
 			}
+		}
+		if err := s.writeDestinations(ctx, q, id, nil, dests, now); err != nil {
+			return err
 		}
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
@@ -763,6 +793,13 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if in.IdpEntries != nil {
 			next.IdpEntries = *in.IdpEntries
 		}
+		var dests map[string]teamDestination
+		if in.DestinationEntries != nil {
+			if dests, err = s.resolveDestinations(ctx, q, *in.DestinationEntries); err != nil {
+				return err
+			}
+			next.DestinationEntries = entriesOf(dests)
+		}
 		if in.OwnWorkingHours && next.Own == nil {
 			if before.Own == nil {
 				return missingHours()
@@ -790,6 +827,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		// A change of the entries changes nobody's membership until their next sign-in or re-check (C-25.FR-4).
 		if !slices.Equal(before.IdpEntries, next.IdpEntries) {
 			if err := s.replaceIdpEntries(ctx, q, before.ID, next.IdpEntries); err != nil {
+				return err
+			}
+		}
+		if dests != nil && !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
+			if err := s.writeDestinations(ctx, q, before.ID, before.DestinationEntries, dests, now); err != nil {
 				return err
 			}
 		}
@@ -1142,8 +1184,8 @@ func resourceOf(t Team) audit.Resource {
 	return audit.Resource{Type: ResourceTeam, PublicID: t.PublicID, Name: t.Name}
 }
 
-// view is a Team as its Audit log diff shows it: its own Working hours, null when it follows the Organization's, and
-// its identity provider entries.
+// view is a Team as its Audit log diff shows it: its own Working hours, null when it follows the Organization's, its
+// identity provider entries and the Destinations of the Team with their Severity conditions.
 type view struct {
 	Name            string        `json:"name"`
 	Slug            string        `json:"slug"`
@@ -1152,6 +1194,8 @@ type view struct {
 	WorkingHours    *WorkingHours `json:"working_hours"`
 	Matchers        []Matcher     `json:"matchers"`
 	IdpEntries      []IdpEntry    `json:"idp_entries"`
+	// DestinationEntries are the Destinations of the Team (C-26.FR-1).
+	DestinationEntries []DestinationEntry `json:"destination_entries"`
 }
 
 func viewOf(t Team) view {
@@ -1159,8 +1203,12 @@ func viewOf(t Team) view {
 	if ms == nil {
 		ms = []Matcher{}
 	}
+	dests := t.DestinationEntries
+	if dests == nil {
+		dests = []DestinationEntry{}
+	}
 	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
-		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries)}
+		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries), DestinationEntries: dests}
 }
 
 // exportInfo sets the muster_team_info series of a Team.

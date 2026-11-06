@@ -1,0 +1,84 @@
+[
+  {
+    "name": "without deliver_to_teams only the Route's entries reach",
+    "level": "warning",
+    "deliver_to_teams": false,
+    "route": [{"destination_id": 11, "severity_condition": "below_critical"}],
+    "team_entries": {"1": [{"destination_id": 21, "severity_condition": "below_critical"}]},
+    "teams": [1],
+    "want": [{"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "below_critical"}]}]
+  },
+  {
+    "name": "with deliver_to_teams the entries of each Team of the Alert Group reach",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [
+      {"destination_id": 10, "severity_condition": "critical"},
+      {"destination_id": 11, "severity_condition": "below_critical"}
+    ],
+    "team_entries": {
+      "1": [{"destination_id": 20, "severity_condition": "critical"}, {"destination_id": 21, "severity_condition": "below_critical"}],
+      "2": [{"destination_id": 31, "severity_condition": "below_critical"}],
+      "3": [{"destination_id": 41, "severity_condition": "any"}]
+    },
+    "teams": [2, 1],
+    "want": [
+      {"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "below_critical"}]},
+      {"destination_id": 21, "entries": [{"kind": "team", "team_id": 1, "severity_condition": "below_critical"}]},
+      {"destination_id": 31, "entries": [{"kind": "team", "team_id": 2, "severity_condition": "below_critical"}]}
+    ]
+  },
+  {
+    "name": "a rise to critical reaches the critical entries of the Route and the Teams",
+    "level": "critical",
+    "deliver_to_teams": true,
+    "route": [
+      {"destination_id": 10, "severity_condition": "critical"},
+      {"destination_id": 11, "severity_condition": "below_critical"}
+    ],
+    "team_entries": {
+      "1": [{"destination_id": 20, "severity_condition": "critical"}, {"destination_id": 21, "severity_condition": "below_critical"}]
+    },
+    "teams": [1],
+    "want": [
+      {"destination_id": 10, "entries": [{"kind": "route", "severity_condition": "critical"}]},
+      {"destination_id": 20, "entries": [{"kind": "team", "team_id": 1, "severity_condition": "critical"}]}
+    ]
+  },
+  {
+    "name": "a Route with no Destination of its own delivers only to the Teams",
+    "level": "info",
+    "deliver_to_teams": true,
+    "route": [],
+    "team_entries": {"1": [{"destination_id": 21, "severity_condition": "any"}]},
+    "teams": [1],
+    "want": [{"destination_id": 21, "entries": [{"kind": "team", "team_id": 1, "severity_condition": "any"}]}]
+  },
+  {
+    "name": "an Alert Group without Teams reaches only the Route's entries",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 11, "severity_condition": "any"}],
+    "team_entries": {"1": [{"destination_id": 21, "severity_condition": "any"}]},
+    "teams": [],
+    "want": [{"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "any"}]}]
+  },
+  {
+    "name": "a Team without Destinations adds nothing",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 11, "severity_condition": "any"}],
+    "team_entries": {},
+    "teams": [1],
+    "want": [{"destination_id": 11, "entries": [{"kind": "route", "severity_condition": "any"}]}]
+  },
+  {
+    "name": "nothing is reached when no condition is met",
+    "level": "warning",
+    "deliver_to_teams": true,
+    "route": [{"destination_id": 10, "severity_condition": "critical"}],
+    "team_entries": {"1": [{"destination_id": 20, "severity_condition": "critical"}]},
+    "teams": [1],
+    "want": []
+  }
+]

@@ -84,6 +84,23 @@ type fakeStore struct {
 	lockedThen func()
 	// entries are the identity provider entries of each Team, in their order.
 	entries map[int64][]dbgen.ListTeamIdpEntriesRow
+	// destinations are the Destinations by public_id, and teamDests the Destinations of each Team (C-26.FR-1).
+	destinations map[string]*fakeDestination
+	teamDests    map[int64][]fakeTeamDest
+}
+
+// fakeDestination is a row of destinations as the Destinations of a Team read it.
+type fakeDestination struct {
+	id                int64
+	name, typ, health string
+	deleted           bool
+}
+
+// fakeTeamDest is a row of team_destinations.
+type fakeTeamDest struct {
+	dest      int64
+	condition string
+	added     time.Time
 }
 
 func newStore() *fakeStore {
@@ -619,6 +636,78 @@ func (s *fakeStore) LeaveThroughIdp(_ context.Context, arg dbgen.LeaveThroughIdp
 	return nil
 }
 
+func (s *fakeStore) destByID(id int64) (string, *fakeDestination) {
+	for p, d := range s.destinations {
+		if d.id == id {
+			return p, d
+		}
+	}
+	return "", nil
+}
+
+func (s *fakeStore) ListTeamDestinations(_ context.Context, arg dbgen.ListTeamDestinationsParams) (
+	[]dbgen.ListTeamDestinationsRow, error) {
+	if err := s.fail["ListTeamDestinations"]; err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListTeamDestinationsRow
+	for _, team := range slices.Sorted(slices.Values(arg.TeamIds)) {
+		var rows []dbgen.ListTeamDestinationsRow
+		for _, td := range s.teamDests[team] {
+			if p, d := s.destByID(td.dest); d != nil && !d.deleted {
+				rows = append(rows, dbgen.ListTeamDestinationsRow{TeamID: team, DestinationID: td.dest,
+					SeverityCondition: td.condition, PublicID: p, Name: d.name, Type: d.typ, Health: d.health})
+			}
+		}
+		slices.SortFunc(rows, func(a, b dbgen.ListTeamDestinationsRow) int { return cmp.Compare(a.PublicID, b.PublicID) })
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ResolveTeamDestinations(_ context.Context, arg dbgen.ResolveTeamDestinationsParams) (
+	[]dbgen.ResolveTeamDestinationsRow, error) {
+	if err := s.fail["ResolveTeamDestinations"]; err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ResolveTeamDestinationsRow
+	for _, p := range arg.PublicIds {
+		if d := s.destinations[p]; d != nil && !d.deleted {
+			out = append(out, dbgen.ResolveTeamDestinationsRow{ID: d.id, PublicID: p})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteTeamDestinations(_ context.Context, arg dbgen.DeleteTeamDestinationsParams) error {
+	if err := s.fail["DeleteTeamDestinations"]; err != nil || arg.OrgID != orgID {
+		return err
+	}
+	s.teamDests[arg.TeamID] = slices.DeleteFunc(slices.Clone(s.teamDests[arg.TeamID]), func(td fakeTeamDest) bool {
+		return slices.Contains(arg.DestinationIds, td.dest)
+	})
+	return nil
+}
+
+func (s *fakeStore) UpsertTeamDestinations(_ context.Context, arg dbgen.UpsertTeamDestinationsParams) error {
+	if err := s.fail["UpsertTeamDestinations"]; err != nil || arg.OrgID != orgID {
+		return err
+	}
+	if s.teamDests == nil {
+		s.teamDests = map[int64][]fakeTeamDest{}
+	}
+	rows := slices.Clone(s.teamDests[arg.TeamID])
+	for i, id := range arg.DestinationIds {
+		if j := slices.IndexFunc(rows, func(td fakeTeamDest) bool { return td.dest == id }); j >= 0 {
+			rows[j].condition = arg.Conditions[i]
+			continue
+		}
+		rows = append(rows, fakeTeamDest{dest: id, condition: arg.Conditions[i], added: arg.Now})
+	}
+	s.teamDests[arg.TeamID] = rows
+	return nil
+}
+
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
 
 func (s *fakeStore) On(dbgen.DBTX) Queries { return s }
@@ -775,7 +864,7 @@ func TestCreate(t *testing.T) {
 	var diff []audit.Change
 	_ = json.Unmarshal(e.Diff, &diff)
 	if e.Action != ActionCreated || e.ResourceType.String != ResourceTeam || e.ResourcePublicID.String !=
-		team.PublicID || len(diff) != 10 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
+		team.PublicID || len(diff) != 11 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
 		t.Errorf("audit %+v %s", e, e.Diff)
 	}
 	if len(store.hints) != 1 || store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {
@@ -1599,5 +1688,101 @@ func TestRemoveByHandKeepsIdp(t *testing.T) {
 			t.Errorf("a failing %s = %v", q, err)
 		}
 		delete(s.fail, q)
+	}
+}
+
+// TestTeamDestinations is C-26.FR-1 for Teams: createTeam and updateTeam take destination_entries, each a Destination
+// once with its Severity condition, any by default; a read gives them by public_id and the Destinations by name; an
+// update that omits them keeps them, one that changes them replaces them as a whole — the kept ones keep when they
+// were added — with the change in the Audit log diff; an unknown, deleted or malformed Destination is unknown_id, one
+// named twice duplicate and an unknown condition invalid_format, at the entry's pointer.
+func TestTeamDestinations(t *testing.T) {
+	svc, s := newService(t)
+	s.destinations = map[string]*fakeDestination{
+		"DS0000000000PC": {id: 51, name: "payments-critical", typ: "mattermost", health: "healthy"},
+		"DS0000000000PN": {id: 52, name: "payments-notice", typ: "mattermost", health: "healthy"},
+		"DS0000000000GO": {id: 53, name: "gone", typ: "webhook", health: "healthy", deleted: true},
+	}
+	created, err := svc.Create(t.Context(), by, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical},
+			{DestinationID: "ds0000000000pc", Condition: ConditionCritical}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical},
+		{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical}}
+	if !slices.Equal(created.DestinationEntries, want) || len(created.Destinations) != 2 ||
+		created.Destinations[0].Name != "payments-critical" || created.Destinations[1].Type != "mattermost" {
+		t.Fatalf("created %+v %+v", created.DestinationEntries, created.Destinations)
+	}
+	if last := s.audit[len(s.audit)-1]; !strings.Contains(string(last.Diff), `"pointer":"/destination_entries"`) {
+		t.Errorf("team.created %s", last.Diff)
+	}
+	added := s.teamDests[created.ID][0].added
+	page, err := svc.List(t.Context(), ListFilter{Limit: 10})
+	if err != nil || !slices.Equal(page.Teams[0].DestinationEntries, want) {
+		t.Errorf("listed %+v, %v", page, err)
+	}
+
+	kept, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments"})
+	if err != nil || kept.Version != created.Version || !slices.Equal(kept.DestinationEntries, want) {
+		t.Errorf("an update without entries = %+v, %v", kept, err)
+	}
+	updated, err := svc.Update(t.Context(), by, created.PublicID, &created.Version, Input{Name: "Payments",
+		Slug: "payments", DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"}}})
+	if err != nil || updated.Version != created.Version+1 ||
+		!slices.Equal(updated.DestinationEntries, []DestinationEntry{{DestinationID: "DS0000000000PN",
+			Condition: ConditionAny}}) {
+		t.Fatalf("update = %+v, %v", updated.DestinationEntries, err)
+	}
+	if rows := s.teamDests[created.ID]; len(rows) != 1 || rows[0].dest != 52 || !rows[0].added.Equal(added) {
+		t.Errorf("the rows after the update %+v", rows)
+	}
+	last := s.audit[len(s.audit)-1]
+	if last.Action != ActionUpdated || !strings.Contains(string(last.Diff), `"pointer":"/destination_entries"`) {
+		t.Errorf("team.updated = %s %s", last.Action, last.Diff)
+	}
+	if again, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionAny}}}); err != nil ||
+		again.Version != updated.Version {
+		t.Errorf("the same entries = %+v, %v", again, err)
+	}
+
+	for _, tc := range []struct {
+		entries []DestinationEntry
+		pointer string
+		code    string
+	}{
+		{[]DestinationEntry{{DestinationID: "DS0000000000ZZ"}}, "/destination_entries/0/destination_id", CodeUnknownID},
+		{[]DestinationEntry{{DestinationID: "DS0000000000PN"}, {DestinationID: "DS0000000000GO"}},
+			"/destination_entries/1/destination_id", CodeUnknownID},
+		{[]DestinationEntry{{DestinationID: "nope"}}, "/destination_entries/0/destination_id", CodeUnknownID},
+		{[]DestinationEntry{{DestinationID: "DS0000000000PN"}, {DestinationID: "ds0000000000pn"}},
+			"/destination_entries/1/destination_id", CodeDuplicate},
+		{[]DestinationEntry{{DestinationID: "DS0000000000PN", Condition: "warning"}},
+			"/destination_entries/0/severity_condition", CodeInvalidFormat},
+	} {
+		_, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+			DestinationEntries: &tc.entries})
+		if fe := fieldError(t, err); fe.Pointer != tc.pointer || fe.Code != tc.code {
+			t.Errorf("%+v: %+v", tc.entries, fe)
+		}
+		if _, err := svc.Create(t.Context(), by, Input{Name: "X", Slug: "x", DestinationEntries: &tc.entries}); err ==
+			nil {
+			t.Errorf("created with %+v", tc.entries)
+		}
+	}
+	for _, q := range []string{"ResolveTeamDestinations", "DeleteTeamDestinations", "UpsertTeamDestinations",
+		"ListTeamDestinations"} {
+		s.fail[q] = errBoom
+		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+			DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
+			t.Errorf("%s: %v", q, err)
+		}
+		delete(s.fail, q)
+	}
+	s.fail["ListTeamDestinations"] = errBoom
+	if _, err := svc.List(t.Context(), ListFilter{Limit: 10}); !errors.Is(err, errBoom) {
+		t.Errorf("list = %v", err)
 	}
 }

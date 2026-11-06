@@ -37,5 +37,6 @@ export const WebhookEventName = {
   notices_missed: 'notices_missed',
   team_joined: 'team_joined',
   unknown_team_value: 'unknown_team_value',
+  destination_joined: 'destination_joined',
   test: 'test',
 } as const;

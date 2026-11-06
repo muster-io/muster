@@ -5,9 +5,11 @@ package delivery
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,15 +23,17 @@ import (
 	"github.com/muster-io/muster/internal/metrics"
 )
 
-// Storms (C-11.FR-6): the new Alert Groups of a Route are counted over the last minute; the one that makes the count
-// exceed route.storm_threshold starts a Storm. Each Destination of the Route then gets one Storm summary, Loud at its
-// first Publication and edited Quietly as Alert Groups join; a new Alert Group that is not Urgent is held, not
-// published, while an Urgent one is published at once, ahead in the queue. The calm check ends the Storm once the count
-// stayed at or below the threshold for delivery.storm_calm_period: the summary gets its final state — Quiet even where
-// it was never published — the held Alert Groups still open are published Quietly within the limiters, and those that
-// resolved are withheld. A Destination that joins the Route during a Storm gets its summary and holds the Alert Groups
-// the Storm holds; one that leaves the Route retires its summary there. The summary texts are fixed English lines in
-// UTC until S-036.
+// Storms (C-11.FR-6, revised by C-26.FR-5): the new Alert Groups of a Route are counted over the last minute; the one
+// that makes the count exceed route.storm_threshold starts a Storm. Each Destination its Alert Groups reach, the
+// Destinations of their Teams included, then gets one Storm summary of the Route's Storm, Loud at its first Publication
+// and edited Quietly as Alert Groups join, all with the Route's counts; a new Alert Group that is not Urgent is held,
+// not published, while an Urgent one is published at once, ahead in the queue. A Destination that an Alert Group joins
+// by its Alerts during the Storm (destination_joined) holds it there too and gets its summary, unless it is Urgent. The
+// calm check ends the Storm once the count stayed at or below the threshold for delivery.storm_calm_period: the summary
+// gets its final state — Quiet even where it was never published — the held Alert Groups still open are published
+// Quietly within the limiters, and those that resolved are withheld. A Destination that joins the Route during a Storm
+// gets its summary and holds the Alert Groups the Storm holds; one that leaves the Route retires its summary there. The
+// summary texts are fixed English lines in UTC until S-036.
 
 // TimerStormCalmCheck is the timers kind of the calm check of a Storm.
 const TimerStormCalmCheck = "storm_calm_check"
@@ -126,21 +130,60 @@ type stormRoute struct {
 	publicID, name, language string
 }
 
-// renderSummaries sets the Desired state of the Storm summary of st in each Destination of its Route, creating the
-// summaries a new Storm needs; an update of what it shows is a Quiet edit.
-func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, route stormRoute,
-	dests []dbgen.ListRouteDestinationsRow, now time.Time) error {
+// stormDest is a Destination of a Storm summary: its internal id, its public_id and its type.
+type stormDest struct {
+	id       int64
+	publicID string
+	typ      string
+}
+
+// stormDestsOf are the Destinations of rows.
+func stormDestsOf(rows []dbgen.ListRouteDestinationsRow) []stormDest {
+	out := make([]stormDest, len(rows))
+	for i, d := range rows {
+		out[i] = stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type}
+	}
+	return out
+}
+
+// withSummaries are the Destinations of the rendering of a new Alert Group of the Storm st and those where st already
+// has its summary, in id order, so that every summary shows the Route's counts (C-11.FR-6).
+func (s *Service) withSummaries(ctx context.Context, q queries, st *storm, dests []target) ([]stormDest, error) {
+	rows, err := q.ListStormSummaries(ctx, dbgen.ListStormSummariesParams{OrgID: s.orgID, StormID: st.id})
+	if err != nil {
+		return nil, fmt.Errorf("list the summaries of the storm %d: %w", st.id, err)
+	}
+	seen := map[int64]bool{}
+	out := make([]stormDest, 0, len(dests)+len(rows))
+	for _, t := range dests {
+		seen[t.dest.ID] = true
+		out = append(out, stormDest{id: t.dest.ID, publicID: t.dest.PublicID, typ: t.dest.Type})
+	}
+	for _, r := range rows {
+		if !seen[r.DestinationID] {
+			seen[r.DestinationID] = true
+			out = append(out, stormDest{id: r.DestinationID, publicID: r.DestinationPublicID, typ: r.DestinationType})
+		}
+	}
+	slices.SortFunc(out, func(a, b stormDest) int { return cmp.Compare(a.id, b.id) })
+	return out, nil
+}
+
+// renderSummaries sets the Desired state of the Storm summary of st in each Destination of dests, creating the
+// summaries a new Storm or a Destination new to it needs; an update of what it shows is a Quiet edit.
+func (s *Service) renderSummaries(ctx context.Context, q queries, st *storm, route stormRoute, dests []stormDest,
+	now time.Time) error {
 	m := s.renderer.Storm(route.publicID, route.name, route.language, st.count, st.urgent)
 	for _, d := range dests {
-		row, err := q.EnsureStormSummary(ctx, dbgen.EnsureStormSummaryParams{OrgID: s.orgID, DestinationID: d.ID,
+		row, err := q.EnsureStormSummary(ctx, dbgen.EnsureStormSummaryParams{OrgID: s.orgID, DestinationID: d.id,
 			StormID: pgtype.Int8{Int64: st.id, Valid: true}, Now: now})
 		if err != nil {
-			return fmt.Errorf("create the storm summary in %s: %w", d.PublicID, err)
+			return fmt.Errorf("create the storm summary in %s: %w", d.publicID, err)
 		}
-		msg, err := s.summaryOf(ctx, q.DB(), d.ID, d.Type, route.language, m, StormState{Route: route.name,
+		msg, err := s.summaryOf(ctx, q.DB(), d.id, d.typ, route.language, m, StormState{Route: route.name,
 			AlertGroupCount: st.count, UrgentCount: st.urgent})
 		if err != nil {
-			return fmt.Errorf("render the storm summary in %s: %w", d.PublicID, err)
+			return fmt.Errorf("render the storm summary in %s: %w", d.publicID, err)
 		}
 		if err := s.setSummary(ctx, q, row.ID, row.DesiredHash, msg, now); err != nil {
 			return err

@@ -9,6 +9,6 @@ import type { TelegramDestinationInput } from './telegramDestinationInput';
 import type { WebhookDestinationInput } from './webhookDestinationInput';
 
 /**
- * A Destination as written; `type` selects the variant and cannot change on update. Routes are attached through the Route's `destination_ids`.
+ * A Destination as written; `type` selects the variant and cannot change on update. Routes and Teams attach it through their `destination_entries`.
  */
 export type DestinationInput = MattermostDestinationInput | TelegramDestinationInput | WebhookDestinationInput | BridgeDestinationInput | SlackDestinationInput;
