@@ -87,12 +87,6 @@ func TestPreviewTemplateAPI(t *testing.T) {
 		t.Errorf("preview = %d %s, request %+v", a.status, a.body, req)
 	}
 	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
-		`{"kind":"root_message","template":"templated","format":"commonmark"}`)
-	if body := string(a.body); a.status != http.StatusOK || !strings.Contains(body, `"layout":null`) ||
-		!strings.Contains(body, `"length":50`) {
-		t.Errorf("a Route's own template = %d %s", a.status, a.body)
-	}
-	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
 		`{"kind":"root_message","template":"{{ env \"HOME\" }}"}`)
 	out = a.json(t)
 	errs, _ := out["errors"].([]any)
@@ -166,6 +160,12 @@ func TestPreviewTemplateLayoutAPI(t *testing.T) {
 	if out := a.json(t); a.status != http.StatusOK || out["messenger_limit"] != nil || out["length"] != float64(42) ||
 		!strings.Contains(string(a.body), `"owner":{"name":"bob","ref":null}`) {
 		t.Errorf("commonmark = %d %s", a.status, a.body)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"templated","format":"commonmark"}`)
+	if body := string(a.body); a.status != http.StatusOK || !strings.Contains(body, `"layout":null`) ||
+		!strings.Contains(body, `"length":50`) {
+		t.Errorf("a Route's own template = %d %s", a.status, a.body)
 	}
 	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
 		`{"kind":"root_message","template":"{{ env \"HOME\" }}"}`)
