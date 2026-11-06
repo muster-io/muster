@@ -9883,7 +9883,9 @@ entries, reach the open Alert Groups at once, without a lifecycle event in their
   Teams from the label" is turned off, or named by a deleted Team — gets the final edit "No longer updated here" with a
   link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. If the Alert Group
   reaches it again later — its Severity level rises into a condition, or a Team that names it joins — it is published
-  there afresh with `destination_joined`, Loudly while it is firing. An entry that still
+  there afresh with `destination_joined`, Loudly while it is firing. If the final edit has not been carried out yet, as
+  while the Destination is Broken, the Root message is kept instead and edited Quietly back to the current state, with no
+  `destination_joined` and no Mention (C-26.FR-5). An entry that still
   names it keeps the Root message, whether its condition is met or not: in the example above, if the Route also names
   `payments-notice` for `critical`, removing `payments-notice` from the Team keeps the Root message of a warning Alert
   Group there.
