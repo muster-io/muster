@@ -160,7 +160,7 @@ export function TeamAlertRules({ team, label, canWrite, save }: TeamAlertRulesPr
           <div className="flex flex-col gap-3">
             {local.list !== undefined && (
               <p className="text-sm text-destructive" role="alert">
-                {t("teams.rules.tooMany", { count: MATCHERS_MAX })}
+                {t("teams.rules.tooMany", { max: MATCHERS_MAX })}
               </p>
             )}
             {otherRefusal && !shownOnRows && (

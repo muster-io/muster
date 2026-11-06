@@ -2733,7 +2733,7 @@
       "matchersHint": "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
       "sharedNamespaceHint": "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
       "title": "Which Alerts belong to this Team",
-      "tooMany": "A Team has at most {{count}} matchers."
+      "tooMany": "A Team has at most {{max}} matchers."
     },
     "title": "Teams",
     "values": {
