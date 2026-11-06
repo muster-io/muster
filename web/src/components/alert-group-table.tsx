@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // The rows of the Alert Group list (C-09.FR-13, FR-24; C-10.FR-13, FR-14, FR-16; C-13.FR-12; C-17.FR-3). On a desktop a
-// table: status with the Delivery problem mark, #N, title, Severity level, Urgent, Route, Integrations, firing and
+// table: status with the Delivery problem mark, #N, title, Severity level, Urgent, Route, Integrations, Teams, firing and
 // total Alerts, Owner, Snooze end, the badge "Unclaimed", start, duration, last change, Reopen count, the label columns
 // the user picked and the "…" menu of Commands. On a phone compact rows — status, the badge "Unclaimed", #N, title,
 // Urgent mark, duration, Owner and the Delivery problem in words, a link to the page, with the menu beside it — so that
@@ -30,6 +30,7 @@ import { CommandMenu, personName } from "./command-buttons";
 import { type CursorList, type DataColumn, DataTable } from "./data-table";
 import { severityLabel } from "./integration-alerts";
 import { DateTime, Duration, elapsedSeconds, formatElapsed, useNow } from "./relative-time";
+import { TeamEntries } from "./team-membership";
 import { Button } from "./ui/button";
 
 /** The width from which the list is a table and the filters a side panel (Tailwind's lg). */
@@ -220,6 +221,13 @@ function useColumns(labelColumns: readonly string[], selecting: boolean): DataCo
         Cell: ({ row }) => (
           <span className="wrap-anywhere">{row.integrations.map((i) => i.name).join(", ")}</span>
         ),
+      },
+      {
+        id: "teams",
+        header: t("alertGroups.fields.teams"),
+        className: "min-w-24",
+        Cell: ({ row }) =>
+          row.teams.length === 0 ? NONE : <TeamEntries entries={row.teams} testId="teams" />,
       },
       {
         id: "alerts",

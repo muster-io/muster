@@ -44,6 +44,17 @@ describe("the Team form", () => {
     expect(slugOf("a".repeat(80))).toHaveLength(63);
   });
 
+  test("a Team made for an unknown value of the Team label starts with it as the slug and the name", async () => {
+    const { save } = renderForm({ initial: { name: "checkout", slug: "checkout" } });
+    await expect.element(slug()).toHaveValue("checkout");
+    await expect.element(name()).toHaveValue("checkout");
+    await userEvent.fill(name(), "Checkout squad");
+    await expect.element(slug()).toHaveValue("checkout");
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ name: "Checkout squad", slug: "checkout" });
+  });
+
   test("a new Team's slug follows its name until the slug is edited, and Save sends the details", async () => {
     const { save } = renderForm();
     await expect

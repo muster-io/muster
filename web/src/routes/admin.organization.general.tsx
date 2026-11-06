@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Organization → General (C-20.FR-1, FR-9): the name of the Organization, the time zone of messages, the start of the
+// Organization → General (C-20.FR-1, FR-9): the name of the Organization, the time zone of messages, the Team label
+// (C-25.FR-5) whose value names a Team, the start of the
 // working day and the first day of the week at which the Snooze presets end, and the Organization's Working hours —
 // the working days and the end of the working day beside its start — which every Team without its own follows
 // (C-25.FR-9). Times go to the API as entered; a value it refuses, such as an end not later than the start, shows at
@@ -15,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { type Organization, Weekday } from "../api/gen/model";
+import { DocsLink } from "../components/docs-link";
 import {
   Field,
   errorText,
@@ -38,9 +40,14 @@ export const Route = createFileRoute("/admin/organization/general")({
   component: GeneralPage,
 });
 
+/** The format of `organization.team_label`, a label name. */
+const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 const schema = z.object({
   name: z.string().trim().min(1, "required"),
   time_zone: z.string().min(1, "required"),
+  // The API takes a label name, as Prometheus does; it also refuses the labels that an Internal alert sets itself.
+  team_label: z.string().trim().min(1, "required").regex(LABEL_NAME, "invalid_format"),
   // The API checks the start of the working day, HH:MM on the 24-hour clock.
   workday_start: z.string(),
   workday_end: z.string(),
@@ -63,6 +70,7 @@ function GeneralForm({ organization }: { organization: Organization }) {
     values: (org) => ({
       name: org.name,
       time_zone: org.time_zone,
+      team_label: org.team_label,
       workday_start: org.workday_start,
       workday_end: org.workday_end,
       working_days: [...org.working_days],
@@ -71,6 +79,7 @@ function GeneralForm({ organization }: { organization: Organization }) {
     patch: (v) => ({
       name: v.name.trim(),
       time_zone: v.time_zone,
+      team_label: v.team_label.trim(),
       workday_start: v.workday_start,
       workday_end: v.workday_end,
       working_days: v.working_days,
@@ -79,6 +88,7 @@ function GeneralForm({ organization }: { organization: Organization }) {
     fields: () => [
       "name",
       "time_zone",
+      "team_label",
       "workday_start",
       "workday_end",
       "working_days",
@@ -87,6 +97,14 @@ function GeneralForm({ organization }: { organization: Organization }) {
     resolver: zodResolver(schema),
   });
   const { errors } = form.formState;
+  const teamLabelError = (error: { message?: string } | undefined) => {
+    if (error === undefined) {
+      return undefined;
+    }
+    return error.message === "reserved_label"
+      ? t("organization.general.teamLabelReserved")
+      : errorText(t, error);
+  };
   const hoursError = (error: { message?: string } | undefined) =>
     error === undefined ? undefined : hoursErrorText(t, error.message ?? "");
   return (
@@ -119,6 +137,31 @@ function GeneralForm({ organization }: { organization: Organization }) {
                     onChange={field.onChange}
                   />
                 )}
+              />
+            )}
+          </Field>
+          <Field
+            id="organization-team-label"
+            label={t("organization.general.teamLabel")}
+            hint={
+              <>
+                {t("organization.general.teamLabelHint")}{" "}
+                <DocsLink
+                  to="field.team_label"
+                  kind="learn_more"
+                  about={t("docs.fields.teamLabel")}
+                />
+              </>
+            }
+            error={teamLabelError(errors.team_label)}
+          >
+            {(control) => (
+              <Input
+                {...control}
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono sm:max-w-xs"
+                {...form.register("team_label")}
               />
             )}
           </Field>

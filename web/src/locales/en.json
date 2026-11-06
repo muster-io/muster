@@ -167,7 +167,8 @@
       "integrations": "Integrations",
       "route": "Route",
       "severity": "Severity",
-      "started": "Started"
+      "started": "Started",
+      "teams": "Teams"
     },
     "filters": {
       "addIntegration": "Add an integration…",
@@ -325,7 +326,8 @@
       "route": "Route",
       "severity": "Severity",
       "startsAt": "Started",
-      "state": "State"
+      "state": "State",
+      "teams": "Teams"
     },
     "empty": "No alerts yet.",
     "emptyFiltered": "No alerts match these filters.",
@@ -1224,6 +1226,7 @@
       "snooze": "Snooze durations",
       "staticLabels": "Static labels",
       "teamIdp": "Identity provider groups",
+      "teamLabel": "Team label and Team matchers",
       "telegramBaseUrl": "Telegram in restricted networks",
       "telegramMode": "Long polling or webhook",
       "template": "Message templates",
@@ -1270,6 +1273,7 @@
       "templateError": "Template error",
       "token": "The token is not valid",
       "truncated": "Truncated Snapshots",
+      "unknownTeamValues": "Values of the Team label without a Team",
       "webhookCredential": "Credentials in a request",
       "webhookSigningSecret": "Previous Signing secret"
     },
@@ -1802,6 +1806,9 @@
     "evaluationNote": "Changes apply to Alerts evaluated from now on; open Alert Groups keep their status.",
     "general": {
       "name": "Name",
+      "teamLabel": "Team label",
+      "teamLabelHint": "The label whose value names the Team of an Alert, by the Team's slug. Not a label that an Internal alert sets, such as team_id.",
+      "teamLabelReserved": "An Internal alert sets this label itself, so it cannot be the Team label. Choose another.",
       "timeZone": "Time zone of messages",
       "timeZoneHint": "Times in messages use this time zone. Each user sees the web UI in their own time zone.",
       "timeZoneSearch": "Search time zones",
@@ -2614,7 +2621,8 @@
   "teams": {
     "create": {
       "start": "New Team",
-      "title": "New Team"
+      "title": "New Team",
+      "valueNote": "{{value}} cannot be the slug of a Team. A Team gets Alerts with this value only through a Team matcher such as {{matcher}}."
     },
     "delete": {
       "action": "Delete Team",
@@ -2622,6 +2630,7 @@
       "inUse": "The Team still has Schedules or Escalation chains. Remove them first.",
       "title": "Delete Team {{name}}?"
     },
+    "deletedName": "{{name}} (deleted)",
     "details": {
       "title": "Details"
     },
@@ -2669,6 +2678,11 @@
       "remove": "Remove group {{group}}",
       "title": "Identity provider groups"
     },
+    "label": {
+      "change": "Change in the Organization settings",
+      "hint": "An Alert belongs to a Team by the value of the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization.",
+      "title": "Team label"
+    },
     "list": {
       "empty": "No Teams yet.",
       "people_one": "{{count}} person",
@@ -2706,7 +2720,31 @@
       "unknownUser": "This User does not exist or was deleted.",
       "user": "User"
     },
-    "title": "Teams"
+    "rule": {
+      "label": "by the Team label",
+      "matcher": "by the matcher {{matcher}}"
+    },
+    "rules": {
+      "byLabel": "By the Team label",
+      "byLabelHint": "An Alert whose {{label}} equals the slug of this Team belongs to it, exactly: Payments is not payments. The value changes with the slug.",
+      "byMatchers": "By Team matchers",
+      "example": "How an Alert Group shows it",
+      "matchersField": "Team matchers",
+      "matchersHint": "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
+      "sharedNamespaceHint": "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
+      "title": "Which Alerts belong to this Team",
+      "tooMany": "A Team has at most {{count}} matchers."
+    },
+    "title": "Teams",
+    "values": {
+      "alerts_one": "{{count}} Alert in the last {{days}} days",
+      "alerts_other": "{{count}} Alerts in the last {{days}} days",
+      "banner": "Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged.",
+      "create": "Create Team",
+      "createFor": "Create Team for the value {{value}}",
+      "lastSeen": "Last seen {{time}} ({{ago}} ago)",
+      "title": "Unknown values of {{label}}"
+    }
   },
   "templates": {
     "errors": {
@@ -2800,6 +2838,8 @@
       "snoozedUntil": "Snoozed until {{until}}",
       "snoozeEnded": "Snooze ended while alerts still fire",
       "takeover": "Taken over from {{name}}",
+      "teamJoinedLabel": "{{team}} joined — by the Team label",
+      "teamJoinedMatcher": "{{team}} joined — by the matcher {{matcher}}",
       "unacknowledged": "Unacknowledged",
       "unacknowledgedWith": "Unacknowledged: {{reason}}",
       "unclaimed": "Unclaimed",
@@ -2838,7 +2878,8 @@
       "fallbackTemplateUsed": "Messages used the fallback template",
       "musterUnavailable": "Muster was unavailable from {{from}} to {{to}}",
       "musterUnavailableUnknown": "Muster was unavailable",
-      "templateValueMissing": "A template value was missing"
+      "templateValueMissing": "A template value was missing",
+      "unknownTeamValue": "No Team has the value {{value}} of the Team label"
     },
     "title": "Timeline",
     "transport": {

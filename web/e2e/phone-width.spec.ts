@@ -11,14 +11,20 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  TEAM_BOB,
+  TEAM_SPEC_PASSWORD,
   adminApi,
   advance,
+  alertGroupOf,
   createRoute,
   deleteRoute,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  removeTeamsBySlug,
+  seedTeamAlerts,
   shot,
   signIn,
   signInAdmin,
@@ -168,6 +174,69 @@ test("the list and the page in Russian, 360 px wide", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Хронология" })).toBeVisible();
   await expectNoHorizontalScroll(page);
   await shot(page, "alert-group-page-ru-360");
+  expect(csp).toEqual([]);
+});
+
+test("the list with My Teams and the Alert Group page with its Teams fit 360 px, in English and in Russian", async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  await removeIntegration(admin, "ag-phone-teams");
+  await removeTeamsBySlug(admin, ["payments", "search"]);
+  await admin.dispose();
+  const integration = await seedTeamAlerts("ag-phone-teams", "PhoneTeam");
+  const group = await alertGroupOf(integration, "PhoneTeamPayments");
+  try {
+    await signIn(page, TEAM_BOB, TEAM_SPEC_PASSWORD);
+    const rowOf = (name: string) => page.getByTestId("alert-group-row").filter({ hasText: name });
+
+    await page.goto("/alert-groups?q=PhoneTeam");
+    await expect(rowOf("PhoneTeamSearch")).toHaveCount(1);
+    await page.getByTestId("filter-my-teams").tap();
+    await expect(page).toHaveURL(/[?&]team=mine/);
+    await expect(page.getByTestId("filter-my-teams")).toHaveAttribute("aria-pressed", "true");
+    await expect(rowOf("PhoneTeamPayments")).toHaveCount(1);
+    await expect(rowOf("PhoneTeamSearch")).toHaveCount(0);
+    await expectNoHorizontalScroll(page);
+    await shot(page, "alert-group-list-my-teams-360");
+    // The filter "Team" is in the sheet of filters.
+    await page.getByTestId("filters-button").tap();
+    const sheet = page.getByRole("dialog", { name: "Filters" });
+    await expect(sheet.getByLabel("Team", { exact: true })).toHaveValue("mine");
+    await expectNoHorizontalScroll(page);
+    await sheet.getByRole("button", { name: "Show Alert Groups" }).tap();
+
+    await page.goto(`/alert-groups/${group}`);
+    await expect(page.getByTestId("alert-group-teams")).toContainText(
+      "Teams:payments — by the Team label",
+    );
+    await expectNoHorizontalScroll(page);
+    await shot(page, "alert-group-page-teams-360");
+
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await page.goto("/alert-groups?q=PhoneTeam&team=mine");
+    await expect(page.getByTestId("filter-my-teams")).toHaveText("Мои команды");
+    await expect(rowOf("PhoneTeamPayments")).toHaveCount(1);
+    await expectNoHorizontalScroll(page);
+    await page.goto(`/alert-groups/${group}`);
+    await expect(page.getByTestId("alert-group-teams")).toContainText(
+      "Команды:payments — по метке команды",
+    );
+    await expectNoHorizontalScroll(page);
+    await shot(page, "alert-group-page-teams-ru-360");
+    await page.goto("/profile");
+    await page.getByLabel("Язык").selectOption("en");
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  } finally {
+    const cleanup = await adminApi();
+    await removeIntegration(cleanup, "ag-phone-teams");
+    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await cleanup.dispose();
+  }
   expect(csp).toEqual([]);
 });
 

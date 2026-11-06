@@ -227,6 +227,8 @@ function organizationField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.totpRequired");
     case "/buttons":
       return t("audit.fields.buttons");
+    case "/team_label":
+      return t("organization.general.teamLabel");
     default:
       return undefined;
   }
@@ -273,6 +275,8 @@ function teamField(t: TFunction, pointer: string): string | undefined {
       return t("teams.idp.title");
     case "/working_hours":
       return t("teams.hours.title");
+    case "/matchers":
+      return t("teams.rules.matchersField");
     default:
       return undefined;
   }

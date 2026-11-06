@@ -36,7 +36,11 @@ import {
   type AlertGroupList,
   AgSortParameter,
 } from "../api/gen/model";
-import { AlertGroupFilters, UnclaimedToggle } from "../components/alert-group-filters";
+import {
+  AlertGroupFilters,
+  MyTeamsToggle,
+  UnclaimedToggle,
+} from "../components/alert-group-filters";
 import {
   AlertGroupTable,
   type Selection,
@@ -536,6 +540,7 @@ function AlertGroups() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <MineToggle value={search.owner} onChange={(owner) => update({ owner })} />
+            <MyTeamsToggle value={search.team} onChange={(team) => update({ team })} />
             <UnclaimedToggle
               value={search.unclaimed}
               onChange={(unclaimed) => update({ unclaimed })}

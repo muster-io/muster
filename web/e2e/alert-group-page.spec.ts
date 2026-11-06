@@ -13,12 +13,17 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   adminApi,
   advance,
+  alertGroupOf,
   createRoute,
   deleteRoute,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  removeTeamsBySlug,
+  seedTeamAlerts,
+  setTeamMatchers,
   shot,
   signIn,
   signInAdmin,
@@ -277,6 +282,90 @@ test("a raised Minimum severity of the Route makes an acknowledged warning Alert
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByTestId("route-minimum-severity")).toHaveValue("none");
   }
+  expect(csp).toEqual([]);
+});
+
+const BILLING = 'namespace=~"checkout|billing"';
+
+test("shows the Teams of an Alert Group in its header, Timeline and Alerts", async ({ page }) => {
+  test.setTimeout(240_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  await removeIntegration(admin, "ag-teams");
+  await removeTeamsBySlug(admin, ["payments", "search"]);
+  await admin.dispose();
+  // Teams "payments" (by the Team label and, once it has the matcher, by namespace) and "search"; Alert Groups of
+  // team="payments", team="search", team="Payments" (no Team) and namespace="billing".
+  const integration = await seedTeamAlerts("ag-teams", "AT");
+  const paymentsGroup = await alertGroupOf(integration, "ATPayments");
+  const billingGroup = await alertGroupOf(integration, "ATBilling");
+  const capitalGroup = await alertGroupOf(integration, "ATCapital");
+  const matcher = await adminApi();
+  await setTeamMatchers(matcher, "payments", [
+    { label: "namespace", op: "=~", value: "checkout|billing" },
+  ]);
+  await matcher.dispose();
+  await signInAdmin(page);
+
+  // 5. The header: "Teams: payments — by the Team label"; the Timeline: "payments joined — by the Team label".
+  await page.goto(`/alert-groups/${paymentsGroup}`);
+  await expect(page.getByTestId("alert-group-teams")).toContainText(
+    "Teams:payments — by the Team label",
+  );
+  await expect(
+    page.getByTestId("alert-group-teams").getByRole("link", { name: "payments" }),
+  ).toHaveAttribute("href", /\/teams\/TM/);
+  await expect(entry(page, "payments joined — by the Team label")).toHaveCount(1);
+  await expect(page.getByTestId("alert-group-alerts").getByTestId("alert-teams")).toContainText(
+    "payments — by the Team label",
+  );
+  await shot(page, "alert-group-page-teams");
+
+  // A Team matcher brings the Team to the Alert Group of namespace="billing", which has no Team label.
+  await expect(async () => {
+    await page.goto(`/alert-groups/${billingGroup}`);
+    await expect(page.getByTestId("alert-group-teams")).toContainText(
+      `payments — by the matcher ${BILLING}`,
+      { timeout: 3_000 },
+    );
+  }).toPass({ timeout: 60_000 });
+  await expect(entry(page, `payments joined — by the matcher ${BILLING}`)).toHaveCount(1);
+
+  // A value of the Team label that names no Team: the Timeline says so, and the header has no Teams.
+  await page.goto(`/alert-groups/${capitalGroup}`);
+  await expect(entry(page, "No Team has the value Payments of the Team label")).toHaveCount(1);
+  await expect(page.getByTestId("alert-group-teams")).toHaveCount(0);
+
+  // A deleted Team stays among the Teams of the Alert Group, marked as deleted.
+  const gone = await adminApi();
+  await removeTeamsBySlug(gone, ["payments"]);
+  await gone.dispose();
+  await page.goto(`/alert-groups/${paymentsGroup}`);
+  await expect(page.getByTestId("alert-group-teams")).toContainText(
+    "payments (deleted) — by the Team label",
+  );
+  await expect(page.getByTestId("alert-group-teams").getByRole("link")).toHaveCount(0);
+
+  // In Russian.
+  await page.goto("/profile");
+  await page.getByLabel("Language").selectOption("ru");
+  await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+  await page.goto(`/alert-groups/${paymentsGroup}`);
+  await expect(page.getByTestId("alert-group-teams")).toContainText(
+    "Команды:payments (удалена) — по метке команды",
+  );
+  await expect(entry(page, "payments добавлена — по метке команды")).toHaveCount(1);
+  await page.goto(`/alert-groups/${capitalGroup}`);
+  await expect(entry(page, "Нет команды со значением Payments метки команды")).toHaveCount(1);
+  await shot(page, "alert-group-page-teams-ru");
+  await page.goto("/profile");
+  await page.getByLabel("Язык").selectOption("en");
+  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+
+  const cleanup = await adminApi();
+  await removeIntegration(cleanup, "ag-teams");
+  await removeTeamsBySlug(cleanup, ["search"]);
+  await cleanup.dispose();
   expect(csp).toEqual([]);
 });
 

@@ -3,27 +3,58 @@
 
 // "New Team" (C-25.FR-3): the name, the slug and the description; the Team page opens after it is created, where its
 // people, identity provider groups and Working hours are set. A new Team follows the Organization's Working hours.
+// "Create Team" beside an unknown value of the Team label (C-25.FR-7) opens it with `slug=<value>`, which the slug and
+// the name start with, or, for a value that is no valid slug, with `value=<value>`: an empty slug and a note that such
+// Alerts reach a Team only through a Team matcher.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 
-import { createTeam, getListTeamsQueryKey } from "../api/gen/endpoints/teams/teams";
+import {
+  createTeam,
+  getListTeamLabelValuesQueryKey,
+  getListTeamsQueryKey,
+  useListTeamLabelValues,
+} from "../api/gen/endpoints/teams/teams";
 import { RequirePermission } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
 import { TeamForm } from "../components/team-form";
 import { buttonVariants } from "../components/ui/button";
 
+const searchSchema = z.object({
+  slug: z.string().min(1).optional().catch(undefined),
+  value: z.string().min(1).optional().catch(undefined),
+});
+
 export const Route = createFileRoute("/teams/new")({
   staticData: { shell: true },
+  validateSearch: searchSchema,
   component: NewTeamPage,
 });
+
+/** The note under the title for a value that is no slug: only a Team matcher can pick such Alerts. */
+function ValueNote({ value }: { value: string }) {
+  const { t } = useTranslation();
+  const values = useListTeamLabelValues();
+  const label = values.data?.label ?? "team";
+  return (
+    <p
+      className="max-w-2xl text-sm text-muted-foreground wrap-anywhere"
+      data-testid="team-value-note"
+    >
+      {t("teams.create.valueNote", { value, matcher: `${label}="${value}"` })}
+    </p>
+  );
+}
 
 function NewTeam() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { slug, value } = Route.useSearch();
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -32,8 +63,10 @@ function NewTeam() {
           {t("teams.title")}
         </Link>
         <PageTitle docs="page.teams">{t("teams.create.title")}</PageTitle>
+        {value !== undefined && slug === undefined && <ValueNote value={value} />}
       </div>
       <TeamForm
+        initial={slug === undefined ? undefined : { name: slug, slug }}
         submitLabel={t("common.save")}
         onCancel={() => void navigate({ to: "/teams" })}
         save={async (values) => {
@@ -44,6 +77,7 @@ function NewTeam() {
             own_working_hours: false,
           });
           void queryClient.invalidateQueries({ queryKey: getListTeamsQueryKey() });
+          void queryClient.invalidateQueries({ queryKey: getListTeamLabelValuesQueryKey() });
           await navigate({ to: "/teams/$teamId", params: { teamId: team.id } });
         }}
       />

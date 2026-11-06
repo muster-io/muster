@@ -321,6 +321,85 @@ test("General saves the working day and week, which the Snooze presets name, and
   expect(csp).toEqual([]);
 });
 
+test("General sets the Team label, and refuses a label that an Internal alert sets", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const csp = watchCsp(page);
+  const saved = await withAdmin(async (admin) => {
+    const me = await admin.call<{ user: { language?: Language } }>("GET", "/api/v1/me");
+    return me.user.language ?? null;
+  });
+  await signInAdmin(page);
+  try {
+    // 8. "Team label" is `team` by default, under the time zone.
+    await page.goto("/admin/organization/general");
+    const label = page.getByLabel("Team label", { exact: true });
+    await expect(label).toHaveValue("team");
+    await expect(page.getByText("Team label", { exact: true })).toHaveCount(1);
+    await expect(label).toHaveAccessibleDescription(
+      /The label whose value names the Team of an Alert, by the Team's slug\./,
+    );
+
+    // `team_id` is set by an Internal alert: the API refuses it at the field and nothing is saved.
+    await label.fill("team_id");
+    await save(page);
+    await expect(label).toHaveAttribute("aria-invalid", "true");
+    await expect(
+      page.getByText(
+        "An Internal alert sets this label itself, so it cannot be the Team label. Choose another.",
+      ),
+    ).toHaveCount(1);
+    await expect(label).toBeFocused();
+    await expect(page.getByTestId("general-status")).toHaveText("");
+    await shot(page, "general-team-label-refused-en");
+    const kept = await withAdmin((admin) =>
+      admin.call<{ team_label: string }>("GET", "/api/v1/organization"),
+    );
+    expect(kept.team_label).toBe("team");
+
+    // A name that is no label is stopped before it is sent.
+    await label.fill("my label");
+    await save(page);
+    await expect(label).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText(INVALID_FORMAT, { exact: true })).toHaveCount(1);
+
+    // `service_team` is saved, and the Teams page names the label.
+    await label.fill("service_team");
+    await save(page);
+    await expect(page.getByTestId("general-status")).toHaveText("Saved.");
+    await page.goto("/teams");
+    await expect(page.getByTestId("team-label-name")).toHaveText("service_team");
+    await shot(page, "teams-team-label-changed");
+
+    // In Russian: the field and the refusal.
+    await adminLanguage("ru");
+    await page.goto("/admin/organization/general");
+    const russian = page.getByLabel("Метка команды", { exact: true });
+    await expect(russian).toHaveValue("service_team");
+    await russian.fill("schedule");
+    await save(page);
+    await expect(
+      page.getByText(
+        "Эту метку выставляет сам внутренний алерт, поэтому она не может быть меткой команды. Выберите другую.",
+      ),
+    ).toHaveCount(1);
+    await shot(page, "general-team-label-refused-ru");
+  } finally {
+    await adminLanguage(saved);
+    await withAdmin(async (admin) => {
+      const org = await admin.call<Organization & { etag: string }>("GET", "/api/v1/organization");
+      await admin.call(
+        "PUT",
+        "/api/v1/organization",
+        { ...organizationInput(org), team_label: "team" },
+        { "If-Match": org.etag },
+      );
+    });
+  }
+  expect(csp).toEqual([]);
+});
+
 test("General edits the working days and the end of the working day, which a Team without its own follows", async ({
   page,
 }) => {

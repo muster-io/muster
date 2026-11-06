@@ -17,6 +17,9 @@ import {
   expectNoHorizontalScroll,
   fam,
   notify,
+  removeIntegration,
+  removeTeamsBySlug,
+  seedTeamAlerts,
   shot,
   signIn,
   signInAdmin,
@@ -452,5 +455,40 @@ test("shows the routes, the warnings and the Alerts view in Russian", async ({ p
       .getByTestId("integration-warning-mark")
       .locator("summary"),
   ).toHaveText("1 предупреждение");
+  expect(csp).toEqual([]);
+});
+
+test("the Alerts view shows the Teams of each Alert with their rule", async ({ page }) => {
+  test.setTimeout(180_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  await removeIntegration(admin, "int-teams");
+  await removeTeamsBySlug(admin, ["payments", "search"]);
+  await admin.dispose();
+  const id = await seedTeamAlerts("int-teams", "IntTeam");
+  try {
+    await signInAdmin(page);
+    await page.goto(`/integrations/${id}`);
+    const table = page.getByRole("table", { name: "Alerts" });
+    await expect(table.getByRole("columnheader", { name: "Teams" })).toBeVisible();
+    const pay = alertRows(page).filter({ hasText: "alertname=IntTeamPayments" });
+    await expect(await alertCell(page, pay, "Teams")).toHaveText("payments — by the Team label");
+    const search = alertRows(page).filter({ hasText: "alertname=IntTeamSearch" });
+    await expect(await alertCell(page, search, "Teams")).toHaveText("search — by the Team label");
+    // A value of the Team label that names no Team, and an Alert of no Team label, have no Teams.
+    const capital = alertRows(page).filter({ hasText: "alertname=IntTeamCapital" });
+    await expect(await alertCell(page, capital, "Teams")).toHaveText("—");
+    const billing = alertRows(page).filter({ hasText: "alertname=IntTeamBilling" });
+    await expect(await alertCell(page, billing, "Teams")).toHaveText("—");
+    await shot(page, "integration-alerts-teams");
+    await page.setViewportSize({ width: 360, height: 740 });
+    await expectNoHorizontalScroll(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+  } finally {
+    const cleanup = await adminApi();
+    await removeIntegration(cleanup, "int-teams");
+    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await cleanup.dispose();
+  }
   expect(csp).toEqual([]);
 });

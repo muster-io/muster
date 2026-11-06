@@ -42,8 +42,15 @@ export function slugOf(name: string): string {
     .slice(0, SLUG_MAX);
 }
 
-export function teamValues(team: Team | undefined): TeamFormValues {
-  return { name: team?.name ?? "", slug: team?.slug ?? "", description: team?.description ?? "" };
+export function teamValues(
+  team: Team | undefined,
+  initial?: { name?: string; slug?: string },
+): TeamFormValues {
+  return {
+    name: team?.name ?? initial?.name ?? "",
+    slug: team?.slug ?? initial?.slug ?? "",
+    description: team?.description ?? "",
+  };
 }
 
 /** The text of a refusal of a field of the form. */
@@ -61,6 +68,8 @@ function fieldText(t: ReturnType<typeof useTranslation>["t"], code: string): str
 export interface TeamFormProps {
   /** The Team of an edit. */
   team?: Team;
+  /** The name and slug a new Team starts with, such as an unknown value of the Team label. */
+  initial?: { name?: string; slug?: string };
   readOnly?: boolean;
   submitLabel: string;
   /** Sends the details; a refusal is shown by the form. */
@@ -72,6 +81,7 @@ export interface TeamFormProps {
 
 export function TeamForm({
   team,
+  initial,
   readOnly = false,
   submitLabel,
   save,
@@ -81,11 +91,11 @@ export function TeamForm({
   const { t } = useTranslation();
   const form = useForm<TeamFormValues>({
     resolver: zodResolver(schema),
-    defaultValues: teamValues(team),
+    defaultValues: teamValues(team, initial),
   });
   const { errors, isDirty } = form.formState;
   // A new Team's slug follows its name until the slug is edited by hand.
-  const [slugTouched, setSlugTouched] = useState(team !== undefined);
+  const [slugTouched, setSlugTouched] = useState(team !== undefined || initial?.slug !== undefined);
   const formElement = useRef<HTMLFormElement>(null);
   // After a refused save, the focus goes to the first marked field.
   const [focusRequest, setFocusRequest] = useState(0);

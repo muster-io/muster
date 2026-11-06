@@ -3,7 +3,8 @@
 
 // The filters of the Alert Group list in a real browser, against a stubbed API: every filter set through its control
 // lands in the URL, the URL read back in a new router shows the same filters, and the view's request names them; the
-// "Unclaimed" quick filter sets the same value as its checkbox. A Matcher the server refuses leaves the URL as it was.
+// "Unclaimed" quick filter sets the same value as its checkbox. The Team filter and the "My Teams" quick filter keep `team`
+// in the URL (C-25.FR-2, C-25.AC-11). A Matcher the server refuses leaves the URL as it was.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -31,7 +32,7 @@ import {
   listParams,
 } from "../lib/alert-group-search";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
-import { AlertGroupFilters, UnclaimedToggle } from "./alert-group-filters";
+import { AlertGroupFilters, MyTeamsToggle, UnclaimedToggle } from "./alert-group-filters";
 
 const ROUTES = [
   { id: "RT0000000000K8", name: "k8s", is_default: false },
@@ -40,6 +41,11 @@ const ROUTES = [
 const INTEGRATIONS = [
   { id: "NT0000000000AM", name: "prod-am" },
   { id: "NT0000000000LB", name: "lab" },
+];
+
+const TEAMS = [
+  { id: "TM0000000000PA", name: "payments", slug: "payments" },
+  { id: "TM0000000000SE", name: "search", slug: "search" },
 ];
 
 let requests: URL[] = [];
@@ -62,6 +68,9 @@ beforeEach(async () => {
     requests.push(url);
     if (url.pathname === "/api/v1/routes") {
       return Promise.resolve(json(200, { items: ROUTES }));
+    }
+    if (url.pathname === "/api/v1/teams") {
+      return Promise.resolve(json(200, { items: TEAMS, next_cursor: null }));
     }
     if (url.pathname === "/api/v1/integrations") {
       return Promise.resolve(json(200, { items: INTEGRATIONS, next_cursor: null }));
@@ -112,6 +121,7 @@ async function renderAt(href: string) {
         history.replace(`/alert-groups${defaultStringifySearch(compact({ ...search, ...patch }))}`);
       return (
         <>
+          <MyTeamsToggle value={search.team} onChange={(team) => update({ team })} />
           <UnclaimedToggle
             value={search.unclaimed}
             onChange={(unclaimed) => update({ unclaimed })}
@@ -203,6 +213,16 @@ describe("search parameters", () => {
     expect(compact(countParams(search, 0))).toEqual({ delivery_problem: true });
     expect(compact(listParams(search, 0))).toEqual({ delivery_problem: true });
     expect(alertGroupSearchSchema.parse(defaultParseSearch("?delivery_problem=no"))).toEqual({});
+  });
+
+  test("keep the Team filter in the URL and send it to the list and the counts", () => {
+    const search = alertGroupSearchSchema.parse(defaultParseSearch("?team=mine"));
+    expect(search).toEqual({ team: "mine" });
+    expect(defaultStringifySearch(search)).toBe("?team=mine");
+    expect(compact(countParams(search, 0))).toEqual({ team: "mine" });
+    expect(compact(listParams(search, 0))).toEqual({ team: "mine" });
+    const one = alertGroupSearchSchema.parse(defaultParseSearch("?team=TM0000000000PA"));
+    expect(compact(listParams(one, 0))).toEqual({ team: "TM0000000000PA" });
   });
 
   test("keep the Unclaimed filter in the URL and send it to the list and the counts", () => {
@@ -300,6 +320,28 @@ describe("AlertGroupFilters", () => {
     await toggle.click();
     await expect.poll(() => searchOf(router)).toEqual({});
     await expect.element(screen.getByRole("checkbox", { name: "Unclaimed" })).not.toBeChecked();
+  });
+
+  test("the Team filter and the My Teams quick filter keep team in the URL", async () => {
+    const { router, screen } = await renderAt("/alert-groups");
+    const select = screen.getByLabelText("Team", { exact: true });
+    await expect.element(screen.getByRole("option", { name: "search" })).toBeInTheDocument();
+    await select.selectOptions("search");
+    await expect.poll(() => searchOf(router)).toEqual({ team: "TM0000000000SE" });
+    const mine = screen.getByRole("button", { name: "My Teams" });
+    await expect.element(mine).toHaveAttribute("aria-pressed", "false");
+    await mine.click();
+    await expect.poll(() => searchOf(router)).toEqual({ team: "mine" });
+    expect(router.state.location.searchStr).toBe("?team=mine");
+    await expect.element(mine).toHaveAttribute("aria-pressed", "true");
+    await expect.element(select).toHaveValue("mine");
+    await screen.getByRole("button", { name: "Clear filters" }).click();
+    await expect.poll(() => searchOf(router)).toEqual({});
+    await expect.element(mine).toHaveAttribute("aria-pressed", "false");
+    await select.selectOptions("My Teams");
+    await expect.poll(() => searchOf(router)).toEqual({ team: "mine" });
+    await select.selectOptions("All");
+    await expect.poll(() => searchOf(router)).toEqual({});
   });
 
   test("a Matcher the server refuses leaves the URL as it was", async () => {

@@ -12,6 +12,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import {
   APP,
+  TEAM_BOB,
+  TEAM_SPEC_PASSWORD,
   adminApi,
   createRoute,
   deleteRoute,
@@ -19,7 +21,11 @@ import {
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  removeTeamsBySlug,
+  seedTeamAlerts,
   shot,
+  signIn,
   signInAdmin,
   watchCsp,
 } from "./support";
@@ -229,5 +235,90 @@ test("lists Alert Groups with counts, filters, search and live updates in the UR
   }).format(new Date(started));
   await duration.hover();
   await expect(duration).toHaveAttribute("title", `Since ${shown}`);
+  expect(csp).toEqual([]);
+});
+
+/** The row of the Alert Group called name. */
+function groupRow(page: Page, name: string) {
+  return rows(page).filter({ hasText: name });
+}
+
+test("lists the Teams of each Alert Group and filters by Team and My Teams, which keep their values in the URL", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  await removeIntegration(admin, "ag-list-teams");
+  await removeTeamsBySlug(admin, ["payments", "search"]);
+  await admin.dispose();
+  // "payments" has bob in it and "search" has nobody; one Alert Group each by the Team label.
+  await seedTeamAlerts("ag-list-teams", "ListTeam");
+  try {
+    await signInAdmin(page);
+    await page.goto("/alert-groups?q=ListTeam");
+    await expect(page.getByRole("columnheader", { name: "Teams" })).toBeVisible();
+    await expect(groupRow(page, "ListTeamPayments").getByTestId("team-entry")).toHaveText(
+      "payments — by the Team label",
+    );
+    await expect(groupRow(page, "ListTeamSearch").getByTestId("team-entry")).toHaveText(
+      "search — by the Team label",
+    );
+    // An Alert Group with a value of no Team has none: a dash.
+    await expect(groupRow(page, "ListTeamCapital").getByTestId("team-entry")).toHaveCount(0);
+    await shot(page, "alert-group-list-teams");
+
+    // The filter "Team" puts the Team in the URL; only the Alert Groups of "search" remain.
+    await page
+      .getByTestId("filter-team")
+      .getByLabel("Team", { exact: true })
+      .selectOption({ label: "search" });
+    await expect(page).toHaveURL(/[?&]team=TM[0-9A-Z]+/);
+    await expect(groupRow(page, "ListTeamSearch")).toHaveCount(1);
+    await expect(groupRow(page, "ListTeamPayments")).toHaveCount(0);
+    // The address alone reproduces the view in another browser.
+    const view = page.url();
+    const other = await browser.newContext();
+    const copy = await other.newPage();
+    await signInAdmin(copy);
+    await copy.goto(view);
+    await expect(groupRow(copy, "ListTeamSearch")).toHaveCount(1);
+    await expect(groupRow(copy, "ListTeamPayments")).toHaveCount(0);
+    await expect(copy.getByTestId("filter-team").getByLabel("Team", { exact: true })).toHaveValue(
+      /^TM/,
+    );
+    await other.close();
+
+    // "My Teams" as the admin, who is in no Team: nothing, with the value in the URL.
+    await page.goto("/alert-groups?q=ListTeam");
+    await page.getByTestId("filter-my-teams").click();
+    await expect(page).toHaveURL(/[?&]team=mine/);
+    await expect(page.getByTestId("filter-my-teams")).toHaveAttribute("aria-pressed", "true");
+    await expect(groupRow(page, "ListTeamPayments")).toHaveCount(0);
+    await expect(groupRow(page, "ListTeamSearch")).toHaveCount(0);
+
+    // bob is in "payments" and not in "search": "My Teams" lists the Alert Groups of "payments" only.
+    const bobContext = await browser.newContext();
+    const bob = await bobContext.newPage();
+    await signIn(bob, TEAM_BOB, TEAM_SPEC_PASSWORD);
+    await bob.goto("/alert-groups?q=ListTeam");
+    await expect(groupRow(bob, "ListTeamPayments")).toHaveCount(1);
+    await expect(groupRow(bob, "ListTeamSearch")).toHaveCount(1);
+    await bob.getByTestId("filter-my-teams").click();
+    await expect(bob).toHaveURL(/[?&]team=mine/);
+    await expect(groupRow(bob, "ListTeamPayments")).toHaveCount(1);
+    await expect(groupRow(bob, "ListTeamSearch")).toHaveCount(0);
+    await expect(groupRow(bob, "ListTeamCapital")).toHaveCount(0);
+    await shot(bob, "alert-group-list-my-teams");
+    await bob.getByTestId("filter-my-teams").click();
+    await expect(groupRow(bob, "ListTeamSearch")).toHaveCount(1);
+    await bobContext.close();
+  } finally {
+    const cleanup = await adminApi();
+    await removeIntegration(cleanup, "ag-list-teams");
+    await removeTeamsBySlug(cleanup, ["payments", "search"]);
+    await cleanup.dispose();
+  }
   expect(csp).toEqual([]);
 });

@@ -7,6 +7,12 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+} from "@tanstack/react-router";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
@@ -35,6 +41,18 @@ const FIRING: IntegrationAlert = integrationAlert({
   last_seen_at: "2026-10-07T09:00:00Z",
   alertmanager_groups: ['{}/{team="db"}:{alertname="DiskFull"}'],
   static_label_warnings: ["cluster"],
+  teams: [
+    {
+      team: { id: "TM0000000000PA", name: "payments", slug: "payments", deleted: false },
+      rule: "label",
+      matcher: null,
+    },
+    {
+      team: { id: "TM0000000000SE", name: "search", slug: "search", deleted: false },
+      rule: "matcher",
+      matcher: 'namespace=~"checkout|billing"',
+    },
+  ],
 });
 const GONE: IntegrationAlert = integrationAlert({
   fingerprint: "c1",
@@ -125,10 +143,16 @@ async function renderView() {
   const read: SessionRead = { session: null, ended: false };
   queryClient.setQueryData(SESSION_QUERY_KEY, read);
   const onSearch = vi.fn();
+  // The Teams of an Alert link to their pages, which needs a router.
+  const root = createRootRoute({ component: () => <Harness onSearch={onSearch} /> });
+  const router = createRouter({
+    routeTree: root,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
   await render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={queryClient}>
-        <Harness onSearch={onSearch} />
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </I18nextProvider>,
   );
@@ -194,6 +218,26 @@ describe("IntegrationAlerts", () => {
     await expect.element(groups.getByText('{}/{team="db"}:{alertname="DiskFull"}')).toBeVisible();
     expect(requests[0]?.searchParams.get("state")).toBe("firing");
     expect(rows().filter({ hasText: "instance=db-c" }).elements()).toHaveLength(0);
+  });
+
+  test("shows the Teams of each Alert with their rule, and a dash for an Alert of no Team", async () => {
+    await renderView();
+    const dbA = rowOf("instance=db-a");
+    const lines = dbA
+      .getByTestId("team-entry")
+      .elements()
+      .map((e) => e.textContent);
+    expect(lines).toEqual([
+      "payments — by the Team label",
+      'search — by the matcher namespace=~"checkout|billing"',
+    ]);
+    await expect.element(page.getByRole("columnheader", { name: "Teams" })).toBeVisible();
+    expect(rowOf("payload=").getByTestId("team-entry").elements()).toHaveLength(0);
+    await i18n.changeLanguage("ru");
+    await expect.element(page.getByRole("columnheader", { name: "Команды" })).toBeVisible();
+    await expect
+      .element(dbA.getByTestId("team-entry").first())
+      .toHaveTextContent("payments — по метке команды");
   });
 
   test("shows labels with markup and template syntax as text", async () => {

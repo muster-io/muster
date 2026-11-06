@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): tab, filters (the Owner,
+// The view of the Alert Group list in the URL (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): tab, filters (the Owner, the Team,
 // "Unclaimed", "Snoozed with no end" and "Delivery problem" among them), time range, search, label columns and sort as
 // typed search parameters, so that a view is shared as a link. The list route validates them before its page loads,
 // so this module stays small: it loads with the application.
@@ -85,6 +85,7 @@ export const alertGroupSearchSchema = z.object({
   reopened: z.boolean().optional().catch(undefined),
   label: strings,
   owner: text,
+  team: text,
   unclaimed: z.literal(true).optional().catch(undefined),
   snoozed_no_end: z.literal(true).optional().catch(undefined),
   delivery_problem: z.literal(true).optional().catch(undefined),
@@ -108,6 +109,7 @@ export const FILTER_KEYS = [
   "reopened",
   "label",
   "owner",
+  "team",
   "unclaimed",
   "snoozed_no_end",
   "delivery_problem",
@@ -158,6 +160,7 @@ export function countParams(search: AlertGroupSearch, now: number): GetAlertGrou
     reopened: search.reopened,
     label: search.label,
     owner: search.owner,
+    team: search.team,
     unclaimed: search.unclaimed,
     snoozed_no_end: search.snoozed_no_end,
     delivery_problem: search.delivery_problem,

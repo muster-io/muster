@@ -4,7 +4,7 @@
 // The Alerts view of an Integration (C-06.FR-19): the Alerts Muster tracks for it, with their labels, the state
 // (firing, or resolved with its reason and time), the Route that took each, linked, its Severity level with the
 // value as received when it has no mapping (C-08.FR-13), the Alert Group it lives in as #N, linked, startsAt, the time
-// last seen, the Alertmanager groups listing them and the Static label warning. The full reason of a Gone or Stale Alert opens under its state by a tap, not only
+// last seen, the Teams with their rule (C-25.FR-5), the Alertmanager groups listing them and the Static label warning. The full reason of a Gone or Stale Alert opens under its state by a tap, not only
 // on hover (C-09.FR-24). State tabs, label Matchers, text search and the sort live in the URL of the page. Labels are
 // what Alertmanager sent: they show as text only.
 
@@ -31,6 +31,7 @@ import { useTimeFormat } from "../lib/time";
 import { type DataColumn, DataTable, useCursorList } from "./data-table";
 import { ALERT_TABS, type AlertSearch, type AlertTab } from "./integration-alerts-search";
 import { LabelMatchersInput } from "./label-matchers-input";
+import { TeamEntries } from "./team-membership";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
@@ -266,6 +267,14 @@ function LastSeenCell({ row }: { row: IntegrationAlert }) {
   return <TimeCell iso={row.last_seen_at} />;
 }
 
+function TeamsCell({ row }: { row: IntegrationAlert }) {
+  return row.teams.length === 0 ? (
+    <span className="text-muted-foreground">—</span>
+  ) : (
+    <TeamEntries entries={row.teams} testId="alert-teams" />
+  );
+}
+
 function GroupsCell({ row }: { row: IntegrationAlert }) {
   const { t } = useTranslation();
   const groups = row.alertmanager_groups;
@@ -469,6 +478,7 @@ export function IntegrationAlerts({
       { id: "state", header: t("alerts.columns.state"), className: "min-w-32", Cell: StateCell },
       { id: "route", header: t("alerts.columns.route"), className: "min-w-28", Cell: RouteCell },
       { id: "alert_group", header: t("alerts.columns.alertGroup"), Cell: AlertGroupCell },
+      { id: "teams", header: t("alerts.columns.teams"), className: "min-w-40", Cell: TeamsCell },
       {
         id: "severity",
         header: t("alerts.columns.severity"),
