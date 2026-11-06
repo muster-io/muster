@@ -256,8 +256,13 @@ None.
   held Alert Group arrives (review M1). A save of a Team or of a Route that commits after the deletion of a Destination
   it names listed its Teams can still leave an entry of the deleted Destination, and an Enqueue that read it before
   the deletion committed a pending delivery there: no read returns such an entry, the next save of the entries drops
-  it, and the worker claims such a delivery only to withhold it without a call (`ClaimDueDeliveries`, `prepare`), so
-  nothing is published in a deleted Destination and its secrets are still wiped (re-check of review L1; locking the
+  it, and the worker claims such a delivery only to withhold it without a call (`ClaimDueDeliveries`, `prepare`), once
+  the deletion committed, so that the Destination's secrets are still wiped. A narrow window remains, the race the
+  Route entries have had since L1: a Team save commits an entry of the Destination after the deletion listed its Teams
+  (`ListTeamsOfDestination`), an Enqueue commits a delivery there before the deletion commits, and a worker publishes it
+  while `deleted_at` still reads null — a Root message in the deleted Destination that never gets a final edit; rare,
+  and accepted. A delivery of a Destination that was Broken when it was deleted is never claimed and stays pending, and
+  the wipe of its secrets waits for it, as its final edits did before this story (re-check of review L1; locking the
   named Destinations FOR SHARE on a save closes cycles with the delivery worker, which updates a delivery and then its
   Destination's health). A batch of `route_minimum_severity` takes the membership locks
   up front as the other batches do (review L2). A delivery that a change of
