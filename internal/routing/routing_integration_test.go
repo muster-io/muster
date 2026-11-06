@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"os"
 	"slices"
@@ -529,7 +530,9 @@ func TestIntegrationPreviewDelivery(t *testing.T) {
 		}
 		dests := map[string]string{"infra-critical": "DSAAAAAAAAAAB1", "infra-notice": "DSAAAAAAAAAAB2",
 			"payments-notice": "DSAAAAAAAAAAB3", "gone": "DSAAAAAAAAAAB4"}
-		for name, id := range dests {
+		// In name order, so that the ids, which order the Destinations of a group, do not depend on the map.
+		for _, name := range slices.Sorted(maps.Keys(dests)) {
+			id := dests[name]
 			var at *time.Time
 			if name == "gone" {
 				at = &t0
@@ -687,6 +690,58 @@ func TestIntegrationPreviewDelivery(t *testing.T) {
 			ProposedGroupKey: []string{"alertname", "system", "team"}, DestinationEntries: &[]routing.DestinationEntry{}})
 		if err != nil || p.Delivery == nil || line(p) != ">critical> payments>warning>payments-notice:team" {
 			t.Errorf("an empty list of entries on a saved Route: %q, %v", line(p), err)
+		}
+
+		// C-26.FR-4, PRD scenario 4: a warning Alert and then a critical one of payments in one Alert Group, as the
+		// Group key lacks the severity: it reaches infra-notice and payments-notice first and infra-critical after,
+		// and all three stay, counted once each; the critical one first leaves only infra-critical.
+		rise := func(category string, severities ...string) routing.Preview {
+			t.Helper()
+			for i, sev := range severities {
+				at := t0.Add(-time.Duration(30-i) * time.Minute)
+				c.Set(at)
+				body := `{"groupKey":"{}:{}","status":"firing","alerts":[{"status":"firing","labels":{"alertname":"Disk",` +
+					`"category":"` + category + `","system":"k8s","team":"payments","severity":"` + sev +
+					`"},"startsAt":"` + at.Format(time.RFC3339) + `"}]}`
+				if _, err := snapshots.Store(ctx, ingest.Received{IntegrationID: integration, Body: []byte(body)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c.Set(t0)
+			p, err := svc.Preview(ctx, routing.PreviewRequest{Matchers: []routing.Matcher{{Label: "category", Op: "=",
+				Value: category}}, ProposedGroupKey: []string{"alertname", "system", "team"}, DeliverToTeams: ptr(true),
+				DestinationEntries: &[]routing.DestinationEntry{
+					{DestinationID: dests["infra-critical"], Condition: routing.ConditionCritical},
+					{DestinationID: dests["infra-notice"], Condition: routing.ConditionBelowCritical}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+		// The Destinations are in the order of their ids, which the insertion order above leaves open.
+		counts := func(p routing.Preview) string {
+			var out []string
+			for _, d := range p.Delivery.DestinationCounts {
+				out = append(out, fmt.Sprintf("%s=%d", d.Destination.Name, d.AlertGroupCount))
+			}
+			slices.Sort(out)
+			return strings.Join(out, ",")
+		}
+		sorted := func(p routing.Preview) string {
+			head, dests, _ := strings.Cut(line(p), ">")
+			level, list, _ := strings.Cut(dests, ">")
+			parts := strings.Split(list, ",")
+			slices.Sort(parts)
+			return head + ">" + level + ">" + strings.Join(parts, ",")
+		}
+		p = rise("rise-up", "warning", "critical")
+		if got := sorted(p); got != "payments>critical>infra-critical:route,infra-notice:route,payments-notice:team" ||
+			counts(p) != "infra-critical=1,infra-notice=1,payments-notice=1" {
+			t.Errorf("warning then critical: %s, %s", got, counts(p))
+		}
+		p = rise("rise-down", "critical", "warning")
+		if got := sorted(p); got != "payments>critical>infra-critical:route" || counts(p) != "infra-critical=1" {
+			t.Errorf("critical then warning: %s, %s", got, counts(p))
 		}
 	})
 }

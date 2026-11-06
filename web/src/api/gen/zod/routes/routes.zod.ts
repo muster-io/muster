@@ -838,6 +838,8 @@ export const previewGroupKeyBodyRouteIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjk
 
 
 export const previewGroupKeyBodyDestinationEntriesItemDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const previewGroupKeyBodyDestinationEntriesMax = 100;
+
 
 
 export const PreviewGroupKeyBody = zod.object({
@@ -853,7 +855,7 @@ export const PreviewGroupKeyBody = zod.object({
   "destination_entries": zod.array(zod.object({
   "destination_id": zod.string().regex(previewGroupKeyBodyDestinationEntriesItemDestinationIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
   "severity_condition": zod.enum(['any', 'critical', 'below_critical']).optional().describe('Omitted, `any`.')
-}).describe('A Destination of a Route or a Team with its Severity condition.')).optional().describe('The unsaved Destinations of the Route with their Severity conditions; the saved Route\'s when absent and `route_id` is given, else none.'),
+}).describe('A Destination of a Route or a Team with its Severity condition.')).max(previewGroupKeyBodyDestinationEntriesMax).optional().describe('The unsaved Destinations of the Route with their Severity conditions; the saved Route\'s when absent and `route_id` is given, else none.'),
   "deliver_to_teams": zod.boolean().optional().describe('The unsaved "Also to the Teams from the label"; the saved Route\'s when absent and `route_id` is given, else false.')
 }).describe('Preview of a Group key. Give `route_id` for a saved Route, `matchers` for a Route that is not saved yet (the create form), or both to try other Matchers on a saved Route; at least one of the two is required (`422`).')
 
