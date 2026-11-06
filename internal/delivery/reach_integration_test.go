@@ -7,8 +7,10 @@ package delivery_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/db/dbtest"
+	deliverydb "github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/routing"
@@ -168,6 +170,60 @@ func TestDeletedDestinationWithheld(t *testing.T) {
 		}
 		if calls := l.rec.Calls(); len(calls) != 0 {
 			t.Errorf("calls to the deleted destination: %+v", calls)
+		}
+	})
+}
+
+// TestRecordRetiredAfterRejoin is C-11.FR-14 with C-26.FR-4 on PostgreSQL: the record of a final edit whose delivery
+// RejoinDelivery made current again while the call was in flight leaves it pending, due at the business time of the
+// record, without an actual state, so that the next call edits the Root message back; a final edit still wanted
+// retires it.
+func TestRecordRetiredAfterRejoin(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		ctx := t.Context()
+		q := deliverydb.New(l.d.Pool)
+		for _, rejoined := range []bool{true, false} {
+			l.fresh(t, 1000, 1)
+			name := map[bool]string{true: "Rejoined", false: "Retired"}[rejoined]
+			l.fire(t, name, name+"/a")
+			gid := l.group(t, name)
+			l.round(t, l.a)
+			var id, group int64
+			if err := l.d.Pool.QueryRow(ctx, `SELECT d.id, d.alert_group_id FROM deliveries d
+				JOIN alert_groups g ON g.id = d.alert_group_id WHERE g.public_id = $1 AND d.destination_id = $2`,
+				gid, l.dests[0]).Scan(&id, &group); err != nil {
+				t.Fatal(err)
+			}
+			// The worker leased the final edit and is in its call.
+			l.exec(t, `UPDATE deliveries SET desired_retire = true, state = 'pending', lease_owner = 'r9',
+				lease_until = $2 WHERE id = $1`, id, l.real.Now().Add(time.Minute))
+			if rejoined {
+				if n, err := q.RejoinDelivery(ctx, deliverydb.RejoinDeliveryParams{OrgID: l.orgID, AlertGroupID: group,
+					DestinationID: l.dests[0], Now: l.business.Now()}); err != nil || n != 1 {
+					t.Fatalf("rejoin: %d, %v", n, err)
+				}
+			}
+			l.business.Advance(time.Second)
+			now := l.business.Now().UTC()
+			if _, err := q.RecordRetired(ctx, deliverydb.RecordRetiredParams{OrgID: l.orgID, ID: id, Owner: "r9",
+				Now: now}); err != nil {
+				t.Fatal(err)
+			}
+			var state string
+			var hashed, retire bool
+			var next time.Time
+			if err := l.d.Pool.QueryRow(ctx, `SELECT state, actual_hash IS NOT NULL, desired_retire, next_attempt_at
+				FROM deliveries WHERE id = $1`, id).Scan(&state, &hashed, &retire, &next); err != nil {
+				t.Fatal(err)
+			}
+			if rejoined && (state != "pending" || hashed || retire || !next.Equal(now.Truncate(time.Microsecond))) {
+				t.Errorf("joined again during the final edit: state %s, actual hash %v, retire %v, due %v, want %v",
+					state, hashed, retire, next, now)
+			}
+			if !rejoined && (state != "retired" || !hashed || retire) {
+				t.Errorf("a final edit still wanted: state %s, actual hash %v, retire %v", state, hashed, retire)
+			}
 		}
 	})
 }
