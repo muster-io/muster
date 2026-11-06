@@ -172,7 +172,9 @@ None.
     `files_touched`), with its length still given; `api/openapi.yaml` says so for `TemplatePreviewResult.layout`.
   - Decided by the orchestrator, after review: the test message's `layout` has the mark "🧪 Test message" as its first
     notice, as its body has it first (C-16.FR-1), in a Destination test and in `muster bridge check`; each link of
-    `layout` is its URL re-encoded as a URI (RFC 3986), since `LayoutLink.url` is `format: uri`; and `layout` takes its
+    `layout` is its URL as the Route gives it, the same as the body links, so `LayoutLink.url` has no `format: uri`
+    — a link may be an IRI, with a host or path outside ASCII, which a validator of `uri` would refuse — and is
+    described as an absolute http or https link; and `layout` takes its
     title cut as the envelope's and its notices and footer from the message as shortened for the body, so that the two
     never disagree. The comments of `layoutCommonMark` that said the bridge body keeps the L1 link position and the
     italic summary "until S-126" now state the current behaviour: no story owns a change of that body.

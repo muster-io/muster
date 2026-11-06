@@ -7,8 +7,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -658,27 +656,15 @@ func TestLayoutEnvelope(t *testing.T) {
 		t.Fatalf("title %q, body %q", firing.Title, body)
 	}
 	odd := compactMessage(t, messages.ColourFiring)
-	odd.Links = append(odd.Links, messages.Link{Text: "Рунбук", URL: "https://wiki.example.org/рунбук/a|b{c}?q=a|b&x={y}#ч"})
-	ol := content(odd, i, nil).Layout
-	got := ol.Links[len(ol.Links)-1].Url
-	u, err := url.Parse(got)
-	if !regexp.MustCompile(`^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$`).MatchString(got) || err != nil ||
-		u.Path != "/рунбук/a|b{c}" || u.Query().Get("q") != "a|b" || u.Query().Get("x") != "{y}" || u.Fragment != "ч" {
-		t.Fatalf("a link with characters a URI does not allow %q", got)
+	// A link is the one the body has, as the Route gives it, an IRI included: the layout and the body never disagree.
+	const iri = "https://пример.рф/путь/a|b{c}?q=a|b&x={y}#ч"
+	odd.Links = append(odd.Links, messages.Link{Text: "Рунбук", URL: iri})
+	oc := content(odd, i, nil)
+	if got := oc.Layout.Links[len(oc.Layout.Links)-1]; got != (gen.LayoutLink{Label: "Рунбук", Url: iri}) ||
+		!strings.Contains(oc.Body, "[Рунбук]("+iri+")") {
+		t.Fatalf("a link %+v, body %q", got, oc.Body)
 	}
-	for _, tc := range []struct{ in, want string }{
-		{"https://пример.рф/путь?q=a|b", "https://пример.рф/%D0%BF%D1%83%D1%82%D1%8C?q=a%7Cb"},
-		{"https://bob:s@пример.рф:8443/a b#ч", "https://bob:s@пример.рф:8443/a%20b#%D1%87"},
-		{"https://wiki.example.org", "https://wiki.example.org"},
-		{"https://wiki.example.org?x=1", "https://wiki.example.org?x=1"},
-		{"mailto:a@example.org", "mailto:a@example.org"},
-		{"%zz", "%zz"},
-	} {
-		if got := uriOf(tc.in); got != tc.want {
-			t.Errorf("uriOf(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-	if b, _ := json.Marshal(content(odd, i, nil)); visit(t, bridgeSchema(t, "MessageContent"), b) != nil {
+	if b, _ := json.Marshal(oc); visit(t, bridgeSchema(t, "MessageContent"), b) != nil {
 		t.Fatalf("%s", b)
 	}
 	acked := content(withFooterIn(compactMessage(t, messages.ColourAcknowledged), 1), i, nil)

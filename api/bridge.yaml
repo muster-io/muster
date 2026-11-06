@@ -1101,7 +1101,8 @@ components:
           type: string
         url:
           type: string
-          format: uri
+          description: An absolute http or https link as the Route gives it, the same as the body links; it may be an
+            IRI, with characters outside ASCII in its host or path.
     MessageInput:
       allOf:
       - $ref: '#/components/schemas/MessageContent'

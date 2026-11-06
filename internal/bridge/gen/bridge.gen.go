@@ -545,7 +545,9 @@ type LayoutLabel struct {
 // LayoutLink defines model for LayoutLink.
 type LayoutLink struct {
 	Label string `json:"label"`
-	Url   string `json:"url"`
+
+	// Url An absolute http or https link as the Route gives it, the same as the body links; it may be an IRI, with characters outside ASCII in its host or path.
+	Url string `json:"url"`
 }
 
 // LayoutPerson defines model for LayoutPerson.

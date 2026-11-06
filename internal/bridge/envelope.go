@@ -5,7 +5,6 @@ package bridge
 
 import (
 	"cmp"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,7 +91,7 @@ func content(m messages.Message, i Info, head []string) gen.MessageContent {
 // body's limit: the description, the Alerts, the summary, the key labels, the notices and the footer of short, so that
 // the layout and the body never disagree, and the rest of m — the status, the fields, the people and the links are
 // never cut (C-29.FR-6) — with the title cut as the envelope's is. The people have no reference; values are plain text,
-// and each link is its URL as a URI, with what RFC 3986 does not allow in it percent-encoded.
+// and each link is its URL as the body links it.
 func layoutOf(m, short messages.Message) gen.Layout {
 	cp := m
 	cp.Description, cp.AlertsLine, cp.Summary, cp.KeyLabels = short.Description, short.AlertsLine, short.Summary,
@@ -123,54 +122,9 @@ func layoutOf(m, short messages.Message) gen.Layout {
 		out.Owner = nullable.NewNullableWithValue(gen.LayoutPerson{Name: o.Name, Ref: nullable.NewNullNullable[string]()})
 	}
 	for _, k := range l.Links {
-		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: uriOf(k.URL)})
+		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: k.URL})
 	}
 	return out
-}
-
-// uriOf is the link u as a URI (RFC 3986): its path and fragment percent-encoded as Go writes a URL, and every byte of
-// its query that a URI does not allow percent-encoded too, so that a bridge that checks `format: uri` takes it. Its
-// authority — userinfo, host and port — stays exactly as given, since a client resolves an internationalized host as
-// written and not percent-encoded; a link without one, or that does not parse, is written as Go writes it, or stays as
-// it is.
-func uriOf(u string) string {
-	p, err := url.Parse(u)
-	if err != nil {
-		return u
-	}
-	const hex = "0123456789ABCDEF"
-	var b strings.Builder
-	for i := range len(p.RawQuery) {
-		if c := p.RawQuery[i]; inURIQuery(c) {
-			b.WriteByte(c)
-		} else {
-			b.WriteByte('%')
-			b.WriteByte(hex[c>>4])
-			b.WriteByte(hex[c&0xf])
-		}
-	}
-	p.RawQuery = b.String()
-	prefix := p.Scheme + "://"
-	if p.Scheme == "" || p.Opaque != "" || !strings.HasPrefix(u, prefix) {
-		return p.String()
-	}
-	rest := u[len(prefix):]
-	authority := rest[:strings.IndexFunc(rest+"/", func(r rune) bool { return r == '/' || r == '?' || r == '#' })]
-	out := prefix + authority + p.EscapedPath()
-	if p.ForceQuery || p.RawQuery != "" {
-		out += "?" + p.RawQuery
-	}
-	if p.Fragment != "" {
-		out += "#" + p.EscapedFragment()
-	}
-	return out
-}
-
-// inURIQuery reports whether the byte c may stand in the query of a URI as it is (RFC 3986): an unreserved character,
-// a sub-delimiter, `:`, `@`, `/`, `?`, or the `%` of a percent-encoding.
-func inURIQuery(c byte) bool {
-	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' ||
-		strings.IndexByte("-._~!$&'()*+,;=:@/?%", c) >= 0
 }
 
 // withOwnerRef gives the Owner of layout the reference ref, the entry of the footer's user in `mentions`, when list —
