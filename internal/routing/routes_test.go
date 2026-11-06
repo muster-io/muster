@@ -1385,11 +1385,11 @@ func TestRouteDestinations(t *testing.T) {
 		store.hints[len(store.hints)-1].ID != created.PublicID {
 		t.Errorf("updated %+v, audit %s %+v", got, e.Action, diff)
 	}
-	any := ConditionAny
+	anyOf := ConditionAny
 	if len(*calls) != 1 || (*calls)[0].RouteID != created.ID || (*calls)[0].Added() != nil ||
 		!slices.Equal((*calls)[0].Removed(), []int64{52}) ||
-		!slices.Equal((*calls)[0].Before, []Entry{{DestinationID: 51, Condition: any}, {DestinationID: 52,
-			Condition: any}}) || !slices.Equal((*calls)[0].After, []Entry{{DestinationID: 51, Condition: any}}) ||
+		!slices.Equal((*calls)[0].Before, []Entry{{DestinationID: 51, Condition: anyOf}, {DestinationID: 52,
+			Condition: anyOf}}) || !slices.Equal((*calls)[0].After, []Entry{{DestinationID: 51, Condition: anyOf}}) ||
 		(*calls)[0].ToTeamsBefore || (*calls)[0].ToTeamsAfter {
 		t.Errorf("hook %+v", *calls)
 	}
@@ -1417,7 +1417,7 @@ func TestRouteDestinations(t *testing.T) {
 	if _, err = svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil || len(*calls) != 3 ||
 		(*calls)[2].Added() != nil || (*calls)[2].Removed() != nil ||
 		!slices.Equal((*calls)[2].After, []Entry{{DestinationID: 51, Condition: ConditionCritical},
-			{DestinationID: 52, Condition: any}}) || (*calls)[2].Before[0].Condition != any {
+			{DestinationID: 52, Condition: anyOf}}) || (*calls)[2].Before[0].Condition != anyOf {
 		t.Errorf("a changed condition: %v %+v", err, *calls)
 	}
 	locks := len(store.membershipLocks)

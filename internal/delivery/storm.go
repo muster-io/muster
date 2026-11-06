@@ -137,15 +137,6 @@ type stormDest struct {
 	typ      string
 }
 
-// stormDestsOf are the Destinations of rows.
-func stormDestsOf(rows []dbgen.ListRouteDestinationsRow) []stormDest {
-	out := make([]stormDest, len(rows))
-	for i, d := range rows {
-		out[i] = stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type}
-	}
-	return out
-}
-
 // withSummaries are the Destinations of the rendering of a new Alert Group of the Storm st and those where st already
 // has its summary, in id order, so that every summary shows the Route's counts (C-11.FR-6).
 func (s *Service) withSummaries(ctx context.Context, q queries, st *storm, dests []target) ([]stormDest, error) {

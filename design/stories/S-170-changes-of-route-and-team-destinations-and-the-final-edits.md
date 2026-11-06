@@ -17,6 +17,8 @@ files_touched:
   - internal/delivery/enqueue_test.go
   - internal/delivery/lockorder_integration_test.go
   - internal/delivery/worker.go
+  - internal/delivery/storm.go
+  - internal/delivery/webhookevents.go
   - internal/delivery/worker_test.go
   - internal/delivery/storm_test.go
   - internal/delivery/hints_test.go
@@ -212,7 +214,8 @@ None.
   `files_touched` gained the fake databases that read the new queries (`internal/delivery/worker_test.go`,
   `storm_test.go`, `internal/groups/events_test.go`), the tests that call the changed hook of the Routes
   (`internal/delivery/hints_test.go`, `outcomes_test.go`, `webhookevents_test.go`, `live_test.go`),
-  `internal/groups/grouping.go` (the Service holds the final edits it is given) and `design/db/schema.md` (the Team's
+  `internal/groups/grouping.go` (the Service holds the final edits it is given), `internal/delivery/storm.go` and
+  `webhookevents.go` (the helpers of the L1 hook that only it used give way to `hasRoot`) and `design/db/schema.md` (the Team's
   lock, the row `team_destinations` and `deliveries.entries`). The deletion of a Destination needs no change of
   `internal/destinations`: routing's `DestinationDeleted`, which it already calls, removes it from the Teams.
 - Decisions taken in the pull request, within the PRD: a delivery made before 0.2.0, whose `entries` are empty, counts

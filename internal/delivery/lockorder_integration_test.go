@@ -8,7 +8,6 @@ package delivery_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -1438,12 +1437,11 @@ func (tl *teamLive) drainUpdates(t *testing.T) {
 	}
 }
 
-// published fires the Alert TL<n>/a of the Team, publishes its Alert Group and returns it.
-func (tl *teamLive) published(t *testing.T, n int) string {
+// published fires the Alert TL1/a of the Team, publishes its Alert Group and returns it.
+func (tl *teamLive) published(t *testing.T) string {
 	t.Helper()
-	name := fmt.Sprintf("TL%d", n)
-	tl.fireAlerts(t, "tl", alert{name: name + "/a", team: "db"})
-	gid := tl.group(t, name)
+	tl.fireAlerts(t, "tl", alert{name: "TL1/a", team: "db"})
+	gid := tl.group(t, "TL1")
 	tl.round(t, tl.a)
 	if tl.count(t, `SELECT count(*) FROM alert_group_teams x JOIN alert_groups g ON g.id = x.alert_group_id
 		WHERE g.public_id = $1 AND g.first_published_at IS NOT NULL`, gid) != 1 {
@@ -1452,9 +1450,9 @@ func (tl *teamLive) published(t *testing.T, n int) string {
 	return gid
 }
 
-// entry is the Destination entry of the Team of the Destination DSAAAAAAAAAAA<n> with the condition.
-func entry(n int, condition string) teams.DestinationEntry {
-	return teams.DestinationEntry{DestinationID: fmt.Sprintf("DSAAAAAAAAAAA%d", n), Condition: condition}
+// secondEntry is the Destination entry of the Team of the second Destination, DSAAAAAAAAAAA2, with the condition.
+func secondEntry(condition string) teams.DestinationEntry {
+	return teams.DestinationEntry{DestinationID: "DSAAAAAAAAAAA2", Condition: condition}
 }
 
 // txGateRenderer holds the first render through it, inside Enqueue, which holds the Route's and the Teams' membership
@@ -1495,7 +1493,7 @@ func (l *live) heldEnqueue(g *txGate) groups.Rerender {
 func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		tl := setupTeamLive(t, s)
-		gid := tl.published(t, 1)
+		gid := tl.published(t)
 		g := newTxGate()
 		svc := delivery.New(delivery.Config{OrgID: tl.orgID, Store: delivery.NewStore(tl.d.Pool, tl.d.Pool),
 			Business: tl.business, Log: tl.logger,
@@ -1506,7 +1504,7 @@ func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
 		blocked, groupErr, saveErr := tl.against(t, g, tl.drain, func(ctx context.Context) error {
 			_, err := tl.teams.Update(ctx, teamSystem, tl.team.PublicID, nil, teams.Input{Name: "locks",
 				Slug: "locks", Matchers: &[]teams.Matcher{{Label: "disk", Op: "=~", Value: "TL.*"}},
-				DestinationEntries: &[]teams.DestinationEntry{entry(2, "any")}})
+				DestinationEntries: &[]teams.DestinationEntry{secondEntry("any")}})
 			return err
 		})
 		if !blocked || groupErr != nil || saveErr != nil {
@@ -1536,9 +1534,9 @@ func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
 // final edit. Taking the Team's lock before the Route's row would deadlock.
 func TestDeleteTeamAgainstGroupingLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, entry(2, "any"))
+		tl := setupTeamLive(t, s, secondEntry("any"))
 		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
-		gid := tl.published(t, 1)
+		gid := tl.published(t)
 		g := newTxGate()
 		tl.groups.SetRerender(tl.heldEnqueue(g))
 		defer tl.groups.SetRerender(tl.svc.Enqueue)
@@ -1566,9 +1564,9 @@ func TestDeleteTeamAgainstGroupingLockOrder(t *testing.T) {
 // row before it takes the Team's lock, so the save goes on; taking the Team's lock first would deadlock.
 func TestDeleteTeamAgainstRouteSaveLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, entry(2, "any"))
+		tl := setupTeamLive(t, s, secondEntry("any"))
 		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
-		tl.published(t, 1)
+		tl.published(t)
 		g := newTxGate()
 		tl.routes.SetMembership(func(ctx context.Context, tx routingdb.DBTX, c routing.MembershipChange) error {
 			if err := g.hold(ctx, tx); err != nil {
@@ -1607,10 +1605,10 @@ func TestDeleteTeamAgainstRouteSaveLockOrder(t *testing.T) {
 // edit. Taking the Teams' locks first would deadlock.
 func TestDestinationDeletionAgainstTeamEnqueueLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, entry(2, "any"))
+		tl := setupTeamLive(t, s, secondEntry("any"))
 		tl.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at, severity_condition)
 			VALUES ($1, $2, $3, $4, 'critical')`, tl.routeID, tl.dests[1], tl.orgID, t0)
-		gid := tl.published(t, 1)
+		gid := tl.published(t)
 		if r := tl.row(t, gid, tl.dests[1]); !r.message {
 			t.Fatalf("the team's destination is not published: %+v", r)
 		}

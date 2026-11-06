@@ -386,8 +386,8 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c
 			return err
 		}
 		for _, id := range c.Added() {
-			if d, ok := n.dests[id]; ok && !slices.ContainsFunc(summaries, func(x stormDest) bool { return x.id == id }) &&
-				(d.Type != TypeWebhook || d.WebhookMode.String != webhookEvents) {
+			if d, ok := n.dests[id]; ok && hasRoot(d) &&
+				!slices.ContainsFunc(summaries, func(x stormDest) bool { return x.id == id }) {
 				summaries = append(summaries, stormDest{id: d.ID, publicID: d.PublicID, typ: d.Type})
 			}
 		}
@@ -419,7 +419,7 @@ func (s *Service) gain(ctx context.Context, tx dbgen.DBTX, q queries, g GroupVie
 	var entries [][]byte
 	for _, rc := range reached {
 		d, ok := n.dests[rc.DestinationID]
-		if !ok || (d.Type == TypeWebhook && d.WebhookMode.String == webhookEvents) {
+		if !ok || !hasRoot(d) {
 			continue
 		}
 		if i := slices.IndexFunc(had, func(x entryDelivery) bool { return x.DestinationID == d.ID }); i >= 0 &&

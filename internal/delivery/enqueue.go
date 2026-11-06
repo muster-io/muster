@@ -316,7 +316,7 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 		if sendsEvents(t.dest) {
 			eventDests = append(eventDests, t.dest)
 		}
-		if t.dest.Type != TypeWebhook || t.dest.WebhookMode.String != webhookEvents {
+		if hasRoot(t.dest) {
 			dests = append(dests, t)
 		}
 	}
