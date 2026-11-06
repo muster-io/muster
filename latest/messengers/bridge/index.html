@@ -3248,13 +3248,28 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
 <h2 id="what-muster-posts">What Muster posts<a class="headerlink" href="#what-muster-posts" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>The envelope.</strong> Every Root message carries its status with a colour and an emoji, the title <code>#N</code> and the Alert
-  Group's title, the link "Open in Muster" to the Alert Group page, and its text in CommonMark: the labels, the
-  summary, one line per Alert, the links, the notices and the footer. A Thread reply carries its text in CommonMark.
-  Alert data are escaped, so a label value cannot format the message, link anywhere or mention anyone. A Loud message
-  asks the bridge to notify; a Quiet one does not.</li>
+  Group's title, the link "Open in Muster" to the Alert Group page, and its text in CommonMark as <code>body</code>: the fields,
+  the summary and the description, the key labels, the Alerts, the links, the notices and the footer. A Thread reply
+  carries its text in CommonMark. Alert data are escaped, so a label value cannot format the message, link anywhere or
+  mention anyone. A Loud message asks the bridge to notify; a Quiet one does not.</li>
+<li><strong>The layout.</strong> Beside <code>body</code>, a Root message and a test message carry the same content as structured data in
+  <code>layout</code>: the number alone and the title without it, the status as a key and a word, the fields as name and value,
+  the summary and the description, the key labels as key and value, the Alerts by the label that tells them apart
+  with whether each is resolved and how many there are in all, the notices, the people and the links. Its values are
+  plain text, never CommonMark, so <code>Queue *full* on #1</code> arrives as it is, and the bridge escapes it for its
+  messenger. The people are the Owner while the Alert Group is acknowledged, with the <code>ref</code> of their entry in
+  <code>mentions</code> when the message carries their Mention, and <code>null</code> in an edit and through a bridge without native
+  mentions; its <code>name</code> is their display name in Muster, which may differ from the <code>display_name</code> of their entry in
+  <code>mentions</code>. A bridge renders either <code>body</code> or <code>layout</code>; a bridge that ignores <code>layout</code> works as before. Storm
+  summaries and Thread replies have no <code>layout</code>, nor has a Root message whose Route has its own Root message template
+  or line template, or that the fallback template shows after a template failed, since part of its content exists
+  only in <code>body</code>: render <code>body</code> whenever <code>layout</code> is absent. A test message has "🧪 Test message" as the first of its
+  <code>notices</code>. The <a href="../../reference/bridge-protocol/">Bridge protocol</a> reference shows its
+  schema.</li>
 <li><strong>The length.</strong> The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
-  long Root message drops its Alert lines first, then the label sections, but always keeps its title, its status, its
-  footer, its buttons and its link to Muster. The bridge may still shorten what it renders, and says so.</li>
+  long Root message drops its description first, then its Alerts, its summary and its key labels, but always keeps its
+  title, its status, its fields, its footer, its buttons and its links, the one to Muster first. <code>layout</code> loses the
+  same parts as <code>body</code>, so that the two never disagree. The bridge may still shorten what it renders, and says so.</li>
 <li><strong>Buttons.</strong> When the bridge offers buttons, a Root message carries the buttons of its status — Ack, Resolve, one
   per Snooze duration and the two <a href="../../concepts/statuses-and-commands/#in-messengers">Snooze presets</a> "Until tomorrow
   09:00" and "Until Monday 09:00", for example — with a style hint for each, the presets <code>neutral</code> like the durations,
