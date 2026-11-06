@@ -24,6 +24,10 @@ import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { TeamLabelLine, TeamLabelValues } from "./team-label-values";
 
+/** Waits until the text of an element holds a text. */
+const contains = (el: { element: () => Element }, text: string) =>
+  expect.poll(() => el.element().textContent ?? "").toContain(text);
+
 const NOW = Date.now();
 const iso = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
 
@@ -104,34 +108,30 @@ async function renderPage(
 describe("the Team label and its unknown values", () => {
   test("show the label with its hint, and the values with when they were last seen", async () => {
     await renderPage();
-    await expect.element(page.getByTestId("team-label-name")).toHaveTextContent("team");
-    await expect
-      .element(page.getByTestId("team-label"))
-      .toHaveTextContent(
-        "An Alert belongs to a Team by the value of the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization.",
-      );
+    await contains(page.getByTestId("team-label-name"), "team");
+    await contains(
+      page.getByTestId("team-label"),
+      "An Alert belongs to a Team by the value of the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization.",
+    );
     await expect
       .element(page.getByRole("link", { name: "Change in the Organization settings" }))
       .toHaveAttribute("href", "/admin/organization/general");
     await expect
       .element(page.getByRole("heading", { name: "Unknown values of team" }))
       .toBeVisible();
-    await expect
-      .element(page.getByTestId("team-label-values"))
-      .toHaveTextContent(
-        "Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged.",
-      );
+    await contains(
+      page.getByTestId("team-label-values"),
+      "Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged.",
+    );
     const rows = page.getByTestId("team-label-value").elements();
     expect(rows.map((r) => r.querySelector("code")?.textContent)).toEqual([
       "team=checkout",
       "team=Payments",
     ]);
     const first = page.getByTestId("team-label-value").first();
-    await expect.element(first).toHaveTextContent("(5 min ago)");
-    await expect.element(first).toHaveTextContent("3 Alerts in the last 7 days");
-    await expect
-      .element(page.getByTestId("team-label-value").nth(1))
-      .toHaveTextContent("1 Alert in the last 7 days");
+    await contains(first, "(5 min ago)");
+    await contains(first, "3 Alerts in the last 7 days");
+    await contains(page.getByTestId("team-label-value").nth(1), "1 Alert in the last 7 days");
   });
 
   test("open the new Team form with the value as the slug, or with the note for a value that is no slug", async () => {
@@ -151,7 +151,7 @@ describe("the Team label and its unknown values", () => {
     await expect
       .element(page.getByRole("heading", { name: "Unknown values of service_team" }))
       .toBeVisible();
-    await expect.element(page.getByTestId("team-label-name")).toHaveTextContent("service_team");
+    await contains(page.getByTestId("team-label-name"), "service_team");
   });
 
   test("offer no Create Team and no link to the settings to a person who may not", async () => {
@@ -179,24 +179,20 @@ describe("the Team label and its unknown values", () => {
   test("speak Russian", async () => {
     await i18n.changeLanguage("ru");
     await renderPage();
-    await expect
-      .element(page.getByTestId("team-label"))
-      .toHaveTextContent(
-        "Алерт относится к команде по значению метки команды или по её матчерам. Доступ команды не ограничивают: роли общие для организации.",
-      );
+    await contains(
+      page.getByTestId("team-label"),
+      "Алерт относится к команде по значению метки команды или по её матчерам. Доступ команды не ограничивают: роли общие для организации.",
+    );
     await expect
       .element(page.getByRole("heading", { name: "Неизвестные значения team" }))
       .toBeVisible();
-    await expect
-      .element(page.getByTestId("team-label-values"))
-      .toHaveTextContent(
-        "Алерты приходили с этими значениями, но такой команды нет: места доставки команды не добавляются, никого не зовут.",
-      );
+    await contains(
+      page.getByTestId("team-label-values"),
+      "Алерты приходили с этими значениями, но такой команды нет: места доставки команды не добавляются, никого не зовут.",
+    );
     await expect
       .element(page.getByRole("link", { name: "Создать команду для значения checkout" }))
       .toBeVisible();
-    await expect
-      .element(page.getByTestId("team-label-value").first())
-      .toHaveTextContent("3 алерта за последние 7 дн.");
+    await contains(page.getByTestId("team-label-value").first(), "3 алерта за последние 7 дн.");
   });
 });

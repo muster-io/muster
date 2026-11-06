@@ -19,6 +19,10 @@ import { ApiError } from "../lib/api";
 import { team } from "../test/fixtures/teams";
 import { MATCHERS_MAX, TeamAlertRules } from "./team-alert-rules";
 
+/** Waits until the text of an element holds a text. */
+const contains = (el: { element: () => Element }, text: string) =>
+  expect.poll(() => el.element().textContent ?? "").toContain(text);
+
 const MATCHER: Matcher = { label: "namespace", op: "=~", value: "checkout|billing" };
 
 beforeEach(async () => {
@@ -63,22 +67,18 @@ function refused(pointer: string, code: string, detail?: string) {
 describe("Which Alerts belong to this Team", () => {
   test("shows the Team label with the slug and the matchers together, with the hints and the example", async () => {
     await renderRules({ team: team({ name: "Payments", slug: "payments", matchers: [MATCHER] }) });
-    await expect.element(page.getByTestId("team-rule-label")).toHaveTextContent("team = payments");
-    await expect
-      .element(section())
-      .toHaveTextContent(
-        "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
-      );
-    await expect
-      .element(section())
-      .toHaveTextContent(
-        "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
-      );
+    await contains(page.getByTestId("team-rule-label"), "team = payments");
+    await contains(
+      section(),
+      "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
+    );
+    await contains(
+      section(),
+      "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
+    );
     await expect.element(page.getByLabelText("Label of matcher 1")).toHaveValue("namespace");
     await expect.element(page.getByLabelText("Value of matcher 1")).toHaveValue("checkout|billing");
-    await expect
-      .element(page.getByTestId("team-rule-example"))
-      .toHaveTextContent("Teams: Payments — by the Team label");
+    await contains(page.getByTestId("team-rule-example"), "Teams: Payments — by the Team label");
     // Both are on the page at once: there is no switch between them.
     expect(page.getByRole("radio").elements()).toHaveLength(0);
     expect(page.getByRole("tab").elements()).toHaveLength(0);
@@ -99,9 +99,7 @@ describe("Which Alerts belong to this Team", () => {
         </QueryClientProvider>
       </I18nextProvider>,
     );
-    await expect
-      .element(page.getByTestId("team-rule-label"))
-      .toHaveTextContent("service_team = payments");
+    await contains(page.getByTestId("team-rule-label"), "service_team = payments");
   });
 
   test("saves the matchers as a whole and starts from what came back", async () => {
@@ -113,11 +111,11 @@ describe("Which Alerts belong to this Team", () => {
     await section().getByRole("button", { name: "Save", exact: true }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]?.[0]).toEqual([MATCHER]);
-    await expect.element(page.getByTestId("team-rules-status")).toHaveTextContent("Saved.");
+    await contains(page.getByTestId("team-rules-status"), "Saved.");
     await expect.element(page.getByLabelText("Value of matcher 1")).toHaveValue("checkout|billing");
     // Removing the only matcher sends an empty list, which clears them.
     await page.getByRole("button", { name: "Remove matcher namespace" }).click();
-    await expect.element(page.getByTestId("team-rules-status")).toHaveTextContent("");
+    await expect.poll(() => page.getByTestId("team-rules-status").element().textContent).toBe("");
     await section().getByRole("button", { name: "Save", exact: true }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1]?.[0]).toEqual([]);
@@ -128,9 +126,7 @@ describe("Which Alerts belong to this Team", () => {
     await page.getByRole("button", { name: "Add matcher" }).click();
     await page.getByLabelText("Value of matcher 1").fill("checkout");
     await section().getByRole("button", { name: "Save", exact: true }).click();
-    await expect
-      .element(page.getByTestId("matcher-label-error"))
-      .toHaveTextContent("Enter a label name.");
+    await contains(page.getByTestId("matcher-label-error"), "Enter a label name.");
     expect(save).not.toHaveBeenCalled();
     await page.getByLabelText("Label of matcher 1").fill("namespace");
     await expect.element(page.getByTestId("matcher-label-error")).not.toBeInTheDocument();
@@ -144,9 +140,7 @@ describe("Which Alerts belong to this Team", () => {
     }));
     const { save } = await renderRules({ team: team({ matchers: many }) });
     await section().getByRole("button", { name: "Save", exact: true }).click();
-    await expect
-      .element(page.getByRole("alert"))
-      .toHaveTextContent("A Team has at most 50 matchers.");
+    await contains(page.getByRole("alert"), "A Team has at most 50 matchers.");
     expect(save).not.toHaveBeenCalled();
   });
 
@@ -158,9 +152,10 @@ describe("Which Alerts belong to this Team", () => {
     });
     await section().getByRole("button", { name: "Save", exact: true }).click();
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    await expect
-      .element(page.getByTestId("matcher-value-error"))
-      .toHaveTextContent("The regular expression is not valid: missing closing ]: `[`");
+    await contains(
+      page.getByTestId("matcher-value-error"),
+      "The regular expression is not valid: missing closing ]: `[`",
+    );
     await expect
       .element(page.getByLabelText("Value of matcher 1"))
       .toHaveAttribute("aria-invalid", "true");
@@ -181,9 +176,7 @@ describe("Which Alerts belong to this Team", () => {
 
   test("only shows the matchers without teams:write", async () => {
     await renderRules({ team: team({ matchers: [MATCHER] }), canWrite: false });
-    await expect
-      .element(page.getByTestId("matcher-text"))
-      .toHaveTextContent('namespace=~"checkout|billing"');
+    await contains(page.getByTestId("matcher-text"), 'namespace=~"checkout|billing"');
     expect(page.getByRole("button", { name: "Save", exact: true }).elements()).toHaveLength(0);
     expect(page.getByRole("button", { name: "Add matcher" }).elements()).toHaveLength(0);
   });
@@ -191,18 +184,14 @@ describe("Which Alerts belong to this Team", () => {
   test("speaks Russian", async () => {
     await i18n.changeLanguage("ru");
     await renderRules({});
-    await expect
-      .element(section())
-      .toHaveTextContent(
-        "Матчер может смотреть на любую метку алерта, не только на namespace. Подходит любой из матчеров.",
-      );
-    await expect
-      .element(section())
-      .toHaveTextContent(
-        "На стендах с общим namespace матчите по pod или app либо ставьте метку команды на поды.",
-      );
-    await expect
-      .element(page.getByTestId("team-rule-example"))
-      .toHaveTextContent("Команды: payments — по метке команды");
+    await contains(
+      section(),
+      "Матчер может смотреть на любую метку алерта, не только на namespace. Подходит любой из матчеров.",
+    );
+    await contains(
+      section(),
+      "На стендах с общим namespace матчите по pod или app либо ставьте метку команды на поды.",
+    );
+    await contains(page.getByTestId("team-rule-example"), "Команды: payments — по метке команды");
   });
 });

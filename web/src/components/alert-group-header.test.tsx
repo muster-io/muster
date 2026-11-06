@@ -125,7 +125,9 @@ describe("AlertGroupHeader", () => {
       }),
     );
     const teams = page.getByTestId("alert-group-teams");
-    await expect.element(teams).toHaveTextContent("Teams:payments — by the Team label");
+    await expect
+      .poll(() => teams.element().textContent)
+      .toContain("Teams: payments — by the Team label");
     const lines = page
       .getByTestId("team-entry")
       .elements()

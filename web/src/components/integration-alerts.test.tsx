@@ -223,6 +223,7 @@ describe("IntegrationAlerts", () => {
   test("shows the Teams of each Alert with their rule, and a dash for an Alert of no Team", async () => {
     await renderView();
     const dbA = rowOf("instance=db-a");
+    await expect.element(dbA.getByTestId("team-entry").first()).toBeVisible();
     const lines = dbA
       .getByTestId("team-entry")
       .elements()

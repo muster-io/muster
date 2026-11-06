@@ -100,7 +100,7 @@ export function TeamsLine({
       className={className ?? "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-sm"}
       data-testid={testId}
     >
-      <span className="font-medium">{t("alertGroups.fields.teams")}:</span>
+      <span className="font-medium">{t("alertGroups.fields.teams")}:</span>{" "}
       <TeamEntries entries={entries} testId={`${testId}-list`} />
     </div>
   );
