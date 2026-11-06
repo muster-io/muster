@@ -970,17 +970,19 @@ func TestLayoutCutWithTheBody(t *testing.T) {
 			{"summary", l.Summary != "", strings.Contains(c.Body, "Queue full on node-a")},
 			{"labels", len(l.Labels) > 0, strings.Contains(c.Body, "svc=br")},
 		}
-		state := ""
-		for n, p := range parts {
+		state, kept := "", ""
+		for _, p := range parts {
 			if p.inLayout != p.body {
 				t.Fatalf("limit %d: the %s is in the layout %v, in the body %v: %q", limit, p.name, p.inLayout, p.body,
 					c.Body)
 			}
-			if !p.inLayout {
+			switch {
+			case p.inLayout:
+				kept = p.name
+			case kept != "":
+				t.Fatalf("limit %d: the %s went before the %s", limit, p.name, kept)
+			default:
 				state += "-" + p.name
-			}
-			if n > 0 && !p.inLayout && parts[n-1].inLayout {
-				t.Fatalf("limit %d: the %s went before the %s", limit, p.name, parts[n-1].name)
 			}
 		}
 		seen[state] = true
