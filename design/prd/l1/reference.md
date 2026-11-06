@@ -200,7 +200,7 @@ commands of Bridges, the UI and the API keep every action.
 | Severity levels | unmapped values seen | "These values have no mapping and count as warning: {values}." | C-20 |
 | Keyring | an older key is no longer needed | "Key {id} is no longer used and can be removed from MUSTER_SECRET_KEYS." | C-20 |
 | Keyring | activation refused | "Replicas {names} do not hold key {id} yet." | C-20 |
-| Teams page | values of the Team label that name no Team | "Unknown values of {team label}: Alerts arrived with these values, but there is no such Team: no channels of a Team are added and nobody is Paged." | C-25 |
+| Teams page | values of the Team label that name no Team | "Unknown values of {team label}: Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged." | C-25 |
 | Team page, Team mention · Destination form, an unavailable Mention target | the Connection cannot mention a group | "Needs the scope usergroups:read" · "The bridge declares no group mentions" · "Telegram cannot mention everyone or groups" | C-25, C-28 |
 | Route form | "Also to the Teams from the label" on and the Team label not in the Group key | "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add {team label} to the key if each Team needs its own." | C-26 |
 | Route form | it names an Escalation chain and no Destination, and does not deliver to Teams | "Only a Notification gateway can reach anyone from this Escalation chain: the Route has no Destination." | C-32 |

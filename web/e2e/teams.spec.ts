@@ -4,7 +4,8 @@
 // The Teams pages against `muster dev` (Verification of the Teams story): the Teams list and "New Team"; the Team page
 // with "People" (a person added by hand, a person who came through the identity provider group), "Identity provider
 // groups" and "Working hours"; the same pages for a Responder, who changes nothing; the pages in Russian and 360 px
-// wide; "Owning Team" on the Route and Destination forms, and the filter "Team" with "My Teams" on both lists.
+// wide; "Owning Team" on the Route and Destination forms, and the filter "Team" with "My Teams" on both lists; the Team
+// label with the unknown values of it, "Create Team" for a value, and "Which Alerts belong to this Team".
 
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
@@ -12,10 +13,15 @@ import {
   APP,
   type Api,
   adminApi,
+  alertGroupOf,
   createRoute,
   deleteRoute,
   expectNoHorizontalScroll,
   nextIdpUser,
+  removeIntegration,
+  removeTeamsBySlug,
+  seedTeamAlerts,
+  teamSlugs,
   shot,
   signIn,
   signInAdmin,
@@ -336,7 +342,7 @@ test("the Teams pages read in Russian and fit 360 px", async ({ browser }) => {
   await expectNoHorizontalScroll(page);
   await shot(page, "teams-list-ru-360");
 
-  await page.getByRole("link", { name: "payments" }).click();
+  await page.getByRole("link", { name: "payments", exact: true }).click();
   await expect(page.getByRole("heading", { name: "payments", level: 1 })).toBeVisible();
   const people = section(page, "team-people");
   await expect(people.getByRole("heading", { name: "Участники" })).toBeVisible();
@@ -566,6 +572,204 @@ test("a Team is deleted from its page, and the page of a Team that is gone says 
     await expect(page.getByText("It no longer exists. Reload the page.")).toBeVisible();
   } finally {
     await admin.dispose();
+  }
+  expect(csp).toEqual([]);
+});
+
+/** The row of the unknown value team=value, whichever other values are listed. */
+function valueRow(page: Page, value: string) {
+  return page
+    .getByTestId("team-label-value")
+    .filter({ has: page.locator("code", { hasText: new RegExp(`^team=${value}$`) }) });
+}
+
+test("lists the unknown values of the Team label, makes a Team of one and sets which Alerts belong to a Team", async ({
+  page,
+}) => {
+  test.setTimeout(240_000);
+  const csp = watchCsp(page);
+  const admin = await adminApi();
+  const { pay, sea } = teamSlugs("TL");
+  await removeTeamsBySlug(admin, [pay, sea, "checkout"]);
+  await removeIntegration(admin, "teams-labels");
+  await admin.dispose();
+  // The Teams pay (bob is in it) and sea, and Alert Groups with their slugs, team="checkout" and team="Payments".
+  const seed = await seedTeamAlerts("teams-labels", "TL");
+  try {
+    await signInAdmin(page);
+    await openTeams(page);
+
+    // 1. The Team label with the hint; "Unknown values of team" lists checkout and Payments with their times.
+    await expect(page.getByTestId("team-label-name")).toHaveText("team");
+    await expect(page.getByTestId("team-label")).toContainText(
+      "An Alert belongs to a Team by the value of the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization.",
+    );
+    await expect(
+      page
+        .getByTestId("team-label")
+        .getByRole("link", { name: "Change in the Organization settings" }),
+    ).toHaveAttribute("href", "/admin/organization/general");
+    const values = page.getByTestId("team-label-values");
+    await expect(values.getByRole("heading", { name: "Unknown values of team" })).toBeVisible();
+    await expect(values).toContainText(
+      "Alerts arrived with these values, but there is no such Team: no Destinations of a Team are added and nobody is Paged.",
+    );
+    await expect(valueRow(page, "checkout")).toContainText("Last seen");
+    await expect(valueRow(page, "checkout")).toContainText("ago)");
+    await expect(valueRow(page, "Payments")).toContainText(/\d+ Alerts? in the last \d+ days/);
+    await expect(valueRow(page, pay)).toHaveCount(0);
+    await expect(valueRow(page, sea)).toHaveCount(0);
+    await shot(page, "teams-unknown-values");
+
+    // 3. Payments is no slug: the form has an empty slug and the note about a Team matcher.
+    await valueRow(page, "Payments").getByRole("link", { name: "Create Team" }).click();
+    await expect(page).toHaveURL(`${APP}/teams/new?value=Payments`);
+    await expect(page.getByLabel("Slug", { exact: true })).toHaveValue("");
+    await expect(page.getByTestId("team-value-note")).toHaveText(
+      'Payments cannot be the slug of a Team. A Team gets Alerts with this value only through a Team matcher such as team="Payments".',
+    );
+    await shot(page, "team-new-for-value");
+
+    // 2. "Create Team" next to checkout: the slug is checkout; Save makes the Team, which the Alert Group then lists.
+    await openTeams(page);
+    await valueRow(page, "checkout").getByRole("link", { name: "Create Team" }).click();
+    await expect(page).toHaveURL(`${APP}/teams/new?slug=checkout`);
+    await expect(page.getByLabel("Slug", { exact: true })).toHaveValue("checkout");
+    await expect(page.getByTestId("team-value-note")).toHaveCount(0);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "checkout", level: 1 })).toBeVisible();
+    await openTeams(page);
+    await expect(valueRow(page, "checkout")).toHaveCount(0);
+    await nav(page).getByRole("link", { name: "Alert Groups", exact: true }).click();
+    const checkoutGroup = await alertGroupOf(seed.integrationId, seed.name("Checkout"));
+    await expect(async () => {
+      await page.goto(`/alert-groups/${checkoutGroup}`);
+      await expect(page.getByTestId("alert-group-teams")).toContainText(
+        "checkout — by the Team label",
+        { timeout: 3_000 },
+      );
+    }).toPass({ timeout: 60_000 });
+
+    // 4. The Team page: the Team label with the slug, the matchers, the hints and the example.
+    await openTeams(page);
+    await page.getByRole("link", { name: pay, exact: true }).click();
+    const rules = page.getByTestId("team-rules");
+    await expect(
+      rules.getByRole("heading", { name: "Which Alerts belong to this Team" }),
+    ).toBeVisible();
+    await expect(rules.getByTestId("team-rule-label")).toContainText(`team = ${pay}`);
+    await expect(rules).toContainText(
+      "A matcher may look at any label of the Alert, not only namespace. Any one matcher is enough.",
+    );
+    await expect(rules).toContainText(
+      "On test clusters with a shared namespace, match by pod or app, or put the team label on the pods.",
+    );
+    await expect(rules.getByTestId("team-rule-example")).toContainText(
+      `Teams: ${pay} — by the Team label`,
+    );
+    // A Matcher without a label, and a regular expression that does not compile, stop at their fields.
+    await rules.getByRole("button", { name: "Add matcher" }).click();
+    await rules.getByLabel("Value of matcher 1").fill("x");
+    await rules.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(rules.getByTestId("matcher-label-error")).toHaveText("Enter a label name.");
+    await rules.getByLabel("Label of matcher 1").fill("pod");
+    await rules.getByLabel("Operator of matcher 1").selectOption("=~");
+    await rules.getByLabel("Value of matcher 1").fill("[");
+    await rules.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(rules.getByTestId("matcher-value-error")).toContainText(
+      "The regular expression is not valid",
+    );
+    await expect(rules.getByTestId("team-rules-status")).toHaveText("");
+    // Then the matcher of the story.
+    await rules.getByLabel("Label of matcher 1").fill("namespace");
+    await rules.getByLabel("Value of matcher 1").fill("checkout|billing");
+    await rules.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(rules.getByTestId("team-rules-status")).toHaveText("Saved.");
+    await shot(page, "team-which-alerts-belong");
+    await page.reload();
+    await expect(page.getByTestId("team-rules").getByLabel("Value of matcher 1")).toHaveValue(
+      "checkout|billing",
+    );
+    await expect(page.getByTestId("team-stale")).toHaveCount(0);
+  } finally {
+    const cleanup = await adminApi();
+    await removeIntegration(cleanup, "teams-labels");
+    await removeTeamsBySlug(cleanup, [pay, sea, "checkout"]);
+    await cleanup.dispose();
+  }
+  expect(csp).toEqual([]);
+});
+
+test("the Teams page and the Team page with the Team label read in Russian and fit 360 px", async ({
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const admin = await adminApi();
+  const { pay, sea } = teamSlugs("TR");
+  await removeTeamsBySlug(admin, [pay, sea]);
+  await removeIntegration(admin, "teams-labels-ru");
+  await ensureUser(admin, RU_ADMIN, "admin");
+  await admin.dispose();
+  await seedTeamAlerts("teams-labels-ru", "TR");
+  const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+  const page = await context.newPage();
+  const csp = watchCsp(page);
+  try {
+    await signIn(page, RU_ADMIN, PASSWORD);
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+
+    await page.goto("/teams");
+    await expect(page.getByTestId("team-label")).toContainText(
+      "Алерт относится к команде по значению метки команды или по её матчерам. Доступ команды не ограничивают: роли общие для организации.",
+    );
+    await expect(
+      page
+        .getByTestId("team-label")
+        .getByRole("link", { name: "Изменить в настройках организации" }),
+    ).toBeVisible();
+    const values = page.getByTestId("team-label-values");
+    await expect(values.getByRole("heading", { name: "Неизвестные значения team" })).toBeVisible();
+    await expect(values).toContainText(
+      "Алерты приходили с этими значениями, но такой команды нет: места доставки команды не добавляются, никого не зовут.",
+    );
+    await expect(valueRow(page, "checkout")).toContainText("Последний раз");
+    await expectNoHorizontalScroll(page);
+    await shot(page, "teams-unknown-values-ru-360");
+
+    await valueRow(page, "Payments").getByRole("link", { name: "Создать команду" }).click();
+    await expect(page.getByTestId("team-value-note")).toHaveText(
+      'Payments не может быть slug команды. Алерты с этим значением попадут в команду только через матчер команды, например team="Payments".',
+    );
+    await expectNoHorizontalScroll(page);
+
+    await page.goto("/teams");
+    await page.getByRole("link", { name: pay, exact: true }).click();
+    const rules = page.getByTestId("team-rules");
+    await expect(rules.getByRole("heading", { name: "Какие алерты — этой команды" })).toBeVisible();
+    await expect(rules).toContainText(
+      "Матчер может смотреть на любую метку алерта, не только на namespace. Подходит любой из матчеров.",
+    );
+    await expect(rules).toContainText(
+      "На стендах с общим namespace матчите по pod или app либо ставьте метку команды на поды.",
+    );
+    await expect(rules.getByTestId("team-rule-example")).toContainText(
+      `Команды: ${pay} — по метке команды`,
+    );
+    await rules.getByRole("button", { name: "Добавить матчер" }).click();
+    await expectNoHorizontalScroll(page);
+    await shot(page, "team-which-alerts-belong-ru-360");
+
+    await page.goto("/profile");
+    await page.getByLabel("Язык").selectOption("en");
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  } finally {
+    const cleanup = await adminApi();
+    await removeIntegration(cleanup, "teams-labels-ru");
+    await removeTeamsBySlug(cleanup, [pay, sea]);
+    await cleanup.dispose();
+    await context.close();
   }
   expect(csp).toEqual([]);
 });

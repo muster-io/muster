@@ -14,7 +14,12 @@ files_touched:
   - web/src/components/team-alert-rules.test.tsx
   - web/src/components/team-label-values.tsx
   - web/src/components/team-label-values.test.tsx
+  - web/src/components/team-membership.tsx
+  - web/src/components/team-form.tsx
+  - web/src/components/team-form.test.tsx
+  - web/src/components/team-view.test.tsx
   - web/src/routes/admin.organization.general.tsx
+  - web/src/routes/alert-groups.index.tsx
   - web/src/components/alert-group-header.tsx
   - web/src/components/alert-group-header.test.tsx
   - web/src/components/alert-group-table.tsx
@@ -36,6 +41,7 @@ files_touched:
   - web/e2e/integration-page.spec.ts
   - web/e2e/phone-width.spec.ts
   - web/e2e/organization-settings.spec.ts
+  - web/e2e/support.ts
 acceptance:
   - "[C-25.FR-7, C-25.AC-10] Above the Teams list, the Team label with the hint \"An Alert belongs to a Team by the value of the Team label or by the Team's matchers. Teams do not limit access: Roles are the same for the whole Organization.\" and a link to change it in Organization → General; the section \"Unknown values of team\" (named after the Team label) lists `checkout` and `Payments` with when each was last seen and \"Create Team\"; \"Create Team\" next to `checkout` opens the new Team form with the slug `checkout`, and next to `Payments` with the slug empty and the note that a Team gets these Alerts only through a Team matcher such as `team=\"Payments\"`, in English and in Russian (`team-label-values.test.tsx`, `teams.spec.ts`)."
   - "[C-25.FR-5] The Team page's \"Which Alerts belong to this Team\" shows the Team label with the Team's slug as its value, and the Team matchers with the matcher input of Routes, the hints \"A matcher may look at any label of the Alert, not only `namespace`. Any one matcher is enough.\" and \"On test clusters with a shared namespace, match by `pod` or `app`, or put the team label on the pods\", and an example of how an Alert Group shows it; both are kept, with no switch between them (`team-alert-rules.test.tsx`)."
@@ -81,10 +87,9 @@ issue: 409
   reference.md, each value with its relative and absolute time last seen, and "Create Team" to `/teams/new?slug=<value>`
   for a valid slug or `/teams/new?value=<value>` for another, which shows the note and an empty slug.
 - **Team page** (`team-alert-rules.tsx`): the Team label with the slug read-only (changed with the slug), the matchers
-  with `label-matchers-input.tsx` and the two hints, and the example line "Teams: {slug} — by the Team label". The
+  with the Matcher builder of Routes (`matcher-builder.tsx`, saved with the section's Save) and the two hints, and the example line "Teams: {name} — by the Team label" (the name is what the Alert Group page shows). The
   approved mockup shows the label and the matchers as one switch; L2.md §5.2 keeps both, so the page does too.
-- **General** (`admin.organization.general.tsx`): "Team label" under the time zone; `reserved_label` shows the server's
-  message at the field.
+- **General** (`admin.organization.general.tsx`): "Team label" under the time zone; `reserved_label` shows its message, in both languages, at the field.
 - **Alert Group page** (`alert-group-header.tsx`, `alert-group-alerts.tsx`, `timeline.tsx`): the header line "Teams:
   {team} — by the Team label" or "— by the matcher {matcher}", one per Team, a deleted Team in its name with
   "(deleted)"; the Timeline texts "{team} joined — by the Team label" / "— by the matcher {matcher}" and "No Team has

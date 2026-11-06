@@ -5,7 +5,8 @@
 // Route and the Integrations linked, start and duration, "🔁 Reopened ×N" and, once resolved, who resolved it or the
 // system's reason; the Owner, the end of a Snooze ("No end" too) and who set it (C-10.FR-13), a deleted user named
 // "(deactivated)"; the badge "Unclaimed" (C-17.FR-3) and the next ack timeout notice or Reminder from next_notice, in
-// the user's time zone with the time left on hover (C-17.FR-9); the Guide link beside the title (C-21.FR-11). Status
+// the user's time zone with the time left on hover (C-17.FR-9); the Teams with the rule that brought each (C-25.FR-6);
+// the Guide link beside the title (C-21.FR-11). Status
 // and urgency are words, never only a colour. The title and summary come from alert labels and annotations, so they
 // show as text only. The list shares the status, the Urgent mark and the badge "Unclaimed".
 
@@ -28,6 +29,7 @@ import { useCan } from "./app-shell";
 import { PageTitle } from "./docs-link";
 import { reasonLabel, severityLabel } from "./integration-alerts";
 import { DateTime, Duration, formatElapsed, useNow } from "./relative-time";
+import { TeamsLine } from "./team-membership";
 import { cn } from "./ui/utils";
 
 export function statusLabel(t: TFunction, status: AlertGroupStatus): string {
@@ -265,6 +267,7 @@ export function AlertGroupHeader({ group }: { group: AlertGroup }) {
           </p>
         )}
         <Ownership group={group} />
+        <TeamsLine entries={group.teams} testId="alert-group-teams" />
         <NextNoticeLine notice={group.next_notice} />
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">

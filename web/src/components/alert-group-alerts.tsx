@@ -3,7 +3,7 @@
 
 // The Alerts of an Alert Group (C-09.FR-14, FR-24): firing first, resolved struck through with their reason, filtered
 // by firing or resolved. Each shows its labels and, in its expandable details, the full reason of a resolved Alert —
-// readable by touch, not only on hover (D261a) — its annotations, startsAt, the time last seen, the Alertmanager groups
+// readable by touch, not only on hover (D261a) — the Teams it belongs to with their rule (C-25.FR-5), its annotations, startsAt, the time last seen, the Alertmanager groups
 // listing it and its source link. Labels, annotations and the link come from Alertmanager: text only, and the link
 // only when it is http or https.
 
@@ -22,6 +22,7 @@ import { problemText } from "../lib/api";
 import { orderedLabels, reasonLabel, reasonText } from "./integration-alerts";
 import { DateTime } from "./relative-time";
 import { StatusTabs } from "./status-tabs";
+import { TeamsLine } from "./team-membership";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
@@ -128,6 +129,11 @@ function AlertItem({ alert }: { alert: AlertGroupAlert }) {
         </span>
       </div>
       <Labels labels={alert.labels} resolved={resolved} />
+      <TeamsLine
+        entries={alert.teams}
+        testId="alert-teams"
+        className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs"
+      />
       <details className="group" data-testid="alert-details">
         <summary className="w-fit cursor-pointer rounded-md text-sm text-primary outline-none focus-visible:ring-2 focus-visible:ring-ring">
           {t("alertGroups.alerts.details")}

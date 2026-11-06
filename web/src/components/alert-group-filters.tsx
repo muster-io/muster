@@ -3,7 +3,7 @@
 
 // The filters of the Alert Group list (C-09.FR-13, C-10.FR-13, C-13.FR-12, C-17.FR-3): Route and Integration (several
 // of each), Severity level, Urgent, resolved by a person or by the system with its reason, Reopened, the Owner,
-// "Unclaimed", "Snoozed with no end", "Delivery problem" and label Matchers; on a desktop also the label columns. All
+// "Unclaimed", "Snoozed with no end", "Delivery problem", the Team (C-25.FR-2) and label Matchers; on a desktop also the label columns. All
 // combine, and all live in the URL. The pickers are native selects (D250); a picker that takes several values adds each
 // chosen one as a chip that removes it again. The "Unclaimed" quick filter beside the list sets the same value.
 
@@ -32,6 +32,7 @@ import { reasonLabel, severityLabel } from "./integration-alerts";
 import { LabelColumnsPicker } from "./label-columns-picker";
 import { LabelMatchersInput } from "./label-matchers-input";
 import { OwnerFilter } from "./owner-filter";
+import { MY_TEAMS, TeamFilter } from "./team-filter";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -280,6 +281,7 @@ export function AlertGroupFilters({
         onChange={(next) => onChange({ reopened: fromFlag(next) })}
       />
       <OwnerFilter value={search.owner} onChange={(owner) => onChange({ owner })} />
+      <TeamFilter value={search.team} onChange={(team) => onChange({ team })} />
       <div className="flex items-start gap-2">
         <input
           id={`${id}-unclaimed`}
@@ -372,6 +374,28 @@ export function UnclaimedToggle({
       data-testid="filter-unclaimed"
     >
       {t("alertGroups.filters.unclaimed")}
+    </Button>
+  );
+}
+
+/** The "My Teams" quick filter beside the list (C-25.FR-2): the Alert Groups of the Teams of the signed-in User. */
+export function MyTeamsToggle({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (next: string | undefined) => void;
+}) {
+  const { t } = useTranslation();
+  const on = value === MY_TEAMS;
+  return (
+    <Button
+      variant={on ? "default" : "outline"}
+      aria-pressed={on}
+      onClick={() => onChange(on ? undefined : MY_TEAMS)}
+      data-testid="filter-my-teams"
+    >
+      {t("teams.filter.mine")}
     </Button>
   );
 }

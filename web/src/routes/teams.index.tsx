@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// Teams (C-25.FR-3, C-25.AC-10): every Team with its name, its slug and how many people are in it, page by page; every
-// Role reads the list, and "New Team" needs teams:write. A Team grants no access of its own.
+// Teams (C-25.FR-3, FR-7, C-25.AC-10): the Team label with its hint, every Team with its name, its slug and how many
+// people are in it, page by page, and the values of the Team label that name no Team; every Role reads them, and "New
+// Team" and "Create Team" need teams:write. A Team grants no access of its own.
 
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMemo } from "react";
@@ -13,6 +14,7 @@ import type { Team } from "../api/gen/model";
 import { RequirePermission, useCan } from "../components/app-shell";
 import { type DataColumn, DataTable, useCursorList } from "../components/data-table";
 import { PageTitle } from "../components/docs-link";
+import { TeamLabelLine, TeamLabelValues } from "../components/team-label-values";
 import { buttonVariants } from "../components/ui/button";
 
 export const Route = createFileRoute("/teams/")({
@@ -84,7 +86,9 @@ function TeamsPage() {
             </Link>
           )}
         </div>
+        <TeamLabelLine />
         <TeamsTable />
+        <TeamLabelValues />
       </div>
     </RequirePermission>
   );

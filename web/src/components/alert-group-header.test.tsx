@@ -3,7 +3,8 @@
 
 // The header of the Alert Group page in a real browser: the next notice from next_notice ("Next ack timeout notice
 // at …", "Next Reminder at …", nothing without one) in the user's time zone, and the badge "Unclaimed" exactly while
-// the Alert Group is Unclaimed, in English and Russian.
+// the Alert Group is Unclaimed, and the Teams with the rule that brought each (a deleted Team marked), in English and
+// Russian.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -22,6 +23,7 @@ import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
 import { alertGroup } from "../test/fixtures/alert-groups";
+import { teamRef } from "../test/fixtures/teams";
 import { AlertGroupHeader } from "./alert-group-header";
 
 const ZONE = "Europe/Berlin";
@@ -106,6 +108,63 @@ describe("AlertGroupHeader", () => {
     await renderHeader(group({ next_notice: { kind: "ack_timeout", at: AT } }));
     await expect.element(nextNotice()).toBeVisible();
     expect(badge().query()).toBeNull();
+  });
+
+  test("shows each Team with the rule that brought it, a deleted Team marked as deleted", async () => {
+    const payments = teamRef({ id: "TM0000000000PA", name: "payments", slug: "payments" });
+    const search = teamRef({ id: "TM0000000000SE", name: "search", slug: "search" });
+    const gone = teamRef({ id: "TM0000000000GO", name: "legacy", slug: "legacy", deleted: true });
+    const joined_at = AT;
+    await renderHeader(
+      group({
+        teams: [
+          { team: payments, rule: "label", matcher: null, joined_at },
+          { team: search, rule: "matcher", matcher: 'namespace=~"checkout|billing"', joined_at },
+          { team: gone, rule: "label", matcher: null, joined_at },
+        ],
+      }),
+    );
+    const teams = page.getByTestId("alert-group-teams");
+    await expect
+      .poll(() => teams.element().textContent)
+      .toContain("Teams: payments — by the Team label");
+    const lines = page
+      .getByTestId("team-entry")
+      .elements()
+      .map((e) => e.textContent);
+    expect(lines).toEqual([
+      "payments — by the Team label",
+      'search — by the matcher namespace=~"checkout|billing"',
+      "legacy (deleted) — by the Team label",
+    ]);
+    await expect
+      .element(page.getByRole("link", { name: "payments" }))
+      .toHaveAttribute("href", "/teams/TM0000000000PA");
+    expect(page.getByRole("link", { name: "legacy" }).elements()).toHaveLength(0);
+  });
+
+  test("shows no Teams line for an Alert Group without Teams", async () => {
+    await renderHeader(group({}));
+    expect(page.getByTestId("alert-group-teams").elements()).toHaveLength(0);
+  });
+
+  test("speaks Russian about its Teams", async () => {
+    await i18n.changeLanguage("ru");
+    await renderHeader(
+      group({
+        teams: [
+          {
+            team: teamRef({ name: "payments", slug: "payments", deleted: true }),
+            rule: "matcher",
+            matcher: 'pod=~"api-.*"',
+            joined_at: AT,
+          },
+        ],
+      }),
+    );
+    await expect
+      .element(page.getByTestId("alert-group-teams"))
+      .toHaveTextContent('Команды: payments (удалена) — по матчеру pod=~"api-.*"');
   });
 
   test("speaks Russian", async () => {

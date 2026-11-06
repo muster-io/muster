@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// A Team (C-25.FR-3, FR-4, FR-9; C-25.AC-10): its name, slug and description, "People", "Identity provider groups" and
-// "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
+// A Team (C-25.FR-3, FR-4, FR-5, FR-9; C-25.AC-10): its name, slug and description, "Which Alerts belong to this Team",
+// "People", "Identity provider groups" and "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
 // with each of its own saves), sends it as If-Match with every other field as read, and says so when a newer version
 // arrives, so a save over a newer version shows a conflict instead of overwriting it, as the OIDC settings do.
 // Without teams:write the page only shows the Team.
@@ -31,6 +31,7 @@ import {
   newEntryKey,
 } from "../components/claim-entries-editor";
 import { DocsLink, PageTitle } from "../components/docs-link";
+import { TeamAlertRules } from "../components/team-alert-rules";
 import { TeamForm } from "../components/team-form";
 import { TeamPeople } from "../components/team-people";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -327,6 +328,46 @@ function IdpGroups({ session, canWrite }: { session: TeamBase; canWrite: boolean
   );
 }
 
+/** "Which Alerts belong to this Team": the Team label with the slug, and the Team matchers, saved on their own. */
+function AlertRules({ session, canWrite }: { session: TeamBase; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const organization = useGetOrganization();
+  const save = useTeamSave(session);
+  const label = organization.data?.team_label;
+  return (
+    <Section
+      id="team-rules"
+      title={t("teams.rules.title")}
+      docs={<DocsLink to="field.team_label" kind="learn_more" about={t("docs.fields.teamLabel")} />}
+    >
+      {label === undefined ? (
+        <p
+          className={
+            organization.isError ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+          }
+          role={organization.isError ? "alert" : "status"}
+        >
+          {organization.isError ? problemText(t, organization.error) : t("common.loading")}
+        </p>
+      ) : (
+        <>
+          {organization.isError && (
+            <p className="text-sm text-destructive" role="alert">
+              {problemText(t, organization.error)}
+            </p>
+          )}
+          <TeamAlertRules
+            team={session.base}
+            label={label}
+            canWrite={canWrite}
+            save={(matchers) => save.mutateAsync({ matchers })}
+          />
+        </>
+      )}
+    </Section>
+  );
+}
+
 /** The checks the server repeats on the Working hours, before they are sent. */
 function hoursChecks(hours: WorkingHours): HoursErrors {
   const found: HoursErrors = {};
@@ -589,6 +630,7 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
           }}
         />
       </Section>
+      <AlertRules session={session} canWrite={canWrite} />
       <TeamPeople teamId={team.id} canWrite={canWrite} />
       <IdpGroups session={session} canWrite={canWrite} />
       <WorkingHoursSection session={session} canWrite={canWrite} />

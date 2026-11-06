@@ -92,6 +92,9 @@ beforeEach(async () => {
           : reply(server.getStatus, problem(server.getStatus)),
       );
     }
+    if (url === "/api/v1/organization") {
+      return Promise.resolve(reply(200, { team_label: "team" }));
+    }
     return Promise.resolve(reply(200, { items: [], next_cursor: null }));
   });
 });
@@ -187,6 +190,87 @@ describe("the page of a Team", () => {
     await hasText(page.getByTestId("team-hours-status"), "Saved.");
     // Its own save is the base now: the next one sends the version it brought, and no banner shows.
     expect(page.getByTestId("team-stale").elements()).toHaveLength(0);
+  });
+
+  test("Which Alerts belong saves the matchers with the version the page was read at and the other fields as read", async () => {
+    const { queryClient } = await renderView();
+    await otherTabChanges(queryClient);
+    await hasText(page.getByTestId("team-stale"), "Someone else changed this Team.");
+    const rules = page.getByTestId("team-rules");
+    await hasText(rules, "team = payments");
+    await rules.getByRole("button", { name: "Add matcher" }).click();
+    await rules.getByLabelText("Label of matcher 1").fill("namespace");
+    await rules.getByLabelText("Operator of matcher 1").selectOptions("=~");
+    await rules.getByLabelText("Value of matcher 1").fill("checkout|billing");
+    await rules.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+    // The newer description ("b") is not the page's; the matchers go with the version it was read at.
+    expect(server.puts[0]?.ifMatch).toBe('"1"');
+    expect(server.puts[0]?.body).toMatchObject({
+      description: "a",
+      matchers: [{ label: "namespace", op: "=~", value: "checkout|billing" }],
+    });
+    await hasText(page.getByTestId("team-rules-status"), "Saved.");
+  });
+
+  test("a save of the matchers shows the banner with Reload on a newer version, once", async () => {
+    await renderView();
+    server.putStatus = 412;
+    const rules = page.getByTestId("team-rules");
+    await rules.getByRole("button", { name: "Add matcher" }).click();
+    await rules.getByLabelText("Label of matcher 1").fill("pod");
+    await rules.getByLabelText("Value of matcher 1").fill("api");
+    await rules.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.element(page.getByTestId("team-stale")).toBeVisible();
+    expect(server.puts[0]?.ifMatch).toBe('"1"');
+    // The conflict is the page's banner; the section adds no alert of its own.
+    expect(rules.getByRole("alert").elements()).toHaveLength(0);
+    expect(page.getByTestId("team-stale").elements()).toHaveLength(1);
+    server.team = {
+      ...server.team,
+      matchers: [{ label: "app", op: "=", value: "web" }],
+      etag: '"2"',
+    };
+    await page.getByTestId("team-stale").getByRole("button", { name: "Reload" }).click();
+    await expect.element(rules.getByLabelText("Label of matcher 1")).toHaveValue("app");
+    await expect.element(page.getByTestId("team-stale")).not.toBeInTheDocument();
+  });
+
+  test("a save of the matchers never shows the banner, and the next save sends the version it brought", async () => {
+    await renderView();
+    let shown = false;
+    const watch = new MutationObserver(() => {
+      shown ||= document.querySelector('[data-testid="team-stale"]') !== null;
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    try {
+      const rules = page.getByTestId("team-rules");
+      await rules.getByRole("button", { name: "Add matcher" }).click();
+      await rules.getByLabelText("Label of matcher 1").fill("pod");
+      await rules.getByLabelText("Value of matcher 1").fill("api");
+      await rules.getByRole("button", { name: "Save", exact: true }).click();
+      await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+      await hasText(page.getByTestId("team-rules-status"), "Saved.");
+      await new Promise((done) => setTimeout(done, 100));
+      await page.getByLabelText("Description", { exact: true }).fill("c");
+      await page.getByTestId("team-details").getByRole("button", { name: "Save" }).click();
+      await vi.waitFor(() => expect(server.puts).toHaveLength(2));
+      await new Promise((done) => setTimeout(done, 100));
+    } finally {
+      watch.disconnect();
+    }
+    expect(shown).toBe(false);
+    expect(server.puts[1]?.ifMatch).toBe('"9"');
+    // The other sections leave the matchers out, which keeps them.
+    expect(server.puts[1]?.body).not.toHaveProperty("matchers");
+  });
+
+  test("a save of the Working hours leaves the matchers out", async () => {
+    await renderView();
+    await hours().getByRole("checkbox", { name: "Own" }).click();
+    await hours().getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+    expect(server.puts[0]?.body).not.toHaveProperty("matchers");
   });
 
   test("a save of its own never shows the banner, not even for a moment", async () => {

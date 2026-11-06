@@ -238,6 +238,29 @@ describe("entryText", () => {
         status("urgency_raised", { reason: "x", reason_code: "minimum_severity" }),
         "Became Urgent: Minimum severity of the Route",
       ],
+      [
+        alerts("team_joined", {
+          team: { id: "TM0000000000PA", name: "payments", slug: "payments", deleted: false },
+          team_rule: "label",
+          team_matcher: null,
+        }),
+        "payments joined — by the Team label",
+      ],
+      [
+        alerts("team_joined", {
+          team: { id: "TM0000000000SE", name: "search", slug: "search", deleted: false },
+          team_rule: "matcher",
+          team_matcher: 'namespace=~"checkout|billing"',
+        }),
+        'search joined — by the matcher namespace=~"checkout|billing"',
+      ],
+      [
+        alerts("team_joined", {
+          team: { id: "TM0000000000GO", name: "legacy", slug: "legacy", deleted: true },
+          team_rule: "label",
+        }),
+        "legacy (deleted) joined — by the Team label",
+      ],
       [timers("ack_timeout", { notice_number: 2 }), "Ack timeout notice 2 of 3"],
       [timers("unclaimed"), "Unclaimed"],
       [timers("reminder", { notice_number: 1 }), "Reminder 1"],
@@ -275,11 +298,30 @@ describe("entryText", () => {
       ),
     ).toBe("Fallback template used: Root message failed — line 4, column 7: <b>x</b>");
     expect(text(system("template_value_missing"))).toBe("A template value was missing");
+    expect(
+      text(system("unknown_team_value", { event: "unknown_team_value", team_value: "Payments" })),
+    ).toBe("No Team has the value Payments of the Team label");
     expect(text(delivery("publication"))).toBe("Published in ops");
     expect(text(delivery("not_delivered"))).toBe("Not delivered to ops");
     expect(text(delivery("final_edit"))).toBe("No longer updated in ops");
     expect(text(delivery("republished_past_edit_window"))).toBe(
       "Published again in ops: past the edit window",
+    );
+  });
+
+  test("has the Team texts in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    expect(
+      text(
+        alerts("team_joined", {
+          team: { id: "TM0000000000PA", name: "payments", slug: "payments", deleted: false },
+          team_rule: "matcher",
+          team_matcher: 'pod=~"api-.*"',
+        }),
+      ),
+    ).toBe('payments добавлена — по матчеру pod=~"api-.*"');
+    expect(text(system("unknown_team_value", { team_value: "Payments" }))).toBe(
+      "Нет команды со значением Payments метки команды",
     );
   });
 

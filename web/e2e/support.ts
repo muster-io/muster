@@ -737,3 +737,156 @@ export async function shot(page: Page, name: string): Promise<void> {
     await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
   }
 }
+
+/** The password of the local users the Team specs create. */
+export const TEAM_SPEC_PASSWORD = "teams-password-1";
+
+/** Creates a local user with a password unless the login exists, and returns its id. */
+export async function ensureLocalUser(admin: Api, login: string, role: string): Promise<string> {
+  const directory = await admin.call<{ items: { id: string; login?: string }[] }>(
+    "GET",
+    `/api/v1/user-directory?q=${encodeURIComponent(login)}`,
+  );
+  const found = directory.items.find((u) => u.login === login);
+  if (found !== undefined) {
+    return found.id;
+  }
+  const { id, token } = await admin.createUser(login, role);
+  await admin.call("POST", "/api/v1/password-setups", { token, password: TEAM_SPEC_PASSWORD });
+  return id;
+}
+
+/**
+ * Creates the Team whose name and slug are slug with the people and the Team matchers, and returns its id. A Team that
+ * exists is deleted first, so that a rerun starts from the same Team and not from what an earlier run left in it.
+ */
+export async function ensureTeam(
+  admin: Api,
+  slug: string,
+  userIds: string[] = [],
+  matchers: { label: string; op: string; value: string }[] = [],
+): Promise<string> {
+  await removeTeamsBySlug(admin, [slug]);
+  const team = await admin.call<{ id: string }>("POST", "/api/v1/teams", {
+    name: slug,
+    slug,
+    own_working_hours: false,
+    matchers,
+  });
+  for (const id of userIds) {
+    await admin.call("POST", `/api/v1/teams/${team.id}/users`, { user_id: id });
+  }
+  return team.id;
+}
+
+/** Deletes the Teams with these slugs, whatever an earlier run left. */
+export async function removeTeamsBySlug(admin: Api, slugs: string[]): Promise<void> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  for (const team of list.items.filter((t) => slugs.includes(t.slug))) {
+    await admin.call("DELETE", `/api/v1/teams/${team.id}`);
+  }
+}
+
+/** The Team of bob. */
+export const TEAM_BOB = "teams-bob";
+
+/** The slugs of the two Teams a spec seeds with the prefix of its Alert names, so that no spec meets another's Teams. */
+export function teamSlugs(prefix: string): { pay: string; sea: string } {
+  const key = prefix.toLowerCase();
+  return { pay: `payments-${key}`, sea: `search-${key}` };
+}
+
+/**
+ * Seeds the Teams "payments-<prefix>" (with bob in it) and "search-<prefix>" (see teamSlugs), an Integration called
+ * name and, through the fake Alertmanager, one Alert Group each for their slugs, team="checkout" and team="Payments"
+ * as values of the Team label, and one of namespace="billing" without the Team label. The Alert names start with
+ * prefix and end with a token of this call, so that a spec finds its own Alert Groups and a rerun on the same database
+ * makes new ones instead of reopening those of the run before. Returns the Integration's id and name(kind), the Alert
+ * name of "Payments", "Search", "Checkout", "Capital" or "Billing".
+ */
+export async function seedTeamAlerts(
+  name: string,
+  prefix: string,
+): Promise<{ integrationId: string; name: (kind: string) => string }> {
+  const run = Math.random().toString(36).slice(2, 7);
+  const alertName = (kind: string) => `${prefix}${kind}${run}`;
+  const slugs = teamSlugs(prefix);
+  const admin = await adminApi();
+  try {
+    const bob = await ensureLocalUser(admin, TEAM_BOB, "responder");
+    await ensureTeam(admin, slugs.pay, [bob]);
+    await ensureTeam(admin, slugs.sea);
+  } finally {
+    await admin.dispose();
+  }
+  const integrationId = await fakeIntegration(name);
+  const group = `${prefix}-teams`;
+  await fam("PUT", `/groups/${group}`, {
+    receiver: name,
+    route: "{}",
+    labels: { job: prefix },
+  });
+  const alerts: [string, Record<string, string>][] = [
+    ["pay", { alertname: alertName("Payments"), team: slugs.pay }],
+    ["sea", { alertname: alertName("Search"), team: slugs.sea }],
+    ["che", { alertname: alertName("Checkout"), team: "checkout" }],
+    ["cap", { alertname: alertName("Capital"), team: "Payments" }],
+    ["bil", { alertname: alertName("Billing"), namespace: "billing" }],
+  ];
+  for (const [id, labels] of alerts) {
+    await fam("PUT", `/groups/${group}/alerts/${id}`, {
+      labels: { severity: "warning", job: prefix, ...labels },
+      annotations: { summary: `${labels.alertname ?? ""} is firing` },
+    });
+  }
+  await notify(integrationId, group, { reason: "first notification" });
+  return { integrationId, name: alertName };
+}
+
+/** The id of the Alert Group of the Alert called alertname in the Integration, once Muster has made it. */
+export async function alertGroupOf(integrationId: string, alertname: string): Promise<string> {
+  const admin = await adminApi();
+  try {
+    let id = "";
+    await expect
+      .poll(async () => {
+        const page = await admin.call<{ items: { alert_group?: { id: string } }[] }>(
+          "GET",
+          `/api/v1/integrations/${integrationId}/alerts?label=${encodeURIComponent(`alertname="${alertname}"`)}`,
+        );
+        id = page.items[0]?.alert_group?.id ?? "";
+        return id;
+      })
+      .not.toBe("");
+    return id;
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/** Replaces the Team matchers of the Team with this slug, as the Team page saves them. */
+export async function setTeamMatchers(
+  admin: Api,
+  slug: string,
+  matchers: { label: string; op: string; value: string }[],
+): Promise<void> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const id = list.items.find((t) => t.slug === slug)?.id;
+  expect(id, `the Team ${slug}`).toBeDefined();
+  const team = await admin.call<{ name: string; description: string; etag: string }>(
+    "GET",
+    `/api/v1/teams/${id}`,
+  );
+  await admin.call(
+    "PUT",
+    `/api/v1/teams/${id}`,
+    { name: team.name, slug, description: team.description, own_working_hours: false, matchers },
+    { "If-Match": team.etag },
+  );
+}

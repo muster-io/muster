@@ -34,6 +34,7 @@ import { reasonLabel } from "./integration-alerts";
 import { useDestinationLabels } from "./destination-label";
 import { unreachable } from "./destination-test-panel";
 import { templateName } from "./template-editor";
+import { teamNameText } from "./team-membership";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Label } from "./ui/label";
@@ -225,6 +226,15 @@ export function entryText(
             ? t("timeline.events.severityRaised")
             : t("timeline.events.severityRaisedWith", { reason });
         }
+        case "team_joined": {
+          if (entry.team === undefined) {
+            return t("timeline.events.other");
+          }
+          const team = teamNameText(t, entry.team);
+          return entry.team_rule === "matcher" && entry.team_matcher
+            ? t("timeline.events.teamJoinedMatcher", { team, matcher: entry.team_matcher })
+            : t("timeline.events.teamJoinedLabel", { team });
+        }
         default:
           return t("timeline.events.other");
       }
@@ -297,6 +307,8 @@ export function entryText(
           return fallbackText(t, entry.detail);
         case "template_value_missing":
           return t("timeline.system.templateValueMissing");
+        case "unknown_team_value":
+          return t("timeline.system.unknownTeamValue", { value: entry.team_value ?? "" });
         default:
           return t("timeline.events.other");
       }
