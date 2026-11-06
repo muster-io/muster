@@ -257,9 +257,9 @@ test("lists the Teams of each Alert Group and filters by Team and My Teams, whic
   await admin.dispose();
   // "payments" has bob in it and "search" has nobody; one Alert Group each by the Team label.
   const seed = await seedTeamAlerts("ag-list-teams", "ListTeam");
-  const [paymentsAlert, searchAlert, capitalAlert] = ["Payments", "Search", "Capital"].map(
-    seed.name,
-  );
+  const paymentsAlert = seed.name("Payments");
+  const searchAlert = seed.name("Search");
+  const capitalAlert = seed.name("Capital");
   try {
     await signInAdmin(page);
     await page.goto("/alert-groups?q=ListTeam");
