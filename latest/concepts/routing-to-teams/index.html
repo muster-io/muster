@@ -1752,6 +1752,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-you-change-a-route-or-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When you change a Route or a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-route-for-test-clusters" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2993,6 +3004,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#when-you-change-a-route-or-a-team" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When you change a Route or a Team
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-route-for-test-clusters" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3061,9 +3083,9 @@ filters.</p>
 <p>A warning Alert of <code>team="payments"</code> makes one Alert Group with one Root message in <code>infra-notice</code> and one in
 <code>payments-notice</code>, and none in the critical channels. If a critical Alert joins it, the Alert Group is also published
 in <code>infra-critical</code> and <code>payments-critical</code>; its messages in the notice channels stay and keep being updated, also
-after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it or its
-Severity level rises: a level that falls again, or a new Alert that brings neither, adds no Destination below critical
-where the Alert Group was not published before.</p>
+after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it —
+which adds that Team's Destinations — or its Severity level rises: a level that falls again, or a new Alert that
+brings neither, adds no Destination below critical where the Alert Group was not published before.</p>
 <h2 id="one-alert-group-one-status">One Alert Group, one status<a class="headerlink" href="#one-alert-group-one-status" title="Permanent link">&para;</a></h2>
 <p>An Alert Group has one status and one list of Alerts in every channel it is in. Acknowledge it from <code>payments-notice</code>
 and its message in <code>infra-notice</code> shows the same Owner; resolve it anywhere and every message shows it resolved. The
@@ -3082,6 +3104,28 @@ a Mention.</p>
 shown in the channels of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
 in <code>search-notice</code> with <code>destination_joined</code>. Teams that want their own Alert Groups add the Team label, <code>team</code> by
 default, to the Group key of the Route.</p>
+<h2 id="when-you-change-a-route-or-a-team">When you change a Route or a Team<a class="headerlink" href="#when-you-change-a-route-or-a-team" title="Permanent link">&para;</a></h2>
+<p>A save of a Route's Destination entries or of "Also to the Teams from the label", and a save of a Team's Destination
+entries, reach the open Alert Groups at once, without a lifecycle event in their Timelines:</p>
+<ul>
+<li>A new Destination, a changed condition that is met now, or the Destinations of the Teams when "Also to the Teams
+  from the label" is turned on add Root messages, Quietly and without <code>destination_joined</code>: each open Alert Group is
+  published in each of those Destinations that it reaches at its current Severity level and was not in. A save
+  publishes only through the entries it added or changed: an Alert Group whose level fell from critical, and that was
+  never published in a Destination below critical, stays out of it when an unrelated entry is saved. A condition is
+  checked against the level as it is: a Destination named for <code>critical</code> receives only the open critical Alert
+  Groups. A change of configuration starts no Escalation chain.</li>
+<li>No change removes a Root message by a condition. A Destination whose condition is not met any more, or a condition
+  narrowed back, keeps its Root messages, which stay current until their Alert Groups resolve.</li>
+<li>A Destination taken away — removed from the Route or from the Team, reached only through the Teams when "Also to the
+  Teams from the label" is turned off, or named by a deleted Team — gets the final edit "No longer updated here" with a
+  link to the Alert Group in Muster, for each open Alert Group that no entry still names it for. If the Alert Group
+  reaches it again later — its Severity level rises into a condition, or a Team that names it joins — it is published
+  there afresh with <code>destination_joined</code>, Loudly while it is firing. An entry that still
+  names it keeps the Root message, whether its condition is met or not: in the example above, if the Route also names
+  <code>payments-notice</code> for <code>critical</code>, removing <code>payments-notice</code> from the Team keeps the Root message of a warning Alert
+  Group there.</li>
+</ul>
 <h2 id="a-route-for-test-clusters">A Route for test clusters<a class="headerlink" href="#a-route-for-test-clusters" title="Permanent link">&para;</a></h2>
 <p>A Route "Test clusters" placed first, with <code>cluster=~".*-stage|.*-preprod"</code>, no Destination of its own, "Also to the
 Teams from the label" on and "Run the Teams' Escalation chains" off sends each team its test alerts in its own channels
