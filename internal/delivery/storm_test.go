@@ -106,9 +106,11 @@ func (f *fakeDB) EnsureStormSummary(_ context.Context, arg dbgen.EnsureStormSumm
 	for _, d := range f.deliveries {
 		if d.storm == arg.StormID.Int64 && d.dest == arg.DestinationID {
 			if d.state == "retired" || d.state == "withheld" {
+				d.loud = pgtype.Bool{Bool: d.publishedAt == nil, Valid: true}
 				d.state, d.messageID, d.messageURL, d.publishedAt, d.started = "pending", nil, nil, nil, nil
 				d.actualVersion, d.actualHash, d.hash, d.actualStatus = 0, nil, nil, nil
-				d.loud, d.desiredRetire, d.next = pgtype.Bool{Bool: true, Valid: true}, false, arg.Now
+				d.desiredRetire, d.next, d.threadState, d.anchorID, d.chainLastID = false, arg.Now, "none", nil, nil
+				d.responseValues, d.threadOpened, d.lateNote, d.republished = map[string]string{}, false, false, false
 			}
 			return dbgen.EnsureStormSummaryRow{ID: d.id, DesiredHash: d.hash}, nil
 		}
@@ -885,41 +887,56 @@ func TestStormDestinationJoinsAndLeaves(t *testing.T) {
 }
 
 // TestStormSummaryRevived is C-11.FR-6 with C-26.FR-6: a Destination taken off the Route during a Storm has its Storm
-// summary retired; added back during the same Storm, it gets the summary published afresh, Loud as a first one, and a
-// creation of another Alert Group meanwhile leaves the retired summary as it is.
+// summary retired; added back during the same Storm, it gets the summary published afresh — Quietly, as it was
+// published before and a change of configuration publishes Quietly (ADR-0018), and Loudly only when it was never
+// published there, its first Publication — and a creation of another Alert Group meanwhile leaves the retired summary
+// as it is.
 func TestStormSummaryRevived(t *testing.T) {
-	e := stormStarted(t)
-	st := e.onlyStorm(t)
-	summary := func() *fakeDelivery {
-		for _, d := range e.db.deliveries {
-			if d.storm == st.id && d.dest == destMM {
-				return d
+	for _, published := range []bool{true, false} {
+		t.Run(fmt.Sprintf("published %v", published), func(t *testing.T) {
+			e := stormStarted(t)
+			st := e.onlyStorm(t)
+			summary := func() *fakeDelivery {
+				for _, d := range e.db.deliveries {
+					if d.storm == st.id && d.dest == destMM {
+						return d
+					}
+				}
+				return nil
 			}
-		}
-		return nil
-	}
-	if s := summary(); s == nil || s.publishedAt == nil {
-		t.Fatalf("no published summary %+v", s)
-	}
-	e.db.routeDests[routeID] = nil
-	e.changed(t, routeID, nil, []int64{destMM})
-	if s := summary(); s.state != "retired" {
-		t.Fatalf("the summary of the destination that left: %s", s.state)
-	}
-	e.addGroup(t, 5003, false)
-	if s := summary(); s.state != "retired" {
-		t.Errorf("a creation revived the retired summary: %s", s.state)
-	}
-	e.rec.Reset()
-	e.db.routeDests[routeID] = []int64{destMM}
-	e.changed(t, routeID, []int64{destMM}, nil)
-	if s := summary(); s.state != "pending" || s.messageID != nil || !s.loud.Bool {
-		t.Fatalf("the summary of the destination added back: %+v", s)
-	}
-	e.round(t)
-	if !slices.ContainsFunc(e.callsTo(destMM), func(c deliverytest.Call) bool {
-		return c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on")
-	}) {
-		t.Errorf("the summary was not published again: %+v", e.callsTo(destMM))
+			if s := summary(); s == nil || s.publishedAt == nil {
+				t.Fatalf("no published summary %+v", s)
+			}
+			if !published {
+				s := summary()
+				s.publishedAt, s.started, s.messageID = nil, nil, nil
+			}
+			e.db.routeDests[routeID] = nil
+			e.changed(t, routeID, nil, []int64{destMM})
+			want := map[bool]string{true: "retired", false: "withheld"}[published]
+			if s := summary(); s.state != want {
+				t.Fatalf("the summary of the destination that left: %s, want %s", s.state, want)
+			}
+			e.addGroup(t, 5003, false)
+			if s := summary(); s.state != want {
+				t.Errorf("a creation revived the summary that left: %s", s.state)
+			}
+			e.rec.Reset()
+			e.db.routeDests[routeID] = []int64{destMM}
+			e.changed(t, routeID, []int64{destMM}, nil)
+			if s := summary(); s.state != "pending" || s.messageID != nil || s.loud.Bool != !published {
+				t.Fatalf("the summary of the destination added back: %s, loud %v", s.state, s.loud)
+			}
+			e.round(t)
+			i := slices.IndexFunc(e.callsTo(destMM), func(c deliverytest.Call) bool {
+				return c.Method == deliverytest.MethodPublish && strings.HasPrefix(textOf(c), "Storm on")
+			})
+			if i < 0 {
+				t.Fatalf("the summary was not published again: %+v", e.callsTo(destMM))
+			}
+			if c := e.callsTo(destMM)[i]; (c.Loudness == groups.Loud) != !published {
+				t.Errorf("the summary published again is %s", c.Loudness)
+			}
+		})
 	}
 }

@@ -1096,8 +1096,10 @@ DO UPDATE SET deadline = excluded.deadline, lease_owner = NULL, lease_until = NU
 
 -- EnsureStormSummary creates the Storm summary of a Storm in a Destination when it is missing, Loud at its first
 -- Publication, and locks it either way. One that left the Destination — retired or withheld when the Destination left
--- the reach of the Route's Alert Groups during the Storm — is published there afresh, as a new one is: its message and
--- its desired hash are cleared, so that the caller stores its Desired state again.
+-- the reach of the Route's Alert Groups during the Storm — is published there afresh: its message, its Thread and its
+-- desired hash are cleared as RejoinDelivery clears them, so that the caller stores its Desired state again; Loud only
+-- when it was never published, its first Publication (C-11.FR-6), and Quiet otherwise, as a change of configuration
+-- publishes (ADR-0018).
 -- name: EnsureStormSummary :one
 INSERT INTO deliveries (org_id, destination_id, storm_id, state, urgent, publication_loud, next_attempt_at, created_at,
                         updated_at)
@@ -1129,8 +1131,17 @@ DO UPDATE SET updated_at             = deliveries.updated_at,
                                               ELSE deliveries.republication_started_at END,
               desired_hash           = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
                                             ELSE deliveries.desired_hash END,
-              publication_loud       = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN true
+              publication_loud       = CASE WHEN deliveries.state IN ('retired', 'withheld')
+                                                THEN deliveries.published_at IS NULL
                                             ELSE deliveries.publication_loud END,
+              response_values        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN '{}'
+                                            ELSE deliveries.response_values END,
+              thread_opened          = deliveries.thread_opened AND deliveries.state NOT IN ('retired', 'withheld'),
+              thread_chain_last_id   = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN NULL
+                                            ELSE deliveries.thread_chain_last_id END,
+              late_note              = deliveries.late_note AND deliveries.state NOT IN ('retired', 'withheld'),
+              republished_after_delete = deliveries.republished_after_delete
+                                         AND deliveries.state NOT IN ('retired', 'withheld'),
               desired_retire         = deliveries.desired_retire AND deliveries.state NOT IN ('retired', 'withheld'),
               next_attempt_at        = CASE WHEN deliveries.state IN ('retired', 'withheld') THEN @now
                                             ELSE deliveries.next_attempt_at END
