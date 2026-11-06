@@ -468,6 +468,8 @@ type InfoUserLookup string
 
 // Layout The content of a Root message or a test message as structured data, for a bridge that renders it natively
 // instead of rendering `body`: the same content in the same order, without the buttons, which stay in `buttons`.
+// Muster sends it only when this is the whole content: a Root message that a Route's own template or Muster's
+// fallback template renders has no `layout`, and the bridge renders its `body`.
 // Every value is plain text, never CommonMark — the bridge escapes it for its messenger — and alert data in it
 // cannot mention anyone. When Muster shortens `body` to `limits.max_body_length`, `layout` loses the same parts:
 // the description first, then the Alerts, the summary and the labels, while the title, the status, the fields,
@@ -547,7 +549,7 @@ type LayoutLink struct {
 
 // LayoutPerson defines model for LayoutPerson.
 type LayoutPerson struct {
-	// Name The person's display name in Muster.
+	// Name The person's display name in Muster, which may differ from the `display_name` of their entry in `mentions`, the name of their account in the messenger.
 	Name string `json:"name"`
 
 	// Ref The `ref` of the person's entry in `mentions` where the message carries their Mention — a new message to a bridge with `native_mentions`, for a person whose account is linked through the Connection — so that the bridge mentions them by its own user id; null otherwise, and always in an edit.
@@ -602,7 +604,7 @@ type Mention struct {
 	Ref string `json:"ref"`
 }
 
-// MessageContent The envelope of a message. A Root message and a test message also carry `layout`, the same content as `body` as plain-text data; a bridge renders either `body` or `layout`, and a bridge that ignores `layout` is unaffected. A Storm summary has no `layout`.
+// MessageContent The envelope of a message. A Root message and a test message also carry `layout`, the same content as `body` as plain-text data; a bridge renders either `body` or `layout`, and a bridge that ignores `layout` is unaffected. A message without `layout` is rendered from `body`, always — a Storm summary, a Root message whose Route renders it with a template of its own or with Muster's fallback template, whose content only `body` holds, or a message of an earlier version of Muster.
 type MessageContent struct {
 	// Body CommonMark, as the description of this protocol says; at most `limits.max_body_length` code points.
 	Body string `json:"body"`
@@ -618,6 +620,8 @@ type MessageContent struct {
 
 	// Layout The content of a Root message or a test message as structured data, for a bridge that renders it natively
 	// instead of rendering `body`: the same content in the same order, without the buttons, which stay in `buttons`.
+	// Muster sends it only when this is the whole content: a Root message that a Route's own template or Muster's
+	// fallback template renders has no `layout`, and the bridge renders its `body`.
 	// Every value is plain text, never CommonMark — the bridge escapes it for its messenger — and alert data in it
 	// cannot mention anyone. When Muster shortens `body` to `limits.max_body_length`, `layout` loses the same parts:
 	// the description first, then the Alerts, the summary and the labels, while the title, the status, the fields,
@@ -668,6 +672,8 @@ type MessageInput struct {
 
 	// Layout The content of a Root message or a test message as structured data, for a bridge that renders it natively
 	// instead of rendering `body`: the same content in the same order, without the buttons, which stay in `buttons`.
+	// Muster sends it only when this is the whole content: a Root message that a Route's own template or Muster's
+	// fallback template renders has no `layout`, and the bridge renders its `body`.
 	// Every value is plain text, never CommonMark — the bridge escapes it for its messenger — and alert data in it
 	// cannot mention anyone. When Muster shortens `body` to `limits.max_body_length`, `layout` loses the same parts:
 	// the description first, then the Alerts, the summary and the labels, while the title, the status, the fields,

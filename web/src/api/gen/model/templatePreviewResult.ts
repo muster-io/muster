@@ -28,7 +28,7 @@ export interface TemplatePreviewResult {
   source?: string | null;
   /** @nullable */
   sample?: TemplatePreviewResultSample;
-  /** For `root_message`, the content of the rendered message as structured data; null when the template failed. */
+  /** For `root_message`, the content of the rendered message as structured data; null when the template failed, and when a template of the Route renders the content, which the structured data cannot carry, as a bridge then receives no `layout`. */
   layout?: MessageLayout | null;
   /** For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise. */
   length?: number;
