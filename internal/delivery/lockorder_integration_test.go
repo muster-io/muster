@@ -1450,9 +1450,9 @@ func (tl *teamLive) published(t *testing.T) string {
 	return gid
 }
 
-// secondEntry is the Destination entry of the Team of the second Destination, DSAAAAAAAAAAA2, with the condition.
-func secondEntry(condition string) teams.DestinationEntry {
-	return teams.DestinationEntry{DestinationID: "DSAAAAAAAAAAA2", Condition: condition}
+// secondEntry is the Destination entry of the Team of the second Destination, DSAAAAAAAAAAA2, for any level.
+func secondEntry() teams.DestinationEntry {
+	return teams.DestinationEntry{DestinationID: "DSAAAAAAAAAAA2", Condition: teams.ConditionAny}
 }
 
 // txGateRenderer holds the first render through it, inside Enqueue, which holds the Route's and the Teams' membership
@@ -1504,7 +1504,7 @@ func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
 		blocked, groupErr, saveErr := tl.against(t, g, tl.drain, func(ctx context.Context) error {
 			_, err := tl.teams.Update(ctx, teamSystem, tl.team.PublicID, nil, teams.Input{Name: "locks",
 				Slug: "locks", Matchers: &[]teams.Matcher{{Label: "disk", Op: "=~", Value: "TL.*"}},
-				DestinationEntries: &[]teams.DestinationEntry{secondEntry("any")}})
+				DestinationEntries: &[]teams.DestinationEntry{secondEntry()}})
 			return err
 		})
 		if !blocked || groupErr != nil || saveErr != nil {
@@ -1534,7 +1534,7 @@ func TestTeamSaveAgainstGroupingLockOrder(t *testing.T) {
 // final edit. Taking the Team's lock before the Route's row would deadlock.
 func TestDeleteTeamAgainstGroupingLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, secondEntry("any"))
+		tl := setupTeamLive(t, s, secondEntry())
 		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
 		gid := tl.published(t)
 		g := newTxGate()
@@ -1564,7 +1564,7 @@ func TestDeleteTeamAgainstGroupingLockOrder(t *testing.T) {
 // row before it takes the Team's lock, so the save goes on; taking the Team's lock first would deadlock.
 func TestDeleteTeamAgainstRouteSaveLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, secondEntry("any"))
+		tl := setupTeamLive(t, s, secondEntry())
 		tl.exec(t, `UPDATE routes SET owning_team_id = $1 WHERE id = $2`, tl.team.ID, tl.routeID)
 		tl.published(t)
 		g := newTxGate()
@@ -1605,7 +1605,7 @@ func TestDeleteTeamAgainstRouteSaveLockOrder(t *testing.T) {
 // edit. Taking the Teams' locks first would deadlock.
 func TestDestinationDeletionAgainstTeamEnqueueLockOrder(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
-		tl := setupTeamLive(t, s, secondEntry("any"))
+		tl := setupTeamLive(t, s, secondEntry())
 		tl.exec(t, `INSERT INTO route_destinations (route_id, destination_id, org_id, added_at, severity_condition)
 			VALUES ($1, $2, $3, $4, 'critical')`, tl.routeID, tl.dests[1], tl.orgID, t0)
 		gid := tl.published(t)
