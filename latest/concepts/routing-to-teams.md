@@ -87,7 +87,12 @@ label" and the proposed Group key. A setting left out is the saved Route's; a Ro
 
 The answer lists the largest Alert Groups the Alerts would form under the key, five by default, each with its Group
 key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams and the Destinations it
-would reach, with the entries that reach each: the Route's, or a Team's. For every Destination that any of the Alert
+would reach, with the entries that reach each: the Route's, or a Team's. The Destinations of an Alert Group only grow, so the
+preview follows each Alert Group as its Alerts arrived, by their `startsAt`: it reaches the Destinations of every
+Severity level the group rose through, and of each Team from the Alert that brought it. A Group key without the
+severity can thus list Destinations for `warning` and for `critical`, as the group reached them in turn; the Severity
+level shown is the highest. Alerts that started at the same time count together. When an Alert has no `startsAt`
+there is no order, and the preview lists the Destinations the group may reach: those of each Alert's own level. For every Destination that any of the Alert
 Groups reaches it counts how many of all of them reach it, those listed or not, so that a Destination reached by
 hundreds of Alert Groups is seen before the Route is saved.
 
