@@ -208,6 +208,8 @@ None.
   S-121 in the story map and needs no migration: S-121's `0032` already adds the kind `team_destinations`.
 - One rule decides Loud or Quiet (ADR-0018, C-26.FR-5): Alerts publish with `destination_joined` (S-121); a change of
   configuration publishes Quietly without it and starts no Escalation chain.
+- A Destination whose final edit is still pending when the Alert Group reaches it again keeps its Root message, which is
+  edited Quietly back to the current state, with no `destination_joined` and no Mention (C-26.FR-5).
 - A Destination is taken away only by its last entry: a Root message whose remaining entry is not met now stays and is
   kept current (C-26.FR-4).
 - The plan review added the Team's membership lock (M3) and the files that wire the changed hooks (M5): without the
