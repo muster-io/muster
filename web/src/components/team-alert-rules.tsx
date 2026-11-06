@@ -188,7 +188,7 @@ export function TeamAlertRules({ team, label, canWrite, save }: TeamAlertRulesPr
       <div className="flex min-w-0 flex-col gap-1.5" data-testid="team-rule-example">
         <h3 className="text-sm font-medium">{t("teams.rules.example")}</h3>
         <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-          <span className="font-medium">{t("alertGroups.fields.teams")}:</span>
+          <span className="font-medium">{t("alertGroups.fields.teams")}:</span>{" "}
           <span className="wrap-anywhere" data-testid="team-rule-example-teams">
             {team.name} — {teamRuleText(t, "label", null)}
           </span>

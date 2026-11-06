@@ -236,8 +236,13 @@ describe("IntegrationAlerts", () => {
     expect(rowOf("payload=").getByTestId("team-entry").elements()).toHaveLength(0);
     await i18n.changeLanguage("ru");
     await expect.element(page.getByRole("columnheader", { name: "Команды" })).toBeVisible();
+    // The table is named in Russian now.
+    const russian = page
+      .getByRole("table", { name: "Алерты" })
+      .getByRole("row")
+      .filter({ hasText: "instance=db-a" });
     await expect
-      .element(dbA.getByTestId("team-entry").first())
+      .element(russian.getByTestId("team-entry").first())
       .toHaveTextContent("payments — по метке команды");
   });
 
