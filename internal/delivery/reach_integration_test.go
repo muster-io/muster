@@ -52,6 +52,20 @@ func rejoinSetup(t *testing.T, l *live, name string, made bool) string {
 	return gid
 }
 
+// dump is the delivery of the Alert Group in the Destination as the log of a failure shows it.
+func (l *live) dump(t *testing.T, gid string, dest int64) string {
+	t.Helper()
+	var out string
+	if err := l.d.Pool.QueryRow(t.Context(), `SELECT format('state %s retire %s message %s published %s started %s
+		desired %s actual %s', d.state, d.desired_retire, d.message_id, d.published_at, d.publication_started_at,
+		d.desired_version, d.actual_version)
+		FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+		WHERE g.public_id = $1 AND d.destination_id = $2`, gid, dest).Scan(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // joinedIn counts the destination_joined entries of the Alert Group for the Destination.
 func (l *live) joinedIn(t *testing.T, gid string, dest int64) int64 {
 	t.Helper()
@@ -90,13 +104,14 @@ func TestRejoinAfterFinalEdit(t *testing.T) {
 		if n := l.joinedIn(t, gid, l.dests[1]); n != 0 {
 			t.Errorf("%d destination_joined for a root message still there", n)
 		}
+		before := l.dump(t, gid, l.dests[1])
 		if r := l.row(t, gid, l.dests[1]); r.retire || !r.message {
-			t.Errorf("the waiting final edit was not cancelled: %+v", r)
+			t.Errorf("the waiting final edit was not cancelled: %s", before)
 		}
 		l.round(t, l.a)
 		for _, c := range l.rec.Calls() {
 			if c.Destination.ID == l.dests[1] && (c.Method != deliverytest.MethodUpdate || c.Loudness != groups.Quiet) {
-				t.Errorf("a call to the destination kept: %+v", c)
+				t.Errorf("a call to the destination kept: %s %s; before the round: %s", c.Method, c.Loudness, before)
 			}
 		}
 	})
