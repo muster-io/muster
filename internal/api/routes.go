@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/muster-io/muster/internal/api/gen"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/routing"
 )
@@ -208,6 +209,21 @@ func (s *Server) PreviewGroupKey(ctx context.Context, req gen.PreviewGroupKeyReq
 		period := int64(*req.Body.PeriodSeconds)
 		in.PeriodSeconds = &period
 	}
+	if m := req.Body.MinimumSeverity; m != nil {
+		in.MinimumSeverity = new(string(*m))
+	}
+	in.DeliverToTeams = req.Body.DeliverToTeams
+	if req.Body.DestinationEntries != nil {
+		entries := make([]routing.DestinationEntry, 0, len(*req.Body.DestinationEntries))
+		for _, e := range *req.Body.DestinationEntries {
+			entry := routing.DestinationEntry{DestinationID: e.DestinationId}
+			if e.SeverityCondition != nil {
+				entry.Condition = routing.SeverityCondition(*e.SeverityCondition)
+			}
+			entries = append(entries, entry)
+		}
+		in.DestinationEntries = &entries
+	}
 	p, err := s.routes.Preview(ctx, in)
 	if err != nil {
 		return nil, err
@@ -218,7 +234,54 @@ func (s *Server) PreviewGroupKey(ctx context.Context, req gen.PreviewGroupKeyReq
 		current := previewSideOf(*p.Current)
 		out.Current = &current
 	}
+	if p.Delivery != nil {
+		d := deliveryPreviewOf(*p.Delivery)
+		out.Delivery = &d
+	}
 	return gen.PreviewGroupKey200JSONResponse(out), nil
+}
+
+func previewTeamRef(t routing.PreviewTeam) gen.TeamRef {
+	return gen.TeamRef{Id: t.PublicID, Name: t.Name, Slug: t.Slug}
+}
+
+func previewDestinationRef(d routing.PreviewDestination) gen.DestinationRef {
+	return gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
+		Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
+}
+
+func deliveryPreviewOf(d routing.DeliveryPreview) gen.DeliveryPreview {
+	out := gen.DeliveryPreview{SharedKeyWarning: d.SharedKeyWarning,
+		AlertGroups:       make([]gen.DeliveryPreviewGroup, 0, len(d.AlertGroups)),
+		DestinationCounts: make([]gen.DeliveryPreviewCount, 0, len(d.DestinationCounts))}
+	for _, g := range d.AlertGroups {
+		v := gen.DeliveryPreviewGroup{GroupKeyValues: g.GroupKeyValues, AlertCount: g.AlertCount,
+			SeverityLevel: gen.SeverityLevel(g.SeverityLevel), Teams: make([]gen.TeamRef, len(g.Teams)),
+			Destinations: make([]gen.DeliveryPreviewDestination, len(g.Destinations))}
+		for i, t := range g.Teams {
+			v.Teams[i] = previewTeamRef(t)
+		}
+		for i, rd := range g.Destinations {
+			dv := gen.DeliveryPreviewDestination{Destination: previewDestinationRef(rd.Destination),
+				Entries: make([]gen.DeliveryEntry, len(rd.Entries))}
+			for j, e := range rd.Entries {
+				dv.Entries[j] = gen.DeliveryEntry{Kind: gen.DeliveryEntryKind(e.Kind),
+					SeverityCondition: gen.SeverityCondition(e.Condition)}
+				if e.Team != nil {
+					dv.Entries[j].Team.Set(previewTeamRef(*e.Team))
+				} else {
+					dv.Entries[j].Team.SetNull()
+				}
+			}
+			v.Destinations[i] = dv
+		}
+		out.AlertGroups = append(out.AlertGroups, v)
+	}
+	for _, c := range d.DestinationCounts {
+		out.DestinationCounts = append(out.DestinationCounts, gen.DeliveryPreviewCount{
+			Destination: previewDestinationRef(c.Destination), AlertGroupCount: c.AlertGroupCount})
+	}
+	return out
 }
 
 func previewSideOf(side routing.PreviewSide) gen.GroupKeyPreviewSide {

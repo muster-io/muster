@@ -4917,6 +4917,50 @@ type DeliveryErrorClass string
 // DeliveryEventKind Delivery events are not lifecycle events and reach neither messengers nor outgoing webhook events.
 type DeliveryEventKind string
 
+// DeliveryPreview defines model for DeliveryPreview.
+type DeliveryPreview struct {
+	// AlertGroups The `routing.group_key_preview_examples` largest Alert Groups of the proposed Group key.
+	AlertGroups []DeliveryPreviewGroup `json:"alert_groups"`
+
+	// DestinationCounts Every Destination that any Alert Group the Alerts would form reaches.
+	DestinationCounts []DeliveryPreviewCount `json:"destination_counts"`
+
+	// SharedKeyWarning True when the Route delivers to the Teams and the proposed Group key lacks the Team label, so that Alerts of different Teams with the same key share one Alert Group.
+	SharedKeyWarning bool `json:"shared_key_warning"`
+}
+
+// DeliveryPreviewCount defines model for DeliveryPreviewCount.
+type DeliveryPreviewCount struct {
+	// AlertGroupCount How many of all the Alert Groups the Alerts would form reach the Destination, listed or not.
+	AlertGroupCount int            `json:"alert_group_count"`
+	Destination     DestinationRef `json:"destination"`
+}
+
+// DeliveryPreviewDestination defines model for DeliveryPreviewDestination.
+type DeliveryPreviewDestination struct {
+	Destination DestinationRef `json:"destination"`
+
+	// Entries The entries that reach the Destination, the Route's first, then the Teams' by Team.
+	Entries []DeliveryEntry `json:"entries"`
+}
+
+// DeliveryPreviewGroup defines model for DeliveryPreviewGroup.
+type DeliveryPreviewGroup struct {
+	AlertCount int `json:"alert_count"`
+
+	// Destinations The Destinations the Alert Group would reach.
+	Destinations []DeliveryPreviewDestination `json:"destinations"`
+
+	// GroupKeyValues Label names and values.
+	GroupKeyValues Labels `json:"group_key_values"`
+
+	// SeverityLevel The highest Severity level of the Alerts raised to the Minimum severity.
+	SeverityLevel SeverityLevel `json:"severity_level"`
+
+	// Teams The Teams of the Alerts, by the Team label and the Team matchers as saved.
+	Teams []TeamRef `json:"teams"`
+}
+
 // DeliveryState `waiting_for_broken_destination` — derived, never stored: a `pending` delivery whose Destination is Broken; `withheld` — never posted to this Destination: the Alert Group resolved while a Storm summary stood for it or while the Destination was Broken; `retired` — no longer updated there after its final edit, because the Destination left the Route or was deleted.
 type DeliveryState string
 
@@ -5134,9 +5178,12 @@ type ExtractionRule struct {
 // GroupKeyPreview Covers the Alerts reported firing in the Stored Snapshots of the period that the Route would take at its place in the current evaluation order (Matchers without a saved Route stand for a new Route just before the Default route), each Alert once with its Integration's Static labels, read from the newest Snapshot back and at most `routing.group_key_preview_max_alerts` of them.
 type GroupKeyPreview struct {
 	// Current Absent when no saved Route was given.
-	Current       *GroupKeyPreviewSide `json:"current,omitempty"`
-	PeriodSeconds int                  `json:"period_seconds"`
-	Proposed      GroupKeyPreviewSide  `json:"proposed"`
+	Current *GroupKeyPreviewSide `json:"current,omitempty"`
+
+	// Delivery Absent when the request gave neither `destination_entries` nor `deliver_to_teams` and no `route_id`.
+	Delivery      *DeliveryPreview    `json:"delivery,omitempty"`
+	PeriodSeconds int                 `json:"period_seconds"`
+	Proposed      GroupKeyPreviewSide `json:"proposed"`
 
 	// Truncated True when `routing.group_key_preview_max_alerts` stopped the reading before the start of the period, so the counts cover only its most recent part.
 	Truncated bool `json:"truncated"`
@@ -5152,8 +5199,17 @@ type GroupKeyPreviewExample struct {
 
 // GroupKeyPreviewRequest Preview of a Group key. Give `route_id` for a saved Route, `matchers` for a Route that is not saved yet (the create form), or both to try other Matchers on a saved Route; at least one of the two is required (`422`).
 type GroupKeyPreviewRequest struct {
+	// DeliverToTeams The unsaved "Also to the Teams from the label"; the saved Route's when absent and `route_id` is given, else false.
+	DeliverToTeams *bool `json:"deliver_to_teams,omitempty"`
+
+	// DestinationEntries The unsaved Destinations of the Route with their Severity conditions; the saved Route's when absent and `route_id` is given, else none.
+	DestinationEntries *[]DestinationEntry `json:"destination_entries,omitempty"`
+
 	// Matchers Matchers to preview instead of, or without, a saved Route's own.
 	Matchers *[]Matcher `json:"matchers,omitempty"`
+
+	// MinimumSeverity The unsaved Minimum severity of the Route; the saved Route's when absent and `route_id` is given, else `none`.
+	MinimumSeverity *MinimumSeverity `json:"minimum_severity,omitempty"`
 
 	// PeriodSeconds Defaults to `routing.group_key_preview_period`; at most `retention.stored_snapshots`.
 	PeriodSeconds    *int     `json:"period_seconds,omitempty"`

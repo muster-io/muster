@@ -899,7 +899,7 @@ export const getPreviewGroupKeyUrl = () => {
 }
 
 /**
- * Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and with the proposed Group key.
+ * Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and with the proposed Group key. With the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of the Route, or those of the saved Route, the delivery preview "Where alerts go" (C-26.FR-12) lists the largest Alert Groups of the proposed key with their Teams and the Destinations each reaches, counts the Alert Groups that reach every Destination, and tells whether Alerts of different Teams would share an Alert Group. It reads only, so nothing is saved, recorded or sent.
  * @summary Preview a Group key
  */
 export const previewGroupKey = async (groupKeyPreviewRequest: GroupKeyPreviewRequest, options?: Parameters<typeof apiFetch>[1]): Promise<GroupKeyPreview> => {

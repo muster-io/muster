@@ -3187,7 +3187,11 @@ paths:
       - Routes
       summary: Preview a Group key
       description: Counts the Alert Groups that the Stored Snapshots of the period would have produced with the current and
-        with the proposed Group key.
+        with the proposed Group key. With the unsaved `minimum_severity`, `destination_entries` and `deliver_to_teams` of
+        the Route, or those of the saved Route, the delivery preview "Where alerts go" (C-26.FR-12) lists the largest
+        Alert Groups of the proposed key with their Teams and the Destinations each reaches, counts the Alert Groups that
+        reach every Destination, and tells whether Alerts of different Teams would share an Alert Group. It reads only, so
+        nothing is saved, recorded or sent.
       x-permission: routes:write
       x-listener: app
       security:
@@ -13103,6 +13107,20 @@ components:
           description: Matchers to preview instead of, or without, a saved Route's own.
           items:
             $ref: '#/components/schemas/Matcher'
+        minimum_severity:
+          $ref: '#/components/schemas/MinimumSeverity'
+          description: The unsaved Minimum severity of the Route; the saved Route's when absent and `route_id` is given,
+            else `none`.
+        destination_entries:
+          type: array
+          description: The unsaved Destinations of the Route with their Severity conditions; the saved Route's when absent
+            and `route_id` is given, else none.
+          items:
+            $ref: '#/components/schemas/DestinationEntry'
+        deliver_to_teams:
+          type: boolean
+          description: The unsaved "Also to the Teams from the label"; the saved Route's when absent and `route_id` is
+            given, else false.
       description: Preview of a Group key. Give `route_id` for a saved Route, `matchers` for a Route that is not saved yet
         (the create form), or both to try other Matchers on a saved Route; at least one of the two is required (`422`).
     GroupKeyPreviewExample:
@@ -13150,6 +13168,81 @@ components:
           description: Absent when no saved Route was given.
         proposed:
           $ref: '#/components/schemas/GroupKeyPreviewSide'
+        delivery:
+          $ref: '#/components/schemas/DeliveryPreview'
+          description: Absent when the request gave neither `destination_entries` nor `deliver_to_teams` and no
+            `route_id`.
+    DeliveryPreviewDestination:
+      type: object
+      required:
+      - destination
+      - entries
+      properties:
+        destination:
+          $ref: '#/components/schemas/DestinationRef'
+        entries:
+          type: array
+          description: The entries that reach the Destination, the Route's first, then the Teams' by Team.
+          items:
+            $ref: '#/components/schemas/DeliveryEntry'
+    DeliveryPreviewGroup:
+      type: object
+      required:
+      - group_key_values
+      - alert_count
+      - severity_level
+      - teams
+      - destinations
+      properties:
+        group_key_values:
+          $ref: '#/components/schemas/Labels'
+        alert_count:
+          type: integer
+        severity_level:
+          $ref: '#/components/schemas/SeverityLevel'
+          description: The highest Severity level of the Alerts raised to the Minimum severity.
+        teams:
+          type: array
+          description: The Teams of the Alerts, by the Team label and the Team matchers as saved.
+          items:
+            $ref: '#/components/schemas/TeamRef'
+        destinations:
+          type: array
+          description: The Destinations the Alert Group would reach.
+          items:
+            $ref: '#/components/schemas/DeliveryPreviewDestination'
+    DeliveryPreviewCount:
+      type: object
+      required:
+      - destination
+      - alert_group_count
+      properties:
+        destination:
+          $ref: '#/components/schemas/DestinationRef'
+        alert_group_count:
+          type: integer
+          description: How many of all the Alert Groups the Alerts would form reach the Destination, listed or not.
+    DeliveryPreview:
+      type: object
+      required:
+      - alert_groups
+      - destination_counts
+      - shared_key_warning
+      properties:
+        alert_groups:
+          type: array
+          description: The `routing.group_key_preview_examples` largest Alert Groups of the proposed Group key.
+          items:
+            $ref: '#/components/schemas/DeliveryPreviewGroup'
+        destination_counts:
+          type: array
+          description: Every Destination that any Alert Group the Alerts would form reaches.
+          items:
+            $ref: '#/components/schemas/DeliveryPreviewCount'
+        shared_key_warning:
+          type: boolean
+          description: True when the Route delivers to the Teams and the proposed Group key lacks the Team label, so
+            that Alerts of different Teams with the same key share one Alert Group.
     MovedAlertGroups:
       type: object
       required:

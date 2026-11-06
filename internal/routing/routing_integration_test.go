@@ -138,6 +138,8 @@ func (e *env) routeOf(t *testing.T, id int64) string {
 	return s(name) + "/" + s(level) + "/" + s(raw)
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func names(list routing.List) string {
 	var out []string
 	for _, r := range list.Routes {
@@ -471,6 +473,220 @@ func TestIntegrationPreviewAndSuggestions(t *testing.T) {
 		}
 		if list, err := svc.Suggestions(ctx, nil); err != nil || len(list) != 0 {
 			t.Errorf("after accepting both %+v, %v", list, err)
+		}
+	})
+}
+
+// TestIntegrationPreviewDelivery is C-26.FR-12 on Stored Snapshots and the real stores: the Route "Infrastructure"
+// sent unsaved lists the Alert Group of payments in infra-notice by the Route and in payments-notice by the Team, that
+// of devops in infra-critical only, and without "Also to the Teams from the label" the first in infra-notice only;
+// Teams and Destinations come from the database, and the preview changes no Route.
+func TestIntegrationPreviewDelivery(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		ctx := t.Context()
+		for _, name := range []string{"20261005", "20261006", "20261007"} {
+			d, _ := time.Parse("20060102", name)
+			next := d.AddDate(0, 0, 1)
+			for _, stmt := range []string{
+				`CREATE TABLE stored_snapshots_p` + name + ` PARTITION OF stored_snapshots FOR VALUES FROM ('` +
+					d.Format(time.RFC3339) + `') TO ('` + next.Format(time.RFC3339) + `')`,
+				`CREATE TABLE snapshot_bodies_p` + name + ` PARTITION OF snapshot_bodies FOR VALUES FROM ('` +
+					d.Format(time.DateOnly) + `') TO ('` + next.Format(time.DateOnly) + `')`,
+			} {
+				if _, err := e.d.Pool.Exec(ctx, stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		var integration int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO integrations (org_id, public_id, name, connection_mode,
+			static_labels, duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state,
+			created_at, updated_at) VALUES ($1, 'NTAAAAAAAAAAAA', 'pv', 'webhook_only', '{}', 45, false, 300,
+			'not_configured', $2, $2) RETURNING id`, e.orgID, t0).Scan(&integration); err != nil {
+			t.Fatal(err)
+		}
+		c := clock.NewManual(t0)
+		snapshots := ingest.New(e.orgID, ingest.NewStore(e.d.Pool), c)
+		alert := func(team, severity string) string {
+			return `{"status":"firing","labels":{"alertname":"Disk","category":"infra","system":"k8s","team":"` + team +
+				`","severity":"` + severity + `"},"startsAt":"2026-10-06T00:00:00Z"}`
+		}
+		c.Set(t0.Add(-time.Hour))
+		if _, err := snapshots.Store(ctx, ingest.Received{IntegrationID: integration, Body: []byte(
+			`{"groupKey":"{}:{}","status":"firing","alerts":[` + alert("payments", "warning") + `,` +
+				alert("devops", "critical") + `]}`)}); err != nil {
+			t.Fatal(err)
+		}
+		c.Set(t0)
+		var conn int64
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
+			mattermost_server_url, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit,
+			limiter_per_seconds, created_at, updated_at) VALUES ($1, 'CNAAAAAAAAAAA1', 'mattermost', 'bot',
+			'https://mm.example.org', '\x00', 'k1', $2, 1000, 1, $2, $2) RETURNING id`, e.orgID, t0).Scan(
+			&conn); err != nil {
+			t.Fatal(err)
+		}
+		dests := map[string]string{"infra-critical": "DSAAAAAAAAAAB1", "infra-notice": "DSAAAAAAAAAAB2",
+			"payments-notice": "DSAAAAAAAAAAB3", "gone": "DSAAAAAAAAAAB4"}
+		for name, id := range dests {
+			var at *time.Time
+			if name == "gone" {
+				at = &t0
+			}
+			if _, err := e.d.Pool.Exec(ctx, `INSERT INTO destinations (org_id, public_id, type, name, connection_id,
+				mattermost_team_id, mattermost_channel_id, mentions, limiter_limit, limiter_per_seconds, health,
+				deleted_at, created_at, updated_at) VALUES ($1, $2, 'mattermost', $3, $4, 'team', 'chan', '{}', 1000,
+				1, 'healthy', $5, $6, $6)`, e.orgID, id, name, conn, at, t0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, stmt := range []string{
+			`INSERT INTO teams (org_id, public_id, name, slug, created_at, updated_at)
+				VALUES ($1, 'TMAAAAAAAAAAA1', 'Payments', 'payments', $2, $2)`,
+			`INSERT INTO team_destinations (org_id, team_id, destination_id, severity_condition, added_at)
+				SELECT $1, t.id, d.id, 'below_critical', $2 FROM teams t, destinations d
+				WHERE t.public_id = 'TMAAAAAAAAAAA1' AND d.public_id = 'DSAAAAAAAAAAB3'`,
+			`UPDATE organizations SET teams_version = teams_version + 1 WHERE id = $1 AND $2::timestamptz IS NOT NULL`,
+		} {
+			if _, err := e.d.Pool.Exec(ctx, stmt, e.orgID, t0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var log bytes.Buffer
+		logger := logging.New(&log, logging.LevelInfo)
+		svc := routing.New(routing.Config{OrgID: e.orgID, Store: routing.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logger, c), Business: c, Real: c, Snapshots: snapshots, Log: logger})
+		routes := func() string {
+			var n string
+			if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) || '/' || coalesce(sum(version), 0) || '/' ||
+				(SELECT count(*) FROM audit_log) FROM routes`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		before := routes()
+		req := routing.PreviewRequest{Matchers: []routing.Matcher{{Label: "category", Op: "=", Value: "infra"}},
+			ProposedGroupKey: []string{"alertname", "system", "team"}, DeliverToTeams: ptr(true),
+			DestinationEntries: &[]routing.DestinationEntry{
+				{DestinationID: dests["infra-critical"], Condition: routing.ConditionCritical},
+				{DestinationID: dests["infra-notice"], Condition: routing.ConditionBelowCritical}}}
+		line := func(p routing.Preview) string {
+			var out []string
+			for _, g := range p.Delivery.AlertGroups {
+				var teams, ds []string
+				for _, t := range g.Teams {
+					teams = append(teams, t.Slug)
+				}
+				for _, d := range g.Destinations {
+					var kinds []string
+					for _, en := range d.Entries {
+						kinds = append(kinds, en.Kind)
+					}
+					ds = append(ds, d.Destination.Name+":"+strings.Join(kinds, "+"))
+				}
+				out = append(out, strings.Join(teams, ",")+">"+g.SeverityLevel+">"+strings.Join(ds, ","))
+			}
+			slices.Sort(out)
+			return strings.Join(out, " ")
+		}
+		p, err := svc.Preview(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := line(p); got != ">critical>infra-critical:route payments>warning>infra-notice:route,payments-notice:team" ||
+			p.Delivery.SharedKeyWarning || len(p.Delivery.DestinationCounts) != 3 {
+			t.Errorf("deliver to Teams: %s %+v", got, p.Delivery)
+		}
+		req.DeliverToTeams = ptr(false)
+		if p, err = svc.Preview(ctx, req); err != nil ||
+			line(p) != ">critical>infra-critical:route payments>warning>infra-notice:route" {
+			t.Errorf("without deliver_to_teams: %s, %v", line(p), err)
+		}
+		req.DeliverToTeams, req.ProposedGroupKey = ptr(true), []string{"alertname"}
+		if p, err = svc.Preview(ctx, req); err != nil || !p.Delivery.SharedKeyWarning ||
+			line(p) != "payments>critical>infra-critical:route" {
+			t.Errorf("a Group key without the Team label: %s %+v, %v", line(p), p.Delivery, err)
+		}
+		req.DestinationEntries = &[]routing.DestinationEntry{{DestinationID: dests["gone"]}}
+		if _, err := svc.Preview(ctx, req); err == nil {
+			t.Error("a deleted Destination")
+		}
+		if after := routes(); after != before {
+			t.Errorf("the previews changed the Routes: %s, now %s", before, after)
+		}
+
+		// Another Organization's Route and Destination are unknown, and an empty list of entries on a saved Route
+		// leaves the Teams alone.
+		clone := func(table, publicID, filter string, org int64) {
+			t.Helper()
+			var cols []string
+			rows, err := e.d.Pool.Query(ctx, `SELECT column_name FROM information_schema.columns
+				WHERE table_name = $1 AND column_name NOT IN ('id', 'public_id', 'org_id') ORDER BY ordinal_position`, table)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var c string
+				if err := rows.Scan(&c); err != nil {
+					t.Fatal(err)
+				}
+				cols = append(cols, c)
+			}
+			rows.Close()
+			list := strings.Join(cols, ", ")
+			if _, err := e.d.Pool.Exec(ctx, `INSERT INTO `+table+` (org_id, public_id, `+list+`) SELECT $1, $2, `+list+
+				` FROM `+table+` WHERE org_id = $3 AND `+filter, org, publicID, e.orgID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var other int64
+		rows, err := e.d.Pool.Query(ctx, `SELECT column_name FROM information_schema.columns
+			WHERE table_name = 'organizations' AND column_name NOT IN ('id', 'public_id') ORDER BY ordinal_position`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var orgCols []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				t.Fatal(err)
+			}
+			orgCols = append(orgCols, c)
+		}
+		rows.Close()
+		list := strings.Join(orgCols, ", ")
+		if err := e.d.Pool.QueryRow(ctx, `INSERT INTO organizations (public_id, `+list+`) SELECT 'RGZZZZZZZZZZZZ', `+list+
+			` FROM organizations WHERE id = $1 RETURNING id`, e.orgID).Scan(&other); err != nil {
+			t.Fatal(err)
+		}
+		clone("routes", "RTZZZZZZZZZZZZ", "is_default", other)
+		clone("destinations", "DSZZZZZZZZZZZZ", "public_id = 'DSAAAAAAAAAAB2'", other)
+		req = routing.PreviewRequest{RouteID: "RTZZZZZZZZZZZZ", ProposedGroupKey: []string{"alertname"}}
+		if _, err := svc.Preview(ctx, req); !errors.Is(err, routing.ErrNotFound) {
+			t.Errorf("another Organization's Route: %v", err)
+		}
+		_, err = svc.Preview(ctx, routing.PreviewRequest{Matchers: []routing.Matcher{{Label: "category", Op: "=",
+			Value: "infra"}}, ProposedGroupKey: []string{"alertname"}, DestinationEntries: &[]routing.DestinationEntry{
+			{DestinationID: "DSZZZZZZZZZZZZ"}}})
+		var fe *routing.FieldError
+		if !errors.As(err, &fe) || fe.Code != routing.CodeUnknownID || fe.Pointer != "/destination_entries/0/destination_id" {
+			t.Errorf("another Organization's Destination: %v", err)
+		}
+
+		in := input("infra", routing.Matcher{Label: "category", Op: "=", Value: "infra"})
+		in.DeliverToTeams = ptr(true)
+		in.DestinationEntries = &[]routing.DestinationEntry{
+			{DestinationID: dests["infra-critical"], Condition: routing.ConditionCritical},
+			{DestinationID: dests["infra-notice"], Condition: routing.ConditionBelowCritical}}
+		saved, err := svc.Create(ctx, by, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err = svc.Preview(ctx, routing.PreviewRequest{RouteID: saved.PublicID,
+			ProposedGroupKey: []string{"alertname", "system", "team"}, DestinationEntries: &[]routing.DestinationEntry{}})
+		if err != nil || p.Delivery == nil || line(p) != ">critical> payments>warning>payments-notice:team" {
+			t.Errorf("an empty list of entries on a saved Route: %q, %v", line(p), err)
 		}
 	})
 }

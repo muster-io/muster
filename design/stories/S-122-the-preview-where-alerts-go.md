@@ -15,8 +15,6 @@ files_touched:
   - internal/routing/routing_integration_test.go
   - internal/api/routes.go
   - internal/api/routes_test.go
-  - internal/teams/classify.go
-  - internal/teams/classify_test.go
   - test/e2e/routing_preview_test.go
   - docs/concepts/routing-to-teams.md
 acceptance:
@@ -67,8 +65,10 @@ issue: 411
   `testdata/reach/` do not change. The preview reads only; it writes nothing, records no Audit log entry and sends no
   hint. The `routing.group_key_preview_examples` largest groups are listed; `destination_counts` covers every Alert
   Group the Alerts would form, not only the listed ones.
-- **Teams** (`internal/teams/classify.go`): the classifier answers outside the Snapshot's transaction too, from a
-  read of the Team label, slugs and matchers.
+- **Teams**: `teams.Classifier.At` takes any `ClassifyQueries` and the Stamp, so the preview calls it with the pool
+  and the Stamp it reads itself, outside a Snapshot; `internal/teams/classify.go` does not change. The names of the
+  Teams, their Destination entries and the Destinations' names come from three reads in `internal/routing/query.sql`
+  (`ListPreviewTeams`, `ListPreviewTeamEntries`, `ListPreviewDestinations`), each filtered by `org_id`.
 - **Settings**: `routing.group_key_preview_period`, `routing.group_key_preview_examples`,
   `routing.group_key_preview_max_alerts`, `organization.team_label`.
 - **Log events, metrics**: none new.
@@ -87,20 +87,21 @@ issue: 411
 
 ```sh
 make dev > dev.log 2>&1 &
-# As in S-121: A, the Integration "sev", the Destinations IC, IN, PN and SN and the Team "payments" with PC and PN.
+# As in S-121 (INFRA is the id of the Route "Infrastructure": the saved Route takes the Alerts before a Route that is
+# not saved yet would, so the preview of its unsaved settings names it in route_id): A, the Integration "sev", the Destinations IC, IN, PN and SN and the Team "payments" with PC and PN.
 API=localhost:8080/api/v1; FAM=127.0.0.1:19093/_fake
 curl -s -X PUT $FAM/groups/w1 -d '{"receiver":"sev","route":"{}","labels":{"alertname":"Disk"}}' > /dev/null
 PUTA w1 a '{"labels":{"category":"infra","system":"k8s","team":"payments","severity":"warning"}}'
 PUTA w1 b '{"labels":{"category":"infra","system":"k8s","team":"devops","severity":"critical"}}'
 NOTIFY w1 '{"reason":"first notification"}'
 N0=$(psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) || '/' || coalesce(sum(version), 0) FROM routes")   # before the previews
-PREVIEW() { curl -s "${A[@]}" $API/group-key-previews -d "{\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
+PREVIEW() { curl -s "${A[@]}" $API/group-key-previews -d "{\"route_id\":\"$INFRA\",\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
   \"proposed_group_key\":[\"alertname\",\"system\",\"team\"],\"deliver_to_teams\":$1,\"destination_entries\":[
   {\"destination_id\":\"$IC\",\"severity_condition\":\"critical\"},{\"destination_id\":\"$IN\",\"severity_condition\":\"below_critical\"}]}"; }
 PREVIEW true | jq -c '[.delivery.alert_groups[] | {t: [.teams[].slug], l: .severity_level, d: [.destinations[] | "\(.destination.name):\(.entries[0].kind)"]}] | sort_by(.l)'
 # [{"t":[],"l":"critical","d":["infra-critical:route"]},{"t":["payments"],"l":"warning","d":["infra-notice:route","payments-notice:team"]}]
 PREVIEW false | jq -c '[.delivery.alert_groups[] | select(.teams | length > 0) | [.destinations[].destination.name]]'   # [["infra-notice"]]
-curl -s "${A[@]}" $API/group-key-previews -d "{\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
+curl -s "${A[@]}" $API/group-key-previews -d "{\"route_id\":\"$INFRA\",\"matchers\":[{\"label\":\"category\",\"op\":\"=\",\"value\":\"infra\"}],
   \"proposed_group_key\":[\"alertname\"],\"deliver_to_teams\":true}" | jq .delivery.shared_key_warning              # true
 [ "$(psql "$MUSTER_DATABASE_URL" -Atc "SELECT count(*) || '/' || coalesce(sum(version), 0) FROM routes")" = "$N0" ] && echo unchanged   # unchanged
 ```
