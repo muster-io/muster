@@ -374,6 +374,21 @@ INSERT INTO open_group_updates (org_id, kind, team_id, requested_at)
 SELECT @org_id, @kind::text, @team_id, @requested_at::timestamptz
 WHERE NOT EXISTS (SELECT 1 FROM pending);
 
+-- InsertTeamDestinationsUpdate inserts the open_group_updates row team_destinations of a Team and, when the change
+-- added or changed the Team's entry of a Destination, of that Destination, unless such a row is still unclaimed, which
+-- it locks so that no worker claims it before the change commits: the run then reads the entries as they are.
+-- name: InsertTeamDestinationsUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind = 'team_destinations' AND u.leased_by IS NULL AND u.team_id = @team_id
+      AND u.destination_id IS NOT DISTINCT FROM sqlc.narg('destination_id')::bigint
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, destination_id, requested_at)
+SELECT @org_id, 'team_destinations', @team_id, sqlc.narg('destination_id')::bigint, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
 -- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
 -- name: NotifyOpenGroupUpdates :exec
 SELECT pg_notify(@channel::text, '');

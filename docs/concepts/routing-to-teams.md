@@ -82,11 +82,13 @@ default, to the Group key of the Route.
 A save of a Route's Destination entries or of "Also to the Teams from the label", and a save of a Team's Destination
 entries, reach the open Alert Groups at once, without a lifecycle event in their Timelines:
 
-- A new Destination, a condition that is met now or a Team whose Destinations now count adds Root messages, Quietly
-  and without `destination_joined`: each open Alert Group is published in each Destination it now reaches at its
-  current Severity level and was not in. A condition is checked against the level as it is: a Destination named for
-  `critical` receives only the open critical Alert Groups, and an Alert Group whose level fell below critical is not
-  published in it. A change of configuration starts no Escalation chain.
+- A new Destination, a changed condition that is met now, or the Destinations of the Teams when "Also to the Teams
+  from the label" is turned on add Root messages, Quietly and without `destination_joined`: each open Alert Group is
+  published in each of those Destinations that it reaches at its current Severity level and was not in. A save
+  publishes only through the entries it added or changed: an Alert Group whose level fell from critical, and that was
+  never published in a Destination below critical, stays out of it when an unrelated entry is saved. A condition is
+  checked against the level as it is: a Destination named for `critical` receives only the open critical Alert
+  Groups. A change of configuration starts no Escalation chain.
 - No change removes a Root message by a condition. A Destination whose condition is not met any more, or a condition
   narrowed back, keeps its Root messages, which stay current until their Alert Groups resolve.
 - A Destination taken away — removed from the Route or from the Team, reached only through the Teams when "Also to the

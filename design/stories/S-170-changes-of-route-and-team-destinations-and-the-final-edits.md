@@ -30,6 +30,9 @@ files_touched:
   - internal/teams/teams.go
   - internal/teams/query.sql
   - internal/teams/teams_test.go
+  - internal/groups/teams.go
+  - internal/destinations/delete.go
+  - internal/destinations/delete_test.go
   - internal/groups/updates.go
   - internal/groups/updates_test.go
   - internal/groups/dispatcher.go
@@ -214,7 +217,9 @@ None.
   `files_touched` gained the fake databases that read the new queries (`internal/delivery/worker_test.go`,
   `storm_test.go`, `internal/groups/events_test.go`), the tests that call the changed hook of the Routes
   (`internal/delivery/hints_test.go`, `outcomes_test.go`, `webhookevents_test.go`, `live_test.go`),
-  `internal/groups/grouping.go` (the Service holds the final edits it is given), `internal/delivery/storm.go` and
+  `internal/groups/grouping.go` (the Service holds the final edits it is given), `internal/groups/teams.go` (a batch of
+  the evaluation takes the Teams' locks up front), `internal/destinations/delete.go` and its test (a deletion that
+  PostgreSQL ends in a deadlock runs again), `internal/delivery/storm.go` and
   `webhookevents.go` (the helpers of the L1 hook that only it used give way to `hasRoot`) and `design/db/schema.md` (the Team's
   lock, the row `team_destinations` and `deliveries.entries`). The deletion of a Destination needs no change of
   `internal/destinations`: routing's `DestinationDeleted`, which it already calls, removes it from the Teams.
@@ -223,15 +228,28 @@ None.
   (C-11.FR-14 of L1). `deliveries.entries` stay appended and never removed: a delivery that keeps its Root message
   because another entry still names its Destination, met or not, gets that entry appended, so that the later removal of
   that entry finds it; otherwise a delivery that a Route reached and whose Team entry was never met would stay current
-  forever once both entries are gone. What a change of configuration adds is the reach under the new configuration at
-  the Alert Group's current Severity level and with its current Teams, where it has no delivery kept current: a
-  condition widened publishes, a fallen level never brings back a critical Destination its condition no longer meets
-  (C-26.FR-4), and no change removes by a condition. The re-render of a `team_destinations` row is marked
-  `groups.Rendering.Grows`, with which Enqueue creates the missing deliveries and publishes again, Quietly, one whose
-  final edit was done; it needs no barrier of the evaluation (`db.TeamEvaluationLockClass`): the Team's membership lock
-  orders a save against the Snapshots that read its entries. A re-render of several open Alert Groups takes every
+  forever once both entries are gone. A change of configuration publishes only in the Destinations whose entries the
+  change itself touched, where the Alert Group meets them now, at its current Severity level and with its current
+  Teams, without a delivery kept current there: for a Route's save, the entries it added or whose condition it
+  changed, and the Team entries of the Alert Group's Teams when it turned `deliver_to_teams` on; for a Team's save, the
+  entries it added or changed, one `team_destinations` row per such Destination (with the Team and the Destination in
+  `destination_id`, a row with the Team alone when the save only removed entries or the Team was deleted), whose
+  re-render is marked `groups.Rendering.Grows` with that Team and Destination, so that Enqueue adds that target only
+  and publishes again, Quietly, only that delivery when its final edit was done. So an Alert Group whose level fell
+  from critical, never published below critical, is not published there by a save that touched something else
+  (C-26.FR-4), and no change removes by a condition (revised in review, H1; the first form published wherever the new
+  reach had no delivery). The rows need no barrier of the evaluation (`db.TeamEvaluationLockClass`): the Team's
+  membership lock orders a save against the Snapshots that read its entries. A delivery that a change of
+  configuration creates or publishes again for an Alert Group created since the active Storm started is held by the
+  Storm, with its summary there, even where a final edit cleared its hold (review, M1). A re-render of several open Alert Groups takes every
   Route's membership lock and then every Team's up front, each in id order, so that the walk never takes a lock below one
-  it holds. The Storm summary of a Destination taken away is retired only once nothing of the Route is kept current
+  it holds, and a batch of `team_evaluation` or `organization_message_settings` classifies its Alerts first and takes
+  the Teams it brings with them (review, M2). Grouping a Snapshot, which classifies per Snapshot, still takes the
+  Teams' locks per Alert Group, out of id order across Alert Groups of different Teams: a cycle with the deletion of a
+  Destination that two of those Teams name is possible, rare and detected by PostgreSQL, as for the Routes' locks; the
+  lane retries the Snapshot, and the deletion runs again, up to three times (`internal/destinations/delete.go`),
+  instead of answering 500. A Storm summary retired in a Destination is not revived when the Destination is added
+  again during the same Storm, as before this story (review, L1: a follow-up). The Storm summary of a Destination taken away is retired only once nothing of the Route is kept current
   there. The dispatcher and Enqueue take the Teams' locks only when the Route delivers to the Teams: otherwise no Team's
   entry counts. A Team created writes no `team_destinations` row: no open Alert Group has it yet, and `team_evaluation`
   publishes those it brings.

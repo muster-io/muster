@@ -460,6 +460,39 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (int64, 
 	return id, err
 }
 
+const insertTeamDestinationsUpdate = `-- name: InsertTeamDestinationsUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = 'team_destinations' AND u.leased_by IS NULL AND u.team_id = $2
+      AND u.destination_id IS NOT DISTINCT FROM $3::bigint
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, team_id, destination_id, requested_at)
+SELECT $1, 'team_destinations', $2, $3::bigint, $4::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertTeamDestinationsUpdateParams struct {
+	OrgID         int64
+	TeamID        pgtype.Int8
+	DestinationID pgtype.Int8
+	RequestedAt   time.Time
+}
+
+// InsertTeamDestinationsUpdate inserts the open_group_updates row team_destinations of a Team and, when the change
+// added or changed the Team's entry of a Destination, of that Destination, unless such a row is still unclaimed, which
+// it locks so that no worker claims it before the change commits: the run then reads the entries as they are.
+func (q *Queries) InsertTeamDestinationsUpdate(ctx context.Context, arg InsertTeamDestinationsUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertTeamDestinationsUpdate,
+		arg.OrgID,
+		arg.TeamID,
+		arg.DestinationID,
+		arg.RequestedAt,
+	)
+	return err
+}
+
 const insertTeamIdpEntries = `-- name: InsertTeamIdpEntries :exec
 INSERT INTO team_idp_entries (org_id, team_id, claim, group_name, position)
 SELECT $1, $2, nullif(c.claim, ''), g.group_name, g.position::integer

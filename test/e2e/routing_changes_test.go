@@ -92,7 +92,9 @@ func (rt *routingTeams) joinedNone(what, g string) {
 // Alert Group and a critical one Quietly; payments-notice, named by the Route for critical and taken off the Team,
 // keeps its Root message (C-26.FR-6); deleting search gives search-notice the final edit, and the updates drain
 // (C-25.FR-10); turning the option off gives payments-critical the final edit and keeps payments-notice (C-26.AC-10);
-// a Team Destination added while an Alert Group is acknowledged publishes it there Quietly (C-26.FR-6).
+// a Team Destination added while an Alert Group is acknowledged publishes it there Quietly (C-26.FR-6); and a save
+// of the Route that adds an unrelated Destination publishes an Alert Group whose level fell from critical there only,
+// not below critical where it never was (C-26.FR-4).
 func TestRoutingChanges(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -240,4 +242,33 @@ func TestRoutingChanges(t *testing.T) {
 		t.Error("the acknowledged alert group arrived loudly")
 	}
 	rt.joinedNone("the added team destination", g2)
+
+	// C-26.FR-4 with FR-6: an Alert Group created critical whose level fell to warning was never published in
+	// infra-notice; a save of the Route that adds an unrelated Destination publishes it there only, not in infra-notice.
+	e.group("q3", "Errors")
+	e.alert("q3", "a", `{"category":"infra","system":"web","team":"payments","severity":"critical","cluster":"q3a"}`,
+		"")
+	e.alert("q3", "b", `{"category":"infra","system":"web","team":"payments","severity":"warning","cluster":"q3b"}`,
+		"")
+	e.notify("q3", "first notification")
+	g3 := e.groupOf("q3a")
+	n3 := e.number(g3)
+	rt.waitChannels("the critical alert group q3", n3, "ch-infra-critical", "ch-payments-critical",
+		"ch-payments-notice", fakemattermost.ChannelAlertsProd, fakemattermost.ChannelAlerts)
+	rt.published(g3)
+	e.alert("q3", "a", `{"category":"infra","system":"web","team":"payments","severity":"critical","cluster":"q3a"}`,
+		`,"status":"resolved"`)
+	e.notify("q3", "resolved")
+	eventually(t, "q3 to fall to warning", func() bool { return e.alertGroup(g3)["severity_level"] == "warning" })
+	rt.settled(g3)
+	rt.putRoute(route, func(in map[string]any) {
+		in["destination_entries"] = rt.entries("infra-critical", "critical", "infra-notice", "below_critical",
+			"shared", "critical", "payments-notice", "critical", "search-notice", "any")
+	})
+	rt.waitChannels("the unrelated destination added", n3, "ch-infra-critical", "ch-payments-critical",
+		"ch-payments-notice", "ch-search-notice", fakemattermost.ChannelAlertsProd, fakemattermost.ChannelAlerts)
+	rt.settled(g3)
+	if got := rt.channelsOf(n3); slices.Contains(got, "ch-infra-notice") {
+		t.Errorf("an unrelated save published the fallen alert group in infra-notice: %v", got)
+	}
 }

@@ -149,10 +149,11 @@ func entriesOf(want map[string]teamDestination) []DestinationEntry {
 }
 
 // writeDestinations makes want the Destinations of the Team teamID, which had before: those it no longer names are
-// removed, the new ones added now and the kept ones keep when they were added with the condition of want. The change
-// reaches the open Alert Groups of the Team through the row team_destinations of its save (changeDestinations).
+// removed, the new ones added now and the kept ones keep when they were added with the condition of want. It returns
+// the Destinations whose entry it added or changed, in id order. The change reaches the open Alert Groups of the Team
+// through the rows team_destinations of its save (changeDestinations).
 func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64, before []DestinationEntry,
-	want map[string]teamDestination, now time.Time) error {
+	want map[string]teamDestination, now time.Time) ([]int64, error) {
 	keep := map[string]string{}
 	for _, e := range before {
 		keep[e.DestinationID] = e.Condition
@@ -167,7 +168,7 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64
 		rows, err := q.ResolveTeamDestinations(ctx, dbgen.ResolveTeamDestinationsParams{OrgID: s.orgID,
 			PublicIds: removed})
 		if err != nil {
-			return fmt.Errorf("read the destinations the team leaves: %w", err)
+			return nil, fmt.Errorf("read the destinations the team leaves: %w", err)
 		}
 		ids := make([]int64, len(rows))
 		for i, r := range rows {
@@ -175,7 +176,7 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64
 		}
 		if err := q.DeleteTeamDestinations(ctx, dbgen.DeleteTeamDestinationsParams{OrgID: s.orgID, TeamID: teamID,
 			DestinationIds: ids}); err != nil {
-			return fmt.Errorf("remove destinations from the team: %w", err)
+			return nil, fmt.Errorf("remove destinations from the team: %w", err)
 		}
 	}
 	p := dbgen.UpsertTeamDestinationsParams{OrgID: s.orgID, TeamID: teamID, Now: now}
@@ -187,12 +188,12 @@ func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64
 		p.Conditions = append(p.Conditions, want[id].condition)
 	}
 	if len(p.DestinationIds) == 0 {
-		return nil
+		return nil, nil
 	}
 	if err := q.UpsertTeamDestinations(ctx, p); err != nil {
-		return fmt.Errorf("write the destinations of the team: %w", err)
+		return nil, fmt.Errorf("write the destinations of the team: %w", err)
 	}
-	return nil
+	return slices.Sorted(slices.Values(p.DestinationIds)), nil
 }
 
 func textOf(t pgtype.Text) *string {

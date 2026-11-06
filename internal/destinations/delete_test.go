@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
@@ -219,7 +220,7 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-// TestDeleteFailures: a failed step rolls the deletion back.
+// TestDeleteFailures: a failed step rolls the deletion back; a detected deadlock is run again.
 func TestDeleteFailures(t *testing.T) {
 	for _, q := range []string{"LockDestination", "MarkDestinationDeleted", "routes", "DeleteDestinationRoutes",
 		"retire", "InsertAuditEntry", "Notify"} {
@@ -230,6 +231,27 @@ func TestDeleteFailures(t *testing.T) {
 		}
 		if d := f.find(3); d.deleted || d.routes == nil || d.secrets == 0 || len(f.audit) != 0 {
 			t.Errorf("%s left %+v", q, d)
+		}
+	}
+	// A deadlock that PostgreSQL detects runs the deletion again, up to three times.
+	for _, failures := range []int{2, 3} {
+		s, f, _ := newDeleter(t)
+		n := 0
+		routes := s.writer.Routes
+		s.writer.Routes = func(ctx context.Context, tx dbgen.DBTX, id int64) error {
+			if n++; n <= failures {
+				return &pgconn.PgError{Code: "40P01", Message: "deadlock detected"}
+			}
+			return routes(ctx, tx, id)
+		}
+		err := s.Delete(t.Context(), deleter, "DSAAAAAAAAAAA3", nil)
+		if failures == 2 && (err != nil || !f.find(3).deleted || n != 3 || len(f.audit) != 1) {
+			t.Errorf("after two deadlocks: %v, deleted %v, %d attempts, %d audits", err, f.find(3).deleted, n,
+				len(f.audit))
+		}
+		if pe, ok := errors.AsType[*pgconn.PgError](err); failures == 3 && (!ok || pe.Code != "40P01" || n != 3 ||
+			f.find(3).deleted) {
+			t.Errorf("after three deadlocks: %v, deleted %v, %d attempts", err, f.find(3).deleted, n)
 		}
 	}
 	s, f, _ := newDeleter(t)

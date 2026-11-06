@@ -1516,9 +1516,11 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   dispatcher and delivery read them for the Teams of an Alert Group (`alert_group_teams`) on a Route with
   `deliver_to_teams`, under the Team's membership lock (`db.TeamMembershipLockClass`, `0x6d75_0009`, keyed by `hashint8`
   of the Team, taken shared), which a save that changes them, the deletion of the Team and the deletion of a
-  Destination take exclusively. A save that changes them inserts a row `team_destinations` of `open_group_updates`
-  with the Team ([section 5](#5-queues-and-claims)); the deletion of a Team deletes its rows, last in its transaction,
-  and inserts the same row; the deletion of a Destination deletes the rows that name it.
+  Destination take exclusively. A save that changes them inserts one row `team_destinations` of `open_group_updates`
+  per Destination whose entry it added or changed, with the Team and that Destination, or one with the Team alone when
+  it only removed entries ([section 5](#5-queues-and-claims)); the deletion of a Team deletes its rows under the lock,
+  which it takes last in its transaction, after releasing the Destinations and Routes it owned, and inserts the row of
+  the Team alone; the deletion of a Destination deletes the rows that name it.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
@@ -1701,12 +1703,16 @@ state over the earlier one before any worker sees either, so a new Team label, w
 with an `alert_group_teams` row of its Team and only runs the re-render step on them: the classification is per Team, so
 new Team matchers saved with the name can bring only that Team, which those Alert Groups already have; a row whose Team
 is gone (`team_id` null) is done. A row `team_destinations` walks the same open Alert Groups, runs the re-render step
-on each without a lifecycle event, marked as a change of configuration that can grow the reach, so delivery publishes
-it Quietly in each Destination it now reaches without a delivery there, and then gives the final edit to each delivery
+on each without a lifecycle event, marked as a change of configuration that may grow the reach by the Team's entry of
+the row's Destination (`destination_id`, null for a row that only removes), so delivery publishes it Quietly in that
+Destination when that entry reaches it now and it is not there, and nowhere else, and then gives the final edit to
+each delivery
 whose `entries` hold an entry of the Team when no entry of its Route or, while the Route delivers to the Teams, of one
 of its Teams still names that Destination (C-26.FR-6); a second run changes nothing. It needs no barrier: the Team's
-membership lock orders the save against the Snapshots that read its entries. The re-render step of every batch takes
-the membership locks of the batch's Routes, then of their Teams, shared and in id order, before its first rendering.
+membership lock orders the save against the Snapshots that read its entries. A save inserts no second row while one
+of the same Team and Destination is still unclaimed. The re-render step of every batch, and every batch of
+`team_evaluation` and `organization_message_settings`, takes the membership locks of the batch's Routes, then of their
+Teams and of the Teams the evaluation brings, shared and in id order, before its first change.
 Each batch of `team_evaluation`, `organization_message_settings` and `team_name` takes
 the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by `hashint8` of the
 Organization) exclusively before it lists its Alert Groups, and routing takes it shared before a Snapshot reads the

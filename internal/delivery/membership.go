@@ -281,8 +281,9 @@ func (s *Service) retireSummaries(ctx context.Context, q queries, routeID int64,
 // RouteDestinationsChanged is the membership hook of the Routes (C-26.FR-6, C-11.FR-14), in the transaction tx of a
 // save of the Route c.RouteID that changed its Destination entries or "Also to the Teams from the label", which holds
 // the Route's membership lock exclusively. Under the new entries, for each open Alert Group of the Route at its current
-// Severity level and with its Teams: each Destination its reach has without a delivery kept current there gets a
-// Quiet Publication, within the limiters, with the entries that reach it — during a Storm its Storm summary, holding
+// Severity level and with its Teams: each Destination that an entry the save added or changed, or a Team's entry when
+// the save turned the option on, now reaches (touchedBy) without a delivery kept current there gets a Quiet
+// Publication, within the limiters, with the entries that reach it — during a Storm its Storm summary, holding
 // the Alert Groups the Storm holds — and each delivery whose entries hold an entry the save took away — the Route's
 // entry of a Destination taken off it, or every Team's entry when the option was turned off — gets the final edit when
 // no entry still names its Destination (settle); a Destination taken off the Route then has the summary of an active
@@ -347,6 +348,7 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c
 	}
 	removed := c.Removed()
 	teamsOff := c.ToTeamsBefore && !c.ToTeamsAfter
+	touched := touchedBy(c)
 	now := s.clock.Now().UTC()
 	changed := false
 	var left []int64
@@ -371,7 +373,8 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c
 		if g.Held {
 			heldBy = &st.id
 		}
-		gained, err := s.gain(ctx, tx, q, view, n.reach(g.SeverityLevel, g.TeamIds), had[g.ID], n, heldBy, now)
+		gained, err := s.gain(ctx, tx, q, view, n.reach(g.SeverityLevel, g.TeamIds), touched, had[g.ID], n, heldBy,
+			now)
 		if err != nil {
 			return err
 		}
@@ -407,19 +410,45 @@ func (s *Service) RouteDestinationsChanged(ctx context.Context, tx dbgen.DBTX, c
 	return s.wake(ctx, q, changed)
 }
 
-// gain publishes the open Alert Group g Quietly in each Destination of its reach reached that has no delivery of it
-// kept current there, with the entries that reach it (join), held by the Storm heldBy when one holds g; an outgoing
+// touchedBy reports, for the save c of a Route, whether an entry that reaches a Destination is one the save added or
+// whose condition it changed, or a Team's entry when the save turned "Also to the Teams from the label" on: what a
+// change of configuration may add to the reach of the open Alert Groups (C-26.FR-6). Every other entry was there
+// before the save, and the reach did not grow by it then — after a fall of the level, say — so it does not now either
+// (C-26.FR-4).
+func touchedBy(c routing.MembershipChange) func(dest int64, e routing.Reaching) bool {
+	route := map[int64]bool{}
+	for _, a := range c.After {
+		if i := slices.IndexFunc(c.Before, func(b routing.Entry) bool { return b.DestinationID == a.DestinationID }); i < 0 ||
+			orAny(c.Before[i].Condition) != orAny(a.Condition) {
+			route[a.DestinationID] = true
+		}
+	}
+	teamsOn := !c.ToTeamsBefore && c.ToTeamsAfter
+	return func(dest int64, e routing.Reaching) bool {
+		if e.Kind == routing.EntryTeam {
+			return teamsOn
+		}
+		return route[dest]
+	}
+}
+
+// gain publishes the open Alert Group g Quietly in each Destination of its reach reached that an entry the save
+// touched reaches (touched) and that has no delivery of it kept current there, with the entries that reach it (join),
+// held by the Storm heldBy when one holds g; an outgoing
 // webhook in the events mode publishes nothing, it receives the events from now on. g is rendered once for the
 // markups of those Destinations, through tx; the counter and log lines of a Route template that fails here are left to
 // the next render through the dispatcher, which records them in the Timeline too. It returns the Destinations it
 // published in.
 func (s *Service) gain(ctx context.Context, tx dbgen.DBTX, q queries, g GroupView, reached []routing.Reached,
-	had []entryDelivery, n naming, heldBy *int64, now time.Time) ([]stormDest, error) {
+	touched func(dest int64, e routing.Reaching) bool, had []entryDelivery, n naming, heldBy *int64,
+	now time.Time) ([]stormDest, error) {
 	var dests []dbgen.ListRouteDestinationsRow
 	var entries [][]byte
 	for _, rc := range reached {
 		d, ok := n.dests[rc.DestinationID]
-		if !ok || !hasRoot(d) {
+		if !ok || !hasRoot(d) || !slices.ContainsFunc(rc.Entries, func(e routing.Reaching) bool {
+			return touched(rc.DestinationID, e)
+		}) {
 			continue
 		}
 		if i := slices.IndexFunc(had, func(x entryDelivery) bool { return x.DestinationID == d.ID }); i >= 0 &&

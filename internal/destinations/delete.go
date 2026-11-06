@@ -10,6 +10,7 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -133,13 +134,45 @@ func (s *Service) SetWriter(c WriterConfig) {
 // every Route, each of which gets a new version and its hint through the Routes hook, delivery gives its open Root
 // messages their final edit through the Retire hook, which also ends the waiting events of an outgoing webhook as Not
 // delivered, and the Audit log entry destination.deleted is written. Its secrets are wiped once the final edits are done
-// and no call of it is in flight. A deleted or unknown Destination is ErrNotFound.
+// and no call of it is in flight. A deleted or unknown Destination is ErrNotFound. The deletion takes the membership
+// locks of the Routes, then of the Teams, that name the Destination exclusively (routing's DestinationDeleted), while
+// a transaction that changes several open Alert Groups at once, such as a Snapshot, may take Teams' locks shared out of
+// id order: a deadlock PostgreSQL detects there rolls the deletion back, and it is run again, up to deletionAttempts
+// times, rather than refused.
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	id, err := publicid.Parse(publicid.Destination, publicID)
 	if err != nil {
 		return ErrNotFound
 	}
-	err = s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+	for attempt := 1; ; attempt++ {
+		err = s.delete(ctx, r, id, version)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != deadlockDetected ||
+			attempt == deletionAttempts {
+			break
+		}
+	}
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if old, ok := s.info[id]; ok {
+		metrics.DestinationInfo.Delete(id, old)
+		delete(s.info, id)
+	}
+	return nil
+}
+
+// deadlockDetected is the SQLSTATE of a transaction PostgreSQL ended to break a deadlock, and deletionAttempts how
+// often a deletion runs before such an end is returned.
+const (
+	deadlockDetected = "40P01"
+	deletionAttempts = 3
+)
+
+// delete deletes the Destination id in one transaction (Delete).
+func (s *Service) delete(ctx context.Context, r Requester, id string, version *int64) error {
+	return s.writer.Writer.InTx(ctx, func(q TxQueries) error {
 		d, err := q.LockDestination(ctx, dbgen.LockDestinationParams{OrgID: s.orgID, PublicID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -178,14 +211,4 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: d.PublicID})
 	})
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if old, ok := s.info[id]; ok {
-		metrics.DestinationInfo.Delete(id, old)
-		delete(s.info, id)
-	}
-	return nil
 }

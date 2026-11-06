@@ -1332,7 +1332,8 @@ func (f *fakeFinalEdits) FinalEditsFor(_ context.Context, _ DBTX, g *Group, team
 // TestTeamDestinationsUpdate is C-26.FR-6 and C-25.FR-10 on the worker: a row team_destinations, which a change of a
 // Team's Destination entries or its deletion writes, runs the re-render step without a lifecycle event on each open
 // Alert Group that has the Team — not one of another Team, not one without a Team, not a resolved one — marked as a
-// change of configuration that can grow the reach (Rendering.Grows), so that delivery publishes it Quietly where it now
+// change of configuration that can grow the reach by the Team's entry of the row's Destination (Rendering.Grows), and
+// by nothing for a row without one, so that delivery publishes it Quietly where that entry now
 // reaches, and then asks delivery for the final edits of the Team's Destinations on it (FinalEdits), in the same
 // transaction. Every membership lock is taken before the first rendering: the Routes', then the Teams' of the batch,
 // in id order. It evaluates nothing and waits for no Snapshot under the lock of the evaluation: the Teams' locks order
@@ -1373,11 +1374,12 @@ func TestTeamDestinationsUpdate(t *testing.T) {
 	evaluated := e.db.calls["ListGroupFiringAlerts"]
 	e.db.reach.locks, e.db.reach.teamLocks = nil, nil
 	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindTeamDestinations, teamID: search,
-		requested: e.clock.Now()})
+		destinationID: 63, requested: e.clock.Now()})
 	e.round(t, e.worker)
 	var got []string
 	for _, r := range rendered {
-		if !r.Configuration || !r.Grows || len(r.Events) != 0 || r.Actor != System {
+		if !r.Configuration || r.Grows == nil || *r.Grows != (Growth{Team: search, Destination: 63}) ||
+			len(r.Events) != 0 || r.Actor != System {
 			t.Errorf("rendering of #%d: configuration %v, grows %v, events %v, actor %+v", r.Group.Number,
 				r.Configuration, r.Grows, r.Events, r.Actor)
 		}
@@ -1398,14 +1400,18 @@ func TestTeamDestinationsUpdate(t *testing.T) {
 	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves || len(e.db.updates) != 0 ||
 		e.db.calls["LockTeamEvaluation"] != locks || e.db.calls["ListGroupFiringAlerts"] != evaluated ||
 		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"team_destinations",`+
-			`"team":"TMSEARCHAAAAAA","alert_groups":2`) {
+			`"destination":"DS000000000063","team":"TMSEARCHAAAAAA","alert_groups":2`) {
 		t.Errorf("%d entries, %d saves, rows %d, %d evaluation locks, log %s", len(e.db.entries)-entries,
 			e.db.calls["SaveGroup"]-saves, len(e.db.updates), e.db.calls["LockTeamEvaluation"]-locks, e.log)
 	}
 
-	// A second run renders the same Alert Groups and changes nothing.
+	// A second run renders the same Alert Groups and changes nothing; a row without a Destination, of a change that
+	// only removed entries, grows nothing and gives the final edits.
 	rendered, fe.got = nil, nil
 	e.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		if r.Grows != nil || !r.Configuration {
+			t.Errorf("a row without a destination grows %+v, configuration %v", r.Grows, r.Configuration)
+		}
 		rendered = append(rendered, r)
 		return nil
 	})
@@ -1451,5 +1457,39 @@ func TestTeamDestinationsUpdate(t *testing.T) {
 	}
 	if !slices.Contains(updateKinds, KindTeamDestinations) {
 		t.Errorf("a replica of this version does not claim %s", KindTeamDestinations)
+	}
+}
+
+// TestTeamEvaluationLocksUpFront is the lock order of a batch of team_evaluation and organization_message_settings
+// (worker.go): before the first change of an Alert Group, the batch holds the membership locks of the Routes of its
+// open Alert Groups, then of their Teams together with the Teams the evaluation brings, each in id order, so that no
+// dispatch takes a Team's lock below one the batch holds while a deletion of a Destination waits for it.
+func TestTeamEvaluationLocksUpFront(t *testing.T) {
+	for _, kind := range []string{KindTeamEvaluation, KindOrganizationMessageSettings} {
+		t.Run(kind, func(t *testing.T) {
+			e := newEvaluation(t)
+			_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "search"})
+			e.save(0)
+			e.round(t, e.worker)
+			if !slices.Equal(e.groupTeamSlugs(t, g), []string{"search:label"}) {
+				t.Fatalf("teams %v", e.groupTeamSlugs(t, g))
+			}
+			// A second Alert of the Alert Group belongs to payments, whose id is below search's.
+			e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a", "team": "payments", "n": "2"})
+			e.db.reach.locks, e.db.reach.teamLocks = nil, nil
+			var routes, teamLocks []int64
+			e.db.before["SaveGroup"] = func() {
+				routes, teamLocks = slices.Clone(e.db.reach.locks), slices.Clone(e.db.reach.teamLocks)
+			}
+			e.db.teamsOf().version++
+			e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: kind, requested: e.clock.Now()})
+			e.round(t, e.worker)
+			if !slices.Equal(e.groupTeamSlugs(t, g), []string{"search:label", "payments:label"}) {
+				t.Fatalf("teams after the evaluation %v", e.groupTeamSlugs(t, g))
+			}
+			if !slices.Equal(routes, []int64{2}) || !slices.Equal(teamLocks, []int64{payments, search}) {
+				t.Errorf("before the first change: route locks %v, team locks %v", routes, teamLocks)
+			}
+		})
 	}
 }

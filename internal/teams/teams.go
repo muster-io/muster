@@ -296,6 +296,7 @@ type Queries interface {
 	DeleteTeamDestinations(ctx context.Context, arg dbgen.DeleteTeamDestinationsParams) error
 	UpsertTeamDestinations(ctx context.Context, arg dbgen.UpsertTeamDestinationsParams) error
 	DeleteAllTeamDestinations(ctx context.Context, arg dbgen.DeleteAllTeamDestinationsParams) error
+	InsertTeamDestinationsUpdate(ctx context.Context, arg dbgen.InsertTeamDestinationsUpdateParams) error
 	LockTeamMembership(ctx context.Context, arg dbgen.LockTeamMembershipParams) error
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
@@ -667,22 +668,38 @@ func (s *Service) requestRename(ctx context.Context, q Queries, id int64, now ti
 }
 
 // changeDestinations takes the membership lock of the Team id exclusively, after the Team's row, and then runs write,
-// which changes the Team's Destination entries, and asks the workers of internal/groups to apply the change to the open
-// Alert Groups that have the Team (C-26.FR-6, C-25.FR-10): one open_group_updates row team_destinations with the Team,
-// requested at the business time of the change, and a notification that wakes them once the transaction commits. An
-// Enqueue that reads the Team's entries takes the lock shared, so it either commits before the change, and the row
-// then reaches its Alert Group, or reads the entries the change wrote.
+// which changes the Team's Destination entries and returns the Destinations whose entry it added or changed, and asks
+// the workers of internal/groups to apply the change to the open Alert Groups that have the Team (C-26.FR-6,
+// C-25.FR-10): one open_group_updates row team_destinations with the Team and each such Destination, which may add
+// that entry to their reach, or one with the Team alone when there is none, which only gives the final edits, each
+// requested at the business time of the change, and a notification that wakes the workers once the transaction
+// commits. An Enqueue that reads the Team's entries takes the lock shared, so it either commits before the change,
+// and the rows then reach its Alert Group, or reads the entries the change wrote.
 func (s *Service) changeDestinations(ctx context.Context, q Queries, id int64, now time.Time,
-	write func() error) error {
+	write func() ([]int64, error)) error {
 	if err := q.LockTeamMembership(ctx, dbgen.LockTeamMembershipParams{LockClass: db.TeamMembershipLockClass,
 		TeamID: id}); err != nil {
 		return fmt.Errorf("lock the destinations of the team: %w", err)
 	}
-	if err := write(); err != nil {
+	touched, err := write()
+	if err != nil {
 		return err
 	}
-	if err := s.requestUpdate(ctx, q, KindTeamDestinations, id, now); err != nil {
-		return fmt.Errorf("apply the destinations of the team to its open alert groups: %w", err)
+	scopes := []pgtype.Int8{{}}
+	if len(touched) > 0 {
+		scopes = scopes[:0]
+		for _, d := range touched {
+			scopes = append(scopes, pgtype.Int8{Int64: d, Valid: true})
+		}
+	}
+	for _, d := range scopes {
+		if err := q.InsertTeamDestinationsUpdate(ctx, dbgen.InsertTeamDestinationsUpdateParams{OrgID: s.orgID,
+			TeamID: pgtype.Int8{Int64: id, Valid: true}, DestinationID: d, RequestedAt: now}); err != nil {
+			return fmt.Errorf("apply the destinations of the team to its open alert groups: %w", err)
+		}
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
 	}
 	return nil
 }
@@ -750,7 +767,7 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
-		if err := s.writeDestinations(ctx, q, id, nil, dests, now); err != nil {
+		if _, err := s.writeDestinations(ctx, q, id, nil, dests, now); err != nil {
 			return err
 		}
 		if err := s.bumpVersion(ctx, q); err != nil {
@@ -859,7 +876,7 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 		}
 		if dests != nil && !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
-			if err := s.changeDestinations(ctx, q, before.ID, now, func() error {
+			if err := s.changeDestinations(ctx, q, before.ID, now, func() ([]int64, error) {
 				return s.writeDestinations(ctx, q, before.ID, before.DestinationEntries, dests, now)
 			}); err != nil {
 				return err
@@ -955,12 +972,12 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		// before it takes the Team's membership lock shared, so taking the lock before the Routes' rows would close a
 		// cycle with it.
 		if len(before.DestinationEntries) > 0 {
-			if err := s.changeDestinations(ctx, q, before.ID, now, func() error {
+			if err := s.changeDestinations(ctx, q, before.ID, now, func() ([]int64, error) {
 				if err := q.DeleteAllTeamDestinations(ctx, dbgen.DeleteAllTeamDestinationsParams{OrgID: s.orgID,
 					TeamID: before.ID}); err != nil {
-					return fmt.Errorf("remove the destinations of the team %s: %w", before.PublicID, err)
+					return nil, fmt.Errorf("remove the destinations of the team %s: %w", before.PublicID, err)
 				}
-				return nil
+				return nil, nil
 			}); err != nil {
 				return err
 			}

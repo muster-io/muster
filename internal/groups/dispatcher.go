@@ -435,10 +435,11 @@ func (c committed) run(ctx context.Context) {
 // for each delivery whose Desired state the re-render step changed: the re-render of a button set counts with it.
 // Configuration marks a rendering that a change of configuration made, as the evaluation of the Teams of the open
 // Alert Groups on a save (C-25.FR-13) and the re-render of a button set do: whatever its lifecycle events, it
-// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018). Grows marks the re-render, without a
-// lifecycle event, of a change of configuration that can move the reach of the Alert Group, a change of a Team's
-// Destination entries (C-26.FR-6): delivery publishes it Quietly in each Destination it reaches without a delivery
-// there, or whose delivery got its final edit, and it is a change of configuration too. Teams are the Teams of the
+// publishes Quietly and releases a held Urgent Alert Group Quietly (ADR-0018). Grows, when set, marks the re-render,
+// without a lifecycle event, of a change of a Team's Destination entries that added or changed the Team's entry of one
+// Destination (C-26.FR-6): delivery publishes the Alert Group Quietly in that Destination when that entry reaches it
+// now and it has no delivery there, or one whose final edit was done, and nowhere else; it is a change of
+// configuration too. Teams are the Teams of the
 // Alert Group by id, from which, with its Severity level, the re-render step applies the reach (routing.Reach,
 // C-26.FR-2); the Destinations the change joined are those of its destination_joined events, and a change of
 // configuration records none (C-26.FR-5).
@@ -451,8 +452,14 @@ type Rendering struct {
 	Fallback      func(f TemplateFailure)
 	Changed       func()
 	Configuration bool
-	Grows         bool
+	Grows         *Growth
 	Teams         []int64
+}
+
+// Growth is what a change of a Team's Destination entries may add to the reach of the open Alert Groups that have the
+// Team (C-26.FR-6): the Team's entry of the Destination it added or changed, by internal ids.
+type Growth struct {
+	Team, Destination int64
 }
 
 // Joined are the Destinations the change joined by its Alerts, each with its destination_joined event.
@@ -646,10 +653,11 @@ func (d *dispatcher) dispatch(ctx context.Context, q Queries, g *Group, actor Ac
 	return nil
 }
 
-// rendering is how a change of configuration renders: whether it is one (Rendering.Configuration) and whether it can
-// move the reach (Rendering.Grows).
+// rendering is how a change of configuration renders: whether it is one (Rendering.Configuration) and what it may add
+// to the reach (Rendering.Grows).
 type rendering struct {
-	configuration, grows bool
+	configuration bool
+	grows         *Growth
 }
 
 // render runs the re-render step on g, changed by actor with the lifecycle events recorded, in the transaction of q,
@@ -671,7 +679,7 @@ func (d *dispatcher) render(ctx context.Context, q Queries, g *Group, actor Acto
 	changed := false
 	if err := d.rerender(ctx, q, Rendering{Group: g, Actor: actor, Events: recorded, ReceivedAt: received,
 		After: after.add, Fallback: func(f TemplateFailure) { failures = append(failures, f) },
-		Changed: func() { changed = true }, Configuration: how.configuration || how.grows, Grows: how.grows,
+		Changed: func() { changed = true }, Configuration: how.configuration || how.grows != nil, Grows: how.grows,
 		Teams: teams}); err != nil {
 		return nil, false, err
 	}

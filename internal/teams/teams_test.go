@@ -89,8 +89,10 @@ type fakeStore struct {
 	destinations map[string]*fakeDestination
 	teamDests    map[int64][]fakeTeamDest
 	// seq is the order of the changes of the Destinations of the Teams, their membership locks and their rows of
-	// open_group_updates, and of the releases of what a deleted Team owned.
-	seq []string
+	// open_group_updates, and of the releases of what a deleted Team owned; destinationRows are the rows
+	// team_destinations inserted.
+	seq             []string
+	destinationRows []dbgen.InsertTeamDestinationsUpdateParams
 }
 
 // fakeDestination is a row of destinations as the Destinations of a Team read it.
@@ -457,6 +459,19 @@ func (s *fakeStore) InsertTeamUpdate(_ context.Context, arg dbgen.InsertTeamUpda
 	}
 	s.evaluations = append(s.evaluations, arg)
 	s.seq = append(s.seq, "row "+arg.Kind)
+	return nil
+}
+
+func (s *fakeStore) InsertTeamDestinationsUpdate(_ context.Context, arg dbgen.InsertTeamDestinationsUpdateParams) error {
+	if err := s.fail["InsertTeamDestinationsUpdate"]; err != nil {
+		return err
+	}
+	s.destinationRows = append(s.destinationRows, arg)
+	scope := "-"
+	if arg.DestinationID.Valid {
+		scope = fmt.Sprint(arg.DestinationID.Int64)
+	}
+	s.seq = append(s.seq, "row team_destinations "+scope)
 	return nil
 }
 
@@ -1818,15 +1833,17 @@ func TestTeamDestinations(t *testing.T) {
 
 // TestTeamDestinationsRows is C-26.FR-6 and C-25.FR-10 in the transactions of teams: a save whose Destination entries
 // are added, removed or changed takes the Team's membership lock after the Team's row and before it writes them, and
-// then writes one row team_destinations of the Team, which wakes the workers; a save that keeps the entries, and the
-// creation of a Team, which no open Alert Group has yet, take no lock and write none. The deletion of a Team removes
-// its entries last — after it released the Destinations and the Routes it owned — under the same lock, with the same
-// row; a Team without entries takes no lock. A failing lock or row fails the change.
+// then writes one row team_destinations of the Team per Destination whose entry it added or changed, or one of the
+// Team alone when it only removed entries, which wakes the workers; a save that keeps the entries, and the creation of
+// a Team, which no open Alert Group has yet, take no lock and write none. The deletion of a Team removes
+// its entries under the same lock, taken last — after it released the Destinations and the Routes it owned — with the
+// row of the Team alone; a Team without entries takes no lock. A failing lock or row fails the change.
 func TestTeamDestinationsRows(t *testing.T) {
 	svc, s := newService(t)
 	s.destinations = map[string]*fakeDestination{
 		"DS0000000000PC": {id: 51, name: "payments-critical", typ: "mattermost", health: "healthy"},
 		"DS0000000000PN": {id: 52, name: "payments-notice", typ: "mattermost", health: "healthy"},
+		"DS0000000000SN": {id: 53, name: "search-notice", typ: "mattermost", health: "healthy"},
 	}
 	created, err := svc.Create(t.Context(), by, Input{Name: "Payments", Slug: "payments",
 		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical}}})
@@ -1836,8 +1853,6 @@ func TestTeamDestinationsRows(t *testing.T) {
 	if !slices.Equal(s.seq, []string{"upsert", "row team_evaluation"}) {
 		t.Errorf("the creation: %v", s.seq)
 	}
-	row := dbgen.InsertTeamUpdateParams{OrgID: orgID, Kind: KindTeamDestinations,
-		TeamID: pgtype.Int8{Int64: created.ID, Valid: true}, RequestedAt: t0}
 	lock := fmt.Sprintf("lock %d", created.ID)
 	for _, c := range []struct {
 		name    string
@@ -1846,15 +1861,16 @@ func TestTeamDestinationsRows(t *testing.T) {
 	}{
 		{"an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical},
 			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{lock, "upsert",
-			"row team_destinations"}},
-		{"a condition changed", []DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionAny},
-			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{lock, "upsert",
-			"row team_destinations"}},
-		{"an entry removed", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
-			[]string{lock, "delete", "row team_destinations"}},
+			"row team_destinations 51"}},
+		{"a condition changed and an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN",
+			Condition: ConditionAny}, {DestinationID: "DS0000000000PC", Condition: ConditionCritical},
+			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{lock, "upsert",
+			"row team_destinations 52", "row team_destinations 53"}},
+		{"entries removed", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
+			[]string{lock, "delete", "row team_destinations -"}},
 		{"the same entries", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, nil},
 	} {
-		s.seq, s.evaluations, s.wakes = nil, nil, nil
+		s.seq, s.destinationRows, s.wakes = nil, nil, nil
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
 			DestinationEntries: &c.entries}); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -1862,29 +1878,36 @@ func TestTeamDestinationsRows(t *testing.T) {
 		if !slices.Equal(s.seq, c.want) {
 			t.Errorf("%s: %v, want %v", c.name, s.seq, c.want)
 		}
-		if c.want != nil && (len(s.evaluations) != 1 || s.evaluations[0] != row ||
-			!slices.Equal(s.wakes, []string{OpenGroupUpdatesChannel})) {
-			t.Errorf("%s: rows %+v, wakes %v", c.name, s.evaluations, s.wakes)
+		for _, r := range s.destinationRows {
+			if r.OrgID != orgID || r.TeamID != (pgtype.Int8{Int64: created.ID, Valid: true}) || !r.RequestedAt.Equal(t0) {
+				t.Errorf("%s: row %+v", c.name, r)
+			}
+		}
+		if c.want != nil && !slices.Equal(s.wakes, []string{OpenGroupUpdatesChannel}) {
+			t.Errorf("%s: wakes %v", c.name, s.wakes)
 		}
 	}
-	for _, q := range []string{"LockTeamMembership", "InsertTeamUpdate"} {
+	// The fake does not roll a failed save back: each one names other entries than the last.
+	for i, q := range []string{"LockTeamMembership", "InsertTeamDestinationsUpdate", "NotifyOpenGroupUpdates"} {
 		s.fail[q] = errBoom
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
-			DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"}}}); !errors.Is(err, errBoom) {
+			DestinationEntries: &[]DestinationEntry{{DestinationID: []string{"DS0000000000PN", "DS0000000000SN",
+				"DS0000000000PN"}[i]}}}); !errors.Is(err, errBoom) {
 			t.Errorf("%s: %v", q, err)
 		}
 		delete(s.fail, q)
 	}
 
-	s.seq, s.evaluations = nil, nil
+	s.seq = nil
 	if err := svc.Delete(t.Context(), by, created.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"release destinations", "release routes", lock, "delete all", "row team_destinations"}; !slices.Equal(s.seq, want) {
+	if want := []string{"release destinations", "release routes", lock, "delete all",
+		"row team_destinations -"}; !slices.Equal(s.seq, want) {
 		t.Errorf("the deletion: %v, want %v", s.seq, want)
 	}
-	if len(s.teamDests[created.ID]) != 0 || len(s.evaluations) != 1 || s.evaluations[0] != row {
-		t.Errorf("after the deletion: entries %+v, rows %+v", s.teamDests[created.ID], s.evaluations)
+	if len(s.teamDests[created.ID]) != 0 {
+		t.Errorf("after the deletion: entries %+v", s.teamDests[created.ID])
 	}
 
 	bare, err := svc.Create(t.Context(), by, Input{Name: "Bare", Slug: "bare"})
@@ -1896,7 +1919,7 @@ func TestTeamDestinationsRows(t *testing.T) {
 		!slices.Equal(s.seq, []string{"release destinations", "release routes"}) {
 		t.Errorf("the deletion of a team without entries: %v, %v", err, s.seq)
 	}
-	for _, q := range []string{"LockTeamMembership", "DeleteAllTeamDestinations", "InsertTeamUpdate"} {
+	for _, q := range []string{"LockTeamMembership", "DeleteAllTeamDestinations", "InsertTeamDestinationsUpdate"} {
 		other, err := svc.Create(t.Context(), by, Input{Name: "Other " + q, Slug: strings.ToLower("o-" + q),
 			DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PN"}}})
 		if err != nil {

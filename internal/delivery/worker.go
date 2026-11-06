@@ -46,13 +46,17 @@ const (
 // it reads the reach of a transition that Alerts made, from which it records destination_joined (C-26.FR-5), then the
 // Teams' locks shared when the Route delivers to the Teams, so that no change of the Route's or a Team's Destinations
 // commits between that reach and the one Enqueue applies under the same locks, which it takes again. A re-render of
-// several open Alert Groups (groups' rerenderIDs) takes every Route's lock and then every Team's lock up front, each in
-// id order. The exclusive holders of a Team's membership lock take it where no cycle closes: a Team save after the
-// Team's row, and it then writes only its entries and its open_group_updates row; the deletion of a Team last, after
-// the rows of the Destinations and the Routes it owns, which grouping holds FOR SHARE or locks before the Team's lock;
-// the deletion of a Destination after the Routes' membership locks, in Team id order, before the deliveries it retires;
-// and a Route save, which holds its row and the Route's lock exclusively, takes the Teams' locks shared after them, as
-// grouping does. Every Enqueue takes the Route's Storm right after the membership locks, before the first delivery it
+// several open Alert Groups (groups' rerenderIDs) and a batch of the evaluation of the Teams (evaluateTeams) take
+// every Route's lock and then every Team's lock up front, each in id order, the Teams the evaluation brings included.
+// A Team save takes the Team's lock exclusively after the Team's row and then writes only its entries and its
+// open_group_updates rows, and the deletion of a Team takes it last, after the rows of the Destinations and the Routes
+// it owns, which grouping holds FOR SHARE or locks before the Team's lock: neither waits for anything after it, so
+// neither closes a cycle. A Route save, which holds its row and the Route's lock exclusively, takes the Teams' locks
+// shared after them, as grouping does. The deletion of a Destination takes the Routes' membership locks and then the
+// Teams', exclusively and in Team id order, before the deliveries it retires; a transaction that changes several
+// Alert Groups of different Teams in one Snapshot takes the Teams' locks shared per Alert Group, out of id order
+// across them, and so can close a cycle with it — rare, detected by PostgreSQL, after which the lane retries the
+// Snapshot and the deletion runs again (destinations' Delete), as for the Routes' locks. Every Enqueue takes the Route's Storm right after the membership locks, before the first delivery it
 // locks: the creation of an Alert
 // Group joins or starts it (JoinStorm, StartStorm), any other rendering takes the active one FOR SHARE
 // (LockActiveStorm), so that a calm check, which locks the Storm FOR NO KEY UPDATE and then its held deliveries, never

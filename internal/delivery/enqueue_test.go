@@ -1077,7 +1077,7 @@ func TestEnqueueGrowsQuietly(t *testing.T) {
 		t.Helper()
 		var changed int
 		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
-			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true, Grows: true,
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true, Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice},
 			Changed: func() { changed++ }}); err != nil {
 			t.Fatal(err)
 		}
@@ -1114,10 +1114,129 @@ func TestEnqueueGrowsQuietly(t *testing.T) {
 	g := e.leveled(groups.StatusFiring, "warning", true)
 	g.Title = "disk full, renamed"
 	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
-		Teams: []int64{teamPayments}, Configuration: true, Grows: true}); err != nil {
+		Teams: []int64{teamPayments}, Configuration: true, Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice}}); err != nil {
 		t.Fatal(err)
 	}
 	if nd.loud.Bool || nd.state != "pending" {
 		t.Errorf("not delivered revived %s, loud %v", nd.state, nd.loud)
+	}
+}
+
+// fallenEnv is reachEnv whose Alert Group of the fixtures of the Team payments was created critical — published in
+// infra-critical and payments-critical — and then fell to warning, which creates nothing below critical (C-26.FR-4).
+func fallenEnv(t *testing.T) *env {
+	t.Helper()
+	e := reachEnv(t)
+	e.w.PublicURL = publicURL
+	e.db.groups[groupID].teams = []int64{teamPayments}
+	e.db.groups[groupID].severity = "critical"
+	e.render(t, e.leveled(groups.StatusFiring, "critical", false), groups.System, false, []int64{teamPayments},
+		created())
+	e.db.groups[groupID].severity = "warning"
+	e.render(t, e.leveled(groups.StatusFiring, "warning", true), groups.System, false, []int64{teamPayments},
+		groups.Recorded{Seq: 2, Event: groups.EventAlertResolved, Loudness: groups.Quiet})
+	e.round(t)
+	if e.deliveryOf(groupID, destCritical) == nil || e.deliveryOf(groupID, destTeamCrit) == nil ||
+		e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+		t.Fatalf("deliveries after the fall %+v", e.db.deliveries)
+	}
+	e.rec.Reset()
+	return e
+}
+
+// TestUnrelatedChangeGainsNothing is C-26.FR-4 and FR-6 (decision D3 revised): a change of configuration publishes
+// only in the Destinations whose entries it added or changed, where the Alert Group meets them now. After a fall from
+// critical to warning, a save of the Route that adds an unrelated Destination, and a change of the Team that adds one,
+// publish the Alert Group in that Destination only — never in infra-notice or payments-notice, which the change did
+// not touch and which the fall did not bring either.
+func TestUnrelatedChangeGainsNothing(t *testing.T) {
+	t.Run("route", func(t *testing.T) {
+		e := fallenEnv(t)
+		e.route(t, e.setCondition(criticalTwo(e), "any"))
+		e.round(t)
+		if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Errorf("an unrelated save published below critical: %+v", e.rec.Calls())
+		}
+		if c := e.published(t, 16); c.Loudness != groups.Quiet {
+			t.Errorf("the added destination %+v", c)
+		}
+		// Turning the option off and on again touches the Teams' entries: payments-notice, which the Alert Group
+		// meets now, is published; infra-notice, the Route's untouched entry, still not.
+		e.route(t, e.setToTeams(false))
+		e.route(t, e.setToTeams(true))
+		e.round(t)
+		if e.deliveryOf(groupID, destTeamNotice) == nil || e.deliveryOf(groupID, destMM) != nil {
+			t.Errorf("the option on again: notice %+v, infra-notice %+v", e.deliveryOf(groupID, destTeamNotice),
+				e.deliveryOf(groupID, destMM))
+		}
+	})
+	t.Run("team", func(t *testing.T) {
+		e := fallenEnv(t)
+		criticalTwo(e)
+		e.db.teamDests[teamPayments] = append(e.db.teamDests[teamPayments],
+			routing.Entry{DestinationID: 16, Condition: routing.ConditionAny})
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true,
+			Grows: &groups.Growth{Team: teamPayments, Destination: 16}}); err != nil {
+			t.Fatal(err)
+		}
+		e.round(t)
+		if e.deliveryOf(groupID, destMM) != nil || e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Errorf("an unrelated team save published below critical: %+v", e.rec.Calls())
+		}
+		if c := e.published(t, 16); c.Loudness != groups.Quiet {
+			t.Errorf("the added team destination %+v", c)
+		}
+		// A growth whose entry the Alert Group does not meet adds nothing.
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.leveled(groups.StatusFiring, "warning",
+			true), Actor: groups.System, Teams: []int64{teamPayments}, Configuration: true,
+			Grows: &groups.Growth{Team: teamPayments, Destination: destTeamCrit}}); err != nil {
+			t.Fatal(err)
+		}
+		if e.deliveryOf(groupID, destTeamNotice) != nil {
+			t.Error("a growth of another destination published payments-notice")
+		}
+	})
+}
+
+// TestEnqueueGrowsDuringStorm is C-11.FR-6 with C-26.FR-6: during a Storm of the Route, a Team's Destination that the
+// change publishes an Alert Group created since the Storm started in holds it there, with the Storm summary, even after
+// a final edit cleared its hold — a Destination added anew and one added again alike.
+func TestEnqueueGrowsDuringStorm(t *testing.T) {
+	e := reachEnv(t)
+	e.db.storms[stormOfTheRoute] = &fakeStorm{id: stormOfTheRoute, route: routeID, started: business0,
+		alertGroupCount: 25}
+	g := e.leveled(groups.StatusFiring, "warning", false)
+	g.CreatedAt = business0
+	e.db.groups[groupID].teams = []int64{teamPayments}
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Events: []groups.Recorded{created()}, Teams: []int64{teamPayments}}); err != nil {
+		t.Fatal(err)
+	}
+	// Every hold of the Alert Group is gone: its deliveries got their final edits, as RetireDeliveries clears it.
+	for _, d := range e.db.deliveries {
+		if d.group == groupID {
+			d.heldBy, d.state = 0, "withheld"
+		}
+	}
+	g.FirstPublishedAt = at(business0)
+	ensured := e.db.calls["EnsureStormSummary"]
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+		Teams: []int64{teamPayments}, Configuration: true,
+		Grows: &groups.Growth{Team: teamPayments, Destination: destTeamNotice}}); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.deliveryOf(groupID, destTeamNotice); d == nil || d.heldBy != stormOfTheRoute || d.state != "pending" {
+		t.Errorf("the destination published again is not held: %+v", d)
+	}
+	if e.db.calls["EnsureStormSummary"] != ensured+1 {
+		t.Errorf("the storm summary of the destination published again was rendered %d times",
+			e.db.calls["EnsureStormSummary"]-ensured)
+	}
+	e.round(t)
+	for _, c := range e.callsTo(destTeamNotice) {
+		if c.Method == deliverytest.MethodPublish && !strings.Contains(textOf(c), "Storm") {
+			t.Errorf("the held alert group was published on its own: %+v", c)
+		}
 	}
 }
