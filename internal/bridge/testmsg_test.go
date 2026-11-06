@@ -74,9 +74,10 @@ func header(r *delivery.TestRequest, name string) string {
 	return ""
 }
 
-// TestTestMessage covers C-22.FR-17 and AC-12: testDestination is one postMessage of the kind test, Quiet, without
-// Mentions, marked "🧪 Test message" before its body, with the buttons of its status whose data name the Destination
-// as a test, under a key new for each test; the step shows the request with the token masked and the answer.
+// TestTestMessage covers C-22.FR-17, AC-12 and C-29.FR-8: testDestination is one postMessage of the kind test, Quiet,
+// without Mentions, marked "🧪 Test message" before its body, with the layout of its Root message and the buttons of
+// its status whose data name the Destination as a test, under a key new for each test; the step shows the request with
+// the token masked and the answer.
 func TestTestMessage(t *testing.T) {
 	e := newTesterEnv(t)
 	st := e.run(t)[0]
@@ -95,12 +96,21 @@ func TestTestMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(posts[0].Body), &in); err != nil {
 		t.Fatal(err)
 	}
-	if in.Kind != gen.Test || in.Notify || in.ChannelId != "ch-alerts" || in.Status != gen.Firing ||
+	if in.Kind != gen.Test || in.Notify || in.ChannelId != "ch-alerts" || in.Status != gen.StatusFiring ||
 		in.Title != "#7 CertExpiry" || len(in.Mentions) != 0 || !strings.HasPrefix(in.Body, "🧪 Test message\n\n") {
 		t.Fatalf("envelope %+v", in)
 	}
 	if len(in.Buttons) == 0 {
 		t.Fatal("no buttons")
+	}
+	if l := in.Layout; l == nil || l.Number != 7 || l.Title != "CertExpiry" ||
+		l.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyFiring, Word: "Firing"}) || len(l.Fields) == 0 ||
+		!l.Owner.IsNull() || !l.Alerts.IsNull() || len(l.Links) == 0 || l.Links[0].Label != "Open in Muster" ||
+		len(l.Notices) == 0 || l.Notices[0] != "🧪 Test message" {
+		t.Fatalf("the layout of a test message %+v", in.Layout)
+	}
+	if !strings.Contains(posts[0].Body, `"layout":{`) {
+		t.Fatalf("no layout in %s", posts[0].Body)
 	}
 	for _, b := range in.Buttons {
 		a, err := buttons.Verify(testKeys{}, b.Data, "")
@@ -246,7 +256,8 @@ func TestPreview(t *testing.T) {
 	}
 	in := preview(t, items)
 	if in.Kind != gen.Test || in.Notify || in.ChannelId != "ch-alerts" || in.Title != "#7 CertExpiry" ||
-		!strings.HasPrefix(in.Body, "🧪 Test message\n\n") || len(in.Buttons) == 0 {
+		!strings.HasPrefix(in.Body, "🧪 Test message\n\n") || len(in.Buttons) == 0 || in.Layout == nil ||
+		in.Layout.Title != "CertExpiry" {
 		t.Fatalf("envelope %+v", in)
 	}
 	if !strings.Contains(*items[0].Text, "\n  \"kind\": \"test\"") {

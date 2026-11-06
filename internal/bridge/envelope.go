@@ -32,7 +32,10 @@ import (
 // Connection, listed in `mentions` (C-22.FR-16). The footer names a user linked through the Connection by a marker of
 // their own in a new message for a bridge with `native_mentions`; an edit carries no Mentions, and any other bridge
 // would show the marker's `@`, so there it names them by the link's display name (C-12.FR-12).
-// Template output keeps its trusted Mention tokens as text that notifies nobody.
+// Template output keeps its trusted Mention tokens as text that notifies nobody. A Root message and a test message of
+// Muster's compact default content also carry `layout` (C-29.FR-8): the same content as plain-text data, shortened together with the body (C-29.FR-6),
+// with the Owner of an acknowledged Alert Group, who has the `ref` of their entry in `mentions` only where the message
+// carries their marker — a new message to a bridge with `native_mentions` — and null otherwise.
 
 // MinBodyLength is the protocol's floor of limits.max_body_length, in code points: the body limit when info has none.
 const MinBodyLength = 500
@@ -57,7 +60,8 @@ const zeroWidthSpace = "\u200b"
 const markerScheme = "muster-mention:"
 
 // content is the envelope of m for a bridge whose info is i, with head — the mention line of a Loud call, the mark of a
-// test message — before its body.
+// test message — before its body, and for a Root message of the compact default content its layout, whose people have
+// no reference; a Root message of a Route's own template or of the Fallback template has none (messages.HasLayout).
 func content(m messages.Message, i Info, head []string) gen.MessageContent {
 	c := gen.MessageContent{Status: gen.Status(m.Colour), Color: messages.StatusColour(m.Colour),
 		Emoji: messages.StatusEmoji(m.Colour), Buttons: buttonsOf(m, i)}
@@ -74,15 +78,76 @@ func content(m messages.Message, i Info, head []string) gen.MessageContent {
 		}
 	}
 	c.Title = cutEnd(strings.TrimSpace(c.Title), maxTitle)
-	c.Body = bodyOf(rest, i, head)
+	var short messages.Message
+	c.Body, short = fitted(rest, i, head)
+	if messages.HasLayout(m) {
+		l := layoutOf(m, short)
+		c.Layout = &l
+	}
 	return c
+}
+
+// layoutOf is the layout of the Root message m (C-29.FR-8) whose body was laid out from short, m shortened for the
+// body's limit: the description, the Alerts, the summary, the key labels, the notices and the footer of short, so that
+// the layout and the body never disagree, and the rest of m — the status, the fields, the people and the links are
+// never cut (C-29.FR-6) — with the title cut as the envelope's is. The people have no reference; values are plain text,
+// and each link is its URL as the body links it.
+func layoutOf(m, short messages.Message) gen.Layout {
+	cp := m
+	cp.Description, cp.AlertsLine, cp.Summary, cp.KeyLabels = short.Description, short.AlertsLine, short.Summary,
+		short.KeyLabels
+	cp.Notices, cp.Footer, cp.FooterMention, cp.FooterName = short.Notices, short.Footer, short.FooterMention,
+		short.FooterName
+	l := messages.LayoutOf(cp)
+	out := gen.Layout{Number: int(l.Number), Title: cutEnd(strings.TrimSpace(l.Title), maxTitle),
+		Status:  gen.LayoutStatus{Key: gen.LayoutStatusKey(l.Status), Word: l.StatusWord},
+		Summary: l.Summary, Description: l.Description, Fields: make([]gen.LayoutField, 0, len(l.Fields)),
+		Labels: make([]gen.LayoutLabel, 0, len(l.Labels)), Alerts: nullable.NewNullNullable[gen.LayoutAlerts](),
+		Notices: append([]string{}, l.Notices...), Assignees: []gen.LayoutPerson{},
+		Owner: nullable.NewNullNullable[gen.LayoutPerson](), Links: make([]gen.LayoutLink, 0, len(l.Links))}
+	for _, f := range l.Fields {
+		out.Fields = append(out.Fields, gen.LayoutField{Name: f.Name, Value: f.Value})
+	}
+	for _, k := range l.Labels {
+		out.Labels = append(out.Labels, gen.LayoutLabel{Key: k.Name, Value: k.Value})
+	}
+	if a := l.Alerts; a != nil {
+		values := make([]gen.LayoutAlertValue, 0, len(a.Values))
+		for _, v := range a.Values {
+			values = append(values, gen.LayoutAlertValue{Value: v.Value, Resolved: v.Resolved})
+		}
+		out.Alerts = nullable.NewNullableWithValue(gen.LayoutAlerts{Label: a.Label, Values: values, Total: int(a.Total)})
+	}
+	if o := l.Owner; o != nil {
+		out.Owner = nullable.NewNullableWithValue(gen.LayoutPerson{Name: o.Name, Ref: nullable.NewNullNullable[string]()})
+	}
+	for _, k := range l.Links {
+		out.Links = append(out.Links, gen.LayoutLink{Label: k.Text, Url: k.URL})
+	}
+	return out
+}
+
+// withOwnerRef gives the Owner of layout the reference ref, the entry of the footer's user in `mentions`, when list —
+// the Mentions the message carries — still has it (C-29.AC-6); a layout without an Owner and an empty ref stay as they
+// are.
+func withOwnerRef(layout *gen.Layout, ref string, list []gen.Mention) {
+	if layout == nil || ref == "" || !slices.ContainsFunc(list, func(m gen.Mention) bool { return m.Ref == ref }) {
+		return
+	}
+	o, err := layout.Owner.Get()
+	if err != nil {
+		return
+	}
+	o.Ref = nullable.NewNullableWithValue(ref)
+	layout.Owner = nullable.NewNullableWithValue(o)
 }
 
 // postInput is the envelope c posted with postMessage as a message of kind to channel, without Mentions; notify is a
 // Loud message.
 func postInput(kind gen.MessageKind, channel string, c gen.MessageContent, notify bool) gen.MessageInput {
 	return gen.MessageInput{Kind: kind, ChannelId: channel, Status: c.Status, Color: c.Color, Emoji: c.Emoji,
-		Title: c.Title, Link: c.Link, Body: c.Body, Buttons: c.Buttons, Mentions: []gen.Mention{}, Notify: notify}
+		Title: c.Title, Link: c.Link, Body: c.Body, Buttons: c.Buttons, Layout: c.Layout, Mentions: []gen.Mention{},
+		Notify: notify}
 }
 
 // replyInput is the Thread reply m for a bridge whose info is i, under the Thread threadRef, null when it is empty,
@@ -178,21 +243,25 @@ func withFooterIn(m messages.Message, conn int64) messages.Message {
 }
 
 // withFooterMention is m, a new message for a bridge whose info is i, with the footer of the identity space of the
-// Bridge Connection conn and the Mentions list (C-12.FR-12, C-22.FR-16): with `native_mentions`, a user linked there
-// is their marker, whose entry list gains unless it has one for the account; otherwise withFooterIn names them.
-func withFooterMention(m messages.Message, conn int64, i Info, list []gen.Mention) (messages.Message, []gen.Mention) {
+// Bridge Connection conn and the Mentions list (C-12.FR-12, C-22.FR-16), and the ref of the footer user's entry: with
+// `native_mentions`, a user linked there is their marker, whose entry list gains unless it has one for the account;
+// otherwise withFooterIn names them, and the ref is empty.
+func withFooterMention(m messages.Message, conn int64, i Info, list []gen.Mention) (messages.Message, []gen.Mention,
+	string) {
 	if c := i.Capabilities.NativeMentions; c == nil || !*c {
-		return withFooterIn(m, conn), list
+		return withFooterIn(m, conn), list, ""
 	}
+	ref := ""
 	m = m.WithFooterIn(mentions.IdentitySpace(mentions.TypeBridge, &conn), func(u mentions.User) string {
 		if !markable(u) {
 			return footerName(u)
 		}
 		var s string
 		s, list = marker(u, list)
+		ref = list[slices.IndexFunc(list, func(e gen.Mention) bool { return e.ExternalId == u.ExternalID })].Ref
 		return s
 	})
-	return m, list
+	return m, list, ref
 }
 
 // marked are the Mentions of list whose marker body still carries: shortening may have cut the footer's (C-12.FR-11),
@@ -215,6 +284,12 @@ func bodyLimit(i Info) int {
 // buttons, and the commands line of a Root message when the bridge has Thread messages and no buttons, separated by
 // blank lines and within the body limit of i.
 func bodyOf(m messages.Message, i Info, head []string) string {
+	body, _ := fitted(m, i, head)
+	return body
+}
+
+// fitted is the body of bodyOf and m as shortened for it (C-12.FR-11, C-29.FR-6), which the layout follows.
+func fitted(m messages.Message, i Info, head []string) (string, messages.Message) {
 	limit := bodyLimit(i)
 	var line string
 	if caps := i.Capabilities; m.Kind == messages.KindRoot && caps.Buttons == nil && caps.ThreadMessages != nil {
@@ -225,10 +300,10 @@ func bodyOf(m messages.Message, i Info, head []string) string {
 	for _, s := range others {
 		room -= utf8.RuneCountInString(s) + utf8.RuneCountInString(blockBreak)
 	}
-	parts := slices.Clone(head)
-	parts = append(parts, fit(laidOut(m), max(room, 0)), line)
+	text, short := fit(laidOut(m), max(room, 0))
+	parts := append(slices.Clone(head), text, line)
 	parts = slices.DeleteFunc(parts, func(s string) bool { return s == "" })
-	return cutEnd(strings.Join(parts, blockBreak), limit)
+	return cutEnd(strings.Join(parts, blockBreak), limit), short
 }
 
 // laidOut is m as the body lays it out: without buttons, with the footer withFooterIn chose, and the trusted Mention
@@ -262,8 +337,9 @@ func tokenText(tk templates.Token) string {
 }
 
 // fit lays m out without its heading in CommonMark within room characters: shortened as C-12.FR-11 says, and when
-// that is not enough, its line of links, notices and footer kept whole after the start of the rest, cut.
-func fit(m messages.Message, room int) string {
+// that is not enough, its line of links, notices and footer kept whole after the start of the rest, cut. It also
+// returns m as shortened.
+func fit(m messages.Message, room int) (string, messages.Message) {
 	extra := 0
 	if h := m.Heading; h != nil {
 		// The heading is not in the body: shortening lays it out only so that the full list of Alerts links to the
@@ -276,12 +352,13 @@ func fit(m messages.Message, room int) string {
 	short.Heading = nil
 	full := messages.Layout(short, messages.MarkupCommonMark)
 	if utf8.RuneCountInString(full) <= room {
-		return full
+		return full, short
 	}
 	tail := messages.Layout(messages.Message{Links: short.Links, Notices: short.Notices, Footer: short.Footer,
 		FooterMention: short.FooterMention}, messages.MarkupCommonMark)
-	short.Links, short.Notices, short.Footer, short.FooterMention = nil, nil, "", ""
-	return cutMiddle(messages.Layout(short, messages.MarkupCommonMark), tail, room)
+	rest := short
+	rest.Links, rest.Notices, rest.Footer, rest.FooterMention = nil, nil, "", ""
+	return cutMiddle(messages.Layout(rest, messages.MarkupCommonMark), tail, room), short
 }
 
 // cutMiddle joins head and tail as two blocks within limit characters, cutting the end of head; a tail that does not

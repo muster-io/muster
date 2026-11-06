@@ -334,7 +334,8 @@ type Rendered struct {
 // Root renders the Root message of src for a markup (C-29.FR-1, FR-5, C-12.FR-6): Muster's colour, heading with the
 // status word, fields, links, notices, footer and buttons around the body of the Route's root_message template or the
 // compact default content with the Route's line template; when a Route template fails, the Fallback template. In CommonMark and mrkdwn it also carries
-// the Route's Snooze durations, for a bridge's commands line and Slack's Snooze menu.
+// the Route's Snooze durations, for a bridge's commands line and Slack's Snooze menu, and in CommonMark the Owner of an
+// acknowledged Alert Group, for the `owner` of a bridge's layout.
 func (r *Renderer) Root(src *Source, markup Markup) Rendered {
 	return r.root(src, markup, true)
 }
@@ -347,6 +348,9 @@ func (r *Renderer) root(src *Source, markup Markup, sign bool) Rendered {
 	m, keyID := r.frame(src, lang, sign)
 	if markup == MarkupCommonMark || markup == MarkupMrkdwn {
 		m.SnoozeSeconds = slices.Clone(src.Route.SnoozeDurations)
+	}
+	if markup == MarkupCommonMark && src.Status == ColourAcknowledged {
+		m.Owner = Value(src.Owner)
 	}
 	out := Rendered{KeyID: keyID}
 	if t := src.Route.RootMessage; t != nil {

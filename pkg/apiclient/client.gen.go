@@ -5986,13 +5986,13 @@ type MessageLayout struct {
 	// Links The links, "Open in Muster" first.
 	Links []MessageLayoutLink `json:"links"`
 
-	// Notices The notices that apply, then the footer as a line.
+	// Notices The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names.
 	Notices []string `json:"notices"`
 
 	// Number The Alert Group's number alone, without `#`.
 	Number int `json:"number"`
 
-	// Owner Who acknowledged the Alert Group, with their Team; null while the footer names them.
+	// Owner Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.
 	Owner  nullable.Nullable[MessageLayoutPerson] `json:"owner"`
 	Status MessageLayoutStatus                    `json:"status"`
 
@@ -8566,7 +8566,7 @@ type TemplatePreviewResult struct {
 	// Format The markup of `output`; null for kinds without markup.
 	Format nullable.Nullable[TemplatePreviewResultFormat] `json:"format,omitempty"`
 
-	// Layout For `root_message`, the content of the rendered message as structured data; null when the template failed.
+	// Layout For `root_message`, the content of the rendered message as structured data; null when the template failed, and when a template of the Route renders the content, which the structured data cannot carry, as a bridge then receives no `layout`. The preview renders without the Route's line template, so for a Route with a line template it shows the compact layout, although a bridge receives none.
 	Layout nullable.Nullable[MessageLayout] `json:"layout,omitempty"`
 
 	// Length For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.

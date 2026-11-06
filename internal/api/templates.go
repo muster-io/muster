@@ -69,6 +69,8 @@ func (s *Server) PreviewTemplate(ctx context.Context, req gen.PreviewTemplateReq
 		out.Layout = nullable.NewNullNullable[gen.MessageLayout]()
 		if res.Layout != nil {
 			out.Layout = nullable.NewNullableWithValue(messageLayoutOf(*res.Layout))
+		}
+		if res.Valid {
 			length := res.Length
 			out.Length = &length
 		}
@@ -85,8 +87,9 @@ func (s *Server) PreviewTemplate(ctx context.Context, req gen.PreviewTemplateReq
 	return gen.PreviewTemplate200JSONResponse(out), nil
 }
 
-// messageLayoutOf is the MessageLayout of a previewed Root message (C-29.FR-1): the Assignees and the Owner come with
-// the Escalation chains, and until then the footer, among the notices, names the Owner.
+// messageLayoutOf is the MessageLayout of a previewed Root message (C-29.FR-1): the Assignees come with the Escalation
+// chains; the Owner, in the layout of a bridge's CommonMark, has no reference, since a preview carries no Mentions, and
+// the footer among the notices names them in every other markup.
 func messageLayoutOf(l messages.MessageLayout) gen.MessageLayout {
 	out := gen.MessageLayout{Number: int(l.Number), Title: l.Title,
 		Status:  gen.MessageLayoutStatus{Key: gen.MessageLayoutStatusKey(l.Status), Word: l.StatusWord},
@@ -94,6 +97,10 @@ func messageLayoutOf(l messages.MessageLayout) gen.MessageLayout {
 		Labels: make([]gen.MessageLayoutLabel, 0, len(l.Labels)), Notices: append([]string{}, l.Notices...),
 		Assignees: []gen.MessageLayoutPerson{}, Links: make([]gen.MessageLayoutLink, 0, len(l.Links))}
 	out.Owner = nullable.NewNullNullable[gen.MessageLayoutPerson]()
+	if o := l.Owner; o != nil {
+		out.Owner = nullable.NewNullableWithValue(gen.MessageLayoutPerson{Name: o.Name,
+			Ref: nullable.NewNullNullable[string]()})
+	}
 	out.Alerts = nullable.NewNullNullable[gen.MessageLayoutAlerts]()
 	for _, f := range l.Fields {
 		out.Fields = append(out.Fields, gen.MessageLayoutField{Name: f.Name, Value: f.Value})

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"regexp"
 	"slices"
@@ -21,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
@@ -148,6 +150,14 @@ func TestConformanceEveryFeature(t *testing.T) {
 			t.Errorf("message %+v", m.Envelope)
 		}
 	}
+	// The fake keeps the layout of every message and edit: the bridge that renders it.
+	if l := post.Envelope.Layout; l == nil || l.Title != "muster bridge check: post" ||
+		l.Status.Key != gen.LayoutStatusKeyFiring || l.Summary != checkBody || len(l.Links) != 1 ||
+		!slices.Equal(l.Notices, []string{"🧪 Test message"}) ||
+		buttons.Envelope.Layout == nil || len(post.Edits) != 1 || post.Edits[0].Layout == nil ||
+		post.Edits[0].Layout.Status != (gen.LayoutStatus{Key: gen.LayoutStatusKeyAcknowledged, Word: "Acknowledged"}) {
+		t.Errorf("layouts %+v %+v", post.Envelope.Layout, post.Edits)
+	}
 	if evs := f.Events(); len(evs) != 0 {
 		t.Errorf("events %+v", evs)
 	}
@@ -158,6 +168,72 @@ func TestConformanceEveryFeature(t *testing.T) {
 	sameLines(t, lines, everyFeature)
 	if failed {
 		t.Fatal("the second run failed")
+	}
+}
+
+// ignoringLayout is a bridge in front of f that ignores `layout`, as a bridge written before it does: it drops
+// `layout` from every postMessage and editMessage, counting those that had one, and passes every request on to f.
+func ignoringLayout(t *testing.T, f *fakebridge.Fake) (string, *atomic.Int64) {
+	t.Helper()
+	target, err := url.Parse(f.URL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.FlushInterval = -1
+	var dropped atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodPost && r.URL.Path == "/v1/messages") ||
+			(r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/v1/messages/")) {
+			var body map[string]json.RawMessage
+			raw, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(raw, &body); err == nil {
+				if _, ok := body["layout"]; ok {
+					dropped.Add(1)
+					delete(body, "layout")
+				}
+				raw, _ = json.Marshal(body)
+			}
+			r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(raw)), int64(len(raw))
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &dropped
+}
+
+// TestConformanceLayout covers C-29.FR-8 and C-22.FR-21: muster bridge check sends `layout` with every message it posts
+// and edits, and passes against a bridge that ignores it — one that never sees it — as against one that keeps it, the
+// fake bridge.
+func TestConformanceLayout(t *testing.T) {
+	f := startFake(t)
+	base, dropped := ignoringLayout(t, f)
+	cfg := conf(f, nil)
+	cfg.BaseURL = base
+	lines, failed := run(t, cfg)
+	sameLines(t, lines, everyFeature)
+	if failed {
+		t.Fatal("failed against a bridge that ignores layout")
+	}
+	ms := f.Messages()
+	// post (and its replay), buttons and edit sent a layout
+	if n := dropped.Load(); n != 4 || len(ms) != 2 {
+		t.Fatalf("%d layouts dropped, %d messages", n, len(ms))
+	}
+	for _, m := range ms {
+		if m.Envelope.Layout != nil || slices.ContainsFunc(m.Edits, func(c gen.MessageContent) bool {
+			return c.Layout != nil
+		}) {
+			t.Errorf("the bridge saw a layout: %+v", m)
+		}
+	}
+	lines, failed = run(t, conf(f, nil))
+	sameLines(t, lines, everyFeature)
+	if failed {
+		t.Fatal("failed against a bridge that keeps layout")
+	}
+	if ms := f.Messages(); len(ms) != 4 || ms[2].Envelope.Layout == nil || ms[3].Envelope.Layout == nil {
+		t.Fatalf("messages %+v", ms)
 	}
 }
 

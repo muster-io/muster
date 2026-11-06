@@ -93,7 +93,8 @@ func (a *Adapter) EditWindow(ctx context.Context, c delivery.Call) (time.Duratio
 
 // Publish posts m as a Root message, or a Storm summary, with the Mentions of a Loud call — their line before its body
 // and their entries in `mentions` (C-22.FR-16) — and its footer in the Connection's identity space, whose user is a
-// marker for a bridge with `native_mentions`. Its outcome names
+// marker for a bridge with `native_mentions`; the Owner in the layout of a Root message has the ref of that marker's
+// entry while the body carries it (C-29.AC-6). Its outcome names
 // the message, its link when the bridge sent a safe one, the Thread the answer named and whether the answer was
 // replayed; a truncated body is delivered.
 func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Message) delivery.Outcome {
@@ -106,9 +107,10 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 		kind = gen.StormSummary
 	}
 	head, list := mentionsOf(c)
-	m, list = withFooterMention(m, t.Conn.ID, i, list)
+	m, list, ref := withFooterMention(m, t.Conn.ID, i, list)
 	in := postInput(kind, t.ChannelID, content(m, i, head), c.Loudness == groups.Loud)
 	in.Mentions = marked(list, in.Body)
+	withOwnerRef(in.Layout, ref, in.Mentions)
 	out, r := t.Conn.Client.PostMessage(ctx, c.Class, c.Key, in)
 	o := r.Outcome()
 	if r.OK() {
@@ -119,7 +121,7 @@ func (a *Adapter) Publish(ctx context.Context, c delivery.Call, m delivery.Messa
 }
 
 // Update replaces the message messageID with the whole envelope of m, Quiet and without Mentions, its footer in the
-// Connection's identity space. An edit refused as gone only because of the message's age, with the reason
+// Connection's identity space, so that the Owner in its layout has no ref. An edit refused as gone only because of the message's age, with the reason
 // edit_window_closed, is OutcomeEditWindowClosed, not a deleted Root message (C-22.FR-8).
 func (a *Adapter) Update(ctx context.Context, c delivery.Call, messageID string, m delivery.Message) delivery.Outcome {
 	t, i, fail := a.prepare(ctx, c)

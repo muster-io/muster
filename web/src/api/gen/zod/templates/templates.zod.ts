@@ -61,7 +61,7 @@ export const PreviewTemplateResponse = zod.object({
 })).describe('Up to `message.compact_alerts_listed` values, firing Alerts first.'),
   "total": zod.int().describe('How many Alerts the Alert Group has, so that a reader counts the ones not listed itself.')
 }),zod.null()]).describe('The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert.'),
-  "notices": zod.array(zod.string()).describe('The notices that apply, then the footer as a line.'),
+  "notices": zod.array(zod.string()).describe('The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names.'),
   "assignees": zod.array(zod.object({
   "name": zod.string(),
   "ref": zod.string().nullable().describe('The `ref` of the person\'s entry in the envelope\'s `mentions` where the message carries their Mention, otherwise null.'),
@@ -75,12 +75,12 @@ export const PreviewTemplateResponse = zod.object({
   "team": zod.object({
   "name": zod.string()
 }).optional()
-}),zod.null()]).describe('Who acknowledged the Alert Group, with their Team; null while the footer names them.'),
+}),zod.null()]).describe('Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them.'),
   "links": zod.array(zod.object({
   "label": zod.string(),
   "url": zod.string()
 })).describe('The links, "Open in Muster" first.')
-}).describe('The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.'),zod.null()]).optional().describe('For `root_message`, the content of the rendered message as structured data; null when the template failed.'),
+}).describe('The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.'),zod.null()]).optional().describe('For `root_message`, the content of the rendered message as structured data; null when the template failed, and when a template of the Route renders the content, which the structured data cannot carry, as a bridge then receives no `layout`. The preview renders without the Route\'s line template, so for a Route with a line template it shows the compact layout, although a bridge receives none.'),
   "length": zod.int().optional().describe('For `root_message`, the length of `output` as its messenger counts it — UTF-16 code units for `html`, characters otherwise.'),
   "messenger_limit": zod.int().nullish().describe('For `root_message`, the length limit the adapter of `format` declares — 16,383 for Mattermost, 4,096 for Telegram, 3,000 for a Slack section — and null for `commonmark`, whose limit each bridge declares.'),
   "errors": zod.array(zod.object({

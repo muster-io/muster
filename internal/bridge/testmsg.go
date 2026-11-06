@@ -21,8 +21,8 @@ import (
 )
 
 // The Destination test of Bridge Destinations (C-22.FR-17, C-16.FR-1 to FR-4): the step message posts the Root message
-// of the source once with postMessage, of the kind test, Quiet, with "🧪 Test message" before its body and the buttons
-// of its status whose data name the Destination, through the interactive path, under an idempotency key new for each
+// of the source once with postMessage, of the kind test, Quiet, with "🧪 Test message" before its body, its layout
+// (C-29.FR-8) and the buttons of its status whose data name the Destination, through the interactive path, under an idempotency key new for each
 // test. Nothing is stored, no Timeline changes and the message has no Thread. The preview is the envelope that test
 // would post, as JSON, and posts nothing.
 
@@ -167,10 +167,14 @@ func (t *Tester) Preview(ctx context.Context, in delivery.TestInput) ([]delivery
 }
 
 // testInput is the test message m posted to the channel of tg for a bridge whose info is i: of the kind test, Quiet,
-// without Mentions, with the mark of a test before its body.
+// without Mentions, with the mark of a test before its body and as the first notice of its layout (C-16.FR-1).
 func testInput(tg Target, m messages.Message, i Info) gen.MessageInput {
-	mark := messages.EscapeCommonMark(messages.TestMark(m.Language))
-	return postInput(gen.Test, tg.ChannelID, content(m, i, []string{mark}), false)
+	mark := messages.TestMark(m.Language)
+	c := content(m, i, []string{messages.EscapeCommonMark(mark)})
+	if c.Layout != nil {
+		c.Layout.Notices = append([]string{mark}, c.Layout.Notices...)
+	}
+	return postInput(gen.Test, tg.ChannelID, c, false)
 }
 
 // postRequest is the postMessage of in under key as a test shows it: the token masked.

@@ -170,6 +170,11 @@ with the `ref` of each Assignee, an Owner in none of the Alert Group's Teams nam
 ## Notes
 
 - Suggested commit: `feat(groups): track the assignees that escalation chains page and show them in messages`.
+- From S-126, `LayoutOf` in `internal/messages/layout.go` names the Owner in `owner` while the Alert Group is
+  acknowledged and returns early without the footer "Acknowledged by {user}" among `notices`, because that footer was
+  only its person. The suffix "· Escalation chains stopped" that this story adds to item 7 is not a person
+  (C-29.FR-8: `notices` holds "the footer of item 7 other than its people"): it must become a line of `notices`, and
+  the early return must not swallow it; `layout_test.go` covers both, and the Owner's Team goes into `owner.team`.
 - The maintainer confirms a provisional value with this story (operator attention): P-89, the Owner is named with the
   Teams they are in among the Teams of the Alert Group, its Route's and its chains' owning Teams.
 - "Assigned" is never used: the people are Assignees (CONTEXT.md).

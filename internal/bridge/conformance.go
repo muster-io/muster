@@ -31,7 +31,9 @@ import (
 // The conformance check `muster bridge check` (C-22.FR-21): the steps of the Bridge protocol against one bridge, run
 // by the people who write a bridge and by the CI of the bridge libraries, outside any installation. It posts, edits,
 // replies and deletes through the protocol client directly, outside delivery, which ADR-0017 permits; it needs no
-// database, master key or configuration file and writes nothing to the file system. Every step prints one line as soon
+// database, master key or configuration file and writes nothing to the file system. The messages it posts and edits
+// carry `layout` beside `body`, as Root messages do, and the bridge's answers are judged whether it renders `layout` or
+// ignores it (C-29.FR-8). Every step prints one line as soon
 // as it ends — `PASS <step>`, `FAIL <step>: <reason>` or `SKIP <step>: <why>` — with the token and the push secret
 // masked in every reason; an interactive run also prints `PUSH <url> [<secret>]` once its push listener listens and
 // `WAIT <step>: <what to do>, message_id <id>` before it waits for a person.
@@ -271,11 +273,24 @@ func (cn *conformance) offers(mode gen.InfoEventDelivery) bool {
 	return slices.Contains(cn.info.EventDelivery, mode)
 }
 
-// content is the envelope of the test message of step in the colour, with buttons.
+// content is the envelope of the test message of step in the colour, with buttons and its layout (C-29.FR-8).
 func (cn *conformance) content(step, colour string, buttons []gen.Button) gen.MessageContent {
 	return gen.MessageContent{Status: gen.Status(colour), Color: messages.StatusColour(colour),
 		Emoji: messages.StatusEmoji(colour), Title: checkTitle + step, Link: gen.Link{Url: checkLink, Label: "Muster"},
-		Body: messages.EscapeCommonMark(messages.TestMark("en")) + blockBreak + checkBody, Buttons: buttons}
+		Body: messages.EscapeCommonMark(messages.TestMark("en")) + blockBreak + checkBody, Buttons: buttons,
+		Layout: checkLayout(step, colour)}
+}
+
+// checkLayout is the layout of the test message of step in the colour, as Muster sends one with every Root message: the
+// number 1, the step in the title and as its one field, the body's text as its summary, the mark of a test as its
+// notice, as a test message from a Destination has it, and the link; a bridge may render it or ignore it.
+func checkLayout(step, colour string) *gen.Layout {
+	return &gen.Layout{Number: 1, Title: checkTitle + step,
+		Status: gen.LayoutStatus{Key: gen.LayoutStatusKey(colour), Word: messages.T("en", "status."+colour, nil)},
+		Fields: []gen.LayoutField{{Name: "Step", Value: step}}, Summary: checkBody, Labels: []gen.LayoutLabel{},
+		Alerts: nullable.NewNullNullable[gen.LayoutAlerts](), Notices: []string{messages.TestMark("en")},
+		Assignees: []gen.LayoutPerson{}, Owner: nullable.NewNullNullable[gen.LayoutPerson](),
+		Links: []gen.LayoutLink{{Label: "Muster", Url: checkLink}}}
 }
 
 // reply is the Thread reply of step under threadRef, null when it is empty.

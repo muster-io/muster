@@ -28,11 +28,11 @@ export interface MessageLayout {
   labels: MessageLayoutLabel[];
   /** The Alerts by their distinguishing label (C-29.FR-3); null for an Alert Group of one Alert. */
   alerts: MessageLayoutAlerts | null;
-  /** The notices that apply, then the footer as a line. */
+  /** The notices that apply, then the footer as a line, except the footer of an acknowledgement that `owner` names. */
   notices: string[];
   /** The Assignees with their Teams, before an acknowledgement; empty until Escalation chains Page people. */
   assignees: MessageLayoutPerson[];
-  /** Who acknowledged the Alert Group, with their Team; null while the footer names them. */
+  /** Who acknowledged the Alert Group, with their Team, while it is acknowledged, in the layout of the markup `commonmark` that bridges receive; null otherwise, while the footer names them. */
   owner: MessageLayoutPerson | null;
   /** The links, "Open in Muster" first. */
   links: MessageLayoutLink[];

@@ -70,6 +70,11 @@ None.
 ## Notes
 
 - Suggested commit: `docs: show the message layout per messenger and how bridges render it`.
+- From S-126, `layout` names a person only as the Owner while the Alert Group is acknowledged (and, from S-168, the
+  Assignees): who snoozed or resolved it appears only as text in a line of `notices` — "Snoozed by Bob until …",
+  "Resolved by Bob" — with no person slot and no `ref`, so the guide says that a bridge cannot mention them from
+  `layout`. It also says to render `body` whenever `layout` is absent: Storm summaries, Thread replies, Root messages
+  of a Route's own Root message template or line template, of the Fallback template, and of older Muster versions.
 - Depends on the library stories so that the examples use released types; if their release waits, the examples name
   the version the maintainer releases, and the pull request says so.
 

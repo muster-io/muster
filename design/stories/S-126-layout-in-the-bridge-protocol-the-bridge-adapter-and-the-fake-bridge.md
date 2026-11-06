@@ -8,8 +8,16 @@ depends_on: [S-125]
 covers: [C-29.FR-1, C-29.FR-4, C-29.FR-6, C-29.FR-8, C-29.AC-6, C-12.FR-1, C-22.FR-4, C-22.FR-21]
 files_touched:
   - api/bridge.yaml
+  - api/openapi.yaml
   - internal/messages/layout.go
   - internal/messages/layout_test.go
+  - internal/messages/message.go
+  - internal/messages/render.go
+  - internal/api/templates.go
+  - internal/api/templates_test.go
+  - internal/messages/preview.go
+  - design/stories/S-168-assignees-in-the-root-message-and-the-layout-the-owners-team-and-the-assignee-filter.md
+  - design/stories/S-130-documentation-message-layout-per-messenger-and-layout-for-bridge-authors.md
   - internal/bridge/envelope.go
   - internal/bridge/envelope_test.go
   - internal/bridge/delivery.go
@@ -107,20 +115,21 @@ curl -s -X PUT $FAM/groups/b1 -d '{"receiver":"sev","route":"{}","labels":{"aler
 for p in api-1 api-2 api-3 api-4 api-5 api-6 api-7; do PUTA b1 $p "{\"labels\":{\"svc\":\"br\",\"pod\":\"$p\",\"severity\":\"warning\"},
   \"annotations\":{\"summary\":\"Queue *full* on #1\"}}"; done
 NOTIFY b1 '{"reason":"first notification"}'; G=$(AG 'svc%3D%22br%22'); sleep 1
-curl -s $FB/messages | jq -c '[.[] | select(.kind == "root")] | last | {n: (.layout.number | type), t: .layout.title,
-  s: .layout.status.key, sum: .layout.summary, a: {label: .layout.alerts.label, listed: (.layout.alerts.values | length), total: .layout.alerts.total}}'
+curl -s $FB/messages | jq -c '[.[] | select(.envelope.kind == "root")] | last | .envelope.layout | {n: (.number | type),
+  t: .title, s: .status.key, sum: .summary, a: {label: .alerts.label, listed: (.alerts.values | length), total: .alerts.total}}'
 # {"n":"number","t":"QueueFull","s":"firing","sum":"Queue *full* on #1","a":{"label":"pod","listed":5,"total":7}}
 curl -s "${B[@]}" -X POST $API/alert-groups/$G/acknowledge > /dev/null; sleep 1
-curl -s $FB/messages | jq -c '[.[] | select(.kind == "root")] | last | .edits | last | .layout.owner'       # {"name":"bob","ref":null}
+curl -s $FB/messages | jq -c '[.[] | select(.envelope.kind == "root")] | last | .edits | last | .layout.owner'   # {"name":"bob","ref":null}
 printf %s muster-dev-bridge-token-b > tok
 ./bin/muster bridge check http://127.0.0.1:18094 --token-file tok --channel ch-alerts --no-interactive; echo "exit $?"
 # every step passed or skipped; exit 0
-curl -s $FB/messages | jq -c '[.[] | select(.kind == "test" or .kind == "root")] | last | has("layout")'      # true
+curl -s $FB/messages | jq -c '[.[] | select(.envelope.kind == "test")] | last | .envelope | has("layout")'   # true
 ```
 
-`test/e2e/bridge_layout_test.go` repeats these checks and adds a new Root message after the acknowledgement, through a
-Route to the same Destination, whose `layout.owner.ref` is the `ref` of bob's entry in its `mentions`, and a bridge
-whose `max_body_length` forces a cut.
+`test/e2e/bridge_layout_test.go` repeats these checks and adds a new Root message after the acknowledgement, in a second
+Destination of the Connection added to the Route, whose `layout.owner.ref` is the `ref` of bob's entry in its
+`mentions`; the same through a bridge without `native_mentions`, with the `ref` null; a Thread reply without `layout`;
+and a bridge whose `max_body_length` forces a cut.
 
 ## Open questions
 
@@ -133,6 +142,49 @@ None.
   for its own markup (C-29.FR-8).
 - The libraries' copies of `api/bridge.yaml` fail their `make spec-check` once this merges, until S-127 and S-128 take
   the new copy.
+- Changes made while implementing (the pull request lists them):
+  - `files_touched` adds `internal/messages/message.go`, from which `MessageLayout` and `LayoutOf` move to
+    `layout.go` and where `Message` gains `Owner`; `internal/messages/render.go`, which sets `Owner` for CommonMark
+    only, as S-125 does with `SnoozeSeconds`, so that the Desired states of the other markups keep their hashes;
+    `internal/api/templates.go` and its test, so that the preview's `MessageLayout` in the markup `commonmark` carries
+    the Owner as a bridge receives it; and `api/openapi.yaml`, whose descriptions of `MessageLayout.notices` and
+    `owner` now say that an acknowledgement's footer is the Owner there, not a notice.
+  - The Verification reads `.envelope.kind` and `.envelope.layout`: `/_fake/messages` lists each message with its
+    envelope under `envelope` and each edit as the envelope itself. The last check takes the newest test message,
+    which `muster bridge check` posted.
+  - The new Root message after the acknowledgement comes from a second Destination added to the Route, which
+    publishes the open Alert Group there Quietly (S-170): an Alert Group has one
+    Root message per Destination, so a second Route to the same Destination cannot post another.
+  - The generated `Status` constants of `internal/bridge/gen` take the prefix `Status` (`gen.StatusFiring`), since the
+    new enum `LayoutStatus.key` has the same values and oapi-codegen prefixes colliding enums; only tests used them.
+- Decisions within the sources, for the maintainer to confirm:
+  - `owner` is set while the Alert Group is acknowledged, named by the Owner's Muster display name, and the footer
+    "Acknowledged by {user}" is then not among `notices`: C-29.FR-8 puts in `notices` "the footer of item 7 other
+    than its people", and that footer is only its person, whom `owner` carries, and the status. The footers "Snoozed
+    by", "Resolved by" and "Resolved automatically" stay as lines of `notices`, the person named as text, since
+    `layout` has no person for them.
+  - Decided by the orchestrator: a Root message whose items 3 to 5 come from a Route's own root_message template, whose
+    Alerts come from its line template (C-29.FR-5: the line template's output, not the distinguishing label's values),
+    or that comes from the Fallback template — and a Desired state stored before the compact layout — carries no `layout`
+    (`messages.HasLayout`), since `layout` has no field for that content and C-29.FR-8 asks for "the same content";
+    a bridge renders `body` whenever `layout` is absent, as it must for Storm summaries, Thread replies and older
+    Muster. The preview of a Route's own template carries no `layout` either (`internal/messages/preview.go`, added to
+    `files_touched`), with its length still given; `api/openapi.yaml` says so for `TemplatePreviewResult.layout`.
+  - Decided by the orchestrator, after review: the test message's `layout` has the mark "🧪 Test message" as its first
+    notice, as its body has it first (C-16.FR-1), in a Destination test and in `muster bridge check`; each link of
+    `layout` is its URL as the Route gives it, the same as the body links, so `LayoutLink.url` has no `format: uri`
+    — a link may be an IRI, with a host or path outside ASCII, which a validator of `uri` would refuse — and is
+    described as an absolute http or https link; and `layout` takes its
+    title cut as the envelope's and its notices and footer from the message as shortened for the body, so that the two
+    never disagree. The comments of `layoutCommonMark` that said the bridge body keeps the L1 link position and the
+    italic summary "until S-126" now state the current behaviour: no story owns a change of that body.
+  - `files_touched` adds S-130's story file: its Notes now say that who snoozed or resolved an Alert Group appears in
+    `layout` only as text in `notices`, without a person.
+  - `files_touched` adds S-168's story file: its Notes now say that the "· Escalation chains stopped" of item 7 must
+    become a line of `notices`, which the Owner's early return in `LayoutOf` would otherwise swallow.
+  - `muster bridge check` sends a `layout` of the number 1, the step in the title and as the one field, the body's
+    text as the summary and the link; `api/bridge.yaml` gives the example of `MessageInput` a `layout`.
+  - The fake bridge refuses as invalid a `layout` whose `status.key` is not one of the four, as it checks `status`.
 
 ## Coverage
 

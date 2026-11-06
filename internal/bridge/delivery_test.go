@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -939,5 +941,91 @@ func TestCheckIsTheChannelCheck(t *testing.T) {
 	c.Class = outbound.ClassHeartbeat
 	if o := e.adapter.Check(t.Context(), c); o.Kind != delivery.OutcomeUnknown {
 		t.Fatalf("a class the client has not = %+v", o)
+	}
+}
+
+// TestLayoutCutWithTheBody covers C-29.FR-6 and C-29.AC-3 for a bridge: as max_body_length shrinks, the body loses its
+// description, then its Alerts, then its summary, then its key labels, and the layout loses each of them with the body
+// — never one without the other — while the title, the status, the fields, the notices, the Owner and the links of the
+// layout stay whole and the buttons stay in `buttons`, and the notices are those the body keeps; a Root message posted
+// to a bridge whose limit forces the cut carries the shortened layout.
+func TestLayoutCutWithTheBody(t *testing.T) {
+	m := compactMessage(t, messages.ColourAcknowledged)
+	m.Description = strings.Repeat("The queue jobs is full. ", 60)
+	m.Summary = "Queue full on " + strings.Repeat("node-a ", 30)
+	// Fields that are never cut and a long line of key labels, so that the floor of max_body_length cuts the labels.
+	m.Fields[1].Value = strings.Repeat("r", 120)
+	m.KeyLabels = append(m.KeyLabels, messages.KeyLabel{Name: "cluster", Value: strings.Repeat("c", 120)})
+	full := content(m, infoOf(t), nil).Layout
+	seen := map[string]bool{}
+	for limit := 2400; limit >= MinBodyLength; limit -= 10 {
+		c := content(m, infoOf(t, set("limits", "max_body_length", limit)), nil)
+		l := c.Layout
+		parts := []struct {
+			name           string
+			inLayout, body bool
+		}{
+			{"description", l.Description != "", strings.Contains(c.Body, "The queue jobs is full.")},
+			{"alerts", !l.Alerts.IsNull(), strings.Contains(c.Body, "api-1")},
+			{"summary", l.Summary != "", strings.Contains(c.Body, "Queue full on node-a")},
+			{"labels", len(l.Labels) > 0, strings.Contains(c.Body, "svc=br")},
+		}
+		state, kept := "", ""
+		for _, p := range parts {
+			if p.inLayout != p.body {
+				t.Fatalf("limit %d: the %s is in the layout %v, in the body %v: %q", limit, p.name, p.inLayout, p.body,
+					c.Body)
+			}
+			switch {
+			case p.inLayout:
+				kept = p.name
+			case kept != "":
+				t.Fatalf("limit %d: the %s went before the %s", limit, p.name, kept)
+			default:
+				state += "-" + p.name
+			}
+		}
+		seen[state] = true
+		if l.Title != full.Title || l.Number != full.Number || l.Status != full.Status ||
+			!slices.Equal(l.Fields, full.Fields) || !slices.Equal(l.Notices, full.Notices[:len(l.Notices)]) ||
+			slices.ContainsFunc(l.Notices, func(n string) bool { return !strings.Contains(c.Body, n) }) ||
+			!slices.Equal(l.Links, full.Links) || !reflect.DeepEqual(l.Owner, full.Owner) || len(c.Buttons) != 7 ||
+			utf8.RuneCountInString(c.Body) > limit {
+			t.Fatalf("limit %d: layout %+v, %d buttons, body %d", limit, l, len(c.Buttons),
+				utf8.RuneCountInString(c.Body))
+		}
+	}
+	for _, state := range []string{"", "-description", "-description-alerts", "-description-alerts-summary",
+		"-description-alerts-summary-labels"} {
+		if !seen[state] {
+			t.Errorf("no limit left the layout at %q: %v", state, seen)
+		}
+	}
+	// Notices too long for the floor go from their end in the body and in the layout alike; a title longer than an
+	// envelope's is cut as the envelope's is.
+	crowded := compactMessage(t, messages.ColourFiring)
+	crowded.Heading.Title = strings.Repeat("t", 600)
+	crowded.Notices = nil
+	for n := range 10 {
+		crowded.Notices = append(crowded.Notices, fmt.Sprintf("Notice %d %s", n, strings.Repeat("n", 70)))
+	}
+	c := content(crowded, infoOf(t, set("limits", "max_body_length", MinBodyLength)), nil)
+	if n := len(c.Layout.Notices); n == 0 || n == 10 || !slices.Equal(c.Layout.Notices, crowded.Notices[:n]) ||
+		!strings.Contains(c.Body, crowded.Notices[n-1]) || strings.Contains(c.Body, crowded.Notices[n]) {
+		t.Fatalf("notices %d of 10 in the layout, body %q", n, c.Body)
+	}
+	if n := utf8.RuneCountInString(c.Layout.Title); n != maxTitle || !strings.HasSuffix(c.Layout.Title, "…") {
+		t.Fatalf("a long title has %d characters in the layout", n)
+	}
+	e := newAdapterEnv(t, set("limits", "max_body_length", 1000))
+	if o := e.adapter.Publish(t.Context(), call(groups.Quiet, "k"), m); o.Kind != delivery.OutcomeOK {
+		t.Fatalf("outcome %+v", o)
+	}
+	env := decode(t, e.bridge.requests("post")[0])
+	l := layoutOfEnvelope(t, env)
+	if body := env["body"].(string); utf8.RuneCountInString(body) > 1000 || l["description"] != "" ||
+		strings.Contains(body, "The queue jobs") || l["title"] != "QueueFull" || len(l["links"].([]any)) != 2 ||
+		len(env["buttons"].([]any)) != 7 {
+		t.Fatalf("a cut Root message: layout %v, body %q", l, body)
 	}
 }

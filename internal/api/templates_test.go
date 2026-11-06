@@ -27,6 +27,9 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 	case `{{ env "HOME" }}`:
 		return messages.PreviewResult{Format: messages.MarkupMarkdown, Source: req.Template,
 			Errors: []*templates.Error{{Code: "unknown_function", Line: 1, Column: 4, Detail: `"env"`}}}, nil
+	case "templated":
+		return messages.PreviewResult{Valid: true, Output: "#1287 KubernetesContainerOOMKilled — Firing\nbody",
+			Format: req.Format, Length: 50, MessengerLimit: messages.MessengerLimit(req.Format)}, nil
 	case "sample":
 		return messages.PreviewResult{Errors: []*templates.Error{{Code: messages.CodeInvalidSample, Detail: "x"}}}, nil
 	case "route":
@@ -40,6 +43,10 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 	case "boom":
 		return messages.PreviewResult{}, errors.New("boom")
 	case "layout":
+		var owner *messages.LayoutPerson
+		if req.Format == messages.MarkupCommonMark {
+			owner = &messages.LayoutPerson{Name: "bob"}
+		}
 		return messages.PreviewResult{Valid: true, Output: "#1287 KubernetesContainerOOMKilled — Firing",
 			Format: req.Format, Length: 42, MessengerLimit: messages.MessengerLimit(req.Format),
 			Layout: &messages.MessageLayout{Number: 1287, Title: "KubernetesContainerOOMKilled", Status: "firing",
@@ -48,7 +55,7 @@ func (f *fakeTemplates) Preview(_ context.Context, req messages.PreviewRequest) 
 				Labels: []messages.Label{{Name: "system", Value: "kubernetes"}, {Name: "namespace", Value: "2 values"}},
 				Alerts: &messages.LayoutAlerts{Label: "pod", Values: []messages.AlertValue{{Value: "a"},
 					{Value: "b", Resolved: true}}, Total: 12}, Notices: []string{"⚠ Nobody has taken this"},
-				Links: []messages.Link{{Text: "Open in Muster", URL: "https://m/ag/1"}}}}, nil
+				Owner: owner, Links: []messages.Link{{Text: "Open in Muster", URL: "https://m/ag/1"}}}}, nil
 	}
 	return messages.PreviewResult{Valid: true, Output: "🔴 [#1 A](u)", Truncated: true, Format: req.Format,
 		Source: "built-in", Sample: messages.SampleAlertGroup}, nil
@@ -126,8 +133,9 @@ func TestPreviewTemplateAPI(t *testing.T) {
 
 // TestPreviewTemplateLayoutAPI is C-29.FR-7 and C-16.FR-4 at the API: the preview of a Root message carries its layout
 // as structured, plain-text data — the number and the title apart, the status by key and word, the fields, the
-// labels, the Alerts with their total, the notices and the links, no Assignees and no Owner yet — and its length
-// against the limit of the messenger of its markup, null for a bridge's CommonMark; other kinds carry neither.
+// labels, the Alerts with their total, the notices and the links, no Assignees, and the Owner without a reference in a
+// bridge's CommonMark only — and its length against the limit of the messenger of its markup, null for a bridge's
+// CommonMark; other kinds carry neither.
 func TestPreviewTemplateLayoutAPI(t *testing.T) {
 	x, ft, _, _ := newTokensAPI(t)
 	ft.idents[previewToken] = &auth.Identity{Session: ft.idents[fullToken].Session,
@@ -149,8 +157,15 @@ func TestPreviewTemplateLayoutAPI(t *testing.T) {
 	}
 	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
 		`{"kind":"root_message","template":"layout","format":"commonmark"}`)
-	if out := a.json(t); a.status != http.StatusOK || out["messenger_limit"] != nil || out["length"] != float64(42) {
+	if out := a.json(t); a.status != http.StatusOK || out["messenger_limit"] != nil || out["length"] != float64(42) ||
+		!strings.Contains(string(a.body), `"owner":{"name":"bob","ref":null}`) {
 		t.Errorf("commonmark = %d %s", a.status, a.body)
+	}
+	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
+		`{"kind":"root_message","template":"templated","format":"commonmark"}`)
+	if body := string(a.body); a.status != http.StatusOK || !strings.Contains(body, `"layout":null`) ||
+		!strings.Contains(body, `"length":50`) {
+		t.Errorf("a Route's own template = %d %s", a.status, a.body)
 	}
 	a = x.as(t, previewToken, http.MethodPost, "/api/v1/template-previews",
 		`{"kind":"root_message","template":"{{ env \"HOME\" }}"}`)
