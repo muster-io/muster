@@ -310,7 +310,7 @@ test("shows the Teams of an Alert Group in its header, Timeline and Alerts", asy
   // 5. The header: "Teams: payments — by the Team label"; the Timeline: "payments joined — by the Team label".
   await page.goto(`/alert-groups/${paymentsGroup}`);
   await expect(page.getByTestId("alert-group-teams")).toContainText(
-    "Teams:payments — by the Team label",
+    "Teams: payments — by the Team label",
   );
   await expect(
     page.getByTestId("alert-group-teams").getByRole("link", { name: "payments" }),
@@ -352,7 +352,7 @@ test("shows the Teams of an Alert Group in its header, Timeline and Alerts", asy
   await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
   await page.goto(`/alert-groups/${paymentsGroup}`);
   await expect(page.getByTestId("alert-group-teams")).toContainText(
-    "Команды:payments (удалена) — по метке команды",
+    "Команды: payments (удалена) — по метке команды",
   );
   await expect(entry(page, "payments добавлена — по метке команды")).toHaveCount(1);
   await page.goto(`/alert-groups/${capitalGroup}`);

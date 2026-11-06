@@ -210,7 +210,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
 
     await page.goto(`/alert-groups/${group}`);
     await expect(page.getByTestId("alert-group-teams")).toContainText(
-      "Teams:payments — by the Team label",
+      "Teams: payments — by the Team label",
     );
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-page-teams-360");
@@ -224,7 +224,7 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
     await expectNoHorizontalScroll(page);
     await page.goto(`/alert-groups/${group}`);
     await expect(page.getByTestId("alert-group-teams")).toContainText(
-      "Команды:payments — по метке команды",
+      "Команды: payments — по метке команды",
     );
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-page-teams-ru-360");

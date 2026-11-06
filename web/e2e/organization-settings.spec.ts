@@ -378,7 +378,7 @@ test("General sets the Team label, and refuses a label that an Internal alert se
     const russian = page.getByLabel("Метка команды", { exact: true });
     await expect(russian).toHaveValue("service_team");
     await russian.fill("schedule");
-    await save(page);
+    await page.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(
       page.getByText(
         "Эту метку выставляет сам внутренний алерт, поэтому она не может быть меткой команды. Выберите другую.",
