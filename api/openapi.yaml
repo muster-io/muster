@@ -13115,6 +13115,7 @@ components:
             else `none`.
         destination_entries:
           type: array
+          maxItems: 100
           description: The unsaved Destinations of the Route with their Severity conditions; the saved Route's when absent
             and `route_id` is given, else none.
           items:

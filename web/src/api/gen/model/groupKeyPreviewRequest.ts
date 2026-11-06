@@ -23,7 +23,10 @@ export interface GroupKeyPreviewRequest {
   matchers?: Matcher[];
   /** The unsaved Minimum severity of the Route; the saved Route's when absent and `route_id` is given, else `none`. */
   minimum_severity?: MinimumSeverity;
-  /** The unsaved Destinations of the Route with their Severity conditions; the saved Route's when absent and `route_id` is given, else none. */
+  /**
+     * The unsaved Destinations of the Route with their Severity conditions; the saved Route's when absent and `route_id` is given, else none.
+     * @maxItems 100
+     */
   destination_entries?: DestinationEntry[];
   /** The unsaved "Also to the Teams from the label"; the saved Route's when absent and `route_id` is given, else false. */
   deliver_to_teams?: boolean;

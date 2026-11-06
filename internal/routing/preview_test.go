@@ -67,6 +67,15 @@ func firing(alerts ...string) []ingest.FiringAlert {
 	return out
 }
 
+// firingAt is firing with the startsAt of every Alert set to at.
+func firingAt(at time.Time, alerts ...string) []ingest.FiringAlert {
+	out := firing(alerts...)
+	for i := range out {
+		out[i].StartsAt = at
+	}
+	return out
+}
+
 func newPreviewService(t *testing.T) (*Service, *fakeStore, *fakeSnapshots, *bytes.Buffer) {
 	t.Helper()
 	store := newStore()
@@ -348,10 +357,10 @@ func defaultRouteID(store *fakeStore) string {
 // TestSideOf groups by the Group key: the largest groups first and, at the same size, by their values; no Alerts
 // make no group.
 func TestSideOf(t *testing.T) {
-	var alerts []map[string]string
+	var alerts []previewAlert
 	for i, n := range []int{1, 3, 2, 3, 1, 1, 2} {
 		for range n {
-			alerts = append(alerts, map[string]string{"k": fmt.Sprint(i)})
+			alerts = append(alerts, previewAlert{labels: map[string]string{"k": fmt.Sprint(i)}})
 		}
 	}
 	side := sideOf(alerts, []string{"k"})
@@ -642,6 +651,108 @@ func TestPreviewDeliveryTeams(t *testing.T) {
 		if tt.line != "" && (len(p.Delivery.AlertGroups) != 1 || deliveryLine(p.Delivery.AlertGroups[0]) != tt.line) {
 			t.Errorf("%v %v: %q", tt.key, tt.to, deliveryLines(p.Delivery))
 		}
+	}
+}
+
+// previewRise previews the Route "Infrastructure" with the Group key alertname, system, team, which lacks the
+// severity, over Alerts given oldest first as startsAt offsets in minutes and labels.
+func previewRise(t *testing.T, key []string, toTeams bool, alerts ...string) *DeliveryPreview {
+	t.Helper()
+	svc, _ := deliveryService(t)
+	snaps := svc.snapshots.(*fakeSnapshots)
+	snaps.bodies = nil
+	// Stored Snapshots are read newest first.
+	for i := len(alerts) - 1; i >= 0; i-- {
+		snaps.bodies = append(snaps.bodies, firingAt(t0.Add(time.Duration(i)*time.Minute), alerts[i]))
+	}
+	p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=", Value: "infra"}},
+		ProposedGroupKey: key, DestinationEntries: infraEntries(), DeliverToTeams: ptr(toTeams)})
+	if err != nil || p.Delivery == nil {
+		t.Fatalf("%+v, %v", p, err)
+	}
+	return p.Delivery
+}
+
+func countsOf(d *DeliveryPreview) string {
+	var out []string
+	for _, c := range d.DestinationCounts {
+		out = append(out, fmt.Sprintf("%s=%d", c.Destination.Name, c.AlertGroupCount))
+	}
+	return strings.Join(out, ",")
+}
+
+// TestPreviewDeliveryRise is C-26.FR-4 (PRD scenario 4): a warning Alert of payments and later a critical one in one
+// Alert Group reach infra-notice and payments-notice first and infra-critical after, and all three stay; the other
+// way round only the critical Destinations are reached, as a level that falls adds nothing.
+func TestPreviewDeliveryRise(t *testing.T) {
+	key := []string{"alertname", "category"}
+	warning := "w=alertname:Disk,category:infra,team:payments,severity:warning"
+	critical := "c=alertname:Disk,category:infra,severity:critical"
+
+	d := previewRise(t, key, true, warning, critical)
+	if len(d.AlertGroups) != 1 || deliveryLine(d.AlertGroups[0]) !=
+		"payments>critical>infra-critical:route,infra-notice:route,payments-notice:team" {
+		t.Errorf("warning then critical: %q", deliveryLines(d))
+	}
+	if got := countsOf(d); got != "infra-critical=1,infra-notice=1,payments-notice=1" {
+		t.Errorf("counts %s", got)
+	}
+
+	d = previewRise(t, key, true, critical, warning)
+	if len(d.AlertGroups) != 1 || deliveryLine(d.AlertGroups[0]) != "payments>critical>infra-critical:route" {
+		t.Errorf("critical then warning: %q", deliveryLines(d))
+	}
+	if got := countsOf(d); got != "infra-critical=1" {
+		t.Errorf("counts %s", got)
+	}
+
+	// The Team of a later Alert adds its Destinations at the level the group has by then, the Team of an earlier one at
+	// the level before.
+	checkout := "k=alertname:Disk,category:infra,namespace:shop,severity:critical"
+	d = previewRise(t, key, true, warning, checkout)
+	if got := deliveryLine(d.AlertGroups[0]); got !=
+		"payments,checkout>critical>infra-critical:route,infra-notice:route+team,payments-notice:team" {
+		t.Errorf("a Team joins on the rise: %q", got)
+	}
+	d = previewRise(t, key, false, warning, critical)
+	if got := deliveryLine(d.AlertGroups[0]); got != "payments>critical>infra-critical:route,infra-notice:route" {
+		t.Errorf("without deliver_to_teams: %q", got)
+	}
+}
+
+// TestPreviewDeliveryRiseTogether: Alerts that start at the same time take effect together, in whatever order they
+// were read, so the lower one adds nothing.
+func TestPreviewDeliveryRiseTogether(t *testing.T) {
+	for _, alerts := range [][]string{
+		{"w=alertname:Disk,category:infra,severity:warning", "c=alertname:Disk,category:infra,severity:critical"},
+		{"c=alertname:Disk,category:infra,severity:critical", "w=alertname:Disk,category:infra,severity:warning"}} {
+		svc, _ := deliveryService(t)
+		svc.snapshots.(*fakeSnapshots).bodies = [][]ingest.FiringAlert{firingAt(t0, alerts...)}
+		p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=",
+			Value: "infra"}}, ProposedGroupKey: []string{"alertname"}, DestinationEntries: infraEntries(),
+			DeliverToTeams: ptr(false)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := deliveryLine(p.Delivery.AlertGroups[0]); got != ">critical>infra-critical:route" {
+			t.Errorf("%v: %q", alerts, got)
+		}
+	}
+}
+
+// TestPreviewDeliveryRiseWithoutOrder: Alerts without a startsAt have no order, so a group reaches what each Alert
+// alone would reach: the Destinations it may reach.
+func TestPreviewDeliveryRiseWithoutOrder(t *testing.T) {
+	svc, _ := deliveryService(t)
+	svc.snapshots.(*fakeSnapshots).bodies = [][]ingest.FiringAlert{firing(
+		"c=alertname:Disk,category:infra,severity:critical", "w=alertname:Disk,category:infra,severity:warning")}
+	p, err := svc.Preview(t.Context(), PreviewRequest{Matchers: []Matcher{{Label: "category", Op: "=", Value: "infra"}},
+		ProposedGroupKey: []string{"alertname"}, DestinationEntries: infraEntries(), DeliverToTeams: ptr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := deliveryLine(p.Delivery.AlertGroups[0]); got != ">critical>infra-critical:route,infra-notice:route" {
+		t.Errorf("%q", got)
 	}
 }
 

@@ -206,10 +206,10 @@ func (s *Service) previewOrder(ctx context.Context, req PreviewRequest) (*order,
 // previewAlerts reads the distinct Alerts reported firing since since, newest first, and keeps the labels of those
 // the Route at place at in o takes, at most PreviewMaxAlerts of them. truncated says that the limit stopped it while
 // an Alert the Route takes, or a Stored Snapshot, was left unread.
-func (s *Service) previewAlerts(ctx context.Context, o *order, at int, since time.Time) ([]map[string]string,
+func (s *Service) previewAlerts(ctx context.Context, o *order, at int, since time.Time) ([]previewAlert,
 	ingest.FiringRead, bool, error) {
 	seen := map[alertKey]bool{}
-	var kept []map[string]string
+	var kept []previewAlert
 	more := false
 	takes := func(a ingest.FiringAlert) bool {
 		k := alertKey{integrationID: a.IntegrationID, fingerprint: a.Fingerprint}
@@ -224,7 +224,7 @@ func (s *Service) previewAlerts(ctx context.Context, o *order, at int, since tim
 			if !takes(a) {
 				continue
 			}
-			kept = append(kept, a.Labels)
+			kept = append(kept, previewAlert{labels: a.Labels, startsAt: a.StartsAt})
 			if len(kept) == PreviewMaxAlerts {
 				more = slices.ContainsFunc(batch[i+1:], takes)
 				return false
@@ -238,16 +238,23 @@ func (s *Service) previewAlerts(ctx context.Context, o *order, at int, since tim
 	return kept, read, more || read.Unread, nil
 }
 
+// previewAlert is an Alert of the preview: its labels and the startsAt of its newest Stored Snapshot, which orders the
+// Alerts of a group as they arrived.
+type previewAlert struct {
+	labels   map[string]string
+	startsAt time.Time
+}
+
 // keyGroup is the Alerts of one Group key value.
 type keyGroup struct {
 	values []string
 	count  int
-	alerts []map[string]string
+	alerts []previewAlert
 }
 
 // sideOf groups the Alerts by the Group key, a missing label counting as the empty value: the count of distinct
 // values and the PreviewExamples largest groups, the larger first and, at the same size, by their values.
-func sideOf(alerts []map[string]string, key []string) PreviewSide {
+func sideOf(alerts []previewAlert, key []string) PreviewSide {
 	groups := groupAlerts(alerts, key)
 	out := PreviewSide{AlertGroupCount: len(groups), Examples: make([]PreviewExample, 0, PreviewExamples)}
 	for _, g := range groups[:min(len(groups), PreviewExamples)] {
@@ -268,10 +275,11 @@ func valuesOf(key, values []string) map[string]string {
 
 // groupAlerts groups the Alerts by the Group key, a missing label counting as the empty value, the larger group first
 // and, at the same size, by their values.
-func groupAlerts(alerts []map[string]string, key []string) []*keyGroup {
+func groupAlerts(alerts []previewAlert, key []string) []*keyGroup {
 	byValue := map[string]*keyGroup{}
 	var groups []*keyGroup
-	for _, labels := range alerts {
+	for _, a := range alerts {
+		labels := a.labels
 		values := make([]string, len(key))
 		quoted := make([]string, len(key))
 		for i, name := range key {
@@ -286,7 +294,7 @@ func groupAlerts(alerts []map[string]string, key []string) []*keyGroup {
 			groups = append(groups, g)
 		}
 		g.count++
-		g.alerts = append(g.alerts, labels)
+		g.alerts = append(g.alerts, a)
 	}
 	slices.SortFunc(groups, func(a, b *keyGroup) int {
 		return cmp.Or(cmp.Compare(b.count, a.count), slices.Compare(a.values, b.values))
@@ -390,9 +398,17 @@ func (s *Service) deliverySettings(ctx context.Context, req PreviewRequest, save
 }
 
 // alertGroupFacts are what the Reach of an Alert Group of the preview depends on: its Severity level raised to the
-// Minimum severity and its Teams by id.
+// Minimum severity, its Teams by id, and the steps it passed through.
 type alertGroupFacts struct {
 	group *keyGroup
+	level string
+	teams []int64
+	// steps are the Severity levels, raised to the Minimum severity, with the Teams the Alert Group had at them.
+	steps []reachStep
+}
+
+// reachStep is a state of an Alert Group in which the Destinations are reached: a level and the Teams it has.
+type reachStep struct {
 	level string
 	teams []int64
 }
@@ -401,42 +417,114 @@ type alertGroupFacts struct {
 var levelRank = map[string]int{"info": 1, "warning": 2, "critical": 3}
 
 // factsOf is, for each group of Alerts, the highest Severity level of its Alerts by the Organization's mapping,
-// raised to the Minimum severity (it never lowers one), and the Teams of its Alerts.
+// raised to the Minimum severity (it never lowers one), the Teams of its Alerts, and the steps the Alert Group
+// passes through, because its Destinations only grow (C-26.FR-4).
+//
+// The steps follow the Alerts in the order of their startsAt, those with the same startsAt taking effect together:
+// the level is the running maximum of the raised levels of the Alerts so far, and a Team joins with the Alert that brings it. When an
+// Alert of the group has no startsAt there is no order, and the steps are each Alert's own raised level with all
+// the Teams of the group: the Destinations are then those the group may reach.
 func factsOf(groups []*keyGroup, severities Severities, classes *teams.Classes, minimum string) []alertGroupFacts {
 	floor := levelRank[minimum]
+	raise := func(level string) string {
+		if levelRank[level] < floor {
+			return minimum
+		}
+		return level
+	}
 	out := make([]alertGroupFacts, len(groups))
 	for i, g := range groups {
+		ordered := !slices.ContainsFunc(g.alerts, func(a previewAlert) bool { return a.startsAt.IsZero() })
+		alerts := slices.Clone(g.alerts)
+		if ordered {
+			slices.SortStableFunc(alerts, func(a, b previewAlert) int { return a.startsAt.Compare(b.startsAt) })
+		}
 		level := ""
 		members := map[int64]bool{}
-		for _, labels := range g.alerts {
-			if l := string(severities.Of(labels).Level); levelRank[l] > levelRank[level] {
+		var steps []reachStep
+		var own []string
+		joined := false
+		for j, a := range alerts {
+			l := string(severities.Of(a.labels).Level)
+			if levelRank[l] > levelRank[level] {
 				level = l
 			}
-			for _, m := range classes.Classify(labels).Teams {
+			for _, m := range classes.Classify(a.labels).Teams {
+				joined = joined || !members[m.TeamID]
 				members[m.TeamID] = true
 			}
+			if !ordered {
+				if r := raise(l); !slices.Contains(own, r) {
+					own = append(own, r)
+				}
+				continue
+			}
+			// Alerts that start together have no order among them: they take effect as one.
+			if j+1 < len(alerts) && alerts[j+1].startsAt.Equal(a.startsAt) {
+				continue
+			}
+			step := reachStep{level: raise(level), teams: slices.Sorted(maps.Keys(members))}
+			if last := len(steps) - 1; joined || last < 0 || steps[last].level != step.level {
+				steps = append(steps, step)
+			}
+			joined = false
 		}
-		if levelRank[level] < floor {
-			level = minimum
+		all := slices.Sorted(maps.Keys(members))
+		for _, l := range own {
+			steps = append(steps, reachStep{level: l, teams: all})
 		}
-		out[i] = alertGroupFacts{group: g, level: level, teams: slices.Sorted(maps.Keys(members))}
+		out[i] = alertGroupFacts{group: g, level: raise(level), teams: all, steps: steps}
 	}
 	return out
 }
 
-// reachesOf is the Reach (C-26.FR-2, FR-3) of each group under the settings.
+// reachesOf is the Reach (C-26.FR-2, FR-3) of each group under the settings: the union of the Reach of each step the
+// group passes through, since its Destinations only grow (C-26.FR-4).
 func reachesOf(facts []alertGroupFacts, set deliverySettings, teamEntries map[int64][]Entry) [][]Reached {
 	out := make([][]Reached, len(facts))
 	for i, f := range facts {
-		var ts []TeamEntries
-		for _, id := range f.teams {
-			if es := teamEntries[id]; len(es) > 0 {
-				ts = append(ts, TeamEntries{TeamID: id, Entries: es})
+		steps := f.steps
+		if len(steps) == 0 {
+			steps = []reachStep{{level: f.level, teams: f.teams}}
+		}
+		by := map[int64]*Reached{}
+		for _, st := range steps {
+			var ts []TeamEntries
+			for _, id := range st.teams {
+				if es := teamEntries[id]; len(es) > 0 {
+					ts = append(ts, TeamEntries{TeamID: id, Entries: es})
+				}
+			}
+			for _, r := range Reach(st.level, set.entries, set.toTeams, ts) {
+				u, ok := by[r.DestinationID]
+				if !ok {
+					u = &Reached{DestinationID: r.DestinationID}
+					by[r.DestinationID] = u
+				}
+				for _, e := range r.Entries {
+					if !slices.Contains(u.Entries, e) {
+						u.Entries = append(u.Entries, e)
+					}
+				}
 			}
 		}
-		out[i] = Reach(f.level, set.entries, set.toTeams, ts)
+		for _, id := range slices.Sorted(maps.Keys(by)) {
+			u := by[id]
+			slices.SortStableFunc(u.Entries, func(a, b Reaching) int {
+				return cmp.Or(cmp.Compare(entryRank(a.Kind), entryRank(b.Kind)), cmp.Compare(a.TeamID, b.TeamID))
+			})
+			out[i] = append(out[i], *u)
+		}
 	}
 	return out
+}
+
+// entryRank puts the Route's entries before the Teams'.
+func entryRank(kind string) int {
+	if kind == EntryRoute {
+		return 0
+	}
+	return 1
 }
 
 // deliveryOf computes the preview "Where alerts go" for the groups of Alerts under the proposed Group key and the

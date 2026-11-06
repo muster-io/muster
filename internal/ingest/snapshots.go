@@ -205,6 +205,8 @@ type FiringAlert struct {
 	IntegrationID int64
 	Fingerprint   string
 	Labels        map[string]string
+	// StartsAt is the startsAt of the Alert in the body.
+	StartsAt time.Time
 }
 
 // FiringRead is how a read of the firing Alerts ended: Bodies is how many distinct bodies it read, and Unread whether
@@ -288,7 +290,8 @@ func firingOf(body []byte, integrationID int64, static map[string]string) []Firi
 			continue
 		}
 		labels, _ := withStaticLabels(a.Labels, static)
-		out = append(out, FiringAlert{IntegrationID: integrationID, Fingerprint: a.Fingerprint, Labels: labels})
+		out = append(out, FiringAlert{IntegrationID: integrationID, Fingerprint: a.Fingerprint, Labels: labels,
+			StartsAt: a.StartsAt})
 	}
 	return out
 }
