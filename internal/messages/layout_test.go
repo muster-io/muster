@@ -63,13 +63,13 @@ func TestHasLayout(t *testing.T) {
 	r := newRenderer(t)
 	src := source("firing", 3)
 	compact := r.Root(src, MarkupCommonMark).Message
-	templated := src
+	templated := source("firing", 3)
 	templated.Route.RootMessage = ptr("{{ .AlertGroup.Title }} is down")
 	withTemplate := r.Root(templated, MarkupCommonMark).Message
 	fallback := r.fallback(compact, src, LanguageEnglish)
 	earlier := compact
 	earlier.StatusWord = ""
-	lined := src
+	lined := source("firing", 3)
 	lined.Route.Line = ptr(`{{ .Labels.pod }} is down`)
 	withLine := r.Root(lined, MarkupCommonMark).Message
 	if withLine.AlertsLine == nil || len(withLine.AlertsLine.Lines) == 0 || HasLayout(withLine) {
