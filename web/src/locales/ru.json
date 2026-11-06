@@ -561,6 +561,9 @@
     "detail": "Подробности: {{detail}}",
     "reasonWithDetail": "{{reason}} Подробности: {{detail}}"
   },
+  "claimEntries": {
+    "emptyClaim": "Пустой claim читает claim с группами: {{claim}}."
+  },
   "commands": {
     "bulk": {
       "actions": "Команды для выбранных групп алертов",
@@ -2738,6 +2741,7 @@
       "from": "С",
       "noDays": "нет дней",
       "organizationDefault": "В организации по умолчанию: {{days}} {{from}}–{{to}}, {{zone}}",
+      "organizationUnknown": "В организации по умолчанию: пока неизвестно.",
       "own": "Своё",
       "timeZone": "Часовой пояс",
       "title": "Рабочее время",
@@ -2776,7 +2780,7 @@
       "byHand": "вручную",
       "chooseUser": "Выберите пользователя",
       "claimTitle": "Claim {{claim}}",
-      "deactivated": "{{name}} (удалён)",
+      "deactivated": "{{name}} (деактивирован)",
       "empty": "В команде пока никого нет.",
       "fromGroup": "группа",
       "fromIdp": "провайдер учётных записей",

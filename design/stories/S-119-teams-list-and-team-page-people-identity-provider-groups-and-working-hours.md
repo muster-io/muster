@@ -13,6 +13,7 @@ files_touched:
   - web/src/components/team-form.tsx
   - web/src/components/team-form.test.tsx
   - web/src/test/fixtures/teams.ts
+  - web/src/components/team-view.test.tsx
   - web/src/components/team-people.tsx
   - web/src/components/team-people.test.tsx
   - web/src/components/claim-entries-editor.tsx
@@ -41,6 +42,7 @@ files_touched:
   - web/src/components/app-shell.test.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - docs/assets/screenshots/**
   - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -170,7 +172,8 @@ None.
   about it either: the Team read carries no such warning, and the claim combobox already offers only what discovery
   lists, with free text allowed.
 - Settled while implementing, within the PRD and the approved mockups. The Team page is one page of sections that each
-  save on their own with the Team's ETag (details, "People", "Identity provider groups", "Working hours"); the other
+  save on their own, over the version the page was read at (as the OIDC settings do: a newer version shows "Someone else
+  changed this Team", and Reload mounts the sections again from it), with that version as the If-Match (details, "People", "Identity provider groups", "Working hours"); the other
   tabs of the mockup belong to the stories that own them. "Delete Team" is on the page for `teams:write`, because
   `deleteTeam` is in the API used. An entry's claim is empty for the groups claim, whose name is the combobox's
   placeholder, so that a change of the groups claim of the OIDC settings is followed. The claim editor keeps the

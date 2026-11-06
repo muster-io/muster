@@ -94,8 +94,10 @@ export function ClaimEntriesEditor({
   rowsTestId = `${testId}-rows`,
   emptyTestId = `${testId}-empty`,
 }: ClaimEntriesEditorProps) {
+  const { t } = useTranslation();
   const base = useId();
   const listId = `${base}-claims`;
+  const claimHintId = `${base}-claim-hint`;
   const update = (index: number, patch: Partial<ClaimEntryRow>) =>
     onChange(value.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   // Removing a row hands the focus to the next one (or "Add"); adding one focuses its claim.
@@ -127,6 +129,9 @@ export function ClaimEntriesEditor({
         {texts.legend}
       </legend>
       <p className="text-sm text-muted-foreground">{texts.hint}</p>
+      <p id={claimHintId} className="sr-only">
+        {t("claimEntries.emptyClaim", { claim: groupsClaim })}
+      </p>
       <datalist id={listId}>
         {offeredClaims(claims, groupsClaim).map((claim) => (
           <option key={claim} value={claim} />
@@ -170,7 +175,9 @@ export function ClaimEntriesEditor({
                     spellCheck={false}
                     autoComplete="off"
                     aria-invalid={error?.claim !== undefined}
-                    aria-describedby={error?.claim === undefined ? undefined : `${claimId}-error`}
+                    aria-describedby={
+                      error?.claim === undefined ? claimHintId : `${claimHintId} ${claimId}-error`
+                    }
                     onChange={(e) => update(index, { claim: e.target.value })}
                   />
                   {error?.claim !== undefined && (

@@ -152,8 +152,8 @@ export interface WorkingHoursEditorProps {
   /** The Working hours to edit with "Own"; they start as the effective ones, the Organization's. */
   value: WorkingHours;
   onChange: (next: WorkingHours) => void;
-  /** The Working hours in effect without "Own": the Organization's. */
-  organization: WorkingHours;
+  /** The Working hours in effect without "Own": the Organization's; undefined while they are not known. */
+  organization: WorkingHours | undefined;
   errors?: HoursErrors;
   disabled?: boolean;
 }
@@ -174,6 +174,10 @@ export function WorkingHoursEditor({
       {own ? (
         <p className="text-sm text-muted-foreground" data-testid="working-hours-summary">
           {workingHoursText(t, value)}
+        </p>
+      ) : organization === undefined ? (
+        <p className="text-sm text-muted-foreground" data-testid="working-hours-summary">
+          {t("teams.hours.organizationUnknown")}
         </p>
       ) : (
         <p className="text-sm" data-testid="working-hours-summary">

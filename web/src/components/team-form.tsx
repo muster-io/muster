@@ -66,9 +66,6 @@ export interface TeamFormProps {
   /** Sends the details; a refusal is shown by the form. */
   save: (values: TeamFormValues) => Promise<unknown>;
   onCancel?: () => void;
-  /** A newer version of the Team was read; the form offers to reload it. */
-  stale?: boolean;
-  onReload?: () => void;
   /** Shown beside Save once a save has gone through. */
   saved?: boolean;
 }
@@ -79,8 +76,6 @@ export function TeamForm({
   submitLabel,
   save,
   onCancel,
-  stale = false,
-  onReload,
   saved = false,
 }: TeamFormProps) {
   const { t } = useTranslation();
@@ -209,19 +204,7 @@ export function TeamForm({
       </fieldset>
       {!readOnly && (
         <div className="flex flex-col gap-3">
-          {(stale || isStale(submit.error)) && (
-            <Alert variant="destructive" data-testid="team-stale">
-              <AlertDescription className="flex flex-wrap items-center gap-3 text-current">
-                <span>{t("teams.errors.stale")}</span>
-                {onReload !== undefined && (
-                  <Button type="button" variant="outline" size="sm" onClick={onReload}>
-                    {t("common.reload")}
-                  </Button>
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
-          {submit.isError && !shownByField && !isStale(submit.error) && (
+          {submit.isError && !shownByField && (
             <Alert variant="destructive">
               <AlertDescription className="text-current">
                 {problemText(t, submit.error)}

@@ -535,6 +535,9 @@
     "detail": "Details: {{detail}}",
     "reasonWithDetail": "{{reason}} Details: {{detail}}"
   },
+  "claimEntries": {
+    "emptyClaim": "An empty claim reads the groups claim, {{claim}}."
+  },
   "commands": {
     "bulk": {
       "actions": "Commands for the selected Alert Groups",
@@ -2650,6 +2653,7 @@
       "from": "From",
       "noDays": "no days",
       "organizationDefault": "Organization default: {{days}} {{from}}–{{to}}, {{zone}}",
+      "organizationUnknown": "Organization default: not known yet.",
       "own": "Own",
       "timeZone": "Time zone",
       "title": "Working hours",
