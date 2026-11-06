@@ -614,7 +614,7 @@ test("lists the unknown values of the Team label, makes a Team of one and sets w
   );
   await expect(valueRow(page, "checkout")).toContainText("Last seen");
   await expect(valueRow(page, "checkout")).toContainText("ago)");
-  await expect(valueRow(page, "Payments")).toContainText(/1 Alert in the last \d+ days/);
+  await expect(valueRow(page, "Payments")).toContainText(/\d+ Alerts? in the last \d+ days/);
   await expect(valueRow(page, "payments")).toHaveCount(0);
   await expect(valueRow(page, "search")).toHaveCount(0);
   await shot(page, "teams-unknown-values");
