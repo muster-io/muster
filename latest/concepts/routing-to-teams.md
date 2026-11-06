@@ -77,6 +77,26 @@ shown in the channels of all of them: an Alert of "search" that joins a firing A
 in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
 default, to the Group key of the Route.
 
+## Preview where alerts go
+
+Before saving a Route, ask where its Alerts would go. The preview (`previewGroupKey`, `routes:write`) takes the Alerts
+reported firing in the last day that the Route would take, as the Group key preview does, and the settings of the form
+as they are, saved or not: the Minimum severity, the Destinations with their conditions, "Also to the Teams from the
+label" and the proposed Group key. A setting left out is the saved Route's; a Route that is not saved starts from none. The answer has a `delivery` part when the request names a saved Route
+(`route_id`), gives `destination_entries` or gives `deliver_to_teams`; a Minimum severity alone does not add it.
+
+The answer lists the largest Alert Groups the Alerts would form under the key, five by default, each with its Group
+key values, its number of Alerts, its Severity level raised to the Minimum severity, its Teams and the Destinations it
+would reach, with the entries that reach each: the Route's, or a Team's. For every Destination that any of the Alert
+Groups reaches it counts how many of all of them reach it, those listed or not, so that a Destination reached by
+hundreds of Alert Groups is seen before the Route is saved.
+
+Teams are read as they are saved: the Team label and the Team matchers of the Teams now, not any change you have not
+saved on the Teams page. When the Route delivers to the Teams and the Group key lacks the Team label, the answer says
+so (`shared_key_warning`), and the form offers to add the Team label to the key.
+
+The preview only reads: it saves nothing, writes no Audit log entry, publishes nothing and sends no message.
+
 ## When you change a Route or a Team
 
 A save of a Route's Destination entries or of "Also to the Teams from the label", and a save of a Team's Destination
