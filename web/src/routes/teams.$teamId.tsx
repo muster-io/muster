@@ -546,17 +546,20 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
   // The version the sections were read at: a newer one on the server never replaces what the Admin sees unasked.
   const [base, setBase] = useState(team);
   const [conflict, setConflict] = useState(false);
+  // The versions this page replaced with its own saves: the read of the Team may still bring one of them for a moment.
+  const [superseded, setSuperseded] = useState<ReadonlySet<string>>(new Set());
   const [saved, setSaved] = useState(false);
   const session: TeamBase = {
     base,
     saved: (updated) => {
+      setSuperseded((now) => new Set(now).add(base.etag));
       setBase(updated);
       setConflict(false);
     },
     conflict: () => setConflict(true),
   };
   const save = useTeamSave(session);
-  const stale = team.etag !== base.etag || conflict;
+  const stale = (team.etag !== base.etag && !superseded.has(team.etag)) || conflict;
   return (
     <div className="flex flex-col gap-8">
       {stale && (
@@ -609,6 +612,15 @@ export function TeamView({ teamId }: { teamId: string }) {
   if (reloadingFrom !== undefined && dataUpdatedAt > reloadingFrom && !isFetching) {
     setReloadingFrom(undefined);
     setGeneration((n) => n + 1);
+  }
+  // A Reload whose read failed does not wait for a later read, which would mount the sections again unasked.
+  if (
+    reloadingFrom !== undefined &&
+    query.isError &&
+    !isFetching &&
+    query.errorUpdatedAt > reloadingFrom
+  ) {
+    setReloadingFrom(undefined);
   }
   const reload = () => {
     setReloadingFrom(dataUpdatedAt);

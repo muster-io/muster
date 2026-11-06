@@ -204,7 +204,7 @@ export function TeamForm({
       </fieldset>
       {!readOnly && (
         <div className="flex flex-col gap-3">
-          {submit.isError && !shownByField && (
+          {submit.isError && !shownByField && !isStale(submit.error) && (
             <Alert variant="destructive">
               <AlertDescription className="text-current">
                 {problemText(t, submit.error)}

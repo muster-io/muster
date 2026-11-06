@@ -189,6 +189,33 @@ describe("the page of a Team", () => {
     expect(page.getByTestId("team-stale").elements()).toHaveLength(0);
   });
 
+  test("a save of its own never shows the banner, not even for a moment", async () => {
+    await renderView();
+    let shown = false;
+    const watch = new MutationObserver(() => {
+      shown ||= document.querySelector('[data-testid="team-stale"]') !== null;
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    try {
+      await page.getByLabelText("Description", { exact: true }).fill("c");
+      await page.getByTestId("team-details").getByRole("button", { name: "Save" }).click();
+      await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+      await hasText(page.getByTestId("team-status"), "Saved.");
+      // The read of the Team brings its own version a tick later; the sections save once more over it.
+      await new Promise((done) => setTimeout(done, 100));
+      await hours().getByRole("checkbox", { name: "Own" }).click();
+      await hours().getByRole("button", { name: "Save", exact: true }).click();
+      await vi.waitFor(() => expect(server.puts).toHaveLength(2));
+      await hasText(page.getByTestId("team-hours-status"), "Saved.");
+      await new Promise((done) => setTimeout(done, 100));
+    } finally {
+      watch.disconnect();
+    }
+    expect(shown).toBe(false);
+    expect(page.getByTestId("team-stale").elements()).toHaveLength(0);
+    expect(server.puts[1]?.ifMatch).toBe('"9"');
+  });
+
   test("a refusal of a save over a newer version shows the banner with Reload", async () => {
     await renderView();
     server.putStatus = 412;

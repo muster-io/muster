@@ -227,12 +227,22 @@ test("creates a Team, adds a person by hand, a group of the identity provider an
     "href",
     /\/concepts\/teams\/#working-hours$/,
   );
+  // Saves of its own never show the banner "Someone else changed this Team", not even for a moment.
+  await page.evaluate(() => {
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid="team-stale"]') !== null) {
+        document.body.dataset.staleSeen = "yes";
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  });
   await hours.getByRole("checkbox", { name: "Own" }).check();
   await hours.getByLabel("From", { exact: true }).fill("11:00");
   await hours.getByLabel("To", { exact: true }).fill("19:00");
   await hours.getByLabel("Time zone", { exact: true }).selectOption("Europe/Berlin");
   await hours.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByTestId("team-hours-status")).toHaveText("Saved.");
+  await expect(page.getByTestId("team-stale")).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.dataset.staleSeen ?? "no")).toBe("no");
   await page.reload();
   await expect(
     section(page, "team-hours-section").getByRole("checkbox", { name: "Own" }),
