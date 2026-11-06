@@ -178,7 +178,7 @@ test("the navigations reach every entry 360 px wide", async ({ page }) => {
 
   // 8. The main navigation scrolls inside itself, the page does not; "Organization" scrolls into view and opens.
   const main = page.getByRole("navigation", { name: "Main" });
-  await expect(main.getByRole("link")).toHaveCount(8);
+  await expect(main.getByRole("link")).toHaveCount(9);
   const mainWidths = await main.evaluate((el) => ({
     scroll: el.scrollWidth,
     client: el.clientWidth,

@@ -312,3 +312,71 @@ test("the check says whether a sign-in requests offline_access", async ({ page }
     await flavor("keycloak");
   }
 });
+
+test("the Role mapping reads each entry from its own claim, offered from the check, and refuses a group at its entry", async ({
+  page,
+}) => {
+  const csp = watchCsp(page);
+  await signInAdmin(page);
+  await page.goto("/admin/oidc");
+  await page.getByRole("button", { name: "Check connection" }).click();
+  await expect(page.getByTestId("oidc-check-result")).toHaveText(
+    /^Connected (directly|through the proxy) in \d+ ms\.$/,
+  );
+
+  // Step 5: "Claim" on each row; the combobox offers the groups claim first, then the claims of the check.
+  const rows = page.getByTestId("group-mappings").getByRole("listitem");
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByLabel("Claim 1", { exact: true })).toHaveAttribute(
+    "placeholder",
+    "groups",
+  );
+  await expect(page.getByLabel("Claim 2", { exact: true })).toBeVisible();
+  const offered = await page.getByLabel("Claim 1", { exact: true }).evaluate((el) => {
+    const list = document.getElementById(el.getAttribute("list") ?? "");
+    return [...(list?.querySelectorAll("option") ?? [])].map((o) => o.getAttribute("value"));
+  });
+  expect(offered[0]).toBe("groups");
+  expect(offered.length).toBeGreaterThan(1);
+
+  // A claim that discovery does not list is typed: GitLab's role claim.
+  const gitlab = "https://gitlab.org/claims/groups/owner";
+  await page.getByRole("button", { name: "Add IdP group" }).click();
+  await page.getByLabel("Claim 3", { exact: true }).fill(gitlab);
+  await page.getByLabel("IdP group 3", { exact: true }).fill("example/platform");
+  await page.getByLabel("Role for IdP group 3").selectOption({ label: "Admin" });
+  await shot(page, "oidc-mapping-claim");
+  await save(page);
+  await page.reload();
+  await expect(page.getByLabel("Claim 3", { exact: true })).toHaveValue(gitlab);
+  await expect(page.getByLabel("IdP group 3", { exact: true })).toHaveValue("example/platform");
+  await expect(page.getByLabel("Role for IdP group 3")).toHaveValue("admin");
+  await expect(page.getByLabel("Claim 1", { exact: true })).toHaveValue("");
+
+  // A refusal shows at the entry it names.
+  await page.getByLabel("IdP group 3", { exact: true }).fill("a*b");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByLabel("IdP group 3", { exact: true })).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(page.getByLabel("IdP group 1", { exact: true })).not.toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(page.getByText("This value has the wrong format.")).toBeVisible();
+  await shot(page, "oidc-mapping-claim-refused");
+
+  // 360 px wide the rows keep their fields without a sideways scroll.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await expectNoHorizontalScroll(page);
+  await shot(page, "oidc-mapping-claim-360");
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  // Put the mapping back.
+  await page.getByRole("button", { name: "Remove IdP group a*b" }).click();
+  await save(page);
+  await page.reload();
+  await expect(page.getByLabel("IdP group 3", { exact: true })).toHaveCount(0);
+  expect(csp).toEqual([]);
+});

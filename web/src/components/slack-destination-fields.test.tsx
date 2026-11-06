@@ -261,6 +261,7 @@ describe("DestinationForm with the Slack fields", () => {
       name: "alerts",
       connection_id: UI.id,
       channel_id: "C0FAKEALERTS",
+      owning_team_id: null,
       mentions: defaultMentions(),
       buttons: { source: "organization" },
       limiter: { limit: 30, per_seconds: 60 },

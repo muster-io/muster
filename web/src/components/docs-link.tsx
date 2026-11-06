@@ -90,6 +90,7 @@ const GUIDE_ABOUT = {
   "page.destination.webhook_events": (t) => t("docs.guides.destination.webhookEvents"),
   "page.destination.webhook_template": (t) => t("docs.guides.destination.webhookTemplate"),
   "page.statistics": (t) => t("docs.guides.statistics"),
+  "page.teams": (t) => t("docs.guides.teams"),
   "page.profile": (t) => t("docs.guides.profile"),
   "page.users": (t) => t("docs.guides.users"),
   "page.service_accounts": (t) => t("docs.guides.serviceAccounts"),

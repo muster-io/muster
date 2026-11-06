@@ -13,11 +13,13 @@ files_touched:
   - web/src/components/team-form.tsx
   - web/src/components/team-form.test.tsx
   - web/src/test/fixtures/teams.ts
+  - web/src/components/team-view.test.tsx
   - web/src/components/team-people.tsx
   - web/src/components/team-people.test.tsx
   - web/src/components/claim-entries-editor.tsx
   - web/src/components/claim-entries-editor.test.tsx
   - web/src/components/group-mapping-editor.tsx
+  - web/src/components/group-mapping-editor.test.tsx
   - web/src/routes/admin.oidc.tsx
   - web/src/components/working-hours-editor.tsx
   - web/src/components/working-hours-editor.test.tsx
@@ -28,11 +30,19 @@ files_touched:
   - web/src/components/route-list.tsx
   - web/src/routes/destinations.index.tsx
   - web/src/components/route-severity-and-owner.tsx
+  - web/src/components/route-severity-and-owner.test.tsx
+  - web/src/components/route-form.tsx
   - web/src/components/destination-form.tsx
+  - web/src/components/destination-form.test.tsx
+  - web/src/components/bridge-destination-fields.test.tsx
+  - web/src/components/slack-destination-fields.test.tsx
+  - web/src/components/telegram-destination-fields.test.tsx
+  - web/src/components/webhook-destination-fields.test.tsx
   - web/src/components/app-shell.tsx
   - web/src/components/app-shell.test.tsx
   - web/src/components/audit-diff.tsx
   - web/src/lib/docs-links.json
+  - docs/assets/screenshots/**
   - web/src/components/docs-link.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -40,6 +50,7 @@ files_touched:
   - web/e2e/oidc-settings.spec.ts
   - web/e2e/organization-settings.spec.ts
   - web/e2e/navigation.spec.ts
+  - web/e2e/statistics.spec.ts
   - web/e2e/routes.spec.ts
   - web/e2e/destinations.spec.ts
   - web/e2e/phone-width.spec.ts
@@ -157,8 +168,23 @@ None.
   (C-03.FR-6); suggestions come from the last connection check.
 - Depends on S-112 for the Route form's section "Severity, Escalation chains and owner", which this story extends.
 - The warning `groups_claim_missing` covers the claims of the Role mapping only (S-117); a claim that only the
-  identity provider entries of Teams name gets none yet. The Team page's "Identity provider groups" decides
-  whether to warn about it too.
+  identity provider entries of Teams name gets none yet. The Team page's "Identity provider groups" does not warn
+  about it either: the Team read carries no such warning, and the claim combobox already offers only what discovery
+  lists, with free text allowed.
+- Settled while implementing, within the PRD and the approved mockups. The Team page is one page of sections that each
+  save on their own, over the version the page was read at (as the OIDC settings do: a newer version shows "Someone else
+  changed this Team", and Reload mounts the sections again from it), with that version as the If-Match (details, "People", "Identity provider groups", "Working hours"); the other
+  tabs of the mockup belong to the stories that own them. "Delete Team" is on the page for `teams:write`, because
+  `deleteTeam` is in the API used. An entry's claim is empty for the groups claim, whose name is the combobox's
+  placeholder, so that a change of the groups claim of the OIDC settings is followed. The claim editor keeps the
+  Role mapping's texts ("IdP group {n}") and the Team page words the same fields as "Identity provider group {n}". A
+  Route list filtered by Team does not number its Routes and cannot be reordered, because the order covers all of them.
+  "Check connection" on the OIDC settings reads the settings again, so that the combobox offers the claims of that
+  check at once. The end of the working day that is not later than the start is worded by the page ("The end must be
+  later than the start.") at "To" and at "End of the working day", from the code `out_of_range` at the field.
+- "Teams" sits between "Alert Groups" and "Statistics", so the spec of the Statistics entry (`statistics.spec.ts`) reads
+  that Statistics follows Teams. The existing tests that this story changes beyond its own — the Role mapping editor's, the Route section's, the
+  Destination form's and the four Destination types' — are in `files_touched`.
 
 ## Coverage
 

@@ -6,9 +6,10 @@
 // D309), health and Routes, page by page, and the Broken banner of each Broken Destination above them; "Create
 // destination" with destinations:write. The destination hint reads the list again as health changes.
 
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 
 import {
   getListDestinationsQueryKey,
@@ -24,9 +25,16 @@ import {
   destinationMessengerName,
   useConnectionsById,
 } from "../components/destination-label";
+import { TeamFilter } from "../components/team-filter";
 import { buttonVariants } from "../components/ui/button";
 
+// The filter by Team (C-25.AC-11) is in the URL: the id of a Team, or "mine" for the Teams of the signed-in User.
+const searchSchema = z.object({
+  team: z.string().min(1).optional().catch(undefined),
+});
+
 export const Route = createFileRoute("/destinations/")({
+  validateSearch: searchSchema,
   staticData: { shell: true },
   component: DestinationsPage,
 });
@@ -89,10 +97,11 @@ function RoutesCell({ row }: { row: Destination }) {
   );
 }
 
-function DestinationsTable() {
+function DestinationsTable({ team }: { team: string | undefined }) {
   const { t } = useTranslation();
-  const list = useCursorList<Destination>(getListDestinationsQueryKey(), (cursor, signal) =>
-    listDestinations({ cursor }, { signal }),
+  const filter = team === undefined ? {} : { team };
+  const list = useCursorList<Destination>(getListDestinationsQueryKey(filter), (cursor, signal) =>
+    listDestinations({ cursor, ...filter }, { signal }),
   );
   const connections = useConnectionsById();
   const columns = useMemo(
@@ -144,7 +153,9 @@ function DestinationsTable() {
           columns={columns}
           list={list}
           rowId={(row) => row.id}
-          empty={t("destinations.list.empty")}
+          empty={
+            team === undefined ? t("destinations.list.empty") : t("destinations.list.emptyFiltered")
+          }
         />
       </ConnectionsById>
     </div>
@@ -154,6 +165,8 @@ function DestinationsTable() {
 function DestinationsPage() {
   const { t } = useTranslation();
   const canWrite = useCan("destinations:write");
+  const { team } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   return (
     <RequirePermission permission="destinations:read">
       <div className="flex flex-col gap-6">
@@ -168,7 +181,11 @@ function DestinationsPage() {
             </Link>
           )}
         </div>
-        <DestinationsTable />
+        <TeamFilter
+          value={team}
+          onChange={(next) => void navigate({ search: { team: next }, replace: true })}
+        />
+        <DestinationsTable team={team} />
       </div>
     </RequirePermission>
   );

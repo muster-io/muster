@@ -36,6 +36,9 @@ import { Route as RoutesIndexRouteImport } from './routes/routes.index'
 import { Route as RoutesRouteIdRouteImport } from './routes/routes.$routeId'
 import { Route as RoutesNewRouteImport } from './routes/routes.new'
 import { Route as SignInTotpRouteImport } from './routes/sign-in.totp'
+import { Route as TeamsIndexRouteImport } from './routes/teams.index'
+import { Route as TeamsTeamIdRouteImport } from './routes/teams.$teamId'
+import { Route as TeamsNewRouteImport } from './routes/teams.new'
 import { Route as AdminOrganizationIndexRouteImport } from './routes/admin.organization.index'
 import { Route as AdminOrganizationAlertHandlingRouteImport } from './routes/admin.organization.alert-handling'
 import { Route as AdminOrganizationGeneralRouteImport } from './routes/admin.organization.general'
@@ -195,6 +198,21 @@ const SignInTotpRoute = SignInTotpRouteImport.update({
   path: '/totp',
   getParentRoute: () => SignInRoute,
 } as any)
+const TeamsIndexRoute = TeamsIndexRouteImport.update({
+  id: '/teams/',
+  path: '/teams/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamsTeamIdRoute = TeamsTeamIdRouteImport.update({
+  id: '/teams/$teamId',
+  path: '/teams/$teamId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamsNewRoute = TeamsNewRouteImport.update({
+  id: '/teams/new',
+  path: '/teams/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminOrganizationIndexRoute = AdminOrganizationIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -348,11 +366,14 @@ export interface FileRoutesByFullPath {
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/teams/$teamId': typeof TeamsTeamIdRoute
+  '/teams/new': typeof TeamsNewRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/teams/': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
   '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
@@ -396,11 +417,14 @@ export interface FileRoutesByTo {
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/teams/$teamId': typeof TeamsTeamIdRoute
+  '/teams/new': typeof TeamsNewRoute
   '/alert-groups': typeof AlertGroupsIndexRoute
   '/connections': typeof ConnectionsIndexRoute
   '/destinations': typeof DestinationsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/routes': typeof RoutesIndexRoute
+  '/teams': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
   '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
@@ -448,11 +472,14 @@ export interface FileRoutesById {
   '/routes/$routeId': typeof RoutesRouteIdRoute
   '/routes/new': typeof RoutesNewRoute
   '/sign-in/totp': typeof SignInTotpRoute
+  '/teams/$teamId': typeof TeamsTeamIdRoute
+  '/teams/new': typeof TeamsNewRoute
   '/alert-groups/': typeof AlertGroupsIndexRoute
   '/connections/': typeof ConnectionsIndexRoute
   '/destinations/': typeof DestinationsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/routes/': typeof RoutesIndexRoute
+  '/teams/': typeof TeamsIndexRoute
   '/admin/organization/alert-handling': typeof AdminOrganizationAlertHandlingRoute
   '/admin/organization/general': typeof AdminOrganizationGeneralRoute
   '/admin/organization/keyring': typeof AdminOrganizationKeyringRoute
@@ -501,11 +528,14 @@ export interface FileRouteTypes {
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/teams/$teamId'
+    | '/teams/new'
     | '/alert-groups/'
     | '/connections/'
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/teams/'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
     | '/admin/organization/keyring'
@@ -549,11 +579,14 @@ export interface FileRouteTypes {
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/teams/$teamId'
+    | '/teams/new'
     | '/alert-groups'
     | '/connections'
     | '/destinations'
     | '/integrations'
     | '/routes'
+    | '/teams'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
     | '/admin/organization/keyring'
@@ -600,11 +633,14 @@ export interface FileRouteTypes {
     | '/routes/$routeId'
     | '/routes/new'
     | '/sign-in/totp'
+    | '/teams/$teamId'
+    | '/teams/new'
     | '/alert-groups/'
     | '/connections/'
     | '/destinations/'
     | '/integrations/'
     | '/routes/'
+    | '/teams/'
     | '/admin/organization/alert-handling'
     | '/admin/organization/general'
     | '/admin/organization/keyring'
@@ -651,11 +687,14 @@ export interface RootRouteChildren {
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   RoutesRouteIdRoute: typeof RoutesRouteIdRoute
   RoutesNewRoute: typeof RoutesNewRoute
+  TeamsTeamIdRoute: typeof TeamsTeamIdRoute
+  TeamsNewRoute: typeof TeamsNewRoute
   AlertGroupsIndexRoute: typeof AlertGroupsIndexRoute
   ConnectionsIndexRoute: typeof ConnectionsIndexRoute
   DestinationsIndexRoute: typeof DestinationsIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   RoutesIndexRoute: typeof RoutesIndexRoute
+  TeamsIndexRoute: typeof TeamsIndexRoute
   IntegrationsIntegrationIdEditRoute: typeof IntegrationsIntegrationIdEditRoute
   IntegrationsIntegrationIdIndexRoute: typeof IntegrationsIntegrationIdIndexRoute
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute: typeof IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute
@@ -851,6 +890,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/sign-in/totp'
       preLoaderRoute: typeof SignInTotpRouteImport
       parentRoute: typeof SignInRoute
+    }
+    '/teams/': {
+      id: '/teams/'
+      path: '/teams'
+      fullPath: '/teams/'
+      preLoaderRoute: typeof TeamsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/teams/$teamId': {
+      id: '/teams/$teamId'
+      path: '/teams/$teamId'
+      fullPath: '/teams/$teamId'
+      preLoaderRoute: typeof TeamsTeamIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/teams/new': {
+      id: '/teams/new'
+      path: '/teams/new'
+      fullPath: '/teams/new'
+      preLoaderRoute: typeof TeamsNewRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/admin/organization/': {
       id: '/admin/organization/'
@@ -1113,11 +1173,14 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsNewRoute: IntegrationsNewRoute,
   RoutesRouteIdRoute: RoutesRouteIdRoute,
   RoutesNewRoute: RoutesNewRoute,
+  TeamsTeamIdRoute: TeamsTeamIdRoute,
+  TeamsNewRoute: TeamsNewRoute,
   AlertGroupsIndexRoute: AlertGroupsIndexRoute,
   ConnectionsIndexRoute: ConnectionsIndexRoute,
   DestinationsIndexRoute: DestinationsIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   RoutesIndexRoute: RoutesIndexRoute,
+  TeamsIndexRoute: TeamsIndexRoute,
   IntegrationsIntegrationIdEditRoute: IntegrationsIntegrationIdEditRoute,
   IntegrationsIntegrationIdIndexRoute: IntegrationsIntegrationIdIndexRoute,
   IntegrationsIntegrationIdSnapshotsStoredSnapshotIdRoute:

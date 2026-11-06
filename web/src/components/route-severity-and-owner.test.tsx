@@ -3,13 +3,14 @@
 
 // The section "Severity, Escalation chains and owner" of the Route editor in a real browser: the Minimum severity with
 // its three values, "None" selected by default, the hint and "Learn more", the value a save sends (and no `urgent`),
-// a server error at the field and the Russian texts.
+// a server error at the field and the Russian texts; and "Owning Team" with every Team and "None", its hint, and the id
+// a save sends (null for none).
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { I18nextProvider } from "react-i18next";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-react";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import { z } from "zod";
 import type { MinimumSeverity, RouteInput } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { team } from "../test/fixtures/teams";
 import { formValues, inputOf } from "./route-form";
 import {
   RouteSeverityAndOwner,
@@ -51,15 +53,20 @@ function Harness({
   initial,
   onSave,
   error,
+  owner = "",
+  ownerError,
 }: {
   initial: MinimumSeverity;
   onSave: (input: RouteInput) => void;
   error?: string;
+  owner?: string;
+  ownerError?: string;
 }) {
   const form = useForm<SeverityAndOwnerValues>({
     resolver: zodResolver(schema),
-    defaultValues: { minimum_severity: initial },
+    defaultValues: { minimum_severity: initial, owning_team_id: owner },
   });
+  const owningTeamId = useWatch({ control: form.control, name: "owning_team_id" });
   return (
     <form
       noValidate
@@ -73,13 +80,23 @@ function Harness({
         id="route-severity"
         minimumSeverity={form.register("minimum_severity")}
         error={error}
+        owningTeam={{
+          value: owningTeamId,
+          error: ownerError,
+          onChange: (next) => form.setValue("owning_team_id", next, { shouldDirty: true }),
+        }}
       />
       <button type="submit">Save</button>
     </form>
   );
 }
 
-async function renderSection(initial: MinimumSeverity = "none", error?: string) {
+async function renderSection(
+  initial: MinimumSeverity = "none",
+  error?: string,
+  owner = "",
+  ownerError?: string,
+) {
   const onSave = vi.fn<(input: RouteInput) => void>();
   // "Learn more" reads the documentation version from the session, which the root route has read.
   const queryClient = new QueryClient();
@@ -90,7 +107,13 @@ async function renderSection(initial: MinimumSeverity = "none", error?: string) 
   await render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={queryClient}>
-        <Harness initial={initial} onSave={onSave} error={error} />
+        <Harness
+          initial={initial}
+          onSave={onSave}
+          error={error}
+          owner={owner}
+          ownerError={ownerError}
+        />
       </QueryClientProvider>
     </I18nextProvider>,
   );
@@ -106,6 +129,24 @@ function optionsOf(el: Element): string[][] {
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
+  vi.spyOn(window, "fetch").mockImplementation(() =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          items: [
+            team({ id: "TM0000000000PA", name: "payments", slug: "payments" }),
+            team({ id: "TM0000000000SE", name: "search", slug: "search" }),
+          ],
+          next_cursor: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("the Minimum severity of a Route", () => {
@@ -172,6 +213,48 @@ describe("the Minimum severity of a Route", () => {
           "Только поднимает важность групп маршрута. Вместо прежнего «Срочный»: срочная группа — это critical.",
         ),
       )
+      .toBeVisible();
+  });
+
+  test("offers None and every Team as the owner, with the hint that it does not affect delivery", async () => {
+    await renderSection();
+    const owner = page.getByLabelText("Owning Team", { exact: true });
+    await expect.element(owner).toHaveValue("");
+    await vi.waitFor(() =>
+      expect(optionsOf(owner.element())).toEqual([
+        ["", "None"],
+        ["TM0000000000PA", "payments"],
+        ["TM0000000000SE", "search"],
+      ]),
+    );
+    await expect
+      .element(page.getByText("For ownership and the filter of the UI; does not affect delivery."))
+      .toBeVisible();
+  });
+
+  test("a save sends the id of the owning Team, and null for none", async () => {
+    const { onSave } = await renderSection("none", undefined, "TM0000000000SE");
+    const owner = page.getByLabelText("Owning Team", { exact: true });
+    await vi.waitFor(() => expect(owner.element().querySelectorAll("option").length).toBe(3));
+    await expect.element(owner).toHaveValue("TM0000000000SE");
+    await owner.selectOptions("TM0000000000PA");
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0]?.[0].owning_team_id).toBe("TM0000000000PA");
+    await owner.selectOptions("");
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+    expect(onSave.mock.calls[1]?.[0].owning_team_id).toBeNull();
+  });
+
+  test("shows the refusal of the owning Team at its field and reads in Russian", async () => {
+    await renderSection("none", undefined, "", "unknown_id");
+    const owner = page.getByLabelText("Owning Team", { exact: true });
+    expect(owner.element().getAttribute("aria-invalid")).toBe("true");
+    await i18n.changeLanguage("ru");
+    await expect.element(page.getByLabelText("Команда-владелец", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText("Для владения и фильтра в интерфейсе; на доставку не влияет."))
       .toBeVisible();
   });
 });

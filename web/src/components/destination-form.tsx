@@ -45,6 +45,7 @@ import {
   defaultMentions,
   mentionErrorText,
 } from "./mention-settings";
+import { OwningTeamField } from "./team-filter";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -115,6 +116,8 @@ export interface DestinationKind<V> {
       limiter: Limiter;
       /** The button set, for the types that have one: not an outgoing webhook. */
       buttons?: DestinationButtonSet;
+      /** The id of the owning Team, null for none (C-25.FR-2). */
+      owning_team_id: string | null;
     },
     v: V,
   ) => DestinationInput;
@@ -133,6 +136,8 @@ export interface DestinationKind<V> {
 
 interface Values<V> {
   name: string;
+  /** The id of the owning Team, empty for none. */
+  owning_team_id: string;
   mentions: MentionSettings;
   buttons: ButtonSetValue;
   limiter: LimiterValues;
@@ -147,6 +152,7 @@ function isTypePointer(pointers: readonly string[], pointer: string): boolean {
 function valuesOf<V>(kind: DestinationKind<V>, d: Destination | undefined): Values<V> {
   return {
     name: d?.name ?? "",
+    owning_team_id: d?.owning_team?.id ?? "",
     mentions: d?.mentions ?? defaultMentions(),
     buttons: destinationButtons(d && d.type !== "webhook" ? d.buttons : undefined),
     limiter: limiterValues(d?.limiter ?? kind.defaultLimiter),
@@ -412,6 +418,7 @@ export function DestinationForm<V>({
   }
   const shown = (pointer: string) =>
     pointer === "/name" ||
+    pointer === "/owning_team_id" ||
     isTypePointer(kind.pointers, pointer) ||
     mentionKindOf(pointer) !== undefined ||
     isButtonsPointer(pointer) ||
@@ -436,6 +443,7 @@ export function DestinationForm<V>({
             kind.input(
               {
                 name: values.name.trim(),
+                owning_team_id: values.owning_team_id === "" ? null : values.owning_team_id,
                 mentions: values.mentions,
                 limiter: limiterInput(values.limiter),
                 ...(kind.type === "webhook"
@@ -510,6 +518,14 @@ export function DestinationForm<V>({
                 </p>
               )}
             </div>
+            <OwningTeamField
+              id={`${ID}-owning-team`}
+              value={values.owning_team_id}
+              current={destination?.owning_team}
+              disabled={readOnly}
+              error={text("/owning_team_id")}
+              onChange={(next) => change("owning_team_id", next, ["/owning_team_id"])}
+            />
             <LimiterField
               id={`${ID}-limiter`}
               value={values.limiter}

@@ -22,6 +22,7 @@
   "field.slack_tokens": "messengers/slack.md#install-the-app-and-create-the-tokens",
   "field.snooze": "concepts/statuses-and-commands.md#snooze-presets",
   "field.static_labels": "integrations/alertmanager.md#static-labels",
+  "field.team_idp": "concepts/teams.md#membership-from-the-identity-provider",
   "field.telegram_base_url": "messengers/telegram-restricted-networks.md",
   "field.telegram_mode": "messengers/telegram.md#long-polling-or-webhook",
   "field.template": "configure/messages-and-templates.md#the-template-language",
@@ -31,6 +32,7 @@
   "field.webhook_secrets": "outgoing-webhooks/events.md#secrets",
   "field.webhook_signing_secret": "outgoing-webhooks/events.md#verify-the-signature",
   "field.webhook_templates": "outgoing-webhooks/templates.md#what-the-templates-read",
+  "field.working_hours": "concepts/teams.md#working-hours",
   "fix.after_downtime": "operations/high-availability.md#after-downtime",
   "fix.another_client_connected": "messengers/slack.md#one-slack-app-per-connection",
   "fix.blocked": "messengers/proxies.md#what-the-outbound-address-policy-checks",
@@ -102,5 +104,6 @@
   "page.statistics": "concepts/alert-groups.md#statistics",
   "page.stored_snapshot": "concepts/snapshot-semantics.md",
   "page.system_status": "operations/monitoring.md#system-status",
+  "page.teams": "concepts/teams.md",
   "page.users": "sign-in/index.md#add-a-user"
 }

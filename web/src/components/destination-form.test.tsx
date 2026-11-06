@@ -250,6 +250,7 @@ describe("a new Mattermost Destination", () => {
       connection_id: CONNECTION.id,
       team_id: "team-dev",
       channel_id: "ch-alerts",
+      owning_team_id: null,
       mentions,
       buttons: { source: "organization" },
       limiter: { limit: 7, per_seconds: 2 },
@@ -599,6 +600,7 @@ describe("the Buttons section", () => {
     const kind = MATTERMOST_KIND;
     const values = {
       name: "alerts",
+      owning_team_id: "",
       mentions: defaultMentions(),
       buttons: { follows: false, items: [{ button: "snooze" as const, snooze_seconds: 0 }] },
       limiter: { limit: "5", per_seconds: "1" },

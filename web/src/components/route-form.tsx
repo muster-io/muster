@@ -129,11 +129,12 @@ const formSchema = z
 
 export type FormValues = z.infer<typeof formSchema>;
 
-export function formValues(base: RouteInput): FormValues {
+export function formValues(base: RouteInput, route?: Route): FormValues {
   return {
     name: base.name,
     description: base.description ?? "",
     minimum_severity: base.minimum_severity ?? "none",
+    owning_team_id: route?.owning_team?.id ?? base.owning_team_id ?? "",
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
     destination_ids: [...(base.destination_ids ?? [])],
@@ -162,6 +163,7 @@ export function inputOf(
     name: v.name.trim(),
     description: v.description.trim(),
     minimum_severity: v.minimum_severity,
+    owning_team_id: v.owning_team_id === "" ? null : v.owning_team_id,
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
     destination_ids: [...v.destination_ids],
@@ -289,13 +291,14 @@ export function RouteForm({
   const [keyDraft, setKeyDraft] = useState("");
   // The Matcher rows a preview was asked with, so that its errors land on the rows they were sent from.
   const previewSent = useRef<MatcherRow[]>([]);
-  const [defaultValues] = useState(() => formValues(base));
+  const [defaultValues] = useState(() => formValues(base, route));
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues,
   });
   const rows = useWatch({ control: form.control, name: "matchers" });
   const groupKey = useWatch({ control: form.control, name: "group_key" });
+  const owningTeamId = useWatch({ control: form.control, name: "owning_team_id" });
   const [
     ackTimeoutEnabled,
     ackTimeoutFirst,
@@ -372,6 +375,12 @@ export function RouteForm({
         } else if (item.pointer === "/minimum_severity") {
           form.setError(
             "minimum_severity",
+            { type: item.code, message: item.code },
+            { shouldFocus: true },
+          );
+        } else if (item.pointer === "/owning_team_id") {
+          form.setError(
+            "owning_team_id",
             { type: item.code, message: item.code },
             { shouldFocus: true },
           );
@@ -477,6 +486,11 @@ export function RouteForm({
         <ReadOnlyField label={t("routes.severity.minimum")}>
           <span className="text-sm" data-testid="route-minimum-severity">
             {minimumSeverityName(t, base.minimum_severity ?? "none")}
+          </span>
+        </ReadOnlyField>
+        <ReadOnlyField label={t("teams.owner.label")}>
+          <span className="text-sm" data-testid="route-owner">
+            {route?.owning_team?.name ?? t("teams.owner.none")}
           </span>
         </ReadOnlyField>
         <div className="flex flex-col gap-1">
@@ -666,6 +680,12 @@ export function RouteForm({
         id={`${ID}-severity`}
         minimumSeverity={form.register("minimum_severity")}
         error={errors.minimum_severity?.message}
+        owningTeam={{
+          value: owningTeamId,
+          current: route?.owning_team,
+          error: errors.owning_team_id?.message,
+          onChange: (next) => form.setValue("owning_team_id", next, { shouldDirty: true }),
+        }}
       />
       <RoutePolicyLifecycle
         id={`${ID}-lifecycle`}

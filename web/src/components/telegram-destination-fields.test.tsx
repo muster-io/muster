@@ -244,6 +244,7 @@ describe("DestinationForm with the Telegram fields", () => {
       name: "muster_alerts",
       connection_id: TG.id,
       channel_id: "@muster_alerts",
+      owning_team_id: null,
       mentions: defaultMentions(),
       buttons: { source: "organization" },
       limiter: { limit: 10, per_seconds: 60 },

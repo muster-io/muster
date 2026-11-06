@@ -326,6 +326,7 @@ describe("DestinationForm with the outgoing webhook fields", () => {
         headers: [{ name: "Authorization", value: "Bearer {{ .Secrets.token }}" }],
       },
       proxy: { enabled: false, type: "http", username: null },
+      owning_team_id: null,
       mentions: defaultMentions(),
       limiter: { limit: 5, per_seconds: 1 },
     });
@@ -404,6 +405,7 @@ describe("DestinationForm with the outgoing webhook fields", () => {
         },
       },
       proxy: { enabled: false, type: "http", username: null },
+      owning_team_id: null,
       mentions: defaultMentions(),
       limiter: { limit: 5, per_seconds: 1 },
     });
