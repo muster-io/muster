@@ -293,9 +293,8 @@ type Queries interface {
 		error)
 	ResolveTeamDestinations(ctx context.Context, arg dbgen.ResolveTeamDestinationsParams) (
 		[]dbgen.ResolveTeamDestinationsRow, error)
-	ShareTeamDestinations(ctx context.Context, arg dbgen.ShareTeamDestinationsParams) (
-		[]dbgen.ShareTeamDestinationsRow, error)
 	DeleteTeamDestinations(ctx context.Context, arg dbgen.DeleteTeamDestinationsParams) error
+	DropDeletedTeamDestinations(ctx context.Context, arg dbgen.DropDeletedTeamDestinationsParams) error
 	UpsertTeamDestinations(ctx context.Context, arg dbgen.UpsertTeamDestinationsParams) error
 	DeleteAllTeamDestinations(ctx context.Context, arg dbgen.DeleteAllTeamDestinationsParams) error
 	InsertTeamDestinationsUpdate(ctx context.Context, arg dbgen.InsertTeamDestinationsUpdateParams) error

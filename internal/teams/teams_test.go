@@ -707,20 +707,6 @@ func (s *fakeStore) ListTeamDestinations(_ context.Context, arg dbgen.ListTeamDe
 	return out, nil
 }
 
-func (s *fakeStore) ShareTeamDestinations(ctx context.Context, arg dbgen.ShareTeamDestinationsParams) (
-	[]dbgen.ShareTeamDestinationsRow, error) {
-	if err := s.fail["ShareTeamDestinations"]; err != nil {
-		return nil, err
-	}
-	s.seq = append(s.seq, "share")
-	rows, err := s.ResolveTeamDestinations(ctx, dbgen.ResolveTeamDestinationsParams(arg))
-	out := make([]dbgen.ShareTeamDestinationsRow, len(rows))
-	for i, r := range rows {
-		out[i] = dbgen.ShareTeamDestinationsRow(r)
-	}
-	return out, err
-}
-
 func (s *fakeStore) ResolveTeamDestinations(_ context.Context, arg dbgen.ResolveTeamDestinationsParams) (
 	[]dbgen.ResolveTeamDestinationsRow, error) {
 	if err := s.fail["ResolveTeamDestinations"]; err != nil || arg.OrgID != orgID {
@@ -733,6 +719,21 @@ func (s *fakeStore) ResolveTeamDestinations(_ context.Context, arg dbgen.Resolve
 		}
 	}
 	return out, nil
+}
+
+func (s *fakeStore) DropDeletedTeamDestinations(_ context.Context, arg dbgen.DropDeletedTeamDestinationsParams) error {
+	if err := s.fail["DropDeletedTeamDestinations"]; err != nil || arg.OrgID != orgID || s.teamDests == nil {
+		return err
+	}
+	s.teamDests[arg.TeamID] = slices.DeleteFunc(slices.Clone(s.teamDests[arg.TeamID]), func(td fakeTeamDest) bool {
+		for _, d := range s.destinations {
+			if d.id == td.dest && d.deleted {
+				return true
+			}
+		}
+		return false
+	})
+	return nil
 }
 
 func (s *fakeStore) DeleteTeamDestinations(_ context.Context, arg dbgen.DeleteTeamDestinationsParams) error {
@@ -1830,7 +1831,7 @@ func TestTeamDestinations(t *testing.T) {
 			t.Errorf("created with %+v", tc.entries)
 		}
 	}
-	for _, q := range []string{"ShareTeamDestinations", "ResolveTeamDestinations", "DeleteTeamDestinations",
+	for _, q := range []string{"ResolveTeamDestinations", "DropDeletedTeamDestinations", "DeleteTeamDestinations",
 		"UpsertTeamDestinations", "ListTeamDestinations"} {
 		s.fail[q] = errBoom
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
@@ -1845,9 +1846,8 @@ func TestTeamDestinations(t *testing.T) {
 	}
 }
 
-// TestTeamDestinationsRows is C-26.FR-6 and C-25.FR-10 in the transactions of teams: a save locks the Destinations it
-// names FOR SHARE first; one whose Destination entries are added, removed or changed takes the Team's membership lock
-// after the Team's row and before it writes them, and
+// TestTeamDestinationsRows is C-26.FR-6 and C-25.FR-10 in the transactions of teams: a save whose Destination entries
+// are added, removed or changed takes the Team's membership lock after the Team's row and before it writes them, and
 // then writes one row team_destinations of the Team per Destination whose entry it added or changed, or one of the
 // Team alone when it only removed entries, which wakes the workers; a save that keeps the entries, and the creation of
 // a Team, which no open Alert Group has yet, take no lock and write none. The deletion of a Team removes
@@ -1865,7 +1865,7 @@ func TestTeamDestinationsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(s.seq, []string{"share", "upsert", "row team_evaluation"}) {
+	if !slices.Equal(s.seq, []string{"upsert", "row team_evaluation"}) {
 		t.Errorf("the creation: %v", s.seq)
 	}
 	lock := fmt.Sprintf("lock %d", created.ID)
@@ -1875,16 +1875,15 @@ func TestTeamDestinationsRows(t *testing.T) {
 		want    []string
 	}{
 		{"an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN", Condition: ConditionBelowCritical},
-			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{"share", lock, "upsert",
+			{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, []string{lock, "upsert",
 			"row team_destinations 51"}},
 		{"a condition changed and an entry added", []DestinationEntry{{DestinationID: "DS0000000000PN",
 			Condition: ConditionAny}, {DestinationID: "DS0000000000PC", Condition: ConditionCritical},
-			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{"share", lock,
+			{DestinationID: "DS0000000000SN", Condition: ConditionAny}}, []string{lock,
 			"upsert", "row team_destinations 52", "row team_destinations 53"}},
 		{"entries removed", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
-			[]string{"share", lock, "delete", "row team_destinations -"}},
-		{"the same entries", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}},
-			[]string{"share"}},
+			[]string{lock, "delete", "row team_destinations -"}},
+		{"the same entries", []DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}, nil},
 	} {
 		s.seq, s.destinationRows, s.wakes = nil, nil, nil
 		if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
@@ -1946,5 +1945,33 @@ func TestTeamDestinationsRows(t *testing.T) {
 			t.Errorf("delete, %s: %v", q, err)
 		}
 		delete(s.fail, q)
+	}
+}
+
+// TestTeamDropsDeletedDestinations: an entry of a deleted Destination, which a save that raced the Destination's
+// deletion may leave behind and no read returns, is dropped by the next save of the Team's entries.
+func TestTeamDropsDeletedDestinations(t *testing.T) {
+	svc, s := newService(t)
+	s.destinations = map[string]*fakeDestination{
+		"DS0000000000PC": {id: 51, name: "payments-critical", typ: "mattermost", health: "healthy"},
+		"DS0000000000PN": {id: 52, name: "payments-notice", typ: "mattermost", health: "healthy"},
+	}
+	created, err := svc.Create(t.Context(), by, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}, {DestinationID: "DS0000000000PN"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.destinations["DS0000000000PN"].deleted = true
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC", Condition: ConditionCritical}}}); err != nil {
+		t.Fatal(err)
+	}
+	if rows := s.teamDests[created.ID]; len(rows) != 1 || rows[0].dest != 51 {
+		t.Errorf("the entries after the save %+v", rows)
+	}
+	s.fail["DropDeletedTeamDestinations"] = errBoom
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, Input{Name: "Payments", Slug: "payments",
+		DestinationEntries: &[]DestinationEntry{{DestinationID: "DS0000000000PC"}}}); !errors.Is(err, errBoom) {
+		t.Errorf("a failing drop: %v", err)
 	}
 }

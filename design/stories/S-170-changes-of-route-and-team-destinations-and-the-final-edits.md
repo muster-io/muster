@@ -22,6 +22,7 @@ files_touched:
   - internal/delivery/worker_test.go
   - internal/delivery/storm_test.go
   - internal/delivery/storm_integration_test.go
+  - internal/delivery/reach_integration_test.go
   - internal/delivery/hints_test.go
   - internal/delivery/outcomes_test.go
   - internal/delivery/webhookevents_test.go
@@ -244,13 +245,21 @@ None.
   final edit, or was withheld, is not "delivered" for the reach: a rise or a joining Team that reaches it again
   records `destination_joined`, and Enqueue publishes it there afresh (`RejoinDelivery`) with that event's loudness —
   Loud while firing, Quiet while acknowledged or snoozed — held by an active Storm with its summary (review, H1 of the
-  xhigh pass). What a rendering adds follows the same rule: a rise adds what the level now meets; a Team that joins —
+  xhigh pass). One whose final edit still waits, its Root message still there, counts as delivered: no
+  destination_joined is recorded, since no new message is sent, and the growth cancels the final edit and edits the
+  Root message to the current state, Quietly (re-check, LOW-b; recording a Quiet destination_joined for a firing Alert
+  Group would need a variant outside the lifecycle table of reference.md, and a new Publication a second Root message
+  on the same delivery). What a rendering adds follows the same rule: a rise adds what the level now meets; a Team that joins —
   by its Alerts or by the evaluation of the Teams — adds only the Destinations of its own entries, so that it never
   brings back a Destination below critical after a fall (an S-121 follow-up, review L3); a change of a Team's entries
   adds the Destination it touched. During a Storm, a Destination added to a Route gets the Storm summary only where a
-  held Alert Group arrives (review M1). A save of a Team or of a Route locks the Destinations it names FOR SHARE before
-  the Team's membership lock or the Route's row, so that a deletion of one of them and the save serialize and no entry
-  of a deleted Destination is written (review L1), and a batch of `route_minimum_severity` takes the membership locks
+  held Alert Group arrives (review M1). A save of a Team or of a Route that commits after the deletion of a Destination
+  it names listed its Teams can still leave an entry of the deleted Destination, and an Enqueue that read it before
+  the deletion committed a pending delivery there: no read returns such an entry, the next save of the entries drops
+  it, and the worker claims such a delivery only to withhold it without a call (`ClaimDueDeliveries`, `prepare`), so
+  nothing is published in a deleted Destination and its secrets are still wiped (re-check of review L1; locking the
+  named Destinations FOR SHARE on a save closes cycles with the delivery worker, which updates a delivery and then its
+  Destination's health). A batch of `route_minimum_severity` takes the membership locks
   up front as the other batches do (review L2). A delivery that a change of
   configuration creates or publishes again for an Alert Group created since the active Storm started is held by the
   Storm, with its summary there, even where a final edit cleared its hold (review, M1). A re-render of several open Alert Groups takes every

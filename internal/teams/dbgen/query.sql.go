@@ -247,6 +247,25 @@ func (q *Queries) DeleteUserTeams(ctx context.Context, arg DeleteUserTeamsParams
 	return items, nil
 }
 
+const dropDeletedTeamDestinations = `-- name: DropDeletedTeamDestinations :exec
+DELETE FROM team_destinations td
+USING destinations d
+WHERE td.org_id = $1 AND td.team_id = $2 AND d.org_id = td.org_id AND d.id = td.destination_id
+  AND d.deleted_at IS NOT NULL
+`
+
+type DropDeletedTeamDestinationsParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DropDeletedTeamDestinations removes from a Team the entries of Destinations that are deleted: one a save wrote while
+// the Destination's deletion committed, which no read returns.
+func (q *Queries) DropDeletedTeamDestinations(ctx context.Context, arg DropDeletedTeamDestinationsParams) error {
+	_, err := q.db.Exec(ctx, dropDeletedTeamDestinations, arg.OrgID, arg.TeamID)
+	return err
+}
+
 const getMember = `-- name: GetMember :one
 SELECT public_id, name
 FROM users
@@ -1624,47 +1643,6 @@ func (q *Queries) SetIdpMatches(ctx context.Context, arg SetIdpMatchesParams) er
 		arg.UserID,
 	)
 	return err
-}
-
-const shareTeamDestinations = `-- name: ShareTeamDestinations :many
-SELECT id, public_id
-FROM destinations
-WHERE org_id = $1 AND public_id = ANY($2::text[]) AND deleted_at IS NULL
-ORDER BY id
-FOR SHARE
-`
-
-type ShareTeamDestinationsParams struct {
-	OrgID     int64
-	PublicIds []string
-}
-
-type ShareTeamDestinationsRow struct {
-	ID       int64
-	PublicID string
-}
-
-// ShareTeamDestinations reads, as ResolveTeamDestinations does, the Destinations a save of a Team names, and locks them
-// FOR SHARE, which the deletion of a Destination's FOR NO KEY UPDATE waits for and which waits for it: the save never
-// writes an entry of a Destination whose deletion commits meanwhile, which finds such an entry in turn.
-func (q *Queries) ShareTeamDestinations(ctx context.Context, arg ShareTeamDestinationsParams) ([]ShareTeamDestinationsRow, error) {
-	rows, err := q.db.Query(ctx, shareTeamDestinations, arg.OrgID, arg.PublicIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ShareTeamDestinationsRow{}
-	for rows.Next() {
-		var i ShareTeamDestinationsRow
-		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const updateTeam = `-- name: UpdateTeam :exec

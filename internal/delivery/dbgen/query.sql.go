@@ -365,7 +365,8 @@ WITH due AS MATERIALIZED (
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = $3 AND x.state = 'pending' AND x.next_attempt_at <= $4::timestamptz
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
-      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+      AND x.held_by_storm_id IS NULL
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR (x.published_at IS NULL AND x.publication_started_at IS NULL))
     ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT $6
     FOR UPDATE OF x SKIP LOCKED
@@ -396,7 +397,9 @@ type ClaimDueDeliveriesRow struct {
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
 // turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
-// deleted Destination is claimed only for its final edit. The choice is a materialized CTE, run once: as a subquery in
+// deleted Destination is claimed only for its final edit or, never published there, to be withheld without a call: an
+// Enqueue that read the Destination's entries before its deletion committed can create one after the deletion ended
+// the others (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
 // FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
 // ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
 // applies to them too.
@@ -1301,7 +1304,7 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        d.actual_status, d.past_edit_window, d.republication_started_at, ds.id AS destination_id,
        ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
-       ds.telegram_discussion_chat_id,
+       ds.telegram_discussion_chat_id, (ds.deleted_at IS NOT NULL)::boolean AS destination_deleted,
        coalesce(g.public_id, '')::text AS alert_group_public_id, coalesce(g.number, 0)::bigint AS number,
        coalesce(g.status, '')::text AS group_status, coalesce(g.created_at, d.created_at)::timestamptz AS group_created_at,
        g.resolved_at AS group_resolved_at, (g.id IS NOT NULL AND g.first_published_at IS NULL)::boolean AS group_unpublished
@@ -1353,6 +1356,7 @@ type GetLeasedDeliveryRow struct {
 	DestinationHealth        string
 	TelegramChannelChatID    pgtype.Int8
 	TelegramDiscussionChatID pgtype.Int8
+	DestinationDeleted       bool
 	AlertGroupPublicID       string
 	Number                   int64
 	GroupStatus              string
@@ -1411,6 +1415,7 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.DestinationHealth,
 		&i.TelegramChannelChatID,
 		&i.TelegramDiscussionChatID,
+		&i.DestinationDeleted,
 		&i.AlertGroupPublicID,
 		&i.Number,
 		&i.GroupStatus,
@@ -3747,7 +3752,8 @@ WITH due AS (
     FROM deliveries x
     JOIN destinations ds ON ds.org_id = x.org_id AND ds.id = x.destination_id
     WHERE x.org_id = $2 AND x.state = 'pending' AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
-      AND x.held_by_storm_id IS NULL AND (ds.deleted_at IS NULL OR x.desired_retire)
+      AND x.held_by_storm_id IS NULL
+      AND (ds.deleted_at IS NULL OR x.desired_retire OR (x.published_at IS NULL AND x.publication_started_at IS NULL))
     UNION ALL
     SELECT b.next_probe_at, NULL::timestamptz
     FROM destinations b

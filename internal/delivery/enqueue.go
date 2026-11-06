@@ -362,7 +362,9 @@ func (s *Service) Enqueue(ctx context.Context, tx groups.DBTX, r groups.Renderin
 			return fmt.Errorf("encode the entries of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
 		// A Destination the rendering adds again, whose delivery got its final edit or was withheld, publishes there
-		// afresh: Loud or Quiet as its destination_joined, Quiet for a change of configuration (C-26.FR-4, FR-5).
+		// afresh: Loud or Quiet as its destination_joined, Quiet for a change of configuration (C-26.FR-4, FR-5). One
+		// whose final edit still waits keeps its Root message, current again, and the final edit is not made: the
+		// dispatcher counts it as delivered and records no destination_joined for it.
 		h.rejoin = !moved && gone(t.had) && len(t.entries) > 0 && (grows(r) || adds.adds(t))
 		h.loud, h.heldBy = publicationOf(r, g, created, moved, joined[d.ID], st, held)
 		if h.heldBy != nil && (created || t.had == nil || (h.rejoin && gone(t.had))) {

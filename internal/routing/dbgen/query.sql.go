@@ -193,6 +193,25 @@ func (q *Queries) DismissRouteSuggestion(ctx context.Context, arg DismissRouteSu
 	return err
 }
 
+const dropDeletedRouteDestinations = `-- name: DropDeletedRouteDestinations :exec
+DELETE FROM route_destinations rd
+USING destinations d
+WHERE rd.org_id = $1 AND rd.route_id = $2 AND d.org_id = rd.org_id AND d.id = rd.destination_id
+  AND d.deleted_at IS NOT NULL
+`
+
+type DropDeletedRouteDestinationsParams struct {
+	OrgID   int64
+	RouteID int64
+}
+
+// DropDeletedRouteDestinations removes from a Route the entries of Destinations that are deleted: one a save wrote
+// while the Destination's deletion committed, which no read returns.
+func (q *Queries) DropDeletedRouteDestinations(ctx context.Context, arg DropDeletedRouteDestinationsParams) error {
+	_, err := q.db.Exec(ctx, dropDeletedRouteDestinations, arg.OrgID, arg.RouteID)
+	return err
+}
+
 const ensureDefaultRoute = `-- name: EnsureDefaultRoute :one
 INSERT INTO routes (
     org_id, public_id, name, description, position, is_default, minimum_severity, urgent, group_key,
@@ -1566,43 +1585,6 @@ type SetRoutePositionsParams struct {
 func (q *Queries) SetRoutePositions(ctx context.Context, arg SetRoutePositionsParams) error {
 	_, err := q.db.Exec(ctx, setRoutePositions, arg.OrgID, arg.Ids, arg.Positions)
 	return err
-}
-
-const shareDestinations = `-- name: ShareDestinations :many
-SELECT id
-FROM destinations
-WHERE org_id = $1 AND public_id = ANY($2::text[]) AND deleted_at IS NULL
-ORDER BY id
-FOR SHARE
-`
-
-type ShareDestinationsParams struct {
-	OrgID     int64
-	PublicIds []string
-}
-
-// ShareDestinations locks FOR SHARE, in id order and until the save commits, the Destinations that are not deleted
-// among the public_ids a save of a Route names, before the Route's row: the deletion of a Destination, which locks it
-// FOR NO KEY UPDATE and then the Routes that name it, either commits first, and the save refuses it, or waits for the
-// save and then removes the entry it wrote.
-func (q *Queries) ShareDestinations(ctx context.Context, arg ShareDestinationsParams) ([]int64, error) {
-	rows, err := q.db.Query(ctx, shareDestinations, arg.OrgID, arg.PublicIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const shareTeamEvaluation = `-- name: ShareTeamEvaluation :exec

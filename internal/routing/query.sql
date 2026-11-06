@@ -299,17 +299,6 @@ SELECT id, public_id
 FROM destinations
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
 
--- ShareDestinations locks FOR SHARE, in id order and until the save commits, the Destinations that are not deleted
--- among the public_ids a save of a Route names, before the Route's row: the deletion of a Destination, which locks it
--- FOR NO KEY UPDATE and then the Routes that name it, either commits first, and the save refuses it, or waits for the
--- save and then removes the entry it wrote.
--- name: ShareDestinations :many
-SELECT id
-FROM destinations
-WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL
-ORDER BY id
-FOR SHARE;
-
 -- ListRouteDestinationIDs lists the Destinations that are not deleted of the Routes with their Severity conditions,
 -- by public_id.
 -- name: ListRouteDestinationIDs :many
@@ -331,6 +320,14 @@ UPDATE route_destinations rd
 SET severity_condition = d.condition
 FROM (SELECT unnest(@destination_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS d
 WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND rd.destination_id = d.id;
+
+-- DropDeletedRouteDestinations removes from a Route the entries of Destinations that are deleted: one a save wrote
+-- while the Destination's deletion committed, which no read returns.
+-- name: DropDeletedRouteDestinations :exec
+DELETE FROM route_destinations rd
+USING destinations d
+WHERE rd.org_id = @org_id AND rd.route_id = @route_id AND d.org_id = rd.org_id AND d.id = rd.destination_id
+  AND d.deleted_at IS NOT NULL;
 
 -- DeleteRouteDestinations removes Destinations from a Route.
 -- name: DeleteRouteDestinations :exec

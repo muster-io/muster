@@ -91,9 +91,7 @@ func (s *Service) withDestinations(ctx context.Context, q Queries, list []Team) 
 // resolveDestinations reads the Destinations of the entries of a save, each once with its condition, any by default
 // (C-26.FR-1), and returns them by public_id: an id that names no Destination, or a deleted one, is an unknown_id
 // FieldError at the entry's destination_id, one named twice a duplicate, and a condition outside the three an
-// invalid_format one at its severity_condition. The Destinations are locked FOR SHARE until the save commits, before
-// the Team's membership lock, so that a deletion of one of them either commits first and the entry is refused, or
-// waits and then removes it (routing's DestinationDeleted).
+// invalid_format one at its severity_condition.
 func (s *Service) resolveDestinations(ctx context.Context, q Queries, entries []DestinationEntry) (
 	map[string]teamDestination, error) {
 	out := map[string]teamDestination{}
@@ -121,7 +119,7 @@ func (s *Service) resolveDestinations(ctx context.Context, q Queries, entries []
 		}
 		seen[id], canonical[i] = true, id
 	}
-	rows, err := q.ShareTeamDestinations(ctx, dbgen.ShareTeamDestinationsParams{OrgID: s.orgID,
+	rows, err := q.ResolveTeamDestinations(ctx, dbgen.ResolveTeamDestinationsParams{OrgID: s.orgID,
 		PublicIds: canonical})
 	if err != nil {
 		return nil, fmt.Errorf("read the destinations of the team: %w", err)
@@ -152,10 +150,15 @@ func entriesOf(want map[string]teamDestination) []DestinationEntry {
 
 // writeDestinations makes want the Destinations of the Team teamID, which had before: those it no longer names are
 // removed, the new ones added now and the kept ones keep when they were added with the condition of want. It returns
-// the Destinations whose entry it added or changed, in id order. The change reaches the open Alert Groups of the Team
+// the Destinations whose entry it added or changed, in id order. Entries of a deleted Destination, which a save that
+// raced its deletion may have left and no read returns, are dropped. The change reaches the open Alert Groups of the Team
 // through the rows team_destinations of its save (changeDestinations).
 func (s *Service) writeDestinations(ctx context.Context, q Queries, teamID int64, before []DestinationEntry,
 	want map[string]teamDestination, now time.Time) ([]int64, error) {
+	if err := q.DropDeletedTeamDestinations(ctx, dbgen.DropDeletedTeamDestinationsParams{OrgID: s.orgID,
+		TeamID: teamID}); err != nil {
+		return nil, fmt.Errorf("drop the entries of deleted destinations from the team: %w", err)
+	}
 	keep := map[string]string{}
 	for _, e := range before {
 		keep[e.DestinationID] = e.Condition

@@ -94,9 +94,6 @@ type fakeStore struct {
 	membershipLocks []int64
 	teamDests       map[int64][]int64
 	teamLocks       []int64
-	// shared are the Destinations a save locked FOR SHARE, and seqLocks the order of those locks and the Routes' rows.
-	shared   []string
-	seqLocks []string
 
 	// teams are the Teams that are not deleted by public_id, and userTeams the public_ids of the Teams of each User.
 	teams     map[string]dbgen.LockOwningTeamRow
@@ -200,7 +197,6 @@ func (s *fakeStore) LockRoute(_ context.Context, arg dbgen.LockRouteParams) (int
 	if err := s.call("LockRoute"); err != nil {
 		return 0, err
 	}
-	s.seqLocks = append(s.seqLocks, "route")
 	if r := s.find(arg.PublicID); r != nil && arg.OrgID == orgID {
 		return r.ID, nil
 	}
@@ -499,15 +495,6 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	return nil
 }
 
-func (s *fakeStore) ShareDestinations(_ context.Context, arg dbgen.ShareDestinationsParams) ([]int64, error) {
-	if err := s.call("ShareDestinations"); err != nil {
-		return nil, err
-	}
-	s.shared = append(s.shared, arg.PublicIds...)
-	s.seqLocks = append(s.seqLocks, "share")
-	return nil, nil
-}
-
 func (s *fakeStore) ResolveDestinations(_ context.Context, arg dbgen.ResolveDestinationsParams) (
 	[]dbgen.ResolveDestinationsRow, error) {
 	if err := s.call("ResolveDestinations"); err != nil {
@@ -593,6 +580,21 @@ func (s *fakeStore) DeleteRouteDestinations(_ context.Context, arg dbgen.DeleteR
 func (s *fakeStore) DB() dbgen.DBTX { return nil }
 
 func (s *fakeStore) On(dbgen.DBTX) Queries { return s }
+
+func (s *fakeStore) DropDeletedRouteDestinations(_ context.Context, arg dbgen.DropDeletedRouteDestinationsParams) error {
+	if err := s.call("DropDeletedRouteDestinations"); err != nil {
+		return err
+	}
+	s.links[arg.RouteID] = slices.DeleteFunc(slices.Clone(s.links[arg.RouteID]), func(l link) bool {
+		for id, internal := range s.dests {
+			if internal == l.dest && s.deleted[id] {
+				return true
+			}
+		}
+		return false
+	})
+	return nil
+}
 
 func (s *fakeStore) LockRouteMembership(_ context.Context, arg dbgen.LockRouteMembershipParams) error {
 	if err := s.call("LockRouteMembership"); err != nil {
@@ -1376,12 +1378,6 @@ func TestRouteDestinations(t *testing.T) {
 	if !slices.Equal(created.DestinationIDs, []string{destA, destB}) || len(*calls) != 0 {
 		t.Fatalf("created %+v, hook %+v", created.DestinationIDs, *calls)
 	}
-	// The Destinations named are locked FOR SHARE, before the Route's row on an update, as a deletion of one of them
-	// locks it before its Routes.
-	if !slices.Equal(store.shared, []string{destB, destA, destB}) {
-		t.Errorf("shared on the creation %v", store.shared)
-	}
-	store.shared, store.seqLocks = nil, nil
 	var diff []audit.Change
 	_ = json.Unmarshal(store.audit[len(store.audit)-1].Diff, &diff)
 	if !slices.ContainsFunc(diff, func(ch audit.Change) bool { return ch.Pointer == "/destination_ids" }) {
@@ -1394,10 +1390,6 @@ func TestRouteDestinations(t *testing.T) {
 	got, err := svc.Update(t.Context(), by, created.PublicID, ptr(created.Version), in)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !slices.Equal(store.shared, []string{destA}) || len(store.seqLocks) < 2 || store.seqLocks[0] != "share" ||
-		store.seqLocks[1] != "route" {
-		t.Errorf("shared %v, locks %v", store.shared, store.seqLocks)
 	}
 	e := store.audit[len(store.audit)-1]
 	diff = nil
@@ -1478,7 +1470,7 @@ func TestRouteDestinations(t *testing.T) {
 		t.Errorf("failed hook = %v, links %+v", err, store.links[created.ID])
 	}
 	delete(store.fail, "membership")
-	for _, q := range []string{"ShareDestinations", "ResolveDestinations", "LockRouteMembership",
+	for _, q := range []string{"ResolveDestinations", "LockRouteMembership", "DropDeletedRouteDestinations",
 		"ListRouteDestinationIDs", "DeleteRouteDestinations", "InsertRouteDestinations"} {
 		store.fail[q] = errBoom
 		in.DestinationIDs = []string{destA}
@@ -2159,5 +2151,26 @@ func TestRouteDestinationEntries(t *testing.T) {
 	upd.DestinationEntries = &[]DestinationEntry{{DestinationID: destA}, {DestinationID: destB}}
 	if _, err := svc.Update(ctx, by, created.PublicID, nil, upd); !errors.Is(err, errBoom) {
 		t.Errorf("a failing write of the conditions: %v", err)
+	}
+}
+
+// TestRouteDropsDeletedDestinations: an entry of a deleted Destination, which a save that raced the Destination's
+// deletion may leave behind and no read returns, is dropped by the next save of the Route's entries.
+func TestRouteDropsDeletedDestinations(t *testing.T) {
+	svc, store, _, _ := withDestinations(t)
+	in := input("r")
+	in.DestinationIDs = []string{destA, destB}
+	created, err := svc.Create(t.Context(), by, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.deleted[destB] = true
+	in.DestinationIDs = nil
+	in.DestinationEntries = &[]DestinationEntry{{DestinationID: destA, Condition: ConditionCritical}}
+	if _, err := svc.Update(t.Context(), by, created.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	if l := store.links[created.ID]; len(l) != 1 || l[0].dest != 51 {
+		t.Errorf("the entries after the save %+v", l)
 	}
 }

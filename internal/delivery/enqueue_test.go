@@ -1287,6 +1287,33 @@ func TestJoinedAgainAfterFinalEdit(t *testing.T) {
 			}
 		})
 	}
+	t.Run("final edit still waiting", func(t *testing.T) {
+		// infra-critical taken off the Route, its final edit not made yet; added back for critical; a rise, for which
+		// the dispatcher records no destination_joined, as the Root message is still there: the final edit is not
+		// made, and the Root message is edited to the current state, Quietly, without a new Publication.
+		e := entriesEnv(t)
+		e.db.conditions[routeID][destCritical] = "any"
+		e.route(t, e.changeOf(routeID, []int64{destCritical}, nil))
+		e.round(t)
+		e.route(t, e.setCondition(destCritical, ""))
+		d := e.deliveryOf(groupID, destCritical)
+		if !d.desiredRetire || d.messageID == nil {
+			t.Fatalf("the final edit does not wait: %+v", d)
+		}
+		e.route(t, e.setCondition(destCritical, "critical"))
+		e.rec.Reset()
+		e.db.groups[groupID].severity = "critical"
+		e.render(t, e.leveled(groups.StatusFiring, "critical", true), groups.System, false, []int64{teamPayments},
+			groups.Recorded{Seq: 5, Event: groups.EventSeverityRaised, Loudness: groups.Quiet})
+		if d.desiredRetire || d.state != "pending" || d.messageID == nil {
+			t.Fatalf("the waiting final edit was not cancelled: %+v", d)
+		}
+		e.round(t)
+		if c := e.callsTo(destCritical); callMethods(c) != "update" || c[0].Loudness != groups.Quiet ||
+			slices.Contains(c[0].Message.Notices, finalText("AGAAAAAAAAAA21")) {
+			t.Errorf("calls to the destination kept %+v", c)
+		}
+	})
 	t.Run("team", func(t *testing.T) {
 		// payments drops payments-notice: its final edit; then search, which names it, joins with its Alert.
 		e := entriesEnv(t)

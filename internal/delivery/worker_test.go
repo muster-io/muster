@@ -569,7 +569,7 @@ func (f *fakeDB) healthy(dest int64) bool {
 // work says whether a pending delivery is work for the worker: no Storm holds it, and its Destination is not deleted
 // unless it is its final edit.
 func (f *fakeDB) work(d *fakeDelivery) bool {
-	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire)
+	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire || (d.publishedAt == nil && d.started == nil))
 }
 
 func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliveriesParams) (
@@ -641,7 +641,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		DestinationPublicID: ds.publicID, DestinationName: ds.name, DestinationType: ds.typ,
 		ConnectionID: nullInt(ds.connection), DestinationHealth: ds.health, GroupCreatedAt: d.updated,
 		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
-		ActualButtonKeyID: txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
+		DestinationDeleted: ds.deleted,
+		ActualButtonKeyID:  txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
 		PastEditWindow: d.pastEditWindow, RepublicationStartedAt: tz(d.restarted)}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}

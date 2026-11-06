@@ -1325,3 +1325,39 @@ func TestNoSummaryWithoutHeldGroup(t *testing.T) {
 		t.Error("the destination the held alert groups reach got no summary")
 	}
 }
+
+// TestDeletedDestinationNeverPublished is C-11.FR-14 against a late delivery: one that an Enqueue created in a
+// Destination while its deletion was committing — after the deletion ended its other deliveries — is claimed, never
+// published there, and withheld without a call, with its Alert Group's hint; the secrets of the Destination are then
+// wiped. A final edit there still goes out.
+func TestDeletedDestinationNeverPublished(t *testing.T) {
+	e := memberEnv(t)
+	e.db.routeDests[routeID] = []int64{destMM, destWH}
+	e.enqueue(t, e.group(groups.StatusFiring, "a"), groups.System, created())
+	e.round(t)
+	e.rec.Reset()
+	wh := e.db.dests[destWH]
+	wh.secrets, wh.deleted = 3, true
+	late := &fakeDelivery{id: 905, dest: destWH, group: 22, state: "pending", threadState: "none",
+		next: e.business.Now(), entries: []byte(`[{"kind":"team","team_id":7,"severity_condition":"any"}]`)}
+	e.db.groups[22] = &fakeGroup{id: 22, publicID: "AGAAAAAAAA0022", number: 22, title: "g", status: "firing",
+		route: routeID, created: e.business.Now()}
+	if err := e.svc.RetireDestination(t.Context(), nil, destWH); err != nil {
+		t.Fatal(err)
+	}
+	// Created after the deletion ended the Destination's deliveries, before it committed.
+	e.db.deliveries = append(e.db.deliveries, late)
+	e.db.hints = nil
+	e.round(t)
+	if late.state != "withheld" || late.messageID != nil || late.publishedAt != nil {
+		t.Errorf("the late delivery in the deleted destination: %+v", late)
+	}
+	if c := e.callsTo(destWH); callMethods(c) != "update" ||
+		c[0].Message.Notices[len(c[0].Message.Notices)-1] != finalText("AGAAAAAAAAAA21") {
+		t.Errorf("calls to the deleted destination %+v", c)
+	}
+	if wh.secrets != 0 || !slices.Contains(e.db.hints, db.Hint{OrgID: orgID, Type: "alert-group",
+		ID: "AGAAAAAAAA0022"}) {
+		t.Errorf("secrets %d, hints %+v", wh.secrets, e.db.hints)
+	}
+}

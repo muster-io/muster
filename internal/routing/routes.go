@@ -471,12 +471,12 @@ type Queries interface {
 	ListOpenAlertGroupCounts(ctx context.Context, orgID int64) ([]dbgen.ListOpenAlertGroupCountsRow, error)
 	ResolveDestinations(ctx context.Context, arg dbgen.ResolveDestinationsParams) ([]dbgen.ResolveDestinationsRow,
 		error)
-	ShareDestinations(ctx context.Context, arg dbgen.ShareDestinationsParams) ([]int64, error)
 	ListRouteDestinationIDs(ctx context.Context, arg dbgen.ListRouteDestinationIDsParams) (
 		[]dbgen.ListRouteDestinationIDsRow, error)
 	InsertRouteDestinations(ctx context.Context, arg dbgen.InsertRouteDestinationsParams) error
 	SetRouteDestinationConditions(ctx context.Context, arg dbgen.SetRouteDestinationConditionsParams) error
 	DeleteRouteDestinations(ctx context.Context, arg dbgen.DeleteRouteDestinationsParams) error
+	DropDeletedRouteDestinations(ctx context.Context, arg dbgen.DropDeletedRouteDestinationsParams) error
 	LockRouteMembership(ctx context.Context, arg dbgen.LockRouteMembershipParams) error
 	ListTeamsOfDestination(ctx context.Context, arg dbgen.ListTeamsOfDestinationParams) ([]int64, error)
 	LockTeamMembership(ctx context.Context, arg dbgen.LockTeamMembershipParams) error
@@ -947,35 +947,6 @@ func (s *Service) resolveDestinations(ctx context.Context, q Queries, req []requ
 	return out, nil
 }
 
-// shareDestinations locks the Destinations that the Input names, by its entries or its deprecated list, FOR SHARE
-// before the Route's row (ShareDestinations): a deletion of one of them and the save serialize, so that the save never
-// writes an entry of a Destination deleted meanwhile, and the deletion, which locks the Route after the Destination,
-// waits for nothing the save holds.
-func (s *Service) shareDestinations(ctx context.Context, q Queries, in Input) error {
-	var ids []string
-	switch {
-	case in.DestinationEntries != nil:
-		for _, e := range *in.DestinationEntries {
-			if id, err := publicid.Parse(publicid.Destination, e.DestinationID); err == nil {
-				ids = append(ids, id)
-			}
-		}
-	case in.DestinationIDs != nil:
-		for _, raw := range in.DestinationIDs {
-			if id, err := publicid.Parse(publicid.Destination, raw); err == nil {
-				ids = append(ids, id)
-			}
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	if _, err := q.ShareDestinations(ctx, dbgen.ShareDestinationsParams{OrgID: s.orgID, PublicIds: ids}); err != nil {
-		return fmt.Errorf("lock the destinations of the route: %w", err)
-	}
-	return nil
-}
-
 // unknownDestination is the refusal of a Destination of a Route at its pointer.
 func unknownDestination(pointer string) error {
 	return &FieldError{Pointer: pointer, Code: CodeUnknownID, Detail: "No such Destination."}
@@ -984,12 +955,17 @@ func unknownDestination(pointer string) error {
 // writeDestinations makes want the Destinations of the Route routeID in route_destinations — those kept keep when
 // they were added, and take the condition of want — and returns the entries before and after, by Destination in id
 // order. It takes the Route's membership lock first, after the Route's row, so that an Enqueue on the Route waits for
-// the change or the change for it.
+// the change or the change for it. Entries of a deleted Destination, which a save that raced its deletion may have
+// left and no read returns, are dropped.
 func (s *Service) writeDestinations(ctx context.Context, q Queries, routeID int64, want destinationSet) (before,
 	after []Entry, err error) {
 	if err := q.LockRouteMembership(ctx, dbgen.LockRouteMembershipParams{LockClass: db.RouteMembershipLockClass,
 		RouteID: routeID}); err != nil {
 		return nil, nil, fmt.Errorf("lock the destinations of the route: %w", err)
+	}
+	if err := q.DropDeletedRouteDestinations(ctx, dbgen.DropDeletedRouteDestinationsParams{OrgID: s.orgID,
+		RouteID: routeID}); err != nil {
+		return nil, nil, fmt.Errorf("drop the entries of deleted destinations from the route: %w", err)
 	}
 	rows, err := q.ListRouteDestinationIDs(ctx, dbgen.ListRouteDestinationIDsParams{OrgID: s.orgID,
 		RouteIds: []int64{routeID}})
@@ -1116,9 +1092,6 @@ func (s *Service) create(ctx context.Context, r Requester, in Input, how creatio
 			if below, err = how.precondition(q); err != nil {
 				return err
 			}
-		}
-		if err := s.shareDestinations(ctx, q, in); err != nil {
-			return err
 		}
 		dests, err := s.resolveDestinations(ctx, q, requestedDestinations(in, nil))
 		if err != nil {
@@ -1251,13 +1224,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	}
 	var before, updated Route
 	err := s.store.InTx(ctx, func(q Queries) error {
-		// A new owner is read before the Route is locked: a Team's deletion locks the Team, then its Routes. So are
-		// the Destinations it names: a Destination's deletion locks it, then its Routes.
+		// A new owner is read before the Route is locked: a Team's deletion locks the Team, then its Routes.
 		owner, err := s.resolveOwner(ctx, q, in.OwningTeamID, nil)
 		if err != nil {
-			return err
-		}
-		if err := s.shareDestinations(ctx, q, in); err != nil {
 			return err
 		}
 		if before, err = s.lock(ctx, q, publicID); err != nil {

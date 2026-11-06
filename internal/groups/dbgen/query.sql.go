@@ -3334,8 +3334,9 @@ SELECT e.kind, e.team_id, e.destination_id, e.severity_condition, d.public_id, d
        EXISTS (SELECT 1
                FROM deliveries x
                WHERE x.org_id = $1 AND x.alert_group_id = $2::bigint
-                 AND x.destination_id = e.destination_id AND NOT x.desired_retire
-                 AND x.state NOT IN ('withheld', 'retired'))::boolean AS delivered
+                 AND x.destination_id = e.destination_id AND x.state NOT IN ('withheld', 'retired')
+                 AND (NOT x.desired_retire OR x.published_at IS NOT NULL
+                      OR x.publication_started_at IS NOT NULL))::boolean AS delivered
 FROM (SELECT 'route'::text AS kind, 0::bigint AS team_id, rd.destination_id, rd.severity_condition
       FROM route_destinations rd
       WHERE rd.org_id = $1 AND rd.route_id = $3
@@ -3370,9 +3371,10 @@ type ListReachEntriesRow struct {
 
 // ListReachEntries lists the Destination entries the reach of an Alert Group is computed from: those of its Route and
 // those of its Teams, each with its Severity condition, of the Destinations that are not deleted and have a Root
-// message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a delivery
-// kept current there — one that got its final edit, or was withheld, does not count, so the Destination joins it again
-// — by Destination.
+// message — an outgoing webhook in the events mode has none — with whether the Alert Group already has a Root message
+// there: one whose final edit was made, or that was withheld, does not count, so the Destination joins it again with a
+// new Publication; one whose final edit still waits counts, as its Root message stays, and the growth keeps it current
+// instead of giving it the final edit (delivery's Enqueue) — by Destination.
 func (q *Queries) ListReachEntries(ctx context.Context, arg ListReachEntriesParams) ([]ListReachEntriesRow, error) {
 	rows, err := q.db.Query(ctx, listReachEntries, arg.OrgID, arg.AlertGroupID, arg.RouteID)
 	if err != nil {

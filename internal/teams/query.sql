@@ -412,15 +412,13 @@ SELECT id, public_id
 FROM destinations
 WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL;
 
--- ShareTeamDestinations reads, as ResolveTeamDestinations does, the Destinations a save of a Team names, and locks them
--- FOR SHARE, which the deletion of a Destination's FOR NO KEY UPDATE waits for and which waits for it: the save never
--- writes an entry of a Destination whose deletion commits meanwhile, which finds such an entry in turn.
--- name: ShareTeamDestinations :many
-SELECT id, public_id
-FROM destinations
-WHERE org_id = @org_id AND public_id = ANY(@public_ids::text[]) AND deleted_at IS NULL
-ORDER BY id
-FOR SHARE;
+-- DropDeletedTeamDestinations removes from a Team the entries of Destinations that are deleted: one a save wrote while
+-- the Destination's deletion committed, which no read returns.
+-- name: DropDeletedTeamDestinations :exec
+DELETE FROM team_destinations td
+USING destinations d
+WHERE td.org_id = @org_id AND td.team_id = @team_id AND d.org_id = td.org_id AND d.id = td.destination_id
+  AND d.deleted_at IS NOT NULL;
 
 -- DeleteTeamDestinations removes Destinations from a Team.
 -- name: DeleteTeamDestinations :exec
