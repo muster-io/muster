@@ -346,21 +346,25 @@ test("shows the Teams of an Alert Group in its header, Timeline and Alerts", asy
   );
   await expect(page.getByTestId("alert-group-teams").getByRole("link")).toHaveCount(0);
 
-  // In Russian.
-  await page.goto("/profile");
-  await page.getByLabel("Language").selectOption("ru");
-  await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
-  await page.goto(`/alert-groups/${paymentsGroup}`);
-  await expect(page.getByTestId("alert-group-teams")).toContainText(
-    "Команды: payments (удалена) — по метке команды",
-  );
-  await expect(entry(page, "payments добавлена — по метке команды")).toHaveCount(1);
-  await page.goto(`/alert-groups/${capitalGroup}`);
-  await expect(entry(page, "Нет команды со значением Payments метки команды")).toHaveCount(1);
-  await shot(page, "alert-group-page-teams-ru");
-  await page.goto("/profile");
-  await page.getByLabel("Язык").selectOption("en");
-  await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  // In Russian; the language of the Admin goes back to the browser's whatever happens.
+  try {
+    await page.goto("/profile");
+    await page.getByLabel("Language").selectOption("ru");
+    await expect(page.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await page.goto(`/alert-groups/${paymentsGroup}`);
+    await expect(page.getByTestId("alert-group-teams")).toContainText(
+      "Команды: payments (удалена) — по метке команды",
+    );
+    await expect(entry(page, "payments (удалена) добавлена — по метке команды")).toHaveCount(1);
+    await page.goto(`/alert-groups/${capitalGroup}`);
+    await expect(entry(page, "Нет команды со значением Payments метки команды")).toHaveCount(1);
+    await shot(page, "alert-group-page-teams-ru");
+  } finally {
+    const reset = await adminApi();
+    const me = await reset.call<{ user: { name: string } }>("GET", "/api/v1/me");
+    await reset.call("PUT", "/api/v1/me", { name: me.user.name, language: null });
+    await reset.dispose();
+  }
 
   const cleanup = await adminApi();
   await removeIntegration(cleanup, "ag-teams");

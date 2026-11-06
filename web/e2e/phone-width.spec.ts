@@ -11,6 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  Api,
   TEAM_BOB,
   TEAM_SPEC_PASSWORD,
   adminApi,
@@ -228,10 +229,12 @@ test("the list with My Teams and the Alert Group page with its Teams fit 360 px,
     );
     await expectNoHorizontalScroll(page);
     await shot(page, "alert-group-page-teams-ru-360");
-    await page.goto("/profile");
-    await page.getByLabel("Язык").selectOption("en");
-    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
   } finally {
+    // bob reads English again whatever happened above.
+    const bob = await Api.signIn(TEAM_BOB, TEAM_SPEC_PASSWORD);
+    const me = await bob.call<{ user: { name: string } }>("GET", "/api/v1/me");
+    await bob.call("PUT", "/api/v1/me", { name: me.user.name, language: null });
+    await bob.dispose();
     const cleanup = await adminApi();
     await removeIntegration(cleanup, "ag-phone-teams");
     await removeTeamsBySlug(cleanup, ["payments", "search"]);
