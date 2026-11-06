@@ -178,6 +178,11 @@ func TestRoutingChanges(t *testing.T) {
 			"shared", "critical", "payments-notice", "critical")
 	})
 	before := openGroupUpdatesDone(h, "team_destinations")
+	rt.waitChannels("the critical alert group in payments-notice, named by the route for critical", n2,
+		"ch-infra-critical", "ch-payments-critical", "ch-payments-notice", fakemattermost.ChannelAlertsProd)
+	if rt.loudIn(n2, "ch-payments-notice") {
+		t.Error("the route's new entry published the critical alert group loudly")
+	}
 	rt.putTeam(tp, rt.entries("payments-critical", "critical"))
 	eventually(t, "the team's destinations applied", func() bool {
 		return openGroupUpdatesDone(h, "team_destinations") > before
@@ -230,7 +235,7 @@ func TestRoutingChanges(t *testing.T) {
 		return openGroupUpdatesDone(h, "team_destinations") > before
 	})
 	rt.waitChannels("the acknowledged alert group in checkout-notice", n2, "ch-infra-critical",
-		"ch-payments-critical", fakemattermost.ChannelAlertsProd, fakemattermost.ChannelAlerts)
+		"ch-payments-critical", "ch-payments-notice", fakemattermost.ChannelAlertsProd, fakemattermost.ChannelAlerts)
 	if rt.loudIn(n2, fakemattermost.ChannelAlerts) {
 		t.Error("the acknowledged alert group arrived loudly")
 	}
