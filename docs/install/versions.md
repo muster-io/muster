@@ -146,6 +146,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       read `destination_entries`; `destination_ids` stays, derived from `destination_entries`, until 0.3.0 removes it: a
       request with only `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
       Outgoing webhooks in events mode may receive the new event `destination_joined`.
+    - Migration 0033 adds the [contacts at Notification gateways](../messengers/notification-gateways.md#contact-for-calls-and-sms)
+      and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
+      reads and writes nothing of the new tables.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -461,6 +464,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0033 adds the contacts at Notification gateways in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 32, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

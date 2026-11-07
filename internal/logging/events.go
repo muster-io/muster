@@ -770,6 +770,28 @@ var GatewayNotificationSent = newEvent("gateway_notification_sent", LevelInfo, "
 		"The contact and the text are never logged; the Request log of the Connection has the request.",
 	"connection", "key", "class")
 
+// GatewayContactCodeSent is logged for each code of a contact at a Notification gateway that Muster sent or tried to
+// send (C-30.FR-3).
+var GatewayContactCodeSent = newEvent("gateway_contact_code_sent", LevelInfo, "C-30",
+	"A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of "+
+		"the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and "+
+		"outcome ok when the gateway accepted the notification, limited when no limiter token was free within "+
+		"delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, "+
+		"rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. "+
+		"The contact text and the code are never logged.",
+	"user", "connection", "contact", "outcome")
+
+// GatewayContactCodeRejected is logged when a code typed for a contact at a Notification gateway did not confirm it
+// (C-30.FR-3).
+var GatewayContactCodeRejected = newEvent("gateway_contact_code_rejected", LevelWarn, "C-30",
+	"A code typed for a contact at a Notification gateway was refused: user is the public_id of the User, "+
+		"connection the public_id of the gateway's Connection, contact the public_id of the contact, and reason "+
+		"wrong_code, other_session for a code asked for in another web session, which counts as an attempt like a "+
+		"wrong one, used, void — after the last wrong attempt, a newer code or a failed sending — expired or "+
+		"no_code; attempts_remaining is how many codes the contact still takes. The contact text and the code are "+
+		"never logged.",
+	"user", "connection", "contact", "reason", "attempts_remaining")
+
 // BridgeEventFailed is logged when the handling of a Bridge event failed and its id was not recorded
 // (C-22.FR-11, FR-24).
 var BridgeEventFailed = newEvent("bridge_event_failed", LevelWarn, "C-22",

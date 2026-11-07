@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,9 @@ import (
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/db/dbtest"
+	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/schedules"
@@ -817,6 +821,123 @@ func TestIntegrationIcalFeedsOfDeletedUsers(t *testing.T) {
 		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE details::text LIKE '%mstr_cal_%'
 			OR diff::text LIKE '%mstr_cal_%'`).Scan(&leaked); err != nil || leaked != 0 {
 			t.Errorf("%d Audit log entries carry the token, %v", leaked, err)
+		}
+	})
+}
+
+// codeGateway is a Notification gateway that keeps the text of the last notification it was sent.
+type codeGateway struct {
+	mu   sync.Mutex
+	text string
+}
+
+func (g *codeGateway) Notify(_ context.Context, _ delivery.Call, n delivery.Notification) delivery.Outcome {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.text = n.Text
+	return delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "n1"}
+}
+
+// TestIntegrationGatewayContactsOfDeletedUsers is C-03.FR-13 revised for L2 and C-30.AC-2: deleting a user erases their
+// contacts at Notification gateways and their codes in the transaction of the delete, each recorded as
+// gateway_contact.deleted with the reason user_deleted; the Audit log keeps the entries about the contact, which show
+// /contact as the contact while the user exists and as [erased] once they are deleted; disabling keeps the contacts.
+func TestIntegrationGatewayContactsOfDeletedUsers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		const contact = "+10000000002"
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url,
+			bridge_event_delivery, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, bridge_info, created_at,
+			updated_at) VALUES ($1, 'CN0000000000G1', 'bridge', 'Gateway', 'http://gw', 'poll', '\x00', 'k1', $2, 1, 1,
+			'{"roles":["gateway"]}', $2, $2)`, e.orgID, t0); err != nil {
+			t.Fatal(err)
+		}
+		gw := &codeGateway{}
+		w := audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock)
+		contacts := gateways.New(gateways.Config{OrgID: e.orgID, Store: gateways.NewStore(e.d.Pool), Audit: w,
+			Business: e.clock, Log: logging.New(&bytes.Buffer{}, logging.LevelInfo), Gateway: gw,
+			Path: deliverytest.Unlimited(e.orgID, clock.Clocks{Business: e.clock, Real: clock.Real{}})})
+		e.admin.SetContactRemover(contacts)
+		bob := e.create(t, "Bob", "bob", auth.RoleResponder, "bob-password-1")
+		sess, err := e.signIn(t, "bob", "bob-password-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		by := gateways.Requester{UserID: bob.ID, UserPublicID: bob.PublicID, SessionID: sess.ID,
+			Actor: audit.User(bob.ID, bob.PublicID), Transport: audit.TransportUI}
+		c, err := contacts.Create(ctx, by, "CN0000000000G1", contact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		code := regexp.MustCompile(`[0-9]{6}`).FindString(gw.text)
+		if _, err := contacts.Confirm(ctx, by, c.PublicID, code); err != nil {
+			t.Fatal(err)
+		}
+		rows := func() (n int) {
+			t.Helper()
+			if err := e.d.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM gateway_contacts WHERE user_id = $1) +
+				(SELECT count(*) FROM gateway_contact_codes WHERE user_id = $1)`, bob.ID).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		shown := func() any {
+			t.Helper()
+			page, err := e.reader.List(ctx, audit.Filter{Action: gateways.ActionConfirmed, Limit: 10})
+			if err != nil || len(page.Entries) != 1 {
+				t.Fatalf("the confirmation: %+v, %v", page, err)
+			}
+			for _, ch := range page.Entries[0].Diff {
+				if ch.Pointer == audit.ContactPointer {
+					return ch.After
+				}
+			}
+			return nil
+		}
+		if got := shown(); got != contact || rows() != 2 {
+			t.Errorf("before the delete: /contact %v, %d rows", got, rows())
+		}
+		if _, err := e.admin.Disable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.admin.Enable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if rows() != 2 {
+			t.Errorf("disabling removed the contacts: %d rows", rows())
+		}
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if n := rows(); n != 0 {
+			t.Errorf("a deleted user has %d contacts and codes", n)
+		}
+		if got := shown(); got != audit.Erased {
+			t.Errorf("after the delete: /contact %v", got)
+		}
+		page, err := e.reader.List(ctx, audit.Filter{ResourceType: gateways.ResourceContact, Limit: 10})
+		if err != nil || len(page.Entries) != 3 {
+			t.Fatalf("the entries about the contact: %+v, %v", page, err)
+		}
+		for _, entry := range page.Entries {
+			for _, ch := range entry.Diff {
+				if ch.Pointer == audit.ContactPointer && (ch.After != nil && ch.After != audit.Erased ||
+					ch.Before != nil && ch.Before != audit.Erased) {
+					t.Errorf("%s shows the contact: %+v", entry.Action, ch)
+				}
+			}
+		}
+		if page.Entries[0].Action != gateways.ActionDeleted || page.Entries[0].Details["reason"] != "user_deleted" ||
+			page.Entries[0].Actor.PublicID != e.ops.PublicID {
+			t.Errorf("the deletion entry: %+v", page.Entries[0])
+		}
+		var leaked int
+		if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE details::text LIKE '%' || $1 || '%'
+			OR details::text LIKE '%' || $2 || '%' OR diff::text LIKE '%"' || $2 || '"%'`, contact, code).
+			Scan(&leaked); err != nil || leaked != 0 {
+			t.Errorf("%d entries carry the contact in their details or the code, %v", leaked, err)
 		}
 	})
 }

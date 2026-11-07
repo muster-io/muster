@@ -221,11 +221,13 @@ type Config struct {
 	Templates    Templates
 	Links        Links
 	AccountLinks AccountLinks
-	SystemStatus SystemStatus
-	RequestLog   RequestLog
-	Teams        Teams
-	Schedules    Schedules
-	IcalFeeds    IcalFeeds
+	// GatewayContacts are the contacts of people at the Notification gateways (C-30.FR-3).
+	GatewayContacts GatewayContacts
+	SystemStatus    SystemStatus
+	RequestLog      RequestLog
+	Teams           Teams
+	Schedules       Schedules
+	IcalFeeds       IcalFeeds
 	// TrustedProxies are MUSTER_TRUSTED_PROXIES, for the client address.
 	TrustedProxies []netip.Prefix
 	Log            *logging.Logger
@@ -237,39 +239,40 @@ type Config struct {
 type Server struct {
 	gen.StrictServerInterface // nil: the operations no story has implemented answer 501 before reaching it
 
-	sessions       Sessions
-	users          Users
-	admin          UserAdmin
-	auditLog       AuditLog
-	totp           TOTP
-	organization   Organization
-	keyring        KeyringStatus
-	notices        Notices
-	live           Live
-	oidc           OIDC
-	tokens         Tokens
-	integrations   Integrations
-	snapshots      StoredSnapshots
-	alerts         Alerts
-	routes         Routes
-	alertGroups    AlertGroups
-	commands       Commands
-	directory      UserDirectory
-	connections    Connections
-	destinations   Destinations
-	webhooks       Webhooks
-	deliveries     Deliveries
-	templates      Templates
-	links          Links
-	accountLinks   AccountLinks
-	systemStatus   SystemStatus
-	requestLog     RequestLog
-	teams          Teams
-	schedules      Schedules
-	icalFeeds      IcalFeeds
-	trustedProxies []netip.Prefix
-	log            *logging.Logger
-	real           clock.Clock
+	sessions        Sessions
+	users           Users
+	admin           UserAdmin
+	auditLog        AuditLog
+	totp            TOTP
+	organization    Organization
+	keyring         KeyringStatus
+	notices         Notices
+	live            Live
+	oidc            OIDC
+	tokens          Tokens
+	integrations    Integrations
+	snapshots       StoredSnapshots
+	alerts          Alerts
+	routes          Routes
+	alertGroups     AlertGroups
+	commands        Commands
+	directory       UserDirectory
+	connections     Connections
+	destinations    Destinations
+	webhooks        Webhooks
+	deliveries      Deliveries
+	templates       Templates
+	links           Links
+	accountLinks    AccountLinks
+	gatewayContacts GatewayContacts
+	systemStatus    SystemStatus
+	requestLog      RequestLog
+	teams           Teams
+	schedules       Schedules
+	icalFeeds       IcalFeeds
+	trustedProxies  []netip.Prefix
+	log             *logging.Logger
+	real            clock.Clock
 
 	router     routers.Router
 	operations map[*openapi3.Operation]*operation
@@ -331,6 +334,9 @@ var implemented = map[string]bool{
 	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
 	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true, "GetOnCallNow": true,
 	"GetMyIcalFeed": true, "IssueMyIcalFeed": true, "RevokeMyIcalFeed": true,
+	"ListMyGatewayContacts": true, "CreateMyGatewayContact": true, "SendMyGatewayContactCode": true,
+	"ConfirmMyGatewayContact": true, "DeleteMyGatewayContact": true, "ListUserGatewayContacts": true,
+	"CreateUserGatewayContact": true, "DeleteUserGatewayContact": true,
 	// getIcalCalendar is outside /api/v1 and not generated: IcalHandler serves it.
 	"GetIcalCalendar": true,
 }
@@ -369,7 +375,7 @@ func New(cfg Config) (*Server, error) {
 		integrations: cfg.Integrations, snapshots: cfg.Snapshots, alerts: cfg.Alerts, routes: cfg.Routes,
 		alertGroups: cfg.AlertGroups, commands: cfg.Commands, directory: cfg.Directory,
 		connections: cfg.Connections, destinations: cfg.Destinations, webhooks: cfg.Webhooks, deliveries: cfg.Deliveries, templates: cfg.Templates, links: cfg.Links,
-		accountLinks: cfg.AccountLinks, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
+		accountLinks: cfg.AccountLinks, gatewayContacts: cfg.GatewayContacts, systemStatus: cfg.SystemStatus, requestLog: cfg.RequestLog, teams: cfg.Teams,
 		schedules: cfg.Schedules, icalFeeds: cfg.IcalFeeds,
 		trustedProxies: cfg.TrustedProxies, log: cfg.Log, real: cfg.Real,
 		router: router, operations: readOperations(doc), ifMatchRequired: ifMatchRequired(doc),

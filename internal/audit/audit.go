@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -151,7 +152,9 @@ func Changed[T comparable](pointer string, before, after T) []Change {
 	return []Change{{Pointer: pointer, Before: before, After: after}}
 }
 
-// Entry is one Audit log entry. Details never carry a Secret.
+// Entry is one Audit log entry. Details never carry a Secret. Personal are the pointers of the diff whose values are
+// personal data, such as a contact at a Notification gateway (C-30.FR-3): the table keeps them for the readers of the
+// Audit log, and its copy in the log shows them as [redacted].
 type Entry struct {
 	OrgID         int64
 	Actor         Actor
@@ -161,6 +164,7 @@ type Entry struct {
 	Diff          []Change
 	Details       map[string]any
 	SourceAddress netip.Addr
+	Personal      []string
 }
 
 // Store inserts entries; it runs over a pool or inside the transaction of the change it records.
@@ -284,12 +288,35 @@ func (e Entry) fields(id string, at time.Time, diff []Change, details map[string
 		f = append(f, logging.F("source_address", e.SourceAddress.String()))
 	}
 	if len(diff) > 0 {
-		f = append(f, logging.F("diff", diff))
+		f = append(f, logging.F("diff", redactPersonal(diff, e.Personal)))
 	}
 	if len(details) > 0 {
 		f = append(f, logging.F("details", details))
 	}
 	return f
+}
+
+// personalRedacted stands in the log for a personal value of a diff.
+const personalRedacted = "[redacted]"
+
+// redactPersonal is diff with the values at the pointers personal replaced by [redacted], an absent value kept.
+func redactPersonal(diff []Change, personal []string) []Change {
+	if len(personal) == 0 {
+		return diff
+	}
+	out := slices.Clone(diff)
+	for i, c := range out {
+		if !slices.Contains(personal, c.Pointer) {
+			continue
+		}
+		if c.Before != nil {
+			out[i].Before = personalRedacted
+		}
+		if c.After != nil {
+			out[i].After = personalRedacted
+		}
+	}
+	return out
 }
 
 func text(s string) pgtype.Text {

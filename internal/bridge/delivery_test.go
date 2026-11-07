@@ -1188,3 +1188,30 @@ func TestNotifyInteractive(t *testing.T) {
 		t.Errorf("requests %+v", reqs)
 	}
 }
+
+// TestNotificationMasking: a contact or a text of at least MinMaskedLength characters is a secret of the request and
+// masked in an answer that echoes it, plain or as JSON escapes it; a shorter one is neither, so that its characters
+// elsewhere — in times and ids — stay, and the Request log masks it by its place (internal/requestlog).
+func TestNotificationMasking(t *testing.T) {
+	long := delivery.Notification{Contact: "+10000000001", Text: `Your Muster code: 123456. "Quoted" text.`}
+	if got := notificationSecrets(long); len(got) != 2 || got[0] != logging.Secret(long.Contact) ||
+		got[1] != logging.Secret(long.Text) {
+		t.Errorf("secrets of a long contact: %v", got)
+	}
+	echo := outbound.Untrusted(`refused +10000000001: Your Muster code: 123456. \"Quoted\" text. at 2026-11-07`)
+	if got := maskNotification(echo, long); got != "refused [redacted]: [redacted] at 2026-11-07" {
+		t.Errorf("masked %q", got)
+	}
+	short := delivery.Notification{Contact: "+1", Text: "hi 12"}
+	if got := notificationSecrets(short); len(got) != 0 {
+		t.Errorf("secrets of a short contact: %v", got)
+	}
+	text := outbound.Untrusted(`{"contact":"+1"} at 2026-11-07T10:00:00+10:00, id n+1, hi 12`)
+	if got := maskNotification(text, short); got != text {
+		t.Errorf("a short contact masked %q", got)
+	}
+	cut := delivery.Notification{Contact: "+1", Text: strings.Repeat("я", MaxNotificationText+5)}
+	if got := notificationForms(cut); len(got) != 2 || utf8.RuneCountInString(got[1]) != MaxNotificationText {
+		t.Errorf("forms of a long text: %d", len(got))
+	}
+}

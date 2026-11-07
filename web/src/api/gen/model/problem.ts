@@ -6,6 +6,7 @@ import type { AlertGroupRef } from './alertGroupRef';
 import type { EntityRef } from './entityRef';
 import type { InUseRef } from './inUseRef';
 import type { ProblemError } from './problemError';
+import type { ProblemGatewayClass } from './problemGatewayClass';
 
 /**
  * RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
@@ -36,8 +37,10 @@ export interface Problem {
   /** Set on `rate-limited`; equals the `Retry-After` header. */
   retry_after_seconds?: number;
   /**
-     * Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+     * Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code). Set on the `contact_code_invalid` refusal of `confirmMyGatewayContact` too, with the attempts left for the code of the contact, 0 once it is void.
      * @minimum 0
      */
   attempts_remaining?: number;
+  /** Set on `gateway-refused`; how the Notification gateway refused the notification, as the Bridge protocol classifies it. */
+  gateway_class?: ProblemGatewayClass;
 }

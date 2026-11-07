@@ -73,6 +73,12 @@ const TeamEvaluationLockClass int32 = 0x6d75_0008
 // entries serialize.
 const TeamMembershipLockClass int32 = 0x6d75_0009
 
+// GatewayContactLockClass is the first key of the transaction advisory lock of the code requests for one contact text
+// at the Notification gateways, whose second key is hashtext of the Organization and the SHA-256 of the text: a code
+// request holds it while it counts the requests for the contact of the last hour and stores its own
+// (gateway.contact_code_requests), whichever User asks.
+const GatewayContactLockClass int32 = 0x6d75_000a
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

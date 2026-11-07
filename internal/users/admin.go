@@ -172,6 +172,17 @@ type FeedRemover interface {
 		t audit.Transport, addr netip.Addr) (func(context.Context), error)
 }
 
+// ContactRemover erases the contacts at Notification gateways of a deleted user and their codes (C-03.FR-13 revised for
+// L2, C-30.FR-3): Admin calls it inside the transaction tx of the delete, after the deletion of their iCal feed and
+// before the Audit log entry, with the actor, the Transport and the client address of the delete, each contact
+// recorded as gateway_contact.deleted with the reason user_deleted. Disabling a user keeps their contacts. An error
+// rolls the delete back. It returns what to run once tx committed, or nil. The gateways implement it (ADR-0016: the
+// interface is declared by its consumer).
+type ContactRemover interface {
+	RemoveUserContacts(ctx context.Context, tx dbgen.DBTX, userID int64, actor audit.Actor, t audit.Transport,
+		addr netip.Addr) (func(context.Context), error)
+}
+
 // Requester is who asks for an administrative change and how: the actor and the Transport of the Audit log entry, and
 // the client address.
 type Requester struct {
@@ -192,6 +203,7 @@ type Admin struct {
 	links     LinkRemover
 	teams     TeamRemover
 	feeds     FeedRemover
+	contacts  ContactRemover
 }
 
 // NewAdmin returns the Admin of the Organization orgID; clock is the business clock and publicURL is
@@ -216,6 +228,10 @@ func (a *Admin) SetTeamRemover(r TeamRemover) { a.teams = r }
 // SetFeedRemover sets what deletes the iCal feeds of the users that Delete deletes; the runtime sets it on the Admin
 // the API uses. One without removes nothing.
 func (a *Admin) SetFeedRemover(r FeedRemover) { a.feeds = r }
+
+// SetContactRemover sets what erases the contacts at Notification gateways of the users that Delete deletes; the
+// runtime sets it on the Admin the API uses. One without erases nothing.
+func (a *Admin) SetContactRemover(r ContactRemover) { a.contacts = r }
 
 // release runs the OwnerReleaser for the user u in the transaction of q and adds what it returns to committed.
 func (a *Admin) release(ctx context.Context, q AdminQueries, u User, reason string,
@@ -508,9 +524,10 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 // Delete deletes the user id (C-03.FR-13): the row stays with the status deleted, the name and the login become
 // deleted-user-<public_id>, the email and the password are erased, the sessions end, the Personal access tokens are
 // revoked with the reason owner_deleted (C-04.FR-1), open password setup links are superseded, their acknowledged
-// Alert Groups are released, their Account links removed (C-03.FR-13), they leave every Team (C-25.FR-3) and their
-// iCal feed is deleted (C-27.FR-10). The Audit log keeps the user's earlier entries, which show the new name. A
-// non-nil version must be the user's; deleting the last active Admin is ErrLastAdmin.
+// Alert Groups are released, their Account links removed (C-03.FR-13), they leave every Team (C-25.FR-3), their iCal
+// feed is deleted (C-27.FR-10) and their contacts at Notification gateways are erased (C-30.FR-3). The Audit log keeps
+// the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
+// Admin is ErrLastAdmin.
 func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int64) error {
 	var committed []func(context.Context)
 	err := a.store.InTx(ctx, func(q AdminQueries) error {
@@ -558,6 +575,15 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 				r.Address)
 			if err != nil {
 				return fmt.Errorf("delete the ical feed of %s: %w", before.PublicID, err)
+			}
+			if after != nil {
+				committed = append(committed, after)
+			}
+		}
+		if a.contacts != nil {
+			after, err := a.contacts.RemoveUserContacts(ctx, q.Tx(), before.ID, r.Actor, r.Transport, r.Address)
+			if err != nil {
+				return fmt.Errorf("erase the gateway contacts of %s: %w", before.PublicID, err)
 			}
 			if after != nil {
 				committed = append(committed, after)

@@ -111,6 +111,9 @@ Every masked value reads `[redacted]`.
 - **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
   press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
   `account_link` event, the code in a direct message.
+- **What a Notification gateway is sent**: the `contact` and the `text` of every request to `sendNotification`, in the
+  request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
+  confirms a contact ([Notification gateways](../messengers/notification-gateways.md#privacy)).
 - **What Slack sends and answers with**: the bot token and the app-level token, the Slack signing secret, the address
   that `apps.connections.open` answers with, whose single-use `ticket` opens a socket, the `response_url` of a press,
   and the legacy verification `token` that every Slack payload still carries.

@@ -58,6 +58,8 @@
   "footer.resolvedBy": "Resolved by {user}",
   "footer.snoozed": "Snoozed by {user} until {time}",
   "footer.snoozedNoEnd": "Snoozed by {user} with no end",
+  "gatewayContact.code_one": "Your Muster code: {code}. It is valid for {minutes} minute. Do not share it.",
+  "gatewayContact.code_other": "Your Muster code: {code}. It is valid for {minutes} minutes. Do not share it.",
   "labels.values_one": "{count} value",
   "labels.values_other": "{count} values",
   "link.dashboard": "Dashboard",

@@ -104,6 +104,7 @@ nav:
       - messengers/proxies.md
       - messengers/bridge.md
       - messengers/write-a-bridge.md
+      - messengers/notification-gateways.md
       - messengers/account-links.md
   - Outgoing webhooks:
       - outgoing-webhooks/events.md

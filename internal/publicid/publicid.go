@@ -25,6 +25,7 @@ const (
 	CheckRun           Prefix = "CR"
 	DeliveryEvent      Prefix = "DE"
 	Destination        Prefix = "DS"
+	GatewayContact     Prefix = "GC"
 	LinkRule           Prefix = "KR"
 	Note               Prefix = "NE"
 	IntegrationToken   Prefix = "NK"

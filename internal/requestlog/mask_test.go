@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/keyring"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // testKeys sign action ids with a fixed MAC: the masking reads their structure, never their signature.
@@ -362,5 +364,53 @@ func TestMaskSocketTicket(t *testing.T) {
 	if err := json.Unmarshal([]byte(maskShape(string(answer))), &m); err != nil ||
 		m["url"] != "wss://wss-primary.slack.com/link/?ticket=[redacted]&app_id=A0MUSTERDEVB" {
 		t.Errorf("the masked answer is %v, %v", m, err)
+	}
+}
+
+// TestMaskNotification is C-23.FR-3 and C-30.FR-10 revised for L2: the record of a sendNotification — by its
+// operation, or by its path for a record without one — shows the contact and the text of every notification as
+// [redacted], with or without an action, in the request, its answer and its error, whatever their length, while a
+// short contact elsewhere in the record is kept; other operations keep members of those names.
+func TestMaskNotification(t *testing.T) {
+	w, _, _ := newTestWriter(&fakeQueries{}, 0)
+	req := `{"contact":"+1","text":"Your Muster code: 123456. It is valid for 10 minutes. Do not share it.",` +
+		`"language":"en"}`
+	call := `{"contact":"+10000000001","text":"#7 DiskFull is firing","language":"ru","action":{"data":"d",` +
+		`"label":"Press 1 to acknowledge"}}`
+	for name, r := range map[string]outbound.Record{
+		"code": {Operation: NotificationOperation, Method: http.MethodPost, URL: "http://gw/v1/notifications",
+			RequestHeader: http.Header{"X-Count": {"+1"}}, RequestBody: []byte(req), Status: 400,
+			ResponseBody: []byte(`{"title":"refused","detail":"bad","echo":{"contact":"+1","text":"t \"q\" 123456"}}`),
+			Error:        `400: {"contact":"+1"}`},
+		"call without operation": {Method: http.MethodPost, URL: "http://gw/prefix/v1/notifications?x=1",
+			RequestBody: []byte(call), Status: 201, ResponseBody: []byte(`{"notification_id":"n1","replayed":false}`)},
+	} {
+		p := w.paramsOf(DirectionOutbound, r)
+		all := p.RequestBody + p.ResponseBody.String + p.Error.String
+		for _, gone := range []string{`"contact":"+1"`, "123456", "+10000000001", "DiskFull", `\"q\"`} {
+			if strings.Contains(all, gone) {
+				t.Errorf("%s: %q stays in %s", name, gone, all)
+			}
+		}
+		if !strings.Contains(p.RequestBody, `"contact":"[redacted]","text":"[redacted]"`) {
+			t.Errorf("%s: request %s", name, p.RequestBody)
+		}
+		if name == "code" && (string(p.RequestHeaders) != `{"X-Count":["+1"]}` ||
+			!strings.Contains(p.ResponseBody.String, `"echo":{"contact":"[redacted]","text":"[redacted]"}`) ||
+			p.Error.String != `400: {"contact":"[redacted]"}`) {
+			t.Errorf("%s: headers %s, answer %s, error %s", name, p.RequestHeaders, p.ResponseBody.String, p.Error.String)
+		}
+		if name != "code" && (!strings.Contains(p.RequestBody, `"language":"ru"`) ||
+			!strings.Contains(p.RequestBody, `"label":"Press 1 to acknowledge"`)) {
+			t.Errorf("%s: request %s", name, p.RequestBody)
+		}
+	}
+	other := w.paramsOf(DirectionOutbound, outbound.Record{Operation: "createPost", URL: "http://mm/api/v4/posts",
+		RequestBody: []byte(`{"contact":"+1","text":"hello"}`)})
+	if other.RequestBody != `{"contact":"+1","text":"hello"}` {
+		t.Errorf("another operation: %s", other.RequestBody)
+	}
+	if got := maskNotification("no members here"); got != "no members here" {
+		t.Errorf("maskNotification = %q", got)
 	}
 }

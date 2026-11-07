@@ -128,6 +128,7 @@ var titles = map[string]string{
 	typePayloadTooLarge:      "Payload too large",
 	typeRateLimited:          "Rate limited",
 	typeInteractiveExhausted: "Messenger is busy",
+	typeGatewayRefused:       "Notification gateway refused",
 	typeInternal:             "Internal error",
 	typeNotImplemented:       "Not implemented",
 }
@@ -148,8 +149,11 @@ type Problem struct {
 	LinkRules []gen.EntityRef
 	// InUseBy is set on team_in_use and schedule_in_use: the objects that hold the resource.
 	InUseBy []gen.InUseRef
-	// AttemptsRemaining is set on link_code_invalid: the codes the link request still takes.
+	// AttemptsRemaining is set on link_code_invalid and contact_code_invalid: the codes the link request or the contact
+	// still takes.
 	AttemptsRemaining *int
+	// GatewayClass is set on gateway-refused: how the Notification gateway refused.
+	GatewayClass *gen.ProblemGatewayClass
 }
 
 func (p *Problem) Error() string {
@@ -329,6 +333,7 @@ func writeProblem(w http.ResponseWriter, r *http.Request, p *Problem) {
 		body.InUseBy = &p.InUseBy
 	}
 	body.AttemptsRemaining = p.AttemptsRemaining
+	body.GatewayClass = p.GatewayClass
 	if p.RetryAfter > 0 {
 		body.RetryAfterSeconds = &p.RetryAfter
 		w.Header().Set(retryAfterHeader, strconv.Itoa(p.RetryAfter))

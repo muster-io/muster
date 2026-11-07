@@ -2339,6 +2339,33 @@ func (e Permission) Valid() bool {
 	}
 }
 
+// Defines values for ProblemGatewayClass.
+const (
+	ProblemGatewayClassForbidden   ProblemGatewayClass = "forbidden"
+	ProblemGatewayClassGone        ProblemGatewayClass = "gone"
+	ProblemGatewayClassInvalid     ProblemGatewayClass = "invalid"
+	ProblemGatewayClassRateLimited ProblemGatewayClass = "rate_limited"
+	ProblemGatewayClassTransient   ProblemGatewayClass = "transient"
+)
+
+// Valid indicates whether the value is a known member of the ProblemGatewayClass enum.
+func (e ProblemGatewayClass) Valid() bool {
+	switch e {
+	case ProblemGatewayClassForbidden:
+		return true
+	case ProblemGatewayClassGone:
+		return true
+	case ProblemGatewayClassInvalid:
+		return true
+	case ProblemGatewayClassRateLimited:
+		return true
+	case ProblemGatewayClassTransient:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProxyType.
 const (
 	ProxyTypeHttp   ProxyType = "http"
@@ -3921,7 +3948,7 @@ type AccountLink struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	ExternalId  string  `json:"external_id"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId                     `json:"id"`
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Messenger  Messenger                    `json:"messenger"`
@@ -3958,7 +3985,7 @@ type ActorRef struct {
 	// Deactivated The user or Service account was deleted; the UI shows "(deactivated)".
 	Deactivated bool `json:"deactivated"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId     `json:"id"`
 	Kind ActorRefKind `json:"kind"`
 
@@ -3991,7 +4018,7 @@ type AlertGroup struct {
 	// GroupLabels Label names and values.
 	GroupLabels *Labels `json:"group_labels,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id           PublicId    `json:"id"`
 	Integrations []EntityRef `json:"integrations"`
 
@@ -4151,7 +4178,7 @@ type AlertGroupNoticeKind string
 
 // AlertGroupRef defines model for AlertGroupRef.
 type AlertGroupRef struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Number The `#N` of the Alert Group.
@@ -4302,7 +4329,7 @@ type AuditEntry struct {
 	Details *map[string]interface{} `json:"details,omitempty"`
 	Diff    *[]AuditDiffEntry       `json:"diff,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id           PublicId                  `json:"id"`
 	ResourceId   nullable.Nullable[string] `json:"resource_id,omitempty"`
 	ResourceName nullable.Nullable[string] `json:"resource_name,omitempty"`
@@ -4391,7 +4418,7 @@ type BridgeCapabilitiesThreadMessages string
 
 // BridgeCodeLinkRequest defines model for BridgeCodeLinkRequest.
 type BridgeCodeLinkRequest struct {
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 
 	// Handle The handle of the account to link, of the kind the Connection's `handle_kind` names.
@@ -4403,7 +4430,7 @@ type BridgeCodeLinkStarted struct {
 	AttemptsRemaining int       `json:"attempts_remaining"`
 	ExpiresAt         time.Time `json:"expires_at"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
@@ -4428,7 +4455,7 @@ type BridgeConnection struct {
 	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
 	EventDelivery BridgeEventDelivery `json:"event_delivery"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Info The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.
@@ -4539,7 +4566,7 @@ type BridgeDestination struct {
 	Etag   *string           `json:"etag,omitempty"`
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter `destination.bridge.limiter`: the form proposes 30 requests per minute, sends and edits together, or half of the Connection's `info.limits.send_per_second_per_channel` when its info has it.
@@ -4674,13 +4701,13 @@ type BridgeLinkConfirm struct {
 	// Code The code the bot sent as a direct message.
 	Code *string `json:"code,omitempty"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
 // BridgeLinkRequest defines model for BridgeLinkRequest.
 type BridgeLinkRequest struct {
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 }
 
@@ -4778,7 +4805,7 @@ type BrokenDestination struct {
 
 // BulkCommandItem defines model for BulkCommandItem.
 type BulkCommandItem struct {
-	// AlertGroupId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// AlertGroupId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	AlertGroupId PublicId `json:"alert_group_id"`
 
 	// Code Stable code of a result other than `done` and `unchanged`: with `refused`, a `command-refused` code such as `already_resolved` or `owner_must_be_user` (Acknowledge by a Service account); with `skipped`, `owned_by_other` for an Acknowledge skipped because another user owns the Alert Group; with `failed`, `not_found` for an id that names no Alert Group the caller may see.
@@ -5059,7 +5086,7 @@ type DestinationCreated struct {
 
 // DestinationEntry A Destination of a Route or a Team with its Severity condition.
 type DestinationEntry struct {
-	// DestinationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// DestinationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	DestinationId PublicId `json:"destination_id"`
 
 	// SeverityCondition Omitted, `any`.
@@ -5121,7 +5148,7 @@ type DestinationReadFields struct {
 	Etag   *string           `json:"etag,omitempty"`
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// OwningTeam The Team that owns the Destination, null when none does.
@@ -5137,7 +5164,7 @@ type DestinationReadFields struct {
 type DestinationRef struct {
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId        `json:"id"`
 	Name string          `json:"name"`
 	Type DestinationType `json:"type"`
@@ -5201,7 +5228,7 @@ type DurationStats struct {
 
 // EntityRef defines model for EntityRef.
 type EntityRef struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Name string   `json:"name"`
 }
@@ -5213,6 +5240,41 @@ type ExtractionRule struct {
 
 	// Path JSONPath into the response, for example `$.data.id`.
 	Path string `json:"path"`
+}
+
+// GatewayContact A person's contact at a Notification gateway. A contact is personal data, not a Secret — its person, Admins and the gateway read it — and the Request log masks it. Only a confirmed contact is called.
+type GatewayContact struct {
+	Confirmed   bool                         `json:"confirmed"`
+	ConfirmedAt nullable.Nullable[time.Time] `json:"confirmed_at"`
+	Connection  EntityRef                    `json:"connection"`
+	Contact     string                       `json:"contact"`
+	CreatedAt   time.Time                    `json:"created_at"`
+
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id PublicId `json:"id"`
+
+	// Replaces The confirmed contact of the same person and gateway that this one replaces once it is confirmed, until then the one called; null for a confirmed contact and without one.
+	Replaces nullable.Nullable[NullablePublicId] `json:"replaces"`
+}
+
+// GatewayContactConfirm defines model for GatewayContactConfirm.
+type GatewayContactConfirm struct {
+	// Code The code the gateway delivered.
+	Code *string `json:"code,omitempty"`
+}
+
+// GatewayContactInput defines model for GatewayContactInput.
+type GatewayContactInput struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Contact A phone number or another address the gateway understands, as text; trimmed, 1 to 200 characters. Muster does not check phone numbers.
+	Contact string `json:"contact"`
+}
+
+// GatewayContactList defines model for GatewayContactList.
+type GatewayContactList struct {
+	Items []GatewayContact `json:"items"`
 }
 
 // GroupKeyPreview Covers the Alerts reported firing in the Stored Snapshots of the period that the Route would take at its place in the current evaluation order (Matchers without a saved Route stand for a new Route just before the Default route), each Alert once with its Integration's Static labels, read from the newest Snapshot back and at most `routing.group_key_preview_max_alerts` of them.
@@ -5342,7 +5404,7 @@ type IcalFeedIssued struct {
 
 // InUseRef An object that holds the resource a deletion refuses.
 type InUseRef struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId     `json:"id"`
 	Name string       `json:"name"`
 	Type InUseRefType `json:"type"`
@@ -5366,7 +5428,7 @@ type Integration struct {
 	Etag      *string       `json:"etag,omitempty"`
 	Heartbeat HeartbeatInfo `json:"heartbeat"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// IngestUrl Ingestion endpoint on the ingest listener (`MUSTER_INGEST_URL` + `/api/v1/ingest`).
@@ -5486,7 +5548,7 @@ type IntegrationList struct {
 type IntegrationToken struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId                     `json:"id"`
 	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
 	Name       *string                      `json:"name,omitempty"`
@@ -5593,7 +5655,7 @@ type LinkRule struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id       PublicId      `json:"id"`
 	Matchers []Matcher     `json:"matchers"`
 	Name     string        `json:"name"`
@@ -5634,7 +5696,7 @@ type LinkableConnection struct {
 	// HandleKind Set on Bridge Connections only; the kind of handle a code needs, the `user_lookup` of the Connection's last `info`, which labels the handle field — Email, Login, Username or User id. Null when no code is offered.
 	HandleKind nullable.Nullable[LinkHandleKind] `json:"handle_kind,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// LinkMethods Set on Bridge Connections only, from the Connection's last `info`; `token`, a token sent to the bot, always, and `code`, a code sent by direct message, where `info` declares `direct_messages` with `bot_can_start` and a `user_lookup` other than `none`. Only `token` while Muster has not read `info`.
@@ -5678,7 +5740,7 @@ type LookupTable struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Name Unique in the Organization; Link rule templates call `lookup` with it.
@@ -5790,7 +5852,7 @@ type MattermostConnection struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -5862,7 +5924,7 @@ type MattermostDestination struct {
 	ChannelId   string                    `json:"channel_id"`
 	ChannelName nullable.Nullable[string] `json:"channel_name,omitempty"`
 
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId  `json:"connection_id"`
 	CreatedAt    time.Time `json:"created_at"`
 
@@ -5870,7 +5932,7 @@ type MattermostDestination struct {
 	Etag   *string           `json:"etag,omitempty"`
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -5904,7 +5966,7 @@ type MattermostDestinationInput struct {
 	Buttons   *DestinationButtonSet `json:"buttons,omitempty"`
 	ChannelId string                `json:"channel_id"`
 
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -5928,13 +5990,13 @@ type MattermostLinkConfirm struct {
 	// Code The code the bot sent as a direct message.
 	Code *string `json:"code,omitempty"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
 // MattermostLinkRequest defines model for MattermostLinkRequest.
 type MattermostLinkRequest struct {
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 
 	// Username The `@username` to link; a leading `@` is optional.
@@ -5946,7 +6008,7 @@ type MattermostLinkStarted struct {
 	AttemptsRemaining int       `json:"attempts_remaining"`
 	ExpiresAt         time.Time `json:"expires_at"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
@@ -6133,7 +6195,7 @@ type Note struct {
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
@@ -6407,7 +6469,7 @@ type Organization struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id             PublicId `json:"id"`
 	InstanceLabels []string `json:"instance_labels"`
 	Name           string   `json:"name"`
@@ -6684,7 +6746,7 @@ type PersonalAccessToken struct {
 	// ExpiresAt Null means the token never expires; the UI warns.
 	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id              PublicId                     `json:"id"`
 	LastUsedAddress nullable.Nullable[string]    `json:"last_used_address,omitempty"`
 	LastUsedAt      nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
@@ -6716,7 +6778,7 @@ type PersonalAccessTokenList struct {
 
 // Problem RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Problem struct {
-	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code).
+	// AttemptsRemaining Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used (void, used or expired, or after the last wrong code). Set on the `contact_code_invalid` refusal of `confirmMyGatewayContact` too, with the attempts left for the code of the contact, 0 once it is void.
 	AttemptsRemaining *int `json:"attempts_remaining,omitempty"`
 
 	// Code Stable machine code that refines `type`, listed per type in `x-problem-codes`. Clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`.
@@ -6727,6 +6789,9 @@ type Problem struct {
 
 	// Errors Field-level errors. Present for `validation-failed`.
 	Errors *[]ProblemError `json:"errors,omitempty"`
+
+	// GatewayClass Set on `gateway-refused`; how the Notification gateway refused the notification, as the Bridge protocol classifies it.
+	GatewayClass *ProblemGatewayClass `json:"gateway_class,omitempty"`
 
 	// InUseBy Set on `team_in_use` and `schedule_in_use`; the objects that hold the resource, each with its kind, `public_id` and name.
 	InUseBy *[]InUseRef `json:"in_use_by,omitempty"`
@@ -6755,6 +6820,9 @@ type Problem struct {
 	// Type Stable problem type URI.
 	Type string `json:"type"`
 }
+
+// ProblemGatewayClass Set on `gateway-refused`; how the Notification gateway refused the notification, as the Bridge protocol classifies it.
+type ProblemGatewayClass string
 
 // ProblemError defines model for ProblemError.
 type ProblemError struct {
@@ -6810,7 +6878,7 @@ type ProxyConfigInput struct {
 // ProxyType defines model for ProxyType.
 type ProxyType string
 
-// PublicId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// PublicId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type PublicId = string
 
 // QueueDepth defines model for QueueDepth.
@@ -6823,7 +6891,7 @@ type QueueDepth struct {
 type RelatedAlertGroup struct {
 	DurationSeconds nullable.Nullable[int] `json:"duration_seconds,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId         `json:"id"`
 	Number     int              `json:"number"`
 	Resolution *ResolvedBy      `json:"resolution,omitempty"`
@@ -6905,7 +6973,7 @@ type RequestRecord struct {
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
 	ErrorCode nullable.Nullable[NullableRequestErrorCode] `json:"error_code"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id        PublicId `json:"id"`
 	LatencyMs int      `json:"latency_ms"`
 
@@ -6981,7 +7049,7 @@ type RequestRecordSummary struct {
 	// ErrorCode What failed when the attempt got no answer, as the checks name it (`NullableConnectionCheckCode`) — `dns_failed`, `connect_failed`, `tls_failed`, `timeout`, `proxy_refused`, `blocked` or `request_failed`. Null for an attempt that got an answer.
 	ErrorCode nullable.Nullable[NullableRequestErrorCode] `json:"error_code"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id        PublicId `json:"id"`
 	LatencyMs int      `json:"latency_ms"`
 
@@ -7080,7 +7148,7 @@ type RotationLayer struct {
 	HandoverDay  *Weekday `json:"handover_day,omitempty"`
 	HandoverTime string   `json:"handover_time"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id     PublicId                          `json:"id"`
 	Limits nullable.Nullable[RotationLimits] `json:"limits"`
 	Name   string                            `json:"name"`
@@ -7179,7 +7247,7 @@ type Route struct {
 	// GroupKey Label names whose values split the Route's Alerts into Alert Groups. A missing label counts as an empty value.
 	GroupKey []string `json:"group_key"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id        PublicId `json:"id"`
 	IsDefault bool     `json:"is_default"`
 
@@ -7391,7 +7459,7 @@ type Schedule struct {
 	// GapAlertActive Whether the Leader's gap scan raises `MusterScheduleGap` for the Schedule now — true with `gap_alert` `on`, and with `by_default` while the Schedule is its Team's main one.
 	GapAlertActive *bool `json:"gap_alert_active,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Main bool     `json:"main"`
 	Name string   `json:"name"`
@@ -7405,7 +7473,7 @@ type Schedule struct {
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
 
-	// TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	TeamId   PublicId `json:"team_id"`
 	TimeZone string   `json:"time_zone"`
 }
@@ -7473,7 +7541,7 @@ type ScheduleOverride struct {
 	End       time.Time `json:"end"`
 	Etag      *string   `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id           PublicId                   `json:"id"`
 	ReplacesUser nullable.Nullable[UserRef] `json:"replaces_user"`
 
@@ -7484,7 +7552,7 @@ type ScheduleOverride struct {
 	// User A User. Used wherever the person must be a User: the Owner and the previous Owner.
 	User UserRef `json:"user"`
 
-	// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	UserId PublicId `json:"user_id"`
 }
 
@@ -7511,7 +7579,7 @@ type ScheduleOverrideList struct {
 
 // ScheduleRef The Schedule an object names, with its Team.
 type ScheduleRef struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Name string   `json:"name"`
 
@@ -7554,7 +7622,7 @@ type ServiceAccount struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId             `json:"id"`
 	Name       string               `json:"name"`
 	Role       RoleName             `json:"role"`
@@ -7584,7 +7652,7 @@ type ServiceAccountToken struct {
 	// ExpiresAt Null means the token never expires; the UI warns.
 	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id              PublicId                     `json:"id"`
 	LastUsedAddress nullable.Nullable[string]    `json:"last_used_address,omitempty"`
 	LastUsedAt      nullable.Nullable[time.Time] `json:"last_used_at,omitempty"`
@@ -7650,7 +7718,7 @@ type SessionInfo struct {
 	CreatedAt time.Time                 `json:"created_at"`
 	Current   bool                      `json:"current"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id         PublicId  `json:"id"`
 	LastUsedAt time.Time `json:"last_used_at"`
 
@@ -7806,7 +7874,7 @@ type SlackConnection struct {
 	// EventMode How a Slack Connection receives button presses (`connection.slack.event_mode`, `socket` for a new Connection): `socket` — the Leader holds a Socket Mode connection with the app-level token, so Slack needs no address of Muster; `http` — Slack posts each press to the Connection's `callback_url`, signed with the Slack signing secret.
 	EventMode SlackEventMode `json:"event_mode"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -7914,7 +7982,7 @@ type SlackDestination struct {
 	Etag   *string           `json:"etag,omitempty"`
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter `destination.slack.limiter`: the form proposes 30 requests per minute, sends and edits together.
@@ -7980,13 +8048,13 @@ type SlackLinkConfirm struct {
 	// Code The code the bot sent as a direct message.
 	Code *string `json:"code,omitempty"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
 // SlackLinkRequest defines model for SlackLinkRequest.
 type SlackLinkRequest struct {
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 
 	// Handle The Slack email or name of the account to link; a leading `@` of a name is optional.
@@ -7998,7 +8066,7 @@ type SlackLinkStarted struct {
 	AttemptsRemaining int       `json:"attempts_remaining"`
 	ExpiresAt         time.Time `json:"expires_at"`
 
-	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// RequestId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	RequestId PublicId `json:"request_id"`
 }
 
@@ -8085,7 +8153,7 @@ type StoredSnapshot struct {
 	// GroupKey The `groupKey` of the payload; null when it could not be read.
 	GroupKey nullable.Nullable[string] `json:"group_key,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id          PublicId                     `json:"id"`
 	Integration EntityRef                    `json:"integration"`
 	ProcessedAt nullable.Nullable[time.Time] `json:"processed_at,omitempty"`
@@ -8116,7 +8184,7 @@ type StoredSnapshotSummary struct {
 	// GroupKey The `groupKey` of the payload; null when it could not be read.
 	GroupKey nullable.Nullable[string] `json:"group_key,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id          PublicId                     `json:"id"`
 	Integration EntityRef                    `json:"integration"`
 	ProcessedAt nullable.Nullable[time.Time] `json:"processed_at,omitempty"`
@@ -8190,7 +8258,7 @@ type Team struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// IdpEntries The groups of the identity provider whose people are in the Team, matched as the entries of the Role mapping are. At every OIDC sign-in and every successful background re-check a User joins the Team when an entry matches them and leaves it when they are in it only through entries that no longer match; a person added by hand is never taken out. A change applies to each User at their next sign-in or re-check. Omit it on an update to keep the entries; a creation without it has none.
@@ -8319,7 +8387,7 @@ type TeamOnCall struct {
 type TeamRef struct {
 	Deleted bool `json:"deleted"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Name string   `json:"name"`
 	Slug string   `json:"slug"`
@@ -8342,7 +8410,7 @@ type TeamUser struct {
 
 // TeamUserAdd defines model for TeamUserAdd.
 type TeamUserAdd struct {
-	// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	UserId PublicId `json:"user_id"`
 }
 
@@ -8368,7 +8436,7 @@ type TelegramConnection struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -8456,7 +8524,7 @@ type TelegramDestination struct {
 	ChannelId    string                    `json:"channel_id"`
 	ChannelTitle nullable.Nullable[string] `json:"channel_title,omitempty"`
 
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId  `json:"connection_id"`
 	CreatedAt    time.Time `json:"created_at"`
 
@@ -8468,7 +8536,7 @@ type TelegramDestination struct {
 	Etag   *string           `json:"etag,omitempty"`
 	Health DestinationHealth `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -8502,7 +8570,7 @@ type TelegramDestinationInput struct {
 	// ChannelId Telegram chat id or `@username` of the channel. Comments must be enabled on the channel.
 	ChannelId string `json:"channel_id"`
 
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -8522,7 +8590,7 @@ type TelegramDestinationInputType string
 
 // TelegramLinkRequest defines model for TelegramLinkRequest.
 type TelegramLinkRequest struct {
-	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	ConnectionId PublicId `json:"connection_id"`
 }
 
@@ -8956,7 +9024,7 @@ type User struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Language UI language; null follows the browser.
@@ -9025,7 +9093,7 @@ type UserRef struct {
 	// Deactivated The user was deleted; the UI shows "(deactivated)".
 	Deactivated bool `json:"deactivated"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id    PublicId `json:"id"`
 	Login *string  `json:"login,omitempty"`
 	Name  string   `json:"name"`
@@ -9079,7 +9147,7 @@ type WebhookAlert struct {
 
 // WebhookAlertGroup The current state of the Alert Group when the event was recorded.
 type WebhookAlertGroup struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id     PublicId `json:"id"`
 	Number int      `json:"number"`
 
@@ -9118,7 +9186,7 @@ type WebhookDestination struct {
 	Events *WebhookEventsConfig `json:"events,omitempty"`
 	Health DestinationHealth    `json:"health"`
 
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
 	// Limiter A rate limit of `limit` calls per `per_seconds`.
@@ -9215,7 +9283,7 @@ type WebhookDestinationInputType string
 
 // WebhookDestinationRef A Destination as an outgoing webhook event names it.
 type WebhookDestinationRef struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId        `json:"id"`
 	Name string          `json:"name"`
 	Type DestinationType `json:"type"`
@@ -9246,7 +9314,7 @@ type WebhookMentionTargetType string
 
 // WebhookTeam A Team as an outgoing webhook event names it.
 type WebhookTeam struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id   PublicId `json:"id"`
 	Name string   `json:"name"`
 	Slug string   `json:"slug"`
@@ -9266,7 +9334,7 @@ type WebhookTemplateConfig struct {
 
 // WebhookUser defines model for WebhookUser.
 type WebhookUser struct {
-	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id    PublicId `json:"id"`
 	Login string   `json:"login"`
 	Name  string   `json:"name"`
@@ -9287,7 +9355,7 @@ type WorkingHours struct {
 	TimeZone string `json:"time_zone"`
 }
 
-// AccountLinkId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// AccountLinkId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type AccountLinkId = PublicId
 
 // AgDeliveryProblem defines model for AgDeliveryProblem.
@@ -9341,20 +9409,23 @@ type AgUnclaimed = bool
 // AgUrgent defines model for AgUrgent.
 type AgUrgent = bool
 
-// AlertGroupId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// AlertGroupId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type AlertGroupId = PublicId
 
-// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type ConnectionId = PublicId
 
 // Cursor defines model for Cursor.
 type Cursor = string
 
-// DestinationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// DestinationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type DestinationId = PublicId
 
 // From defines model for From.
 type From = time.Time
+
+// GatewayContactId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+type GatewayContactId = PublicId
 
 // IfMatch defines model for IfMatch.
 type IfMatch = string
@@ -9365,10 +9436,10 @@ type IfMatchOptional = string
 // IngestTokenInPath defines model for IngestTokenInPath.
 type IngestTokenInPath = string
 
-// IntegrationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// IntegrationId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type IntegrationId = PublicId
 
-// IntegrationTokenId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// IntegrationTokenId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type IntegrationTokenId = PublicId
 
 // LabelMatchers defines model for LabelMatchers.
@@ -9377,49 +9448,49 @@ type LabelMatchers = []string
 // Limit defines model for Limit.
 type Limit = int
 
-// LinkRuleId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// LinkRuleId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type LinkRuleId = PublicId
 
-// LookupTableId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// LookupTableId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type LookupTableId = PublicId
 
-// OverrideId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// OverrideId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type OverrideId = PublicId
 
 // OwningTeamQuery defines model for OwningTeamQuery.
 type OwningTeamQuery = string
 
-// RequestRecordId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// RequestRecordId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type RequestRecordId = PublicId
 
-// RouteId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// RouteId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type RouteId = PublicId
 
-// ScheduleId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// ScheduleId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type ScheduleId = PublicId
 
 // SecretName defines model for SecretName.
 type SecretName = string
 
-// ServiceAccountId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// ServiceAccountId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type ServiceAccountId = PublicId
 
-// StoredSnapshotId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// StoredSnapshotId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type StoredSnapshotId = PublicId
 
 // SuggestionId `heartbeat_lost` suggests a Route for `alertname="MusterHeartbeatLost"`; `internal_alerts` suggests a Route for `alertname=~"Muster.*"`.
 type SuggestionId = RouteSuggestionId
 
-// TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// TeamId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type TeamId = PublicId
 
 // To defines model for To.
 type To = time.Time
 
-// TokenId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// TokenId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type TokenId = PublicId
 
-// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+// UserId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type UserId = PublicId
 
 // BadRequest RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
@@ -9430,6 +9501,9 @@ type Conflict = Problem
 
 // Forbidden RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Forbidden = Problem
+
+// GatewayRefused RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
+type GatewayRefused = Problem
 
 // Gone RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Gone = Problem
@@ -10169,6 +10243,9 @@ type UpdateUserParams struct {
 	IfMatch IfMatch `json:"If-Match"`
 }
 
+// CreateUserGatewayContactJSONBody defines parameters for CreateUserGatewayContact.
+type CreateUserGatewayContactJSONBody = map[string]interface{}
+
 // DeliverAlertGroupEventParams defines parameters for DeliverAlertGroupEvent.
 type DeliverAlertGroupEventParams struct {
 	// WebhookId Id of this event, kept across retries.
@@ -10283,6 +10360,12 @@ type ConfirmSlackLinkJSONRequestBody = SlackLinkConfirm
 // StartTelegramLinkJSONRequestBody defines body for StartTelegramLink for application/json ContentType.
 type StartTelegramLinkJSONRequestBody = TelegramLinkRequest
 
+// CreateMyGatewayContactJSONRequestBody defines body for CreateMyGatewayContact for application/json ContentType.
+type CreateMyGatewayContactJSONRequestBody = GatewayContactInput
+
+// ConfirmMyGatewayContactJSONRequestBody defines body for ConfirmMyGatewayContact for application/json ContentType.
+type ConfirmMyGatewayContactJSONRequestBody = GatewayContactConfirm
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = PasswordChange
 
@@ -10366,6 +10449,9 @@ type CreateUserJSONRequestBody = UserCreate
 
 // UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
 type UpdateUserJSONRequestBody = UserUpdate
+
+// CreateUserGatewayContactJSONRequestBody defines body for CreateUserGatewayContact for application/json ContentType.
+type CreateUserGatewayContactJSONRequestBody = CreateUserGatewayContactJSONBody
 
 // DeliverAlertGroupEventJSONRequestBody defines body for DeliverAlertGroupEvent for application/json ContentType.
 type DeliverAlertGroupEventJSONRequestBody = OutgoingWebhookEvent
@@ -12710,6 +12796,21 @@ type ServerInterface interface {
 	// DeleteMyAccountLink Unlink an own messenger account
 	// (DELETE /me/account-links/{account_link_id})
 	DeleteMyAccountLink(w http.ResponseWriter, r *http.Request, accountLinkId AccountLinkId)
+	// ListMyGatewayContacts List own contacts at Notification gateways
+	// (GET /me/gateway-contacts)
+	ListMyGatewayContacts(w http.ResponseWriter, r *http.Request)
+	// CreateMyGatewayContact Add an own contact at a Notification gateway
+	// (POST /me/gateway-contacts)
+	CreateMyGatewayContact(w http.ResponseWriter, r *http.Request)
+	// DeleteMyGatewayContact Remove an own contact at a Notification gateway
+	// (DELETE /me/gateway-contacts/{gateway_contact_id})
+	DeleteMyGatewayContact(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId)
+	// SendMyGatewayContactCode Send a new code for an own contact
+	// (POST /me/gateway-contacts/{gateway_contact_id}/code)
+	SendMyGatewayContactCode(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId)
+	// ConfirmMyGatewayContact Confirm an own contact with the code
+	// (POST /me/gateway-contacts/{gateway_contact_id}/confirmation)
+	ConfirmMyGatewayContact(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId)
 	// RevokeMyIcalFeed Revoke the caller's iCal feed
 	// (DELETE /me/ical-feed)
 	RevokeMyIcalFeed(w http.ResponseWriter, r *http.Request)
@@ -12998,6 +13099,15 @@ type ServerInterface interface {
 	// EnableUser Enable a user
 	// (POST /users/{user_id}/enable)
 	EnableUser(w http.ResponseWriter, r *http.Request, userId UserId)
+	// ListUserGatewayContacts List a user's contacts at Notification gateways
+	// (GET /users/{user_id}/gateway-contacts)
+	ListUserGatewayContacts(w http.ResponseWriter, r *http.Request, userId UserId)
+	// CreateUserGatewayContact Set a user's contact (always refused)
+	// (POST /users/{user_id}/gateway-contacts)
+	CreateUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId)
+	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
+	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
+	DeleteUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId, gatewayContactId GatewayContactId)
 	// CreatePasswordSetupLink Issue a password setup link
 	// (POST /users/{user_id}/password-setup-links)
 	CreatePasswordSetupLink(w http.ResponseWriter, r *http.Request, userId UserId)
@@ -16518,6 +16628,112 @@ func (siw *ServerInterfaceWrapper) DeleteMyAccountLink(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyGatewayContacts operation middleware
+func (siw *ServerInterfaceWrapper) ListMyGatewayContacts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyGatewayContacts(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMyGatewayContact operation middleware
+func (siw *ServerInterfaceWrapper) CreateMyGatewayContact(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMyGatewayContact(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMyGatewayContact operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMyGatewayContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gateway_contact_id" -------------
+	var gatewayContactId GatewayContactId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gateway_contact_id", r.PathValue("gateway_contact_id"), &gatewayContactId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gateway_contact_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMyGatewayContact(w, r, gatewayContactId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SendMyGatewayContactCode operation middleware
+func (siw *ServerInterfaceWrapper) SendMyGatewayContactCode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gateway_contact_id" -------------
+	var gatewayContactId GatewayContactId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gateway_contact_id", r.PathValue("gateway_contact_id"), &gatewayContactId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gateway_contact_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SendMyGatewayContactCode(w, r, gatewayContactId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmMyGatewayContact operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmMyGatewayContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "gateway_contact_id" -------------
+	var gatewayContactId GatewayContactId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gateway_contact_id", r.PathValue("gateway_contact_id"), &gatewayContactId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gateway_contact_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmMyGatewayContact(w, r, gatewayContactId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RevokeMyIcalFeed operation middleware
 func (siw *ServerInterfaceWrapper) RevokeMyIcalFeed(w http.ResponseWriter, r *http.Request) {
 
@@ -19544,6 +19760,93 @@ func (siw *ServerInterfaceWrapper) EnableUser(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListUserGatewayContacts operation middleware
+func (siw *ServerInterfaceWrapper) ListUserGatewayContacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUserGatewayContacts(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateUserGatewayContact operation middleware
+func (siw *ServerInterfaceWrapper) CreateUserGatewayContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateUserGatewayContact(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteUserGatewayContact operation middleware
+func (siw *ServerInterfaceWrapper) DeleteUserGatewayContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "gateway_contact_id" -------------
+	var gatewayContactId GatewayContactId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "gateway_contact_id", r.PathValue("gateway_contact_id"), &gatewayContactId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "gateway_contact_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteUserGatewayContact(w, r, userId, gatewayContactId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreatePasswordSetupLink operation middleware
 func (siw *ServerInterfaceWrapper) CreatePasswordSetupLink(w http.ResponseWriter, r *http.Request) {
 
@@ -19896,6 +20199,14 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/account-links/slack/confirmation", wrapper.ConfirmSlackLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/account-links", wrapper.ListUserAccountLinks)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/account-links/{account_link_id}", wrapper.DeleteUserAccountLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/gateway-contacts", wrapper.ListMyGatewayContacts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/gateway-contacts", wrapper.CreateMyGatewayContact)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/me/gateway-contacts/{gateway_contact_id}", wrapper.DeleteMyGatewayContact)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/gateway-contacts/{gateway_contact_id}/code", wrapper.SendMyGatewayContactCode)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/gateway-contacts/{gateway_contact_id}/confirmation", wrapper.ConfirmMyGatewayContact)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/gateway-contacts", wrapper.ListUserGatewayContacts)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users/{user_id}/gateway-contacts", wrapper.CreateUserGatewayContact)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/gateway-contacts/{gateway_contact_id}", wrapper.DeleteUserGatewayContact)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/request-log", wrapper.ListRequestLog)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/request-log/{request_record_id}", wrapper.GetRequestRecord)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/system-status", wrapper.GetSystemStatus)
@@ -20016,6 +20327,8 @@ type BadRequestApplicationProblemPlusJSONResponse Problem
 type ConflictApplicationProblemPlusJSONResponse Problem
 
 type ForbiddenApplicationProblemPlusJSONResponse Problem
+
+type GatewayRefusedApplicationProblemPlusJSONResponse Problem
 
 type GoneApplicationProblemPlusJSONResponse Problem
 
@@ -29463,6 +29776,563 @@ type DeleteMyAccountLink429ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response DeleteMyAccountLink429ApplicationProblemPlusJSONResponse) VisitDeleteMyAccountLinkResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyGatewayContactsRequestObject struct {
+}
+
+type ListMyGatewayContactsResponseObject interface {
+	VisitListMyGatewayContactsResponse(w http.ResponseWriter) error
+}
+
+type ListMyGatewayContacts200JSONResponse GatewayContactList
+
+func (response ListMyGatewayContacts200JSONResponse) VisitListMyGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyGatewayContacts401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListMyGatewayContacts401ApplicationProblemPlusJSONResponse) VisitListMyGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyGatewayContacts403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListMyGatewayContacts403ApplicationProblemPlusJSONResponse) VisitListMyGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListMyGatewayContacts429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListMyGatewayContacts429ApplicationProblemPlusJSONResponse) VisitListMyGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContactRequestObject struct {
+	Body *CreateMyGatewayContactJSONRequestBody
+}
+
+type CreateMyGatewayContactResponseObject interface {
+	VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error
+}
+
+type CreateMyGatewayContact202JSONResponse GatewayContact
+
+func (response CreateMyGatewayContact202JSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact400ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact401ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact403ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact422ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact429ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact502ApplicationProblemPlusJSONResponse struct {
+	GatewayRefusedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact502ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateMyGatewayContact503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateMyGatewayContact503ApplicationProblemPlusJSONResponse) VisitCreateMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyGatewayContactRequestObject struct {
+	GatewayContactId GatewayContactId `json:"gateway_contact_id"`
+}
+
+type DeleteMyGatewayContactResponseObject interface {
+	VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error
+}
+
+type DeleteMyGatewayContact204Response struct {
+}
+
+func (response DeleteMyGatewayContact204Response) VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMyGatewayContact401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteMyGatewayContact401ApplicationProblemPlusJSONResponse) VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyGatewayContact403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteMyGatewayContact403ApplicationProblemPlusJSONResponse) VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyGatewayContact404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteMyGatewayContact404ApplicationProblemPlusJSONResponse) VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteMyGatewayContact429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteMyGatewayContact429ApplicationProblemPlusJSONResponse) VisitDeleteMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCodeRequestObject struct {
+	GatewayContactId GatewayContactId `json:"gateway_contact_id"`
+}
+
+type SendMyGatewayContactCodeResponseObject interface {
+	VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error
+}
+
+type SendMyGatewayContactCode202JSONResponse GatewayContact
+
+func (response SendMyGatewayContactCode202JSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode401ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode403ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode404ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode422ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode429ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode502ApplicationProblemPlusJSONResponse struct {
+	GatewayRefusedApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode502ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SendMyGatewayContactCode503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response SendMyGatewayContactCode503ApplicationProblemPlusJSONResponse) VisitSendMyGatewayContactCodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContactRequestObject struct {
+	GatewayContactId GatewayContactId `json:"gateway_contact_id"`
+	Body             *ConfirmMyGatewayContactJSONRequestBody
+}
+
+type ConfirmMyGatewayContactResponseObject interface {
+	VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error
+}
+
+type ConfirmMyGatewayContact200JSONResponse GatewayContact
+
+func (response ConfirmMyGatewayContact200JSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact400ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact401ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact403ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact404ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact422ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ConfirmMyGatewayContact429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ConfirmMyGatewayContact429ApplicationProblemPlusJSONResponse) VisitConfirmMyGatewayContactResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -39288,6 +40158,239 @@ func (response EnableUser429ApplicationProblemPlusJSONResponse) VisitEnableUserR
 	return err
 }
 
+type ListUserGatewayContactsRequestObject struct {
+	UserId UserId `json:"user_id"`
+}
+
+type ListUserGatewayContactsResponseObject interface {
+	VisitListUserGatewayContactsResponse(w http.ResponseWriter) error
+}
+
+type ListUserGatewayContacts200JSONResponse GatewayContactList
+
+func (response ListUserGatewayContacts200JSONResponse) VisitListUserGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGatewayContacts401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListUserGatewayContacts401ApplicationProblemPlusJSONResponse) VisitListUserGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGatewayContacts403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListUserGatewayContacts403ApplicationProblemPlusJSONResponse) VisitListUserGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGatewayContacts404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListUserGatewayContacts404ApplicationProblemPlusJSONResponse) VisitListUserGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUserGatewayContacts429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListUserGatewayContacts429ApplicationProblemPlusJSONResponse) VisitListUserGatewayContactsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUserGatewayContactRequestObject struct {
+	UserId UserId `json:"user_id"`
+	Body   *CreateUserGatewayContactJSONRequestBody
+}
+
+type CreateUserGatewayContactResponseObject interface {
+	VisitCreateUserGatewayContactResponse(w http.ResponseWriter) error
+}
+
+type CreateUserGatewayContact401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response CreateUserGatewayContact401ApplicationProblemPlusJSONResponse) VisitCreateUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUserGatewayContact403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response CreateUserGatewayContact403ApplicationProblemPlusJSONResponse) VisitCreateUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateUserGatewayContact429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response CreateUserGatewayContact429ApplicationProblemPlusJSONResponse) VisitCreateUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUserGatewayContactRequestObject struct {
+	UserId           UserId           `json:"user_id"`
+	GatewayContactId GatewayContactId `json:"gateway_contact_id"`
+}
+
+type DeleteUserGatewayContactResponseObject interface {
+	VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error
+}
+
+type DeleteUserGatewayContact204Response struct {
+}
+
+func (response DeleteUserGatewayContact204Response) VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteUserGatewayContact401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteUserGatewayContact401ApplicationProblemPlusJSONResponse) VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUserGatewayContact403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteUserGatewayContact403ApplicationProblemPlusJSONResponse) VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUserGatewayContact404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteUserGatewayContact404ApplicationProblemPlusJSONResponse) VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteUserGatewayContact429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response DeleteUserGatewayContact429ApplicationProblemPlusJSONResponse) VisitDeleteUserGatewayContactResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreatePasswordSetupLinkRequestObject struct {
 	UserId UserId `json:"user_id"`
 }
@@ -39736,6 +40839,21 @@ type StrictServerInterface interface {
 	// DeleteMyAccountLink Unlink an own messenger account
 	// (DELETE /me/account-links/{account_link_id})
 	DeleteMyAccountLink(ctx context.Context, request DeleteMyAccountLinkRequestObject) (DeleteMyAccountLinkResponseObject, error)
+	// ListMyGatewayContacts List own contacts at Notification gateways
+	// (GET /me/gateway-contacts)
+	ListMyGatewayContacts(ctx context.Context, request ListMyGatewayContactsRequestObject) (ListMyGatewayContactsResponseObject, error)
+	// CreateMyGatewayContact Add an own contact at a Notification gateway
+	// (POST /me/gateway-contacts)
+	CreateMyGatewayContact(ctx context.Context, request CreateMyGatewayContactRequestObject) (CreateMyGatewayContactResponseObject, error)
+	// DeleteMyGatewayContact Remove an own contact at a Notification gateway
+	// (DELETE /me/gateway-contacts/{gateway_contact_id})
+	DeleteMyGatewayContact(ctx context.Context, request DeleteMyGatewayContactRequestObject) (DeleteMyGatewayContactResponseObject, error)
+	// SendMyGatewayContactCode Send a new code for an own contact
+	// (POST /me/gateway-contacts/{gateway_contact_id}/code)
+	SendMyGatewayContactCode(ctx context.Context, request SendMyGatewayContactCodeRequestObject) (SendMyGatewayContactCodeResponseObject, error)
+	// ConfirmMyGatewayContact Confirm an own contact with the code
+	// (POST /me/gateway-contacts/{gateway_contact_id}/confirmation)
+	ConfirmMyGatewayContact(ctx context.Context, request ConfirmMyGatewayContactRequestObject) (ConfirmMyGatewayContactResponseObject, error)
 	// RevokeMyIcalFeed Revoke the caller's iCal feed
 	// (DELETE /me/ical-feed)
 	RevokeMyIcalFeed(ctx context.Context, request RevokeMyIcalFeedRequestObject) (RevokeMyIcalFeedResponseObject, error)
@@ -40024,6 +41142,15 @@ type StrictServerInterface interface {
 	// EnableUser Enable a user
 	// (POST /users/{user_id}/enable)
 	EnableUser(ctx context.Context, request EnableUserRequestObject) (EnableUserResponseObject, error)
+	// ListUserGatewayContacts List a user's contacts at Notification gateways
+	// (GET /users/{user_id}/gateway-contacts)
+	ListUserGatewayContacts(ctx context.Context, request ListUserGatewayContactsRequestObject) (ListUserGatewayContactsResponseObject, error)
+	// CreateUserGatewayContact Set a user's contact (always refused)
+	// (POST /users/{user_id}/gateway-contacts)
+	CreateUserGatewayContact(ctx context.Context, request CreateUserGatewayContactRequestObject) (CreateUserGatewayContactResponseObject, error)
+	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
+	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
+	DeleteUserGatewayContact(ctx context.Context, request DeleteUserGatewayContactRequestObject) (DeleteUserGatewayContactResponseObject, error)
 	// CreatePasswordSetupLink Issue a password setup link
 	// (POST /users/{user_id}/password-setup-links)
 	CreatePasswordSetupLink(ctx context.Context, request CreatePasswordSetupLinkRequestObject) (CreatePasswordSetupLinkResponseObject, error)
@@ -42533,6 +43660,146 @@ func (sh *strictHandler) DeleteMyAccountLink(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteMyAccountLinkResponseObject); ok {
 		if err := validResponse.VisitDeleteMyAccountLinkResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMyGatewayContacts operation middleware
+func (sh *strictHandler) ListMyGatewayContacts(w http.ResponseWriter, r *http.Request) {
+	var request ListMyGatewayContactsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMyGatewayContacts(ctx, request.(ListMyGatewayContactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMyGatewayContacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMyGatewayContactsResponseObject); ok {
+		if err := validResponse.VisitListMyGatewayContactsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMyGatewayContact operation middleware
+func (sh *strictHandler) CreateMyGatewayContact(w http.ResponseWriter, r *http.Request) {
+	var request CreateMyGatewayContactRequestObject
+
+	var body CreateMyGatewayContactJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMyGatewayContact(ctx, request.(CreateMyGatewayContactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMyGatewayContact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMyGatewayContactResponseObject); ok {
+		if err := validResponse.VisitCreateMyGatewayContactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMyGatewayContact operation middleware
+func (sh *strictHandler) DeleteMyGatewayContact(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId) {
+	var request DeleteMyGatewayContactRequestObject
+
+	request.GatewayContactId = gatewayContactId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMyGatewayContact(ctx, request.(DeleteMyGatewayContactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMyGatewayContact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMyGatewayContactResponseObject); ok {
+		if err := validResponse.VisitDeleteMyGatewayContactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SendMyGatewayContactCode operation middleware
+func (sh *strictHandler) SendMyGatewayContactCode(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId) {
+	var request SendMyGatewayContactCodeRequestObject
+
+	request.GatewayContactId = gatewayContactId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SendMyGatewayContactCode(ctx, request.(SendMyGatewayContactCodeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SendMyGatewayContactCode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SendMyGatewayContactCodeResponseObject); ok {
+		if err := validResponse.VisitSendMyGatewayContactCodeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ConfirmMyGatewayContact operation middleware
+func (sh *strictHandler) ConfirmMyGatewayContact(w http.ResponseWriter, r *http.Request, gatewayContactId GatewayContactId) {
+	var request ConfirmMyGatewayContactRequestObject
+
+	request.GatewayContactId = gatewayContactId
+
+	var body ConfirmMyGatewayContactJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ConfirmMyGatewayContact(ctx, request.(ConfirmMyGatewayContactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ConfirmMyGatewayContact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ConfirmMyGatewayContactResponseObject); ok {
+		if err := validResponse.VisitConfirmMyGatewayContactResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -45169,6 +46436,95 @@ func (sh *strictHandler) EnableUser(w http.ResponseWriter, r *http.Request, user
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnableUserResponseObject); ok {
 		if err := validResponse.VisitEnableUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListUserGatewayContacts operation middleware
+func (sh *strictHandler) ListUserGatewayContacts(w http.ResponseWriter, r *http.Request, userId UserId) {
+	var request ListUserGatewayContactsRequestObject
+
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUserGatewayContacts(ctx, request.(ListUserGatewayContactsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUserGatewayContacts")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUserGatewayContactsResponseObject); ok {
+		if err := validResponse.VisitListUserGatewayContactsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateUserGatewayContact operation middleware
+func (sh *strictHandler) CreateUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId) {
+	var request CreateUserGatewayContactRequestObject
+
+	request.UserId = userId
+
+	var body CreateUserGatewayContactJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateUserGatewayContact(ctx, request.(CreateUserGatewayContactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateUserGatewayContact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateUserGatewayContactResponseObject); ok {
+		if err := validResponse.VisitCreateUserGatewayContactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteUserGatewayContact operation middleware
+func (sh *strictHandler) DeleteUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId, gatewayContactId GatewayContactId) {
+	var request DeleteUserGatewayContactRequestObject
+
+	request.UserId = userId
+	request.GatewayContactId = gatewayContactId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteUserGatewayContact(ctx, request.(DeleteUserGatewayContactRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteUserGatewayContact")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteUserGatewayContactResponseObject); ok {
+		if err := validResponse.VisitDeleteUserGatewayContactResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
