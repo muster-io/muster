@@ -5201,7 +5201,7 @@ paths:
           Connections whose stored `info` has the role `messenger`, which a bridge that declares no roles has;
           `gateway` only the Bridge Connections whose stored `info` has the role `gateway`.'
         schema:
-          $ref: '#/components/schemas/BridgeRole'
+          $ref: '#/components/schemas/BridgeInfoRole'
       responses:
         '200':
           description: A page of Connections.
@@ -5669,7 +5669,9 @@ paths:
         on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination
         check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that
         moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with
-        `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
+        `gateway_only`. One that keeps a Connection that became a gateway alone after the Destination was saved is not,
+        but its Destination check fails as that bridge answers it, so such a Destination can only be deleted or moved to
+        another Connection.
       x-permission: destinations:write
       x-listener: app
       security:
@@ -14813,7 +14815,7 @@ components:
             minItems: 1
             uniqueItems: true
             items:
-              $ref: '#/components/schemas/BridgeRole'
+              $ref: '#/components/schemas/BridgeInfoRole'
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:
@@ -15086,8 +15088,8 @@ components:
           minItems: 1
           uniqueItems: true
           items:
-            $ref: '#/components/schemas/BridgeRole'
-    BridgeRole:
+            $ref: '#/components/schemas/BridgeInfoRole'
+    BridgeInfoRole:
       x-bridge-schema: InfoRole
       type: string
       description: '`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification
@@ -15096,8 +15098,8 @@ components:
       - messenger
       - gateway
       x-enum-varnames:
-      - RoleMessenger
-      - RoleGateway
+      - BridgeInfoRoleMessenger
+      - BridgeInfoRoleGateway
     BridgeCapabilities:
       x-bridge-schema: Capabilities
       type: object

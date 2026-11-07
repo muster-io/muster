@@ -65,8 +65,9 @@ const MessageNotGateway = "the bridge does not declare the role gateway"
 // once the Connection's info, read again past bridge.info_max_age, declares the role gateway; a bridge that does not is
 // Fatal without a call, as is an id that names no Bridge Connection (C-30.FR-2). The outcome is classified as a
 // delivery's, names the notification in MessageID and says whether the answer was Replayed; its error, the bridge's
-// text, has the contact and the text masked. It logs gateway_notification_sent with the Connection, the key and the
-// class of the answer, never the contact or the text (C-30.FR-10).
+// text, has the contact and the text masked, and so has the Request log's record of the request and its answer
+// (outbound.WithSecrets). It logs gateway_notification_sent with the Connection, the key and the class of the answer,
+// never the contact or the text (C-30.FR-10).
 func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notification) delivery.Outcome {
 	conn, err := a.Targets.BridgeConnection(ctx, n.Connection)
 	switch {
@@ -88,7 +89,7 @@ func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notifi
 	if n.Action != nil {
 		in.Action = &gen.NotificationAction{Data: n.Action.Data, Label: n.Action.Label}
 	}
-	out, r := conn.Client.SendNotification(ctx, c.Class, c.Key, in)
+	out, r := conn.Client.SendNotification(outbound.WithSecrets(ctx, notificationSecrets(n)...), c.Class, c.Key, in)
 	o := r.Outcome()
 	o.Error = maskNotification(o.Error, n)
 	if r.OK() {
@@ -103,6 +104,18 @@ func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notifi
 			logging.F("key", c.Key), logging.F("class", class))
 	}
 	return o
+}
+
+// notificationSecrets are the contact and the text of n, also as the client cuts the text, which the record of the
+// request masks like a Secret, though they are personal data rather than Secrets.
+func notificationSecrets(n delivery.Notification) []logging.Secret {
+	var out []logging.Secret
+	for _, v := range []string{n.Contact, n.Text, cutText(n.Text, MaxNotificationText)} {
+		if v != "" && !slices.Contains(out, logging.Secret(v)) {
+			out = append(out, logging.Secret(v))
+		}
+	}
+	return out
 }
 
 // maskNotification is the text of a bridge's answer to n with its contact and its text replaced, as they are and as a

@@ -18,8 +18,8 @@ export const ListConnectionsQueryParams = zod.object({
   "limit": zod.int().min(1).max(listConnectionsQueryLimitMax).default(listConnectionsQueryLimitDefault).describe('Page size (`api.page_size`).'),
   "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']).optional().describe('Filter by type.'),
   "role": zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).optional().describe('Filter by role: `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has the role `messenger`, which a bridge that declares no roles has; `gateway` only the Bridge Connections whose stored `info` has the role `gateway`.')
 })
 
@@ -193,14 +193,14 @@ export const ListConnectionsResponse = zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax).regex(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -538,14 +538,14 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -759,8 +759,8 @@ export const CheckConnectionDraftResponse = zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
   "slack": zod.union([zod.object({
@@ -951,14 +951,14 @@ export const GetConnectionResponse = zod.union([zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -1305,14 +1305,14 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
@@ -1495,8 +1495,8 @@ export const CheckConnectionResponse = zod.object({
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
   "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
   "roles": zod.array(zod.enum({
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
   "slack": zod.union([zod.object({

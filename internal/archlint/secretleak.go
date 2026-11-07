@@ -2048,7 +2048,8 @@ func (g gatewayTargets) BridgeInfo(ctx context.Context, conn bridge.Conn, class 
 // personal data that no log line and no outcome may carry. Against a stand-in gateway whose info declares the role
 // gateway, Notify sends on the interactive path, as lint 3 allows, while sendNotification answers with 201, and with a
 // 400, a 401, a 403, a 503 and a 429 problem and a 500 that is no problem, each echoing the token, the Authorization
-// header and the whole request body; and with a notification_id that breaks the protocol.
+// header and the whole request body; and with a notification_id that breaks the protocol. The answer 201 echoes the
+// request too, and the records the Request log keeps of every request and answer count as output.
 func probeGatewayNotifications(ctx context.Context, secrets []string, log io.Writer) error {
 	var lines bytes.Buffer
 	logger := logging.New(io.MultiWriter(log, &lines), logging.LevelInfo)
@@ -2077,7 +2078,7 @@ func probeGatewayNotifications(ctx context.Context, secrets []string, log io.Wri
 			if a.status == http.StatusCreated {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(a.status)
-				_, _ = io.WriteString(w, `{"notification_id":"n1","replayed":false}`)
+				_ = json.NewEncoder(w).Encode(map[string]any{"notification_id": "n1", "replayed": false, "echo": echo})
 				return
 			}
 			w.Header().Set("Content-Type", "application/problem+json")
@@ -2105,7 +2106,9 @@ func probeGatewayNotifications(ctx context.Context, secrets []string, log io.Wri
 	if err != nil {
 		return err
 	}
-	c, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+	records := &gatewayRecords{}
+	c, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+		Recorder: records},
 		bridge.Settings{BaseURL: srv.URL, Token: logging.Secret(secrets[0]),
 			Owner: outbound.Owner{Connection: 1, PublicID: "CNAAAAAAAAAAG1"}})
 	if err != nil {
@@ -2130,7 +2133,34 @@ func probeGatewayNotifications(ctx context.Context, secrets []string, log io.Wri
 	if sent != 1 || strings.Count(lines.String(), `"event":"gateway_notification_sent"`) != len(answers) {
 		return errors.Join(append(errs, &probeIncomplete{what: "no notification was sent and logged"})...)
 	}
+	// The records of the Request log, with the request and the answers that echo it, are part of the output too.
+	if len(records.texts()) < len(answers) {
+		return errors.Join(append(errs, &probeIncomplete{what: "the notifications were not recorded"})...)
+	}
+	for _, t := range records.texts() {
+		errs = append(errs, errors.New(t))
+	}
 	return errors.Join(errs...)
+}
+
+// gatewayRecords keeps the records of the Request log of probeGatewayNotifications as text: the URL, the headers and
+// the bodies of each request and its answer.
+type gatewayRecords struct {
+	mu  sync.Mutex
+	all []string
+}
+
+func (g *gatewayRecords) Record(_ context.Context, r outbound.Record) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.all = append(g.all, fmt.Sprint(r.URL, r.RequestHeader, string(r.RequestBody), r.ResponseHeader,
+		string(r.ResponseBody), r.Error))
+}
+
+func (g *gatewayRecords) texts() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.all)
 }
 
 // probeBridgeEvents pushes the secrets through the event paths of a Bridge Connection (C-22.AC-3): the token, the push

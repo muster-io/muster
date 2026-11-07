@@ -5,7 +5,7 @@
 import type { BridgeConnectionBase } from './bridgeConnectionBase';
 import type { BridgeConnectionType } from './bridgeConnectionType';
 import type { BridgeInfo } from './bridgeInfo';
-import type { BridgeRole } from './bridgeRole';
+import type { BridgeInfoRole } from './bridgeInfoRole';
 import type { ProxyConfig } from './proxyConfig';
 import type { PublicId } from './publicId';
 import type { SecretStatus } from './secretStatus';
@@ -28,7 +28,7 @@ export type BridgeConnection = BridgeConnectionBase & ({
      * The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.
      * @minItems 1
      */
-  readonly roles: readonly BridgeRole[];
+  readonly roles: readonly BridgeInfoRole[];
   proxy: ProxyConfig;
   /** A Connection used by Destinations cannot be deleted. */
   destination_count: number;

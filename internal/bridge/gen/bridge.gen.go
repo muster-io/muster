@@ -188,16 +188,16 @@ func (e InfoUserLookup) Valid() bool {
 
 // Defines values for InfoRole.
 const (
-	RoleGateway   InfoRole = "gateway"
-	RoleMessenger InfoRole = "messenger"
+	Gateway   InfoRole = "gateway"
+	Messenger InfoRole = "messenger"
 )
 
 // Valid indicates whether the value is a known member of the InfoRole enum.
 func (e InfoRole) Valid() bool {
 	switch e {
-	case RoleGateway:
+	case Gateway:
 		return true
-	case RoleMessenger:
+	case Messenger:
 		return true
 	default:
 		return false

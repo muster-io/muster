@@ -8,14 +8,14 @@
 // the configured info — the messenger "Example chat", every feature on and both event delivery modes by default; for
 // the gateway bot, the provider "Example Gateway" without a messenger's features, with no user lookup — with the roles
 // /_fake/config sets for the token, none for the first two bots by default, as a bridge written before roles existed
-// sends it; sendNotification records the notifications of each bot (notifications.go); every operation is served under
-// GatewayPrefix too; checkChannel answers the
-// configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
-// their edits and Thread replies, and deleteMessage marks a message of the bot deleted, without a message_deleted
-// event, answering 204 also for one already deleted, of the other bot or unknown (messages.go), pollEvents and
-// answerEvent serve the events of each bot (events.go), findUsers and sendDirectMessage serve Account links by code
-// (people.go), and every request with any other token, none or a revoked one gets 401. Operations that no story has
-// added yet answer 501.
+// sends it; sendNotification records the notifications of each bot (notifications.go), and a bot without the role
+// messenger answers 501 to the operations of a messenger; every operation is served under GatewayPrefix too;
+// checkChannel answers the configured channels (channels.go), postMessage, editMessage and replyInThread keep the
+// messages of each bot with their edits and Thread replies, and deleteMessage marks a message of the bot deleted,
+// without a message_deleted event, answering 204 also for one already deleted, of the other bot or unknown
+// (messages.go), pollEvents and answerEvent serve the events of each bot (events.go), findUsers and sendDirectMessage
+// serve Account links by code (people.go), and every request with any other token, none or a revoked one gets 401.
+// Operations that no story has added yet answer 501.
 //
 // Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
 // its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
@@ -464,7 +464,9 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 type botKey struct{}
 
 // serve answers the requests of the protocol, also under GatewayPrefix: 401 unless the bearer token is one of a bot
-// and not revoked; the handlers find the bot in the request's context.
+// and not revoked, and 501 to an operation of a messenger for a bot whose info lacks the role messenger, as a
+// gateway alone serves only info, events, answers and notifications; the handlers find the bot in the request's
+// context.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	b, ok := f.botOf(r)
 	if !ok {
@@ -477,7 +479,26 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		u.Path, u.RawPath = "/"+rest, strings.TrimPrefix(r.URL.RawPath, GatewayPrefix)
 		r.URL = &u
 	}
+	f.mu.Lock()
+	messenger := f.hasRole(b, gen.Messenger)
+	f.mu.Unlock()
+	if !messenger && messengerOperation(r.URL.Path) {
+		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
+			r.Method+" "+r.URL.Path+" is served by a bot in the role messenger only")
+		return
+	}
 	f.api.ServeHTTP(w, r)
+}
+
+// messengerOperation reports whether path is an operation that only a bridge in the role messenger serves: the
+// channels, the messages and their Thread replies, and the people with their direct messages.
+func messengerOperation(path string) bool {
+	for _, p := range []string{"/v1/channels/", "/v1/messages", "/v1/users", "/v1/direct-messages"} {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // botOf is the bot of the request's bearer token; false for no token, another one or a revoked one.
@@ -527,7 +548,7 @@ func (f *Fake) getInfo(w http.ResponseWriter, r *http.Request) {
 func (f *Fake) hasRole(b *bot, role gen.InfoRole) bool {
 	roles, ok := f.config.Roles[b.token]
 	if !ok {
-		return role == gen.RoleMessenger
+		return role == gen.Messenger
 	}
 	return slices.Contains(roles, role)
 }

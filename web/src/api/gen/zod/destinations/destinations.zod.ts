@@ -2253,7 +2253,7 @@ export const GetDestinationResponse = zod.union([zod.object({
 }))]).describe('A Destination; `type` selects the variant.')
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`. One that keeps a Connection that became a gateway alone after the Destination was saved is not, but its Destination check fails as that bridge answers it, so such a Destination can only be deleted or moved to another Connection.
  * @summary Update Destination
  */
 export const updateDestinationPathDestinationIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');

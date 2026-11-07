@@ -61,8 +61,8 @@ files_touched:
   - docs/messengers/bridge.md
   - docs/messengers/write-a-bridge.md
 acceptance:
-  - "[C-30.FR-2, C-22.FR-2, C-22.FR-11] `api/bridge.yaml` gains, additively in protocol version 1: `Info.roles` (an array of `messenger` and `gateway`, unique, at least one; `messenger` when omitted); the operation `sendNotification` (`POST /v1/notifications`, `Idempotency-Key` required) with `NotificationInput` {`contact`, `text` (plain text, at most 1,000 code points), `language` (`en`, `ru`), `action` (`NotificationAction` {`data`, at most 64 ASCII bytes, and `label`}, or absent for a confirmation code)} answering `201` `NotificationSent` {`notification_id`, `replayed`} and the classes of every other call; the event `NotificationAcknowledgedEvent` {`type` `notification_acknowledged`, `notification_id`, `data`} in the `Event` union; `AnswerShown.shown_as` gains `notification`; `make lint` passes Redocly and the CI step \"oasdiff breaking, api/bridge.yaml\" passes with the three role-gated breaking changes that `api/bridge-oasdiff-ignore.txt` names — the two of the operations through oasdiff's `--err-ignore`, the one of the push webhook through its JSON run (Step 1) — and fails on any other, the push webhook's included; and `api/bridge_test.go` finds `BridgeInfo` of `openapi.yaml` equal to `Info`."
-  - "[C-30.FR-1, C-30.AC-1, C-22.FR-3] A Bridge Connection whose stored `info` declares only `gateway` reads `roles` `[\"gateway\"]`; `createDestination` naming it, and `updateDestination` that moves a Destination to it, are refused with `422` `gateway_only` at `/connection_id`, while a Destination saved before its bridge became gateway-only stays editable on that Connection; a Connection whose `info` declares both roles reads `[\"messenger\", \"gateway\"]` and takes a Destination; one without `roles` in `info` reads `[\"messenger\"]`; `listConnections` takes `role` (`messenger`, `gateway`): `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has it, `gateway` only the Bridge Connections whose stored `info` has it (`bridge_test.go`, `write_test.go`)."
+  - "[C-30.FR-2, C-22.FR-2, C-22.FR-11] `api/bridge.yaml` gains, additively in protocol version 1: `Info.roles` (an array of `messenger` and `gateway`, unique, at least one; `messenger` when omitted); the operation `sendNotification` (`POST /v1/notifications`, `Idempotency-Key` required) with `NotificationInput` {`contact`, `text` (plain text, at most 1,000 code points), `language` (`en`, `ru`), `action` (`NotificationAction` {`data`, at most 64 ASCII bytes, and `label`}, or absent for a confirmation code)} answering `201` `NotificationSent` {`notification_id`, `replayed`} and the classes of every other call; the event `NotificationAcknowledgedEvent` {`type` `notification_acknowledged`, `notification_id`, `data`} in the `Event` union; `AnswerShown.shown_as` gains `notification`; `make lint` passes Redocly and the CI step \"oasdiff breaking, api/bridge.yaml\" passes with the three role-gated breaking changes that this pull request adds to `api/bridge-oasdiff-ignore.txt`, each with its direction (`forward` or `reverse`), and fails on any other, the push webhook's included, on a line of the wrong direction and, once merged, on a later change that the same lines would name, such as the removal of what this story adds (Step 1); and `api/bridge_test.go` finds `BridgeInfo` of `openapi.yaml` equal to `Info`."
+  - "[C-30.FR-1, C-30.AC-1, C-22.FR-3] A Bridge Connection whose stored `info` declares only `gateway` reads `roles` `[\"gateway\"]`; `createDestination` naming it, and `updateDestination` that moves a Destination to it, are refused with `422` `gateway_only` at `/connection_id`, while an update of a Destination saved before its bridge became gateway-only, on that Connection, is not refused with `gateway_only` but fails its Destination check as the bridge answers it, so that it can only be deleted or moved to another Connection; a Connection whose `info` declares both roles reads `[\"messenger\", \"gateway\"]` and takes a Destination; one without `roles` in `info` reads `[\"messenger\"]`; `listConnections` takes `role` (`messenger`, `gateway`): `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has it, `gateway` only the Bridge Connections whose stored `info` has it (`bridge_test.go`, `write_test.go`)."
   - "[C-30.FR-2, C-22.FR-21] `muster bridge check` reads the roles: a bridge without `gateway` skips the gateway steps; with `gateway`, the step `notification` sends one `sendNotification` to the contact given by `--contact` (skipped without it) with a test text and test action data, and passes on `201`; a repeated call with the same key must answer `replayed` true; in interactive mode the step `notification_acknowledged` waits for that event carrying the same `data` and answers it with `answerEvent`; against the fake bridge's gateway bot every step passes (`conformance_test.go`, `bridge_test.go` of `internal/cli`)."
   - "[C-30.FR-5] `delivery.Gateway` is an interface with the one method `Notify`, which the Bridge adapter implements by `sendNotification` through the Connection's limiter; lint 3 fails a call of `Notify` outside `internal/delivery/interactive.go` (and, from S-148, the gateway sender), with its fixture `testdata/rule3/internal/gateways/calls.go` (`archlint_test.go`)."
   - "[C-30.FR-2, C-22.FR-11] `DecodeEvent` reads `notification_acknowledged` and keeps it for its handler, which until S-173 logs `bridge_event_unhandled` — a new log event of the registry — and acknowledges the event; Bridge polling takes the events of a Connection whose only role is `gateway` like any other's (`events_test.go`)."
@@ -121,30 +121,39 @@ issue: 434
     `notification` ("told in the call or in the reply to the message"). The description of the role says that a gateway
     implements `info`, `sendNotification`, `answerEvent` — during a call in the push mode, so that the answer comes
     while the person is on the line — and events in at least one mode.
-- **Spec** (`api/openapi.yaml`): `BridgeInfo` gains `roles` (copy of `Info`), `BridgeRole` is the copy of `InfoRole`
-  and `BridgeNotificationAcknowledgedEvent` that of the event, in `BridgeEvent`; `BridgeConnection` gains the required,
-  read-only `roles` (`BridgeRole`[], from the stored `info`, `["messenger"]` while `info` is null); `listConnections`
-  gains `role`; problem code `gateway_only` (`validation-failed`, in `errors[].code`) at `/connection_id`, which the
-  mapping of `destinations.FieldError` in `internal/api/problem.go` answers as it is, so that file does not change.
+- **Spec** (`api/openapi.yaml`): `BridgeInfo` gains `roles` (copy of `Info`), `BridgeInfoRole` is the copy of `InfoRole`
+  (whose Go constants `x-enum-varnames` names `BridgeInfoRoleMessenger` and `BridgeInfoRoleGateway`, apart from the type
+  `Messenger` of `openapi.yaml`; `api/bridge_test.go` leaves that key out of the comparison, and `api/bridge.yaml` has
+  none, so its generators name them by their defaults) and `BridgeNotificationAcknowledgedEvent` that of the event, in
+  `BridgeEvent`; `BridgeConnection` gains the required, read-only `roles` (`BridgeInfoRole`[], from the stored `info`,
+  `["messenger"]` while `info` is null); `listConnections` gains `role`; problem code `gateway_only`
+  (`validation-failed`, in `errors[].code`) at `/connection_id`, which the mapping of `destinations.FieldError` in
+  `internal/api/problem.go` answers as it is, so that file does not change.
 - **Bridge** (`internal/bridge`): `info.go` — `Info.Roles` and `HasRole`; `client.go` — `SendNotification(ctx, conn,
   key, NotificationInput)` with the classification of `classify.go`; `delivery.go` — the Bridge adapter's `Notify`,
-  through the Connection's limiter (`connection.bridge.limiter`) in the client class of its caller; `events.go` —
+  through the Connection's limiter (`connection.bridge.limiter`) in the client class of its caller, with the contact
+  and the text masked like Secrets in the Request log's record of the call (`outbound.WithSecrets`) and in its error;
+  `events.go` —
   `TypeNotificationAcknowledged`, decoded and validated (the `data` at most 64 bytes), handed to a handler that S-173
   registers; `conformance.go` — the steps `notification` and `notification_acknowledged`.
 - **Delivery** (`internal/delivery`): `delivery.go` declares `Gateway` {`Notify(ctx, Call, Notification) Outcome`},
   which `*bridge.Adapter` implements; `interactive.go` gains `Notify` on the interactive path, for the confirmation
   codes of S-167.
 - **Bridge protocol check in CI** (`.github/workflows/ci.yml`, `api/bridge-oasdiff-ignore.txt`): the step "oasdiff
-  breaking, api/bridge.yaml" takes `--err-ignore` with the file of Step 1 in both comparisons for its report, and takes
-  its status from a second run of each with `--format json`, which `jq` fails on every ERR whose
-  `<method> <path> <text>` is not a line of that file; the libraries' own spec checks (S-146, S-147) are not affected.
+  breaking, api/bridge.yaml" writes the markdown report of both comparisons without `--err-ignore`, and takes its
+  status from a second run of each with `--format json`: `jq` checks the shape of the answer — a list whose items have
+  a numeric `level` and string `id`, `operation`, `path` and `text` — and fails on every ERR (level 3) whose
+  `<direction>|<method> <path> <text>` is not one of the lines that the pull request adds to the file compared with
+  `origin/<base>` (every line when the base has none); the libraries' own spec checks (S-146, S-147) are not
+  affected.
 - **Lint 3** (`internal/archlint/archlint.go`, `callrules.go`): the configuration gains the interface
   `delivery.Gateway` with the method `Notify`, allowed in `internal/delivery/interactive.go`; S-148 adds the sender. The
   rule checks each of the two interfaces with its own allowed files, and its fixture's `internal/delivery` declares
   `Gateway` beside `Adapter`, with a call allowed in its `interactive.go`. The messenger clients beneath stay
   unchecked, so `muster bridge check` needs no exception (ADR-0016 as amended).
 - **CLI** (`internal/cli/bridge.go`): `muster bridge check` gains `--contact` (the contact the step `notification`
-  calls); its output names the roles.
+  calls); its output names the roles; `--channel` is needed only by a bridge in the role `messenger`, and its absence
+  is a usage error, exit 2, once `info` named that role and before any step of the messenger.
 - **Connections** (`internal/connections/bridge.go`, `connections.go`, `query.sql`): `roles` in the read; the filter
   `role` in the query `ListConnections`, so that a page of the cursor pagination is full; `BridgeConnection`, the Bridge
   Connection of a gateway by its id for `bridge.Targets`; `GatewayOnly` for the Destination write path; and
@@ -152,7 +161,10 @@ issue: 434
   and logs `demo_check_failed` for a check that fails or cannot run.
 - **Destinations** (`internal/destinations/write.go`): the refusal `gateway_only` on create and on an update that moves
   the Destination to another Connection, from the stored `info`; a Destination saved before its bridge became
-  gateway-only stays, keeps its delivery and stays editable on that Connection (Open question 1, Notes). The refusal
+  gateway-only stays and keeps its delivery as the bridge answers it (Open question 1, Notes), and an update of it on
+  that Connection is not refused with `gateway_only` but fails its Destination check, since a gateway alone answers
+  `checkChannel` with 501, as the fake's gateway bot does: such a Destination can only be deleted or moved to another
+  Connection. The refusal
   comes before the Mention entries of S-140 are validated, so it also keeps such a Connection out of Mention entries
   (maintainer's decision Q2 of the plan review); S-139's `mention_connections` leaves it out by the same condition.
 - **Account links** (`internal/accountlinks/query.sql`, `accountlinks.go`): `ListLinkableConnections` leaves out a
@@ -163,7 +175,9 @@ issue: 434
   `roles: [gateway]`, poll and push, `messenger.name` "Example Gateway"; `notifications.go` — `sendNotification` with
   the idempotency of the other calls, `/_fake/notifications` (each request with its key, contact, text, language and
   `action`), `POST /_fake/acknowledge` {`notification_id`} that queues `notification_acknowledged` for the bot;
-  `/_fake/config` gains `roles` per token; `/_fake/faults` applies to `sendNotification` like to the other calls.
+  `/_fake/config` gains `roles` per token; `/_fake/faults` applies to `sendNotification` like to the other calls; a bot
+  whose roles lack `messenger` answers 501 to the operations of a messenger (channels, messages and Thread replies,
+  people and direct messages) and keeps `info`, events, answers and notifications.
 - **Development mode** (`internal/devmode/devmode.go`, `internal/runtime/runtime.go`): the demo Bridge Connection
   "Example Gateway" with the gateway bot in poll mode, ensured and checked at start by the runtime; its base URL has the
   fake's path prefix `/gateway`, which the fake serves too, so that the faults that tests script on `/v1/…` paths for
@@ -193,14 +207,18 @@ issue: 434
    /v1/answers`); reverse, `request-body-one-of-removed` (the same event in the pushed `bridgeEvent`). Each is gated by
    the role: a bridge sends `notification_acknowledged` only for a `sendNotification`, which Muster makes only to a
    bridge that declares `gateway`, and answers `shown_as` `notification` only to the `answerEvent` of such an event, so
-   neither a Muster of 0.1 nor a bridge without the role ever meets them. The step therefore passes `--err-ignore
-   api/bridge-oasdiff-ignore.txt` to both comparisons, a checked-in file with exactly these three changes, each a line
-   `<method> <path> <text>` after a comment with this reason; a new ERR still fails, and the rule's other changes keep
-   their level (the levels file stays as it is). oasdiff v1.33.0 matches an ignore line only by a path that starts with
-   `/`, and names the change of the webhook by `webhook:bridgeEvent`, so `--err-ignore` cannot take the third: the step
-   takes its status from a second run of each comparison with `--format json`, and `jq` fails on every ERR (level 3)
-   whose line is not one of the file, so only that exact change of the webhook passes and any other change of the
-   webhook, such as a header that becomes optional, still fails.
+   neither a Muster of 0.1 nor a bridge without the role ever meets them. The step therefore accepts them through
+   `api/bridge-oasdiff-ignore.txt`, a checked-in file with exactly these three changes, each a line
+   `<direction>|<method> <path> <text>` — `forward` for the comparison from the base to the head, `reverse` for the
+   other — after a comment with this reason; a new ERR still fails, and the rule's other changes keep their level (the
+   levels file stays as it is). oasdiff's `--err-ignore` is not used: v1.33.0 matches its lines by substring, without
+   case and without a direction, and only by a path that starts with `/`, so never the change of the webhook,
+   `webhook:bridgeEvent`. The step takes its status from a second run of each comparison with `--format json`, whose
+   shape `jq` checks before it fails on every ERR (level 3) that no line of the same direction names exactly, and only
+   the lines that the pull request adds to the file compared with `origin/<base>` count: once this story is merged,
+   its lines accept nothing, so a later pull request that removes `NotificationAcknowledgedEvent` from `Event` or
+   `notification` from `shown_as` fails, as does any other change of the webhook, such as a header that becomes
+   optional. The markdown report may list the changes the file accepts.
 2. Read the roles, write the client call, the adapter's `Notify`, the interface and lint 3. Check: `info_test.go`,
    `client_test.go`, `delivery_test.go`, `archlint_test.go`.
 3. Decode the event; add the roles to the Connection read, the refusal to Destinations and the filter to the linkable
@@ -251,7 +269,8 @@ and a fault scripted on `sendNotification` that the check reports.
 
 1. **A Destination whose bridge later declares only `gateway`.** Settled by C-30.FR-1, which refuses only creating a
    Destination for such a Connection: a Destination saved while the bridge was a messenger stays, its deliveries fail as
-   the bridge answers, and S-150 warns about it on the Connection page.
+   the bridge answers, and S-150 warns about it on the Connection page. Saving it again runs its Destination check,
+   which a gateway alone fails, so it can only be deleted or moved to another Connection.
 
 ## Notes
 

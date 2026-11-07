@@ -60,8 +60,8 @@ type Info struct {
 
 // The roles a bridge declares in info (C-30.FR-1): messenger, the default, and gateway, a Notification gateway.
 const (
-	RoleMessenger = string(gen.RoleMessenger)
-	RoleGateway   = string(gen.RoleGateway)
+	RoleMessenger = string(gen.Messenger)
+	RoleGateway   = string(gen.Gateway)
 )
 
 // Roles are the roles the info declares, in its order: messenger when it declares none, as a bridge written before

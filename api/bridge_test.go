@@ -21,6 +21,10 @@ const markKey = "x-bridge-schema"
 
 const schemaRef = "#/components/schemas/"
 
+// enumNamesKey names the Go constants of an enum, which a copy may name after itself, as BridgeInfoRole does to keep
+// apart from the type Messenger of openapi.yaml; it is not part of the schema.
+const enumNamesKey = "x-enum-varnames"
+
 // dataKeys hold values, not schemas: they are compared as they are.
 var dataKeys = []string{"enum", "const", "default", "example", "examples"}
 
@@ -79,8 +83,8 @@ func compareCopies(api, bridge map[string]any) []string {
 	return diffs
 }
 
-// normalize drops descriptions and marks and replaces every schema reference by the name ref gives its target. In a
-// map of names (properties), every key is kept.
+// normalize drops descriptions, marks and the names of enum constants, and replaces every schema reference by the name
+// ref gives its target. In a map of names (properties), every key is kept.
 func normalize(v any, ref func(target string) string, names bool) any {
 	switch v := v.(type) {
 	case map[string]any:
@@ -89,7 +93,7 @@ func normalize(v any, ref func(target string) string, names bool) any {
 			switch {
 			case names:
 				out[k] = normalize(val, ref, false)
-			case k == "description" || k == markKey:
+			case k == "description" || k == markKey || k == enumNamesKey:
 			case slices.Contains(dataKeys, k):
 				out[k] = val
 			case k == "$ref":

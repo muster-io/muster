@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -146,9 +147,13 @@ type conformanceStep struct {
 	run  func(context.Context)
 }
 
+// ErrChannelRequired ends a run against a bridge in the role messenger without a channel, once info declared the role
+// and before any step of the messenger: a usage error, not a failure of the bridge.
+var ErrChannelRequired = errors.New("--channel is required for a bridge in the role messenger")
+
 // RunConformance runs the conformance check of cfg and prints each line to cfg.Out as soon as its step ends. failed
-// is whether a step failed. err is the end of ctx, which interrupted the run, or a client that cannot be built, after
-// which nothing ran.
+// is whether a step failed. err is the end of ctx, which interrupted the run, a client that cannot be built, after
+// which nothing ran, or ErrChannelRequired, after which only info ran.
 func RunConformance(ctx context.Context, cfg ConformanceConfig) (failed bool, err error) {
 	base, err := ParseBaseURL(cfg.BaseURL)
 	if err != nil {
@@ -180,8 +185,7 @@ func RunConformance(ctx context.Context, cfg ConformanceConfig) (failed bool, er
 		return true, ctx.Err()
 	}
 	if cn.messenger && cn.cfg.Channel == "" {
-		cn.fail("channel_check", "--channel is required for a bridge in the role messenger")
-		return true, ctx.Err()
+		return false, ErrChannelRequired
 	}
 	for _, step := range cn.steps() {
 		if err := ctx.Err(); err != nil {

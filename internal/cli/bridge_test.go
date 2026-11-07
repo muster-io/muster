@@ -189,7 +189,8 @@ func (w *waitWriter) Write(p []byte) (int, error) {
 // TestBridgeCheckGateway is C-22.FR-21 as revised and C-30.FR-2 through the command: against the fake's gateway bot,
 // without --channel, the output names the roles, skips the messenger's steps, sends a notification to --contact and,
 // interactively, passes notification_acknowledged once the fake acknowledges it; a check without --contact skips both
-// gateway steps; a check of a messenger without --channel fails after info.
+// gateway steps; a check of a messenger without --channel is a usage error once info named the role, exit 2, before any
+// step of the messenger.
 func TestBridgeCheckGateway(t *testing.T) {
 	f := fakebridge.New()
 	if err := f.Start(t.Context(), "127.0.0.1:0"); err != nil {
@@ -226,10 +227,15 @@ func TestBridgeCheckGateway(t *testing.T) {
 		t.Fatalf("without --contact: exit %d, stdout\n%s", code, plain.String())
 	}
 	plain.Reset()
+	stderr.Reset()
 	messenger := secretFile(t, "messenger", fakebridge.SecondToken)
 	if code := BridgeCheckCommand(t.Context(), []string{f.URL(), "--token-file", messenger}, &plain, &stderr); code !=
-		exitFailure || plain.String() != "PASS info\nROLES messenger\n"+
-		"FAIL channel_check: --channel is required for a bridge in the role messenger\n" {
-		t.Fatalf("a messenger without --channel: exit %d, stdout\n%s", code, plain.String())
+		exitUsage || plain.String() != "PASS info\nROLES messenger\n" || stderr.String() != "muster bridge check: "+
+		"--channel is required for a bridge in the role messenger\n\n"+bridgeUsage {
+		t.Fatalf("a messenger without --channel: exit %d, stdout\n%s\nstderr\n%s", code, plain.String(),
+			stderr.String())
+	}
+	if ms := f.Messages(); len(ms) != 0 {
+		t.Errorf("a messenger step ran without --channel: %+v", ms)
 	}
 }

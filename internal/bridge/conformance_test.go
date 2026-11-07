@@ -866,7 +866,8 @@ func TestConformanceGateway(t *testing.T) {
 }
 
 // TestConformanceBothRoles: a bridge with both roles runs the messenger's steps and the gateway's, and a bridge in the
-// role messenger needs --channel, whose absence fails the run after info.
+// role messenger needs --channel, whose absence ends the run after info with ErrChannelRequired, before any step of
+// the messenger.
 func TestConformanceBothRoles(t *testing.T) {
 	f := startFake(t)
 	configure(t, f, `{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`)
@@ -879,13 +880,13 @@ func TestConformanceBothRoles(t *testing.T) {
 	if failed {
 		t.Fatal("failed")
 	}
-	cfg.Channel = ""
-	lines, failed = run(t, cfg)
-	sameLines(t, lines, []string{"PASS info", "ROLES messenger gateway",
-		"FAIL channel_check: --channel is required for a bridge in the role messenger"})
-	if !failed {
-		t.Fatal("passed without --channel")
+	w := &lineWriter{}
+	cfg.Channel, cfg.Out = "", w
+	failed, err := RunConformance(t.Context(), cfg)
+	if !errors.Is(err, ErrChannelRequired) || failed {
+		t.Fatalf("without --channel: failed %v, err %v", failed, err)
 	}
+	sameLines(t, w.lines, []string{"PASS info", "ROLES messenger gateway"})
 }
 
 // TestConformanceGatewayFailures: a sendNotification that fails, a replay that is not one, an acknowledgement with

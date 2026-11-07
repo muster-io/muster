@@ -72,7 +72,7 @@ func (f *Fake) Notifications() []Notification {
 func (f *Fake) sendNotification(w http.ResponseWriter, r *http.Request) {
 	b := botFrom(r)
 	f.mu.Lock()
-	gateway := f.hasRole(b, gen.RoleGateway)
+	gateway := f.hasRole(b, gen.Gateway)
 	f.mu.Unlock()
 	if !gateway {
 		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,

@@ -1,17 +1,19 @@
 # The breaking changes of api/bridge.yaml that the CI step "oasdiff breaking, api/bridge.yaml" accepts, one per line
-# below a comment that gives its reason: "<method> <path> <text>", the method, the path and the text of the change as
-# oasdiff names it. oasdiff --err-ignore takes the lines of paths that start with a slash; the step's JSON run takes
-# every line, the push webhook's (webhook:bridgeEvent) included, and fails on any ERR that no line names exactly, so a
-# new change on the same operation still fails. Comment lines hold no word that starts with a slash, so that oasdiff
-# matches none of them.
+# below a comment that gives its reason: "<direction>|<method> <path> <text>". The direction is forward for the
+# comparison from the base to the head, as Muster the client sees the protocol, and reverse for the one from the head
+# to the base, as an existing bridge serves it; the method, the path and the text are those of the change as oasdiff
+# names them. The step fails on any ERR that no line of its direction names exactly, and only the lines that a pull
+# request adds to this file count for it: once it is merged, its lines accept nothing more, so a later change of the
+# same operation, its removal of what was added included, still fails. A pull request may remove the lines of earlier
+# ones.
 #
 # The role gateway (C-30.FR-2). A bridge sends notification_acknowledged only for a sendNotification, which Muster makes
 # only to a bridge whose info declares the role gateway, so a bridge without the role never sends the event, and a
 # Muster of 0.1, which knows no role, never meets it.
-GET /v1/events added `#/components/schemas/NotificationAcknowledgedEvent` to the `events/items/` response property `oneOf` list for the response status `200`
+forward|GET /v1/events added `#/components/schemas/NotificationAcknowledgedEvent` to the `events/items/` response property `oneOf` list for the response status `200`
 # The same event in the push webhook, which the comparison from the head to the base reports as removed from the
 # bridgeEvent request body: only a bridge in the role gateway pushes it, and a Muster that knows it takes it.
-POST webhook:bridgeEvent removed `#/components/schemas/NotificationAcknowledgedEvent` from the request body `oneOf` list
+reverse|POST webhook:bridgeEvent removed `#/components/schemas/NotificationAcknowledgedEvent` from the request body `oneOf` list
 # A bridge answers shown_as notification only to the answerEvent of a notification_acknowledged event, which only a
 # bridge in the role gateway sends, so neither a Muster of 0.1 nor a bridge without the role ever meets the value.
-POST /v1/answers added the new `notification` enum value to the `shown_as` response property for the response status `200`
+forward|POST /v1/answers added the new `notification` enum value to the `shown_as` response property for the response status `200`

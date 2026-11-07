@@ -1699,7 +1699,8 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   The bridge's token, alone in the file (required).
 
 `--channel <id>`
-:   A channel the bot can post to (required for a bridge in the role `messenger`).
+:   A channel the bot can post to; a bridge in the role `messenger` needs it, and without it the check stops after
+    `info` with exit status `2`. A bridge whose only role is `gateway` needs none.
 
 `--forbidden-channel <id>`
 :   A channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped.

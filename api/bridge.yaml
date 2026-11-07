@@ -766,9 +766,6 @@ components:
       enum:
       - messenger
       - gateway
-      x-enum-varnames:
-      - RoleMessenger
-      - RoleGateway
     Capabilities:
       type: object
       description: The optional features of the bridge. A missing member means the feature is not offered.

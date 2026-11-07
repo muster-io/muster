@@ -533,9 +533,9 @@ func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
 func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, error) {
 	tag := etag(c.Version)
 	callback := s.connections.BridgeCallbackURL(c.PublicID)
-	roles := []gen.BridgeRole{}
+	roles := []gen.BridgeInfoRole{}
 	for _, r := range c.BridgeRoles() {
-		roles = append(roles, gen.BridgeRole(r))
+		roles = append(roles, gen.BridgeInfoRole(r))
 	}
 	b := gen.BridgeConnection{Id: c.PublicID, Type: gen.BridgeConnectionTypeBridge, Name: c.Name,
 		BaseUrl: c.BridgeBaseURL, EventDelivery: gen.BridgeEventDelivery(c.EventDelivery), Roles: &roles,

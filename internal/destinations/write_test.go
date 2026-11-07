@@ -426,7 +426,7 @@ func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChan
 // fakeBridge stands for the Connections: the Destination check of a Bridge channel through the Connection
 // CNAAAAAAAAAAA3, by its channel id: ch-nobot is forbidden with the fake bridge's detail, revoked has its token
 // refused, and any other channel passes with the name name, "alerts" when it is empty; the Connections in gateways are
-// Notification gateways alone, and gatewayErr fails their read.
+// Notification gateways alone, whose channel check fails as a gateway answers it, and gatewayErr fails their read.
 type fakeBridge struct {
 	calls      []BridgeChannelCheck
 	links      []outbound.Links
@@ -451,6 +451,11 @@ func (c *fakeBridge) CheckBridgeChannel(ctx context.Context, in BridgeChannelChe
 	fatal := func(code, message string) BridgeChannelChecked {
 		return BridgeChannelChecked{ConnectionID: 7, Check: bridge.ChannelCheck{Message: message, Code: code,
 			Outcome: delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(message)}}}
+	}
+	if slices.Contains(c.gateways, in.Connection) {
+		// A gateway alone serves no channels, as the fake bridge answers it.
+		return fatal("request_failed", "POST /v1/channels/"+in.ChannelID+"/check is served by a bot in the role "+
+			"messenger only"), nil
 	}
 	switch in.ChannelID {
 	case "ch-nobot":
@@ -2204,9 +2209,9 @@ func TestOwningTeam(t *testing.T) {
 // TestBridgeGatewayOnly is C-30.FR-1, C-30.AC-1 and C-22.FR-3 as revised: createDestination of a Bridge Destination
 // whose Connection is a Notification gateway alone, and updateDestination that moves a Bridge Destination to such a
 // Connection, are refused with gateway_only at /connection_id before its Mention settings are validated and before any
-// check, and nothing is saved; a Destination whose Connection became a gateway alone after it was saved stays editable
-// on that Connection (Open question 1); a Connection with both roles takes a Destination; a failed read of the
-// Connection fails the save.
+// check, and nothing is saved; an update of a Destination whose Connection became a gateway alone after it was saved
+// is not refused with gateway_only but fails its channel check, so that it can only be deleted or moved (Open question
+// 1); a Connection with both roles takes a Destination; a failed read of the Connection fails the save.
 func TestBridgeGatewayOnly(t *testing.T) {
 	s, store, w, _, _ := newSaver(t)
 	br := s.writer.Bridge.(*fakeBridge)
@@ -2231,10 +2236,14 @@ func TestBridgeGatewayOnly(t *testing.T) {
 	if len(br.calls) != 0 || len(w.brIns) != 0 || len(w.brSets) != 0 || len(w.audit) != 0 {
 		t.Fatalf("a refused save checked or wrote: %+v %+v %+v", br.calls, w.brIns, w.brSets)
 	}
-	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts-renamed", "ch-alerts")); err != nil ||
-		len(br.calls) != 1 || len(w.brSets) != 1 || w.brSets[0].Name != "alerts-renamed" ||
-		w.brSets[0].ConnectionID.Int64 != 7 {
-		t.Fatalf("an update on the same Connection, now a gateway = %v, sets %+v", err, w.brSets)
+	// An update that keeps its Connection, now a gateway alone, is not refused with gateway_only, but its channel
+	// check fails as the bridge answers it, so that such a Destination can only be deleted or moved.
+	_, err = s.Update(ctx, saver, "DSAAAAAAAAAAA4", nil, bridgeInput("alerts-renamed", "ch-alerts"))
+	failed, ok := errors.AsType[*CheckFailedError](err)
+	if !ok || len(failed.Items) != 1 || failed.Items[0].Code != "request_failed" ||
+		failed.Items[0].Pointer != "/channel_id" || len(br.calls) != 1 || br.calls[0].Destination == nil ||
+		len(w.brSets) != 0 {
+		t.Fatalf("an update on the same Connection, now a gateway = %v, checks %+v, sets %+v", err, br.calls, w.brSets)
 	}
 	br.gateways = nil
 	if _, err := s.Create(ctx, saver, bridgeInput("both", "ch-alerts")); err != nil {

@@ -2044,8 +2044,8 @@ func TestGatewayInfo(t *testing.T) {
 		[]string{bridge.RoleMessenger, bridge.RoleGateway}) || i.Messenger.Name != fakebridge.MessengerName {
 		t.Errorf("both roles: %s", i.Raw)
 	}
-	if c := s.fake.Config(); !slices.Equal(c.Roles[fakebridge.Token], []gen.InfoRole{gen.RoleMessenger,
-		gen.RoleGateway}) || !slices.Equal(c.Roles[fakebridge.GatewayToken], []gen.InfoRole{gen.RoleGateway}) {
+	if c := s.fake.Config(); !slices.Equal(c.Roles[fakebridge.Token], []gen.InfoRole{gen.Messenger,
+		gen.Gateway}) || !slices.Equal(c.Roles[fakebridge.GatewayToken], []gen.InfoRole{gen.Gateway}) {
 		t.Errorf("roles %v", c.Roles)
 	}
 	s.configure(t, `{"token":"`+fakebridge.Token+`","roles":null}`)
@@ -2190,4 +2190,49 @@ func TestGatewayPrefix(t *testing.T) {
 	if _, r := s.client(t, fakebridge.GatewayToken).PollEvents(t.Context(), nil, 0); r.Status != http.StatusForbidden {
 		t.Errorf("a poll without the prefix: %+v", r)
 	}
+}
+
+// TestGatewayServesNoMessenger: a bot whose info lacks the role messenger — the gateway bot, or another one given only
+// the role gateway — answers 501 to the operations of a messenger, under the gateway prefix too, and still serves
+// info, events, answers and notifications; given both roles it serves them again.
+func TestGatewayServesNoMessenger(t *testing.T) {
+	s := start(t)
+	for _, token := range []string{fakebridge.GatewayToken, fakebridge.SecondToken} {
+		if token == fakebridge.SecondToken {
+			s.configure(t, `{"token":"`+fakebridge.SecondToken+`","roles":["gateway"]}`)
+		}
+		if a := s.checkChannel(t, token, fakebridge.ChannelAlerts); a.status != http.StatusNotImplemented ||
+			!strings.Contains(string(a.body), "served by a bot in the role messenger only") {
+			t.Errorf("%s checkChannel = %d %s", token, a.status, a.body)
+		}
+		for _, rq := range []request{
+			{method: http.MethodPost, path: "/v1/messages", token: token, key: "k1",
+				body: envelope(fakebridge.ChannelAlerts)},
+			{method: http.MethodPatch, path: "/v1/messages/m1", token: token, body: content(gen.StatusAcknowledged)},
+			{method: http.MethodPost, path: "/v1/messages/m1/thread-replies", token: token, key: "k2",
+				body: replyOf(nil)},
+			{method: http.MethodDelete, path: "/v1/messages/m1", token: token},
+			{method: http.MethodGet, path: "/v1/users?handle=alice", token: token},
+			{method: http.MethodPost, path: "/v1/direct-messages", token: token, key: "k3",
+				body: gen.DirectMessageInput{UserExternalId: fakebridge.AliceID, Body: "code"}},
+		} {
+			if a := s.exchange(t, rq); a.status != http.StatusNotImplemented {
+				t.Errorf("%s %s %s = %d %s", token, rq.method, rq.path, a.status, a.body)
+			}
+		}
+		s.getInfo(t, token).valid(t)
+		s.poll(t, token, "wait=0").batch(t)
+		s.notify(t, token, "n-"+token, gen.NotificationInput{Contact: "+1", Text: "x", Language: gen.En}, false).sent(t)
+	}
+	c, err := bridge.NewClient(network(t), bridge.Settings{BaseURL: s.fake.URL() + fakebridge.GatewayPrefix,
+		Token: logging.Secret(fakebridge.GatewayToken)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, r := c.CheckChannel(t.Context(), outbound.ClassInteractive, fakebridge.ChannelAlerts); r.Status !=
+		http.StatusNotImplemented || r.Classification.Class != bridge.ClassInvalid {
+		t.Errorf("checkChannel under the prefix %+v", r)
+	}
+	s.configure(t, `{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`)
+	s.post(t, fakebridge.SecondToken, "k9", envelope(fakebridge.ChannelAlerts)).posted(t)
 }

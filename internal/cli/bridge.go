@@ -46,7 +46,8 @@ Flags, before or after <url>:
   --push-secret-file <file>  the push secret, whsec_ followed by base64, instead of a generated one
   --no-interactive           skip press, push and notification_acknowledged, which need a person
 
-Exits 0 when no step failed, 1 when one did, 2 on a usage error.
+Exits 0 when no step failed, 1 when one did, 2 on a usage error, also after info when a bridge in the role messenger
+is checked without --channel.
 `
 
 // maxSecretFile bounds what a token or push secret file holds.
@@ -78,9 +79,10 @@ func runBridge(args []string, stdout, stderr io.Writer) int {
 
 // BridgeCheckCommand is `muster bridge check` with the arguments after check; the secret-leak probe of lint 5 runs it.
 // A broken invocation — no URL or one that is not a bridge's base URL, a missing required flag, a contact longer than a
-// notification takes, or a token or push secret file that cannot be read or holds more than the secret — exits 2
-// before any request, so that it never looks
-// like a broken bridge. The token and the push secret appear in no line it prints, only a push secret it generated.
+// notification takes, or a token or push secret file that cannot be read or holds more than the secret — exits 2 before
+// any request; a bridge in the role messenger checked without --channel exits 2 once info named the role, so that it
+// never looks like a broken bridge. The token and the push secret appear in no line it prints, only a push secret it
+// generated.
 func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -148,6 +150,8 @@ func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 		PushURL: *pushURL, Interactive: !*noInteractive,
 		Out: stdout, Log: logging.New(stderr, logging.LevelInfo)})
 	switch {
+	case errors.Is(err, bridge.ErrChannelRequired):
+		return bridgeUsageError(stderr, err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintln(stderr, "muster bridge check: interrupted")
 		return exitFailure

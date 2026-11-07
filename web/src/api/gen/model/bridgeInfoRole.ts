@@ -6,10 +6,10 @@
 /**
  * `messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.
  */
-export type BridgeRole = typeof BridgeRole[keyof typeof BridgeRole];
+export type BridgeInfoRole = typeof BridgeInfoRole[keyof typeof BridgeInfoRole];
 
 
-export const BridgeRole = {
-  RoleMessenger: 'messenger',
-  RoleGateway: 'gateway',
+export const BridgeInfoRole = {
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
 } as const;

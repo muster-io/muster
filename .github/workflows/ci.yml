@@ -243,14 +243,16 @@ jobs:
     # bridge's info declares it, so the two rules on removed operations are off there. --flatten-allof compares each
     # event as one schema: branch by branch, oasdiff reports a new required member of an event in the oneOf only as a
     # warning. api/bridge-oasdiff-ignore.txt lists the breaking changes that a role or a feature of info gates, each
-    # with its reason, by "<method> <path> <text>" as oasdiff names them; any other breaking change still fails. oasdiff
-    # --err-ignore matches only paths that start with /, never the push webhook (webhook:bridgeEvent), so the status of
-    # each direction comes from a JSON run instead: it fails on every ERR (level 3) whose line is not in the file, while
-    # the markdown report keeps --err-ignore for the paths. The JSON run takes no --err-ignore, which matches its lines
-    # by substring and without case, so that only jq's exact match accepts a change. In the summary of the comparison
-    # from the head to the base, an entry of the push webhook may be a change the file accepts. What oasdiff cannot judge is left to the libraries' check of
-    # their copy of api/bridge.yaml and to muster bridge check. The step runs last, so its failure skips neither the
-    # report nor its comment. A full checkout fetches every branch, so origin/<base branch> is present.
+    # with its reason, as "<direction>|<method> <path> <text>": forward for the comparison from the base to the head,
+    # reverse for the one from the head to the base, and the method, path and text as oasdiff names them. The status of
+    # each direction comes from a JSON run, which jq checks for its shape and then fails on every ERR (level 3) that no
+    # line of its direction names exactly; only the lines that this pull request adds to the file count, so that an
+    # accepted change never covers a later one, such as the removal of what it added. oasdiff's --err-ignore is used
+    # nowhere: it matches by substring, without case and without a direction, and never the push webhook
+    # (webhook:bridgeEvent); the summary of each direction may therefore list changes the file accepts. What oasdiff
+    # cannot judge is left to the libraries' check of their copy of api/bridge.yaml and to muster bridge check. The step
+    # runs last, so its failure skips neither the report nor its comment. A full checkout fetches every branch, so
+    # origin/<base branch> is present.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -297,32 +299,45 @@ jobs:
           levels="$RUNNER_TEMP/oasdiff-bridge-levels.txt"
           printf '%s\n' 'api-path-removed-without-deprecation NONE' 'api-removed-without-deprecation NONE' >"$levels"
           ignore=api/bridge-oasdiff-ignore.txt
+          # Only the lines this pull request adds to the ignore file accept a change, all of them when the base has
+          # none.
+          added="$RUNNER_TEMP/oasdiff-bridge-added.txt"
+          git show "origin/$BASE_REF:$ignore" >"$RUNNER_TEMP/oasdiff-bridge-base-ignore.txt" 2>/dev/null ||
+            : >"$RUNNER_TEMP/oasdiff-bridge-base-ignore.txt"
+          grep -vxF -f "$RUNNER_TEMP/oasdiff-bridge-base-ignore.txt" "$ignore" >"$added" || :
           status=0
           compare() {
-            title=$1
-            shift
+            direction=$1
+            title=$2
+            shift 2
             report="$RUNNER_TEMP/oasdiff-bridge.md"
             changes="$RUNNER_TEMP/oasdiff-bridge.json"
             rc=0
-            go run "github.com/oasdiff/oasdiff@$OASDIFF_VERSION" breaking --flatten-allof --err-ignore "$ignore" "$@" \
-              --format markdown >"$report" || rc=$?
+            go run "github.com/oasdiff/oasdiff@$OASDIFF_VERSION" breaking --flatten-allof "$@" --format markdown \
+              >"$report" || rc=$?
             if [ ! -s "$report" ] && [ "$rc" -eq 0 ]; then echo "No breaking changes." >"$report"; fi
             if [ ! -s "$report" ]; then echo "oasdiff failed with exit status $rc; see the step log." >"$report"; fi
             { printf '%s\n\n' "$title"; cat "$report"; printf '\n'; } >>"$GITHUB_STEP_SUMMARY"
             if [ "$rc" -ne 0 ]; then status=$rc; return; fi
-            # The ERRs that no line of the ignore file names exactly, the webhook's included.
+            # The ERRs that no line this pull request adds names exactly, with this direction.
             if ! go run "github.com/oasdiff/oasdiff@$OASDIFF_VERSION" breaking --flatten-allof "$@" --format json \
               >"$changes" ||
-              ! jq -e --rawfile ignore "$ignore" '($ignore | split("\n")) as $lines
-                | [.[] | select(.level == 3) | select((.operation + " " + .path + " " + .text) as $l
-                  | $lines | index($l) | not)]
-                | if length == 0 then true else (.[] | "not accepted: \(.operation) \(.path) \(.text) [\(.id)]\n"
-                  | stderr) | false end' "$changes" >/dev/null; then
+              ! jq -e --arg direction "$direction" --rawfile added "$added" '
+                if type == "array" and all(.[]; (.level | type) == "number" and (.id | type) == "string" and
+                  (.operation | type) == "string" and (.path | type) == "string" and (.text | type) == "string")
+                then . else error("the JSON of oasdiff is not a list of changes with level, id, operation, path " +
+                  "and text; check the jq filter of this step against the oasdiff version") end
+                | ($added | split("\n")) as $lines
+                | [.[] | select(.level == 3)
+                  | select(($direction + "|" + .operation + " " + .path + " " + .text) as $l
+                    | $lines | index($l) | not)]
+                | if length == 0 then true else (.[] | "not accepted: \($direction)|\(.operation) \(.path) \(.text)" +
+                  " [\(.id)]\n" | stderr) | false end' "$changes" >/dev/null; then
               status=1
             fi
           }
-          compare '# Bridge protocol (`api/bridge.yaml`), Muster as the client' "$base" api/bridge.yaml
-          compare '# Bridge protocol (`api/bridge.yaml`), existing bridges as the server' \
+          compare forward '# Bridge protocol (`api/bridge.yaml`), Muster as the client' "$base" api/bridge.yaml
+          compare reverse '# Bridge protocol (`api/bridge.yaml`), existing bridges as the server' \
             --severity-levels "$levels" api/bridge.yaml "$base"
           exit "$status"
 

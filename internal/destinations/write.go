@@ -1467,8 +1467,9 @@ func unknownBridgeConnection() *FieldError {
 // (C-22.FR-3) — stored is nil on a creation — which a creation, or an update that moves the Destination to another
 // Connection, may not give as a Notification gateway alone: a Bridge Connection whose stored info declares only the
 // role gateway is refused with gateway_only before the Mention settings are validated, so that it never takes a
-// Mention entry either (C-30.FR-1). A Destination saved before its bridge became one keeps its delivery and stays
-// editable on that Connection.
+// Mention entry either (C-30.FR-1). A Destination saved before its bridge became one keeps its delivery as the bridge
+// answers it; an update that keeps that Connection is not refused here, but its Destination check fails as the bridge
+// answers checkChannel, so that the Destination can only be deleted or moved to another Connection.
 func (s *Service) validateBridge(ctx context.Context, in *Input, stored *Destination) error {
 	if err := validateCommon(in); err != nil {
 		return err
