@@ -213,6 +213,20 @@ describe("the page of a Route", () => {
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/routes"));
   });
 
+  test("a save of its own invalidates the previews, which render the Route as saved", async () => {
+    const { queryClient } = await renderEditor();
+    queryClient.setQueryData(["previewTemplate", { kind: "root_message" }], { valid: true });
+    await expect.element(condition(CRITICAL.id)).toHaveValue("critical");
+    await condition(NOTICE.id).selectOptions("any");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(
+        queryClient.getQueryState(["previewTemplate", { kind: "root_message" }])?.isInvalidated,
+      ).toBe(true),
+    );
+  });
+
   test("a newer version from someone else, while the form has changes, shows one banner, and Reload takes it", async () => {
     const { queryClient } = await renderEditor();
     await expect.element(condition(CRITICAL.id)).toHaveValue("critical");

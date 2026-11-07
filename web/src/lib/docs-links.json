@@ -12,6 +12,7 @@
   "field.matchers": "concepts/routes-and-group-keys.md#matchers",
   "field.mattermost_callback": "messengers/mattermost.md#let-button-presses-reach-muster",
   "field.mentions": "configure/messages-and-templates.md#whom-a-message-mentions",
+  "field.message_labels": "configure/messages-and-templates.md#labels-in-the-message",
   "field.minimum_severity": "concepts/routes-and-group-keys.md#minimum-severity",
   "field.oidc_groups": "sign-in/oidc-keycloak.md#2-add-the-groups-claim",
   "field.outbound_policy": "messengers/proxies.md#what-the-outbound-address-policy-checks",

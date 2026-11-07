@@ -7,7 +7,7 @@
 // (C-26.FR-2), the preview "Where alerts go" (C-26.FR-12), the section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section
 // (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the Storm threshold of C-11), the Snooze
 // durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
-// the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
+// the Message section (C-12.FR-2, FR-3, FR-5) with "Labels in the message" (C-29.FR-2), with the banner of a template that keeps failing (C-12.FR-6). Every
 // policy field is shown; a new Route starts with the values of its profile. Without routes:write the editor only shows
 // the Route. The Matchers, the Minimum severity and the Group key have "Learn more" beside their labels.
 
@@ -25,6 +25,7 @@ import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
 import { GroupKeyEditor } from "./group-key-editor";
 import { GroupKeyPreviewPanel, type PreviewQuery } from "./group-key-preview";
+import { MESSAGE_LABELS_MAX, sameLabels } from "./message-labels-editor";
 import {
   MatcherBuilder,
   type MatcherRow,
@@ -124,6 +125,12 @@ const formSchema = z
     deliver_to_teams: z.boolean(),
     run_team_chains: z.boolean(),
     snooze_durations: z.array(z.number().int().min(1)),
+    labels: z.object({
+      own: z.boolean(),
+      names: z
+        .array(z.string().trim().min(1, "invalid_format"))
+        .max(MESSAGE_LABELS_MAX, "out_of_range"),
+    }),
     message: z.object({
       language: z.enum(["en", "ru"]),
       templates: z.object({
@@ -138,6 +145,9 @@ const formSchema = z
   })
   .superRefine((v, ctx) => {
     refineTimers(v, ctx);
+    if (new Set(v.labels.names).size !== v.labels.names.length) {
+      ctx.addIssue({ code: "custom", path: ["labels", "names"], message: "duplicate" });
+    }
     const seen = new Set<string>();
     v.destination_entries.forEach((entry, index) => {
       if (seen.has(entry.destination_id)) {
@@ -170,6 +180,7 @@ export function formValues(base: RouteInput, route?: Route): FormValues {
     deliver_to_teams: base.deliver_to_teams ?? false,
     run_team_chains: base.run_team_chains ?? true,
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
+    labels: { own: base.own_message_labels ?? false, names: [...(base.message_labels ?? [])] },
     message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
     ...deliveryValues(base.policy),
@@ -200,6 +211,9 @@ export function inputOf(
     destination_entries: v.destination_entries.map((e) => ({ ...e })),
     deliver_to_teams: v.deliver_to_teams,
     run_team_chains: v.run_team_chains,
+    own_message_labels: v.labels.own,
+    // The list is read only while it is the Route's own; the default one is computed.
+    ...(v.labels.own ? { message_labels: v.labels.names } : {}),
     policy: withTimers(
       withDelivery(
         withMessage(
@@ -322,6 +336,7 @@ export function RouteForm({
     Partial<Record<MessageTemplate, ProblemError[]>>
   >({});
   const [languageError, setLanguageError] = useState<string>();
+  const [labelsError, setLabelsError] = useState<string>();
   const [serverDestinationErrors, setServerDestinationErrors] = useState<Record<string, string>>(
     {},
   );
@@ -331,6 +346,12 @@ export function RouteForm({
   // The Matcher rows a preview was asked with, so that its errors land on the rows they were sent from.
   const previewSent = useRef<MatcherRow[]>([]);
   const [defaultValues] = useState(() => formValues(base, route));
+  // The computed default list as it was read; unknown for a new Route and once an own list was read.
+  const [defaultLabels] = useState<string[] | null>(() =>
+    base.own_message_labels === false && base.message_labels !== undefined
+      ? [...base.message_labels]
+      : null,
+  );
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues,
@@ -338,6 +359,7 @@ export function RouteForm({
   const rows = useWatch({ control: form.control, name: "matchers" });
   const groupKey = useWatch({ control: form.control, name: "group_key" });
   const owningTeamId = useWatch({ control: form.control, name: "owning_team_id" });
+  const labels = useWatch({ control: form.control, name: "labels" });
   const [entries, deliverToTeams, runTeamChains, minimumSeverity] = useWatch({
     control: form.control,
     name: ["destination_entries", "deliver_to_teams", "run_team_chains", "minimum_severity"],
@@ -390,6 +412,7 @@ export function RouteForm({
       setSnoozeError(undefined);
       setTemplateErrors({});
       setLanguageError(undefined);
+      setLabelsError(undefined);
       setServerMatcherErrors(new Map());
       setServerGroupKeyError(undefined);
     },
@@ -415,6 +438,12 @@ export function RouteForm({
           byTemplate[template] = [...(byTemplate[template] ?? []), item];
         } else if (item.pointer === LANGUAGE_POINTER) {
           setLanguageError(item.code);
+        } else if (
+          item.pointer === "/message_labels" ||
+          item.pointer.startsWith("/message_labels/") ||
+          item.pointer === "/own_message_labels"
+        ) {
+          setLabelsError((prev) => prev ?? item.code);
         } else if (item.pointer === "/name") {
           form.setError("name", { type: item.code, message: item.code }, { shouldFocus: true });
         } else if (item.pointer === "/minimum_severity") {
@@ -586,6 +615,11 @@ export function RouteForm({
           routeId={route?.id}
           value={messageValues(base.policy)}
           readOnly
+          labels={{
+            value: { own: base.own_message_labels ?? false, names: base.message_labels ?? [] },
+            defaultNames: defaultLabels,
+            unsaved: false,
+          }}
         />
         <div>
           <Button type="button" variant="outline" onClick={onCancel}>
@@ -898,6 +932,16 @@ export function RouteForm({
             value={field.value}
             errors={templateErrors}
             languageError={languageError}
+            labels={{
+              value: labels,
+              defaultNames: defaultLabels,
+              error: labelsError ?? errors.labels?.names?.message ?? errors.labels?.message,
+              unsaved: !sameLabels(labels, defaultValues.labels),
+              onChange: (next) => {
+                setLabelsError(undefined);
+                form.setValue("labels", next, { shouldDirty: true });
+              },
+            }}
             onChange={(next) => {
               // A template that changes loses the error of the save, which was about its old text.
               setTemplateErrors((prev) => {

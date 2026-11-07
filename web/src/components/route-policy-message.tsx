@@ -6,8 +6,9 @@
 // the notice is used from the ack timeout's story on) — each "Built-in" (null) or "Custom" (a string). "Custom" starts
 // from the source of the built-in template in the Route's language, which previewTemplate returns for an empty
 // template. Under each editor its preview renders against the chosen sample, refreshed as the text changes, and the
-// editor marks the errors of the preview or of a refused save at their line and column. "Learn more" beside the
-// section's title opens the template language.
+// editor marks the errors of the preview or of a refused save at their line and column. The preview of the Root message
+// has the tabs Mattermost, Slack, Telegram and Bridge, which lay out its compact layout (C-29.AC-7). "Labels in the
+// message" (C-29.FR-2) sit above the templates. "Learn more" beside the section's title opens the template language.
 
 import { useMutation } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
@@ -23,11 +24,13 @@ import { DEFAULT_SAMPLE, type Sample, SamplePicker } from "./sample-picker";
 import { TemplateEditor, templateName } from "./template-editor";
 import {
   FormatSwitch,
+  MarkupTabs,
   type PreviewFormat,
   TemplatePreview,
   previewErrors,
   useTemplatePreview,
 } from "./template-preview";
+import { MessageLabelsEditor, type MessageLabelsValue } from "./message-labels-editor";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
@@ -94,6 +97,8 @@ function TemplateField({
   routeId,
   language,
   readOnly,
+  lineCustom,
+  labelsUnsaved,
 }: {
   id: string;
   name: MessageTemplate;
@@ -104,6 +109,10 @@ function TemplateField({
   routeId?: string;
   language: Language;
   readOnly: boolean;
+  /** The Route has an Alert line template, which the preview of the Root message does not render. */
+  lineCustom: boolean;
+  /** The labels of the form are not saved yet, and the preview renders the saved ones. */
+  labelsUnsaved: boolean;
 }) {
   const { t } = useTranslation();
   const canPreview = useCan("templates:preview");
@@ -225,9 +234,34 @@ function TemplateField({
                 defaultLabel={t("templates.sample.routeRecent")}
               />
             </div>
-            <FormatSwitch name={`${id}-format`} value={format} onChange={setFormat} />
+            {name === "root_message" ? null : (
+              <FormatSwitch name={`${id}-format`} value={format} onChange={setFormat} />
+            )}
           </div>
-          <TemplatePreview id={`${id}-preview`} kind={name} preview={preview} />
+          {name === "root_message" && (
+            <MarkupTabs
+              id={`${id}-markup`}
+              panelId={`${id}-preview`}
+              value={format}
+              onChange={setFormat}
+            />
+          )}
+          <TemplatePreview
+            id={`${id}-preview`}
+            kind={name}
+            preview={preview}
+            context={
+              name === "root_message"
+                ? {
+                    tabsId: `${id}-markup`,
+                    markup: format,
+                    rootCustom: custom,
+                    lineCustom,
+                    labelsUnsaved,
+                  }
+                : undefined
+            }
+          />
         </div>
       )}
     </section>
@@ -242,12 +276,24 @@ export function RoutePolicyMessage({
   errors,
   languageError,
   readOnly = false,
+  labels,
 }: {
   id: string;
   /** The stored Route of an edit, whose recent Stored Snapshots the previews render against. */
   routeId?: string;
   value: MessageValues;
   onChange?: (value: MessageValues) => void;
+  /** "Labels in the message": the form's value and what it needs. */
+  labels: {
+    value: MessageLabelsValue;
+    onChange?: (value: MessageLabelsValue) => void;
+    /** The computed default list as it was read, or null while it is not known. */
+    defaultNames: readonly string[] | null;
+    /** The code of a refusal of the list. */
+    error?: string;
+    /** The labels differ from those saved on the Route. */
+    unsaved: boolean;
+  };
   /** The errors of a refused save, by template. */
   errors?: Partial<Record<MessageTemplate, readonly ProblemError[]>>;
   languageError?: string;
@@ -303,6 +349,16 @@ export function RoutePolicyMessage({
           </p>
         )}
       </div>
+      <MessageLabelsEditor
+        id={`${id}-labels`}
+        value={labels.value}
+        onChange={(next) => labels.onChange?.(next)}
+        defaultNames={labels.defaultNames}
+        routeId={routeId}
+        error={labels.error}
+        readOnly={readOnly}
+        replaced={value.templates.root_message !== null}
+      />
       {MESSAGE_TEMPLATES.map((name) => (
         <TemplateField
           key={name}
@@ -313,6 +369,8 @@ export function RoutePolicyMessage({
           routeId={routeId}
           language={value.language}
           readOnly={readOnly}
+          lineCustom={value.templates.line !== null}
+          labelsUnsaved={labels.unsaved}
           onChange={(next) =>
             onChange?.({ ...value, templates: { ...value.templates, [name]: next } })
           }
