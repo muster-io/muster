@@ -110,8 +110,8 @@ func TestRecordEmptyDiffAndDetails(t *testing.T) {
 	}
 }
 
-// TestRecordTransports is C-03.FR-14 revised for L2: every Transport of the closed list is recorded, gateway among them,
-// and one outside it is refused as an unknown transport.
+// TestRecordTransports is C-03.FR-14 revised for L2: every Transport of the closed list is recorded, gateway among
+// them, and one outside it is refused as an unknown transport.
 func TestRecordTransports(t *testing.T) {
 	w, _ := newWriter()
 	s := &fakeStore{}

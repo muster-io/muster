@@ -23,8 +23,9 @@ What stops while no replica leads:
 - **Telegram polling**: Connections in the long polling update mode receive no button presses and no messages from
   the discussion group.
 - **Bridge polling**: Bridge Connections in the `poll` event delivery mode receive no events — no button presses, Text
-  commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
-  command that is older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
+  commands, acknowledgements made in a call through a Notification gateway, Account link requests or reports of
+  deleted messages — until a replica leads again. A press, a Text command or an acknowledgement in a call that is
+  older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
 - **Slack's Socket Mode**: Slack Connections in the `socket` event mode hold no Socket Mode connection, so a button
   press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
   not count on Slack to send such presses again.

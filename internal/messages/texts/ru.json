@@ -69,6 +69,7 @@
   "gatewayAck.notAcknowledged_few": "Не подтверждены: {numbers}",
   "gatewayAck.notAcknowledged_many": "Не подтверждены: {numbers}",
   "gatewayAck.notAcknowledged_other": "Не подтверждены: {numbers}",
+  "gatewayAck.nothing": "Подтверждать нечего",
   "gatewayAck.notVerified": "Не удалось проверить этот звонок; ничего не изменилось",
   "gatewayAck.resolved": "Уже закрыта",
   "gatewayAck.resolvedGroups_one": "Уже закрыта: {numbers}",

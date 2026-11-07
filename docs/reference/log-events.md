@@ -80,6 +80,12 @@ WARN · no fields · C-03
 
 The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
 
+### `bridge_acknowledgement_dropped`
+
+INFO · fields: `connection`, `event_id`, `age_seconds` · C-30
+
+A notification_acknowledged event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's real clock — such as one a gateway sent again after bridge.event_dedup_window — and was dropped without an answer, so that it never makes the person an Owner again: connection is the public_id of the Connection, event_id the event's id and age_seconds how old it was. Nothing changed.
+
 ### `bridge_event_failed`
 
 WARN · fields: `connection`, `event_id`, `type`, `error` · C-22

@@ -24,8 +24,10 @@ type fakeStatus struct {
 	orgs      []int64
 	encrypted map[int64][]dbgen.CountEncryptedValuesByKeyRow
 	messages  map[int64][]dbgen.CountOpenButtonKeysRow
-	activated map[int64][]dbgen.ListActivatedKeysRow
-	fail      string
+	// endedSince are the cutoffs of the calls that CountOpenButtonKeys was asked for.
+	endedSince []time.Time
+	activated  map[int64][]dbgen.ListActivatedKeysRow
+	fail       string
 }
 
 var errStatus = errors.New("boom")
@@ -55,8 +57,10 @@ func (f *fakeStatus) CountEncryptedValuesByKey(_ context.Context, org int64) ([]
 	return f.encrypted[org], f.err("CountEncryptedValuesByKey")
 }
 
-func (f *fakeStatus) CountOpenButtonKeys(_ context.Context, org int64) ([]dbgen.CountOpenButtonKeysRow, error) {
-	return f.messages[org], f.err("CountOpenButtonKeys")
+func (f *fakeStatus) CountOpenButtonKeys(_ context.Context, a dbgen.CountOpenButtonKeysParams) (
+	[]dbgen.CountOpenButtonKeysRow, error) {
+	f.endedSince = append(f.endedSince, a.EndedSince)
+	return f.messages[a.OrgID], f.err("CountOpenButtonKeys")
 }
 
 func (f *fakeStatus) ListActivatedKeys(_ context.Context, org int64) ([]dbgen.ListActivatedKeysRow, error) {
@@ -155,15 +159,19 @@ func TestKeyringStatusErrors(t *testing.T) {
 	}
 }
 
-// TestStatusReader reads the status with this process's keys at the real time.
+// TestStatusReader reads the status with this process's keys at the real time, and counts the calls that ended within
+// CallKeyWindow before the business time.
 func TestStatusReader(t *testing.T) {
 	k := newKeyring(t, 'a', 'b')
 	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
-	f := &fakeStatus{active: KeyID(material('a'))}
-	st, err := NewStatusReader(f, k, clock.NewManual(now)).Status(t.Context())
+	business := now.Add(10 * time.Minute)
+	f := &fakeStatus{active: KeyID(material('a')), orgs: []int64{1}}
+	st, err := NewStatusReader(f, k, clock.Clocks{Real: clock.NewManual(now),
+		Business: clock.NewManual(business)}).Status(t.Context())
 	if err != nil || len(st.Keys) != 2 || st.Keys[0].State != KeyActive || st.Keys[1].State != KeyNotActiveYet ||
-		!f.since.Equal(now.Add(-LiveExpiry)) {
-		t.Errorf("status %+v, %v", st, err)
+		!f.since.Equal(now.Add(-LiveExpiry)) || len(f.endedSince) != 1 ||
+		!f.endedSince[0].Equal(business.Add(-CallKeyWindow)) {
+		t.Errorf("status %+v, %v, calls since %v", st, err, f.endedSince)
 	}
 	if NewStatusQueries(nil) == nil {
 		t.Error("NewStatusQueries returned nil")

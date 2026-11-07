@@ -47,8 +47,8 @@
 // Muster made; and GET /_fake/direct-messages, the direct messages the bots sent; GET /_fake/notifications, the
 // notifications the bots sent, and POST /_fake/acknowledge {notification_id[, occurred_at][, data][, bot]}, which
 // acknowledges one as its person would and queues notification_acknowledged with its action data, or the data given,
-// for its bot, or the bot given, and {event_id} queues that earlier event again under its id (notifications.go). The fake
-// answers what it is configured to, also when that breaks the protocol, so that the checks of Muster can be tried
+// for its bot, or the bot given, and {event_id} queues that earlier event again under its id (notifications.go). The
+// fake answers what it is configured to, also when that breaks the protocol, so that the checks of Muster can be tried
 // against a broken bridge.
 package fakebridge
 

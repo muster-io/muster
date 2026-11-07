@@ -1162,7 +1162,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		AuditLog:     audit.NewReader(orgID, p.db.AuditReader()),
 		TOTP:         factors,
 		Organization: settings,
-		Keyring:      keyring.NewStatusReader(p.db.KeyringStatus(), p.keyring, p.clocks.Real),
+		Keyring:      keyring.NewStatusReader(p.db.KeyringStatus(), p.keyring, p.clocks),
 		Notices:      p.notices,
 		Live:         p.hub,
 		OIDC:         signIn,

@@ -719,6 +719,15 @@ var BridgePressDropped = newEvent("bridge_press_dropped", LevelInfo, "C-22",
 		"age_seconds how old the press was. Nothing changed; the person can press again.",
 	"connection", "external_id", "age_seconds")
 
+// BridgeAcknowledgementDropped is logged when a notification_acknowledged event of a Notification gateway was too old
+// to act on (C-22.FR-11, C-30.FR-6).
+var BridgeAcknowledgementDropped = newEvent("bridge_acknowledgement_dropped", LevelInfo, "C-30",
+	"A notification_acknowledged event of a Bridge Connection arrived more than bridge.event_max_age after its "+
+		"occurred_at, by Muster's real clock — such as one a gateway sent again after bridge.event_dedup_window — and "+
+		"was dropped without an answer, so that it never makes the person an Owner again: connection is the "+
+		"public_id of the Connection, event_id the event's id and age_seconds how old it was. Nothing changed.",
+	"connection", "event_id", "age_seconds")
+
 // BridgeTextCommand is logged for each Text command in a Thread of a Bridge Connection (C-22.FR-14, FR-24).
 var BridgeTextCommand = newEvent("bridge_text_command", LevelInfo, "C-22",
 	"A thread_message event of a Bridge Connection was a Text command — one of the words of bridge.text_commands — "+

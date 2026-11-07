@@ -65,6 +65,7 @@
   "gatewayAck.forbidden": "You are not permitted to acknowledge Alert Groups; nothing was changed",
   "gatewayAck.notAcknowledged_one": "Not acknowledged: {numbers}",
   "gatewayAck.notAcknowledged_other": "Not acknowledged: {numbers}",
+  "gatewayAck.nothing": "Nothing to acknowledge",
   "gatewayAck.notVerified": "This call could not be verified; nothing was changed",
   "gatewayAck.resolved": "Already resolved",
   "gatewayAck.resolvedGroups_one": "Already resolved: {numbers}",

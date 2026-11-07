@@ -145,9 +145,11 @@ func TestIntegrationStatusSupersededButtons(t *testing.T) {
 }
 
 // TestIntegrationStatusGatewayCalls covers the Note of S-173 on PostgreSQL: a call through a Notification gateway whose
-// action data the old key signed keeps that key needed while the call is being sent, and once accepted while any of
-// its Alert Groups is open; a call accepted whose Alert Groups all resolved, one Not delivered, and an Alert Group
-// dropped from a call before its first attempt keep nothing needed. A call without a key id, which a replica of an
+// action data the old key signed keeps that key needed while the call is being sent, and once accepted or Not
+// delivered after an attempt, within keyring.CallKeyWindow of its end by the business clock, while any of its Alert
+// Groups is open; a call accepted whose Alert Groups all resolved, one that ended longer ago, one Not delivered
+// without an attempt, one whose gateway or person is deleted, and an Alert Group dropped from a call before its first
+// attempt keep nothing needed. A call without a key id, which a replica of an
 // earlier version started, counts for no key.
 func TestIntegrationStatusGatewayCalls(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
@@ -205,9 +207,12 @@ func TestIntegrationStatusGatewayCalls(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		// business is the business time of the reads: a minute after the calls ended at t0.
+		business := t0.Add(time.Minute)
 		check := func(step string, state keyring.KeyState, n int64) {
 			t.Helper()
-			st, err := keyring.ReadStatus(ctx, keyring.NewStatusQueries(d.Pool), keys.KeyIDs(), time.Now())
+			st, err := keyring.ReadStatusAt(ctx, keyring.NewStatusQueries(d.Pool), keys.KeyIDs(), time.Now(),
+				business)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +238,33 @@ func TestIntegrationStatusGatewayCalls(t *testing.T) {
 		check("accepted, its Alert Group resolved", keyring.KeyRemovable, 0)
 		set(`UPDATE alert_groups SET status = 'firing', resolved_at = NULL, resolved_by_kind = NULL,
 			resolve_reason = NULL WHERE id = $1`, group)
+		// Accepted longer than keyring.CallKeyWindow ago — twice bridge.event_max_age, a margin for the call to ring —
+		// an acknowledgement of it is dropped, so it needs no key.
+		business = t0.Add(keyring.CallKeyWindow + time.Second)
+		check("accepted longer than the window ago", keyring.KeyRemovable, 0)
+		business = t0.Add(keyring.CallKeyWindow)
+		check("accepted exactly the window ago", keyring.KeyNeeded, 1)
+		business = t0.Add(keyring.CallAcknowledgeWindow + time.Minute)
+		check("accepted more than bridge.event_max_age ago, still ringing", keyring.KeyNeeded, 1)
+		business = t0.Add(time.Minute)
+		// A deleted gateway or a deleted person reports nothing that is acted on.
+		set(`UPDATE connections SET deleted_at = $2 WHERE id = (SELECT connection_id FROM gateway_calls WHERE id = $1)`,
+			call, t0)
+		check("its gateway deleted", keyring.KeyRemovable, 0)
+		set(`UPDATE connections SET deleted_at = NULL WHERE id = (SELECT connection_id FROM gateway_calls WHERE id = $1)`,
+			call)
+		set(`UPDATE users SET status = 'deleted', deleted_at = $2, email = NULL
+			WHERE id = (SELECT user_id FROM gateway_calls WHERE id = $1)`, call, t0)
+		check("its person deleted", keyring.KeyRemovable, 0)
+		set(`UPDATE users SET status = 'active', deleted_at = NULL
+			WHERE id = (SELECT user_id FROM gateway_calls WHERE id = $1)`, call)
+		// Not delivered after an attempt, which may have rung: needed like an accepted one; without one: not.
 		set(`UPDATE gateway_calls SET state = 'not_delivered', reason = 'call_refused' WHERE id = $1`, call)
-		check("not delivered", keyring.KeyRemovable, 0)
+		check("not delivered after an attempt", keyring.KeyNeeded, 1)
+		business = t0.Add(keyring.CallKeyWindow + time.Second)
+		check("not delivered longer than the window ago", keyring.KeyRemovable, 0)
+		business = t0.Add(time.Minute)
+		set(`UPDATE gateway_calls SET first_attempt_at = NULL, language = NULL WHERE id = $1`, call)
+		check("not delivered without an attempt", keyring.KeyRemovable, 0)
 	})
 }

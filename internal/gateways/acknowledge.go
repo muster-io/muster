@@ -114,7 +114,13 @@ func (a *Acknowledgements) Acknowledged(ctx context.Context, c bridge.Conn, ev b
 	for _, g := range gs {
 		_, err := a.Commands.Acknowledge(ctx, caller, g.PublicID)
 		if _, ok := errors.AsType[*groups.ForbiddenError](err); ok {
-			return messages.T(lang, "gatewayAck.forbidden", nil), nil
+			// Without the Permission before anything ran, nothing changed; a person disabled once some Alert Groups
+			// were acknowledged is told which, and that the others were not.
+			if out.empty() {
+				return messages.T(lang, "gatewayAck.forbidden", nil), nil
+			}
+			out.other = append(out.other, g.Number)
+			continue
 		}
 		if err := out.add(g.Number, err); err != nil {
 			return "", fmt.Errorf("acknowledge #%d of the call %s: %w", g.Number, call.PublicID, err)
@@ -181,10 +187,18 @@ func (o *answer) add(number int64, err error) error {
 	return nil
 }
 
+// empty reports whether nothing was recorded yet.
+func (o *answer) empty() bool {
+	return len(o.acknowledged)+len(o.resolved)+len(o.other)+len(o.owners) == 0
+}
+
 // text is the answer in lang to a call about n Alert Groups: what was acknowledged, by #N, then who has the Alert
 // Groups already taken, what was resolved and what else was refused, each with its #N when the call is about more than
-// one, "Already taken by Ivan" alone when it is about one; empty when nothing is left to say.
+// one, "Already taken by Ivan" alone when it is about one; "Nothing to acknowledge" when none of them is left.
 func (o *answer) text(lang string, n int) string {
+	if o.empty() {
+		return messages.T(lang, "gatewayAck.nothing", nil)
+	}
 	var parts []string
 	if len(o.acknowledged) > 0 {
 		parts = append(parts, messages.N(lang, "gatewayAck.acknowledged", int64(len(o.acknowledged)),

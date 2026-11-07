@@ -38,14 +38,14 @@ import (
 // the delivery client class through the limiter of the gateway's Connection, and records the outcome in another short
 // transaction, guarded by its lease. Lint 3 allows Notify here and in delivery's interactive path only.
 //
-// A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact, its text and its action data, signed
-// with the active button-signature key whose id the call keeps (button_key_id), so that the Keyring keeps that key
-// while the gateway may still report the data, are fixed at its first attempt and identical on every retry, on any
-// replica and after a restart. When a replica dies after the gateway
-// accepted the call but before the outcome committed, or its lease ran out during a slow call, the replica that claims
-// the call again resends it with the same key; a gateway that keeps idempotency keys answers replayed, which counts as
-// accepted, and makes no second call. Two replicas never hold the lease of one call at once, and the outcome of a
-// replica whose lease went to another changes nothing. The lock order is in calls.go.
+// A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact, its text and its action data,
+// signed with the active button-signature key whose id the call keeps (button_key_id), so that the Keyring keeps that
+// key while the gateway may still report the data, are fixed at its first attempt and identical on every retry, on any
+// replica and after a restart. When a replica dies after the gateway accepted the call but before the outcome
+// committed, or its lease ran out during a slow call, the replica that claims the call again resends it with the same
+// key; a gateway that keeps idempotency keys answers replayed, which counts as accepted, and makes no second call. Two
+// replicas never hold the lease of one call at once, and the outcome of a replica whose lease went to another changes
+// nothing. The lock order is in calls.go.
 
 // The defaults of the sender, as the delivery worker's (internal/delivery): the lease of a claimed call, renewed
 // before its attempt; the calls one claim takes; the margin after the time a limiter token is due; the longest and

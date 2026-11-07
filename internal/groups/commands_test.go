@@ -294,8 +294,8 @@ func TestAcknowledge(t *testing.T) {
 	}
 }
 
-// TestAcknowledgeThroughGateway is C-30.FR-6 and C-30.AC-4 in the dispatcher: an Acknowledge with the Transport
-// gateway makes a firing or a snoozed Alert Group acknowledged, with gateway in the Timeline and the Audit log; one that
+// TestAcknowledgeThroughGateway is C-30.FR-6 and C-30.AC-4 in the dispatcher: an Acknowledge with the Transport gateway
+// makes a firing or a snoozed Alert Group acknowledged, with gateway in the Timeline and the Audit log; one that
 // another User or the same person owns stays as it is, refused owned_by_other with the Owner's name and logged as a
 // refused Command, so that a call never makes a Takeover; a resolved one is refused already_resolved; a Viewer is
 // refused forbidden; an Owner without a row is refused without a name, and one that cannot be read fails the Command.

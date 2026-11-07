@@ -14,6 +14,7 @@ files_touched:
   - internal/gateways/sender.go
   - internal/gateways/sender_test.go
   - internal/gateways/calls_test.go
+  - internal/bridge/events.go
   - internal/bridge/events_test.go
   - internal/groups/commands.go
   - internal/groups/commands_test.go
@@ -25,6 +26,7 @@ files_touched:
   - internal/audit/audit_test.go
   - internal/keyring/query.sql
   - internal/keyring/status.go
+  - internal/keyring/status_test.go
   - internal/keyring/status_integration_test.go
   - internal/db/migrations/0035_gateway_call_signature.up.sql
   - internal/db/migrations/0035_gateway_call_signature.down.sql
@@ -42,8 +44,12 @@ files_touched:
   - internal/runtime/runtime.go
   - design/prd/l1/reference.md
   - design/db/schema.md
+  - design/prd/l1/defaults.md
+  - docs/operations/high-availability.md
+  - docs/operations/runbooks/MusterNoLeader.md
   - docs/install/versions.md
   - docs/messengers/notification-gateways.md
+  - docs/outgoing-webhooks/events.md
   - web/src/components/timeline.tsx
   - web/src/components/timeline.test.tsx
   - web/src/routes/admin.audit-log.tsx
@@ -102,9 +108,11 @@ issue: 462
   press (C-18.FR-8).
 - **Audit log** (`internal/audit/audit.go`): `TransportGateway` (`gateway`) joins the closed list of transports that
   the validation of an entry accepts, which refuses any other as "unknown transport".
-- **Bridge** (`internal/bridge/events.go`, unchanged): `notification_acknowledged` is handed to `Acknowledgements` once
-  per event id under the claim of C-22.FR-11, as S-145 wrote it; wired by `internal/runtime`, it replaces the
-  `bridge_event_unhandled` that S-145 logs without a handler.
+- **Bridge** (`internal/bridge/events.go`): `notification_acknowledged` is handed to `Acknowledgements` once per event
+  id under the claim of C-22.FR-11, as S-145 wrote it; wired by `internal/runtime`, it replaces the
+  `bridge_event_unhandled` that S-145 logs without a handler. One older than `bridge.event_max_age` by the real clock,
+  as a press, is dropped unanswered and logged `bridge_acknowledgement_dropped`, so that an id a gateway sends again
+  after `bridge.event_dedup_window` never makes the person an Owner again.
 - **Texts** (`internal/messages/texts`): the answers, in English and Russian with their plurals (C-12.FR-3 revised).
 - **SPA** (`web/src/components/timeline.tsx`, `web/src/routes/admin.audit-log.tsx`, locales): the exhaustive switches
   over `Transport` gain `gateway` — "Notification gateway" / «шлюз оповещений».
@@ -112,8 +120,10 @@ issue: 462
   reference.md adds it to the row of that metric and drops the sentence about it under "Metrics added in L2".
 - **Log events** (`internal/logging/events.go`): `gateway_acknowledge_refused` (info; the call, the Connection, the
   reason: `not_verified`, `expired`, `unknown_call`, `disabled` or `deleted`), C-30.
-- **Keyring** (`internal/keyring/query.sql`): `CountOpenButtonKeys` counts, with the Root messages, the calls whose
-  action data a key signed — waiting or being sent, or accepted while any of their Alert Groups is open.
+- **Keyring** (`internal/keyring/query.sql`, `status.go`): `CountOpenButtonKeys` counts, with the Root messages, the
+  calls whose action data a key signed, through a gateway and to a person not deleted — waiting or being sent, or
+  accepted or Not delivered after an attempt, ended within twice `bridge.event_max_age` of the business time
+  (`keyring.CallKeyWindow`, a margin for the call to ring), while any of their Alert Groups is open; the API's status reader passes the business clock.
 - **Settings**: `delivery.interactive_budget`.
 
 ## Steps

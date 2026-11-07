@@ -188,7 +188,12 @@ func TestAcknowledged(t *testing.T) {
 				3: &groups.RefusedError{Code: groups.CodeOwnedByOther}}, "ru",
 			"Уже взяты другим пользователем: #2, #3"},
 		{"resolved", []int64{2}, map[int64]error{2: resolved}, "en", "Already resolved"},
-		{"gone", []int64{2}, map[int64]error{2: groups.ErrNotFound}, "en", ""},
+		{"gone", []int64{2}, map[int64]error{2: groups.ErrNotFound}, "en", "Nothing to acknowledge"},
+		{"none left", nil, nil, "ru", "Подтверждать нечего"},
+		{"disabled midway", []int64{1, 2, 3}, map[int64]error{
+			2: &groups.ForbiddenError{Permission: groups.PermissionAcknowledge},
+			3: &groups.ForbiddenError{Permission: groups.PermissionAcknowledge}}, "en",
+			"Acknowledged: #1. Not acknowledged: #2, #3"},
 		{"mixed", []int64{1, 2, 3, 4, 5, 6}, map[int64]error{2: taken, 3: resolved, 4: groups.ErrNotFound,
 			5: &groups.RefusedError{Code: groups.CodeOwnerMustBeUser},
 			6: &groups.RefusedError{Code: groups.CodeOwnedByOther, OwnerName: "Alice"}}, "en",
@@ -222,10 +227,11 @@ func TestAcknowledged(t *testing.T) {
 }
 
 // TestAcknowledgedRefused is C-30.FR-6, ADR-0013 and C-18.FR-8 at the gateways: data that is not Muster's signature of
-// a call — tampered, too long, of another subject or Command, or signed with a key that left the Keyring — and the
-// data of a call of another Connection or Organization run nothing, are logged as gateway_acknowledge_refused with the
-// call and the reason and answered in English, that it expired for a key that left the Keyring; a disabled or deleted person runs nothing and is answered in their
-// language; a Viewer is refused by the dispatcher and answered once, without trying the other Alert Groups.
+// a call — tampered, too long, of another subject or Command, or signed with a key that left the Keyring — and the data
+// of a call of another Connection or Organization run nothing, are logged as gateway_acknowledge_refused with the call
+// and the reason and answered in English, that it expired for a key that left the Keyring; a disabled or deleted person
+// runs nothing and is answered in their language; a Viewer is refused by the dispatcher and answered once, without
+// trying the other Alert Groups.
 func TestAcknowledgedRefused(t *testing.T) {
 	good := callData(t)
 	// A character in the middle, of the call's public_id: every bit of it is signed.
@@ -303,5 +309,10 @@ func TestAcknowledgedFailures(t *testing.T) {
 	}
 	if NewAckQueries(nil) == nil {
 		t.Error("no queries")
+	}
+	// The Keyring keeps the key of a call as long as bridge.event_max_age lets its acknowledgement act.
+	if keyring.CallAcknowledgeWindow != bridge.EventMaxAge {
+		t.Errorf("keyring.CallAcknowledgeWindow %v, bridge.EventMaxAge %v", keyring.CallAcknowledgeWindow,
+			bridge.EventMaxAge)
 	}
 }

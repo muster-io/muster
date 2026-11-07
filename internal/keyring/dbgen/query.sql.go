@@ -87,9 +87,12 @@ FROM (
     UNION ALL
     SELECT c.button_key_id
     FROM gateway_calls c
-    WHERE c.org_id = $1 AND c.button_key_id IS NOT NULL
+    JOIN connections n ON n.org_id = c.org_id AND n.id = c.connection_id
+    JOIN users u ON u.org_id = c.org_id AND u.id = c.user_id
+    WHERE c.org_id = $1 AND c.button_key_id IS NOT NULL AND n.deleted_at IS NULL AND u.status <> 'deleted'
       AND (c.state IN ('waiting', 'sending')
-           OR (c.state = 'accepted'
+           OR ((c.state = 'accepted' OR (c.state = 'not_delivered' AND c.first_attempt_at IS NOT NULL))
+               AND c.ended_at >= $2::timestamptz
                AND EXISTS (SELECT 1
                            FROM gateway_call_items i
                            JOIN alert_groups a ON a.org_id = i.org_id AND a.id = i.alert_group_id
@@ -100,6 +103,11 @@ GROUP BY k.key_id
 ORDER BY 1
 `
 
+type CountOpenButtonKeysParams struct {
+	OrgID      int64
+	EndedSince time.Time
+}
+
 type CountOpenButtonKeysRow struct {
 	KeyID    string
 	Messages int64
@@ -109,11 +117,15 @@ type CountOpenButtonKeysRow struct {
 // key signed (C-20.FR-6): the current one of each delivery, and every older one a republication past a bridge's edit
 // window replaced, whose buttons still work (C-22.FR-9). A delivery deleted in the messenger, retired or withheld
 // depends on nothing: the re-render after a rotation never re-signs it. It counts with them the calls through
-// Notification gateways whose action data that key signed (C-30.FR-6), which a gateway may still report: those waiting
-// or being sent, and those accepted while any of their Alert Groups is open. A waiting call has no key id yet, since
-// StartCall signs it as it becomes sending; waiting is listed so that the rule reads as its contract.
-func (q *Queries) CountOpenButtonKeys(ctx context.Context, orgID int64) ([]CountOpenButtonKeysRow, error) {
-	rows, err := q.db.Query(ctx, countOpenButtonKeys, orgID)
+// Notification gateways whose action data that key signed (C-30.FR-6) while the gateway may still report an
+// acknowledgement of it, through a gateway and to a person not deleted: those waiting or being sent, and those
+// accepted, or Not delivered after an attempt, which may have rung, that ended at or after @ended_since — the business
+// time less twice bridge.event_max_age (keyring.CallKeyWindow): an acknowledgement is dropped once it is older than
+// that age, and the person may press it as long again after the call ended, while it rings or the gateway retries it —
+// while any of their Alert Groups is open. A waiting call has no key id yet, since StartCall signs it as it becomes
+// sending; waiting is listed so that the rule reads as its contract.
+func (q *Queries) CountOpenButtonKeys(ctx context.Context, arg CountOpenButtonKeysParams) ([]CountOpenButtonKeysRow, error) {
+	rows, err := q.db.Query(ctx, countOpenButtonKeys, arg.OrgID, arg.EndedSince)
 	if err != nil {
 		return nil, err
 	}
