@@ -1595,7 +1595,7 @@ stored `info` declares the role `gateway`; it has no table of its own.
   contact deletes the person's earlier unconfirmed one for the gateway. `gateway_contacts_connection_idx` on `(org_id,
   connection_id)` finds the contacts of a gateway, `gateway_contacts_user_idx` on `(org_id, user_id)` those of a
   person. Removing a contact, and deleting its User (C-03.FR-13), is a `DELETE`; the Audit log keeps its entries and
-  shows `/contact` as `[erased]` once the User is deleted.
+  shows `/contact` as `[erased]` once the User is deleted. The codes of a removed contact stay, for the limits.
 - **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the SHA-256 of the code bound to its contact's
   `public_id` (`code_hash`), the web session that asked for it (`session_id`, `ON DELETE CASCADE`: the code is checked
   only in that session, ADR-0013), `attempts`, `expires_at` on the business clock, `sent_at` once the gateway accepted
@@ -1607,12 +1607,14 @@ stored `info` declares the role `gateway`; it has no table of its own.
   …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that removing and
   adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id, contact_id,
   created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since `created_at` comes
-  from the clocks of several replicas. The Leader's short-lived pruning deletes the codes that expired a day ago
-  (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the expired Account link requests; deleting a
-  User deletes theirs. Codes of one contact are counted, marked sent, voided and checked under the lock of its User
-  (`FOR NO KEY UPDATE`) and of the code's row, so that parallel wrong codes never pass the attempts of
-  `gateway.contact_code`; the requests for one contact text of several Users serialize on the transaction advisory lock
-  of class `GatewayContactLockClass`.
+  from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
+  `gateway_contact_codes_contact_fk_idx` on `(contact_id)` serve the foreign key actions: the pruning of sessions
+  deletes their codes, and removing a contact sets the contact of its codes to null. The Leader's short-lived pruning
+  deletes the codes that expired a day ago (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the
+  expired Account link requests; deleting a User deletes theirs. Codes of one contact are counted, marked sent, voided
+  and checked under the lock of its User (`FOR NO KEY UPDATE`) and of the code's row, so that parallel wrong codes never
+  pass the attempts of `gateway.contact_code`; the requests for one contact text of several Users serialize on the
+  transaction advisory lock of class `GatewayContactLockClass`.
 
 ## 5. Queues and claims
 

@@ -53,5 +53,8 @@ CREATE INDEX gateway_contact_codes_contact_idx ON gateway_contact_codes (org_id,
 CREATE INDEX gateway_contact_codes_user_idx ON gateway_contact_codes (org_id, user_id, created_at);
 CREATE INDEX gateway_contact_codes_hash_idx ON gateway_contact_codes (org_id, contact_hash, created_at);
 CREATE INDEX gateway_contact_codes_expires_idx ON gateway_contact_codes (org_id, expires_at);
+-- The foreign key actions: deleting a session deletes its codes, deleting a contact sets theirs to null.
+CREATE INDEX gateway_contact_codes_session_idx ON gateway_contact_codes (session_id);
+CREATE INDEX gateway_contact_codes_contact_fk_idx ON gateway_contact_codes (contact_id);
 
 COMMIT;

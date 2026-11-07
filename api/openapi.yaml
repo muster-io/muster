@@ -7100,8 +7100,10 @@ paths:
       tags:
       - Notification gateways
       summary: Remove an own contact at a Notification gateway
-      description: 'Removes one of the caller''s contacts, confirmed or not, with its codes; a confirmed contact is no
-        longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403`
+      description: 'Removes one of the caller''s contacts, confirmed or not; a confirmed contact is no longer called.
+        Its codes can no longer confirm anything, but stay, without the contact, and count toward
+        `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not
+        reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403`
         (`session_required`).'
       x-permission: authenticated
       x-listener: app
@@ -7272,9 +7274,10 @@ paths:
       tags:
       - Notification gateways
       summary: Remove a user's contact at a Notification gateway
-      description: Admins can remove any contact but never set one. Recorded in the Audit log as
-        `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer
-        is `403` (`session_required`).
+      description: Admins can remove any contact but never set one. Its codes stay, without the contact, and count
+        toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the
+        Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a
+        token the answer is `403` (`session_required`).
       x-permission: users:write
       x-listener: app
       security:

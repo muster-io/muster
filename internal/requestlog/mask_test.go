@@ -414,3 +414,21 @@ func TestMaskNotification(t *testing.T) {
 		t.Errorf("maskNotification = %q", got)
 	}
 }
+
+// TestMaskNotificationEscaped: a bridge's problem that quotes the request as JSON inside a JSON string, in the answer
+// or in the error of the record, has its contact and text masked too, a short contact included; the same digits in
+// free text are kept, which is the limit docs/operations/request-log.md states.
+func TestMaskNotificationEscaped(t *testing.T) {
+	w, _, _ := newTestWriter(&fakeQueries{}, 0)
+	quoted := `{"title":"refused","detail":"got {\"contact\":\"1234\",\"text\":\"Your Muster code: 123456.\"}"}`
+	p := w.paramsOf(DirectionOutbound, outbound.Record{Operation: NotificationOperation, Method: http.MethodPost,
+		URL: "http://gw/v1/notifications", RequestBody: []byte(`{"contact":"1234","text":"x"}`), Status: 400,
+		ResponseBody: []byte(quoted), Error: `400 refused: {\"contact\":\"1234\"} for 1234`})
+	want := `{"title":"refused","detail":"got {\"contact\":\"[redacted]\",\"text\":\"[redacted]\"}"}`
+	if p.ResponseBody.String != want {
+		t.Errorf("answer %s", p.ResponseBody.String)
+	}
+	if p.Error.String != `400 refused: {\"contact\":\"[redacted]\"} for 1234` {
+		t.Errorf("error %s", p.Error.String)
+	}
+}

@@ -41,6 +41,8 @@ files_touched:
   - internal/requestlog/mask_test.go
   - internal/bridge/delivery.go
   - internal/bridge/delivery_test.go
+  - internal/outbound/members.go
+  - internal/outbound/members_test.go
   - internal/metrics/catalogue.go
   - internal/archlint/secretleak.go
   - internal/messages/texts/en.json
@@ -219,9 +221,9 @@ confirmed, and `deleteMyGatewayContact`.
 - P-86 stays provisional; the test environment confirms it, not this story.
 - Renumbered to `0033`: this story merged out of the story-map order, after `0032`, so its migration takes the next
   free number, with its tests and `schema.md`.
-- Migration numbers follow the story map: `0036` here, then `0037` to `0044` for S-148, S-149, S-152, S-154, S-169,
-  S-155, S-168 and S-157. A story merged out of that order renumbers its migration to the next free number in its own
-  pull request, with its tests and `schema.md`.
+- The story map numbered the migrations `0036` to `0044` for this story, S-148, S-149, S-152, S-154, S-169, S-155,
+  S-168 and S-157; this one is `0033`, and a story merged out of that order renumbers its migration to the next free
+  number in its own pull request, with its tests and `schema.md`.
 - `gateway_reaches` on the warnings of Schedules moved to S-150 in the plan review (M12): with it this story depended
   on S-164 and so on the spike S-132, which held up this story and S-148, S-149, S-152, S-154, S-156, S-169 and S-173
   after it; S-150, S-155 and the stories after them still follow S-164.

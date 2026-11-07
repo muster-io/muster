@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // redacted stands for what the masking removed, as the outbound package writes it.
@@ -56,9 +57,11 @@ var (
 	// member token of a Slack payload: in JSON, and in JSON that a form carries percent-encoded.
 	responseURLRes = memberRes("response_url")
 	slackTokenRes  = memberRes("token")
-	// notificationRes find the values of the members contact and text of a notification through a Notification
-	// gateway (C-23.FR-3 revised for L2, C-30.FR-10).
-	notificationRes = slices.Concat(memberRes("contact"), memberRes("text"))
+	// notificationRes and notificationMembers find the values of the members contact and text of a notification
+	// through a Notification gateway (C-23.FR-3 revised for L2, C-30.FR-10): in JSON and in a form, and in JSON inside
+	// a JSON string, as a bridge's problem may quote the request.
+	notificationRes     = slices.Concat(memberRes("contact"), memberRes("text"))
+	notificationMembers = outbound.NewMemberMasker("contact", "text")
 	// ticketRe finds the single-use ticket of a Socket Mode address (F-100): the value of the query parameter ticket of
 	// a ws or wss address whose scheme follows no letter — plain, with JSON-escaped or percent-encoded slashes, its ?
 	// and = percent-encoded too, the & before it JSON-escaped or percent-encoded too. The first group ends right before
@@ -307,13 +310,14 @@ func notification(operation, rawURL string) bool {
 	return strings.HasSuffix(path, NotificationPath)
 }
 
-// maskNotification replaces the values of the members contact and text in s with [redacted], in JSON and in JSON a
-// form carries.
+// maskNotification replaces the values of the members contact and text in s with [redacted], in JSON, in JSON a form
+// carries and in JSON inside a JSON string. A contact in free text outside a JSON member is masked only when it has
+// bridge.MinMaskedLength characters or more, as a secret of its request (docs/operations/request-log.md).
 func maskNotification(s string) string {
 	if !strings.Contains(s, "contact") && !strings.Contains(s, "text") {
 		return s
 	}
-	return maskMembers(s, notificationRes)
+	return notificationMembers.Mask(maskMembers(s, notificationRes))
 }
 
 // textOf is body as a record stores it (C-23.FR-2, FR-3): shape-masked, sanitized and cut to at most BodyMax bytes at

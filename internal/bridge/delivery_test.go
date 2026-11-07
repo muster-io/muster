@@ -1191,7 +1191,7 @@ func TestNotifyInteractive(t *testing.T) {
 
 // TestNotificationMasking: a contact or a text of at least MinMaskedLength characters is a secret of the request and
 // masked in an answer that echoes it, plain or as JSON escapes it; a shorter one is neither, so that its characters
-// elsewhere — in times and ids — stay, and the Request log masks it by its place (internal/requestlog).
+// elsewhere — in times and ids — stay, and only its place as a JSON member masks it.
 func TestNotificationMasking(t *testing.T) {
 	long := delivery.Notification{Contact: "+10000000001", Text: `Your Muster code: 123456. "Quoted" text.`}
 	if got := notificationSecrets(long); len(got) != 2 || got[0] != logging.Secret(long.Contact) ||
@@ -1207,11 +1207,37 @@ func TestNotificationMasking(t *testing.T) {
 		t.Errorf("secrets of a short contact: %v", got)
 	}
 	text := outbound.Untrusted(`{"contact":"+1"} at 2026-11-07T10:00:00+10:00, id n+1, hi 12`)
-	if got := maskNotification(text, short); got != text {
+	if got := maskNotification(text, short); got !=
+		`{"contact":"[redacted]"} at 2026-11-07T10:00:00+10:00, id n+1, hi 12` {
 		t.Errorf("a short contact masked %q", got)
 	}
 	cut := delivery.Notification{Contact: "+1", Text: strings.Repeat("я", MaxNotificationText+5)}
 	if got := notificationForms(cut); len(got) != 2 || utf8.RuneCountInString(got[1]) != MaxNotificationText {
 		t.Errorf("forms of a long text: %d", len(got))
+	}
+}
+
+// TestNotificationMaskingShortMember: a contact of four digits, a PBX extension, that a bridge echoes as a JSON member
+// in its error — plain or quoted inside a JSON string — is masked by its place in the Outcome's error, and the same
+// digits elsewhere are kept.
+func TestNotificationMaskingShortMember(t *testing.T) {
+	n := delivery.Notification{Connection: 1, Contact: "1234",
+		Text: "Your Muster code: 123456. It is valid for 10 minutes."}
+	for in, want := range map[string]string{
+		`refused {"contact":"1234","id":"n1234"} at 12:34`: `refused {"contact":"[redacted]","id":"n1234"} at 12:34`,
+		`{"detail":"got {\"contact\":\"1234\",\"text\":\"t\"}"} 1234`: `{"detail":"got {\"contact\":\"[redacted]\",` +
+			`\"text\":\"[redacted]\"}"} 1234`,
+		`cannot call 1234`: `cannot call 1234`,
+	} {
+		if got := string(maskNotification(outbound.Untrusted(in), n)); got != want {
+			t.Errorf("maskNotification(%s)\n = %s\nwant %s", in, got, want)
+		}
+	}
+	e := newAdapterEnv(t, gatewayInfo)
+	e.bridge.answer("notify", answerJSON(http.StatusBadRequest, "application/problem+json",
+		`{"title":"refused","class":"invalid","detail":"bad {\"contact\":\"1234\"}"}`))
+	o := e.adapter.Notify(t.Context(), delivery.Call{Class: outbound.ClassInteractive, Key: "k"}, n)
+	if strings.Contains(string(o.Error), `\"1234\"`) || !strings.Contains(string(o.Error), "[redacted]") {
+		t.Errorf("the error of the outcome: %s", o.Error)
 	}
 }

@@ -13583,7 +13583,7 @@ type ClientInterface interface {
 
 	// DeleteMyGatewayContact Remove an own contact at a Notification gateway
 	//
-	// Removes one of the caller's contacts, confirmed or not, with its codes; a confirmed contact is no longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
+	// Removes one of the caller's contacts, confirmed or not; a confirmed contact is no longer called. Its codes can no longer confirm anything, but stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
 	//
 	// Corresponds with DELETE /me/gateway-contacts/{gateway_contact_id} (the `DeleteMyGatewayContact` operationId).
 	DeleteMyGatewayContact(ctx context.Context, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -14596,7 +14596,7 @@ type ClientInterface interface {
 
 	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 	//
-	// Admins can remove any contact but never set one. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
+	// Admins can remove any contact but never set one. Its codes stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
 	//
 	// Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 	DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -16817,7 +16817,7 @@ func (c *Client) CreateMyGatewayContact(ctx context.Context, body CreateMyGatewa
 
 // DeleteMyGatewayContact Remove an own contact at a Notification gateway
 //
-// Removes one of the caller's contacts, confirmed or not, with its codes; a confirmed contact is no longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
+// Removes one of the caller's contacts, confirmed or not; a confirmed contact is no longer called. Its codes can no longer confirm anything, but stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
 //
 // Corresponds with DELETE /me/gateway-contacts/{gateway_contact_id} (the `DeleteMyGatewayContact` operationId).
 func (c *Client) DeleteMyGatewayContact(ctx context.Context, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -19140,7 +19140,7 @@ func (c *Client) CreateUserGatewayContact(ctx context.Context, userId UserId, bo
 
 // DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 //
-// Admins can remove any contact but never set one. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
+// Admins can remove any contact but never set one. Its codes stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
 //
 // Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 func (c *Client) DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -29626,7 +29626,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteMyGatewayContactWithResponse Remove an own contact at a Notification gateway
 	//
-	// Removes one of the caller's contacts, confirmed or not, with its codes; a confirmed contact is no longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
+	// Removes one of the caller's contacts, confirmed or not; a confirmed contact is no longer called. Its codes can no longer confirm anything, but stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -30781,7 +30781,7 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteUserGatewayContactWithResponse Remove a user's contact at a Notification gateway
 	//
-	// Admins can remove any contact but never set one. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
+	// Admins can remove any contact but never set one. Its codes stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -48489,7 +48489,7 @@ func (c *ClientWithResponses) CreateMyGatewayContactWithResponse(ctx context.Con
 
 // DeleteMyGatewayContactWithResponse Remove an own contact at a Notification gateway
 //
-// Removes one of the caller's contacts, confirmed or not, with its codes; a confirmed contact is no longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
+// Removes one of the caller's contacts, confirmed or not; a confirmed contact is no longer called. Its codes can no longer confirm anything, but stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -50430,7 +50430,7 @@ func (c *ClientWithResponses) CreateUserGatewayContactWithResponse(ctx context.C
 
 // DeleteUserGatewayContactWithResponse Remove a user's contact at a Notification gateway
 //
-// Admins can remove any contact but never set one. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
+// Admins can remove any contact but never set one. Its codes stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
 //
 // Returns a wrapper object for the known response body format(s).
 //

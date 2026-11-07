@@ -257,7 +257,7 @@ export const useCreateMyGatewayContact = <TError = BadRequestResponse | Unauthor
 }
 
 /**
- * Removes one of the caller's contacts, confirmed or not, with its codes; a confirmed contact is no longer called. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
+ * Removes one of the caller's contacts, confirmed or not; a confirmed contact is no longer called. Its codes can no longer confirm anything, but stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403` (`session_required`).
  * @summary Remove an own contact at a Notification gateway
  */
 export const deleteMyGatewayContact = async (gatewayContactId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
@@ -685,7 +685,7 @@ export const useCreateUserGatewayContact = <TError = UnauthorizedResponse | Forb
 }
 
 /**
- * Admins can remove any contact but never set one. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
+ * Admins can remove any contact but never set one. Its codes stay, without the contact, and count toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a token the answer is `403` (`session_required`).
  * @summary Remove a user's contact at a Notification gateway
  */
 export const deleteUserGatewayContact = async (userId: string,
