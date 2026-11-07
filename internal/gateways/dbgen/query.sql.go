@@ -12,6 +12,133 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addCallItem = `-- name: AddCallItem :exec
+INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
+VALUES ($1, $2, $3, $4::timestamptz)
+ON CONFLICT (call_id, alert_group_id) DO UPDATE SET dropped_at = NULL, queued_at = EXCLUDED.queued_at
+WHERE gateway_call_items.org_id = $1 AND gateway_call_items.dropped_at IS NOT NULL
+`
+
+type AddCallItemParams struct {
+	OrgID        int64
+	CallID       int64
+	AlertGroupID int64
+	Now          time.Time
+}
+
+// AddCallItem adds an Alert Group to a waiting call; one it is about already stays as it is, and one dropped from it
+// while it waited — a preparation that dropped it and then found no limiter token — is queued again.
+func (q *Queries) AddCallItem(ctx context.Context, arg AddCallItemParams) error {
+	_, err := q.db.Exec(ctx, addCallItem,
+		arg.OrgID,
+		arg.CallID,
+		arg.AlertGroupID,
+		arg.Now,
+	)
+	return err
+}
+
+const callContact = `-- name: CallContact :one
+SELECT g.id, g.contact
+FROM gateway_contacts g
+JOIN connections c ON c.org_id = g.org_id AND c.id = g.connection_id
+WHERE g.org_id = $1 AND g.user_id = $2 AND g.connection_id = $3 AND g.confirmed_at IS NOT NULL
+  AND c.deleted_at IS NULL AND c.bridge_info->'roles' @> '["gateway"]'::jsonb
+`
+
+type CallContactParams struct {
+	OrgID        int64
+	UserID       int64
+	ConnectionID int64
+}
+
+type CallContactRow struct {
+	ID      int64
+	Contact string
+}
+
+// CallContact reads the confirmed contact of a User at a Notification gateway that is not deleted, the one a call's
+// first attempt goes to.
+func (q *Queries) CallContact(ctx context.Context, arg CallContactParams) (CallContactRow, error) {
+	row := q.db.QueryRow(ctx, callContact, arg.OrgID, arg.UserID, arg.ConnectionID)
+	var i CallContactRow
+	err := row.Scan(&i.ID, &i.Contact)
+	return i, err
+}
+
+const claimDueCalls = `-- name: ClaimDueCalls :many
+WITH due AS MATERIALIZED (
+    SELECT x.id
+    FROM gateway_calls x
+    WHERE x.org_id = $3 AND x.state IN ('waiting', 'sending') AND x.next_attempt_at <= $4::timestamptz
+      AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz)
+    ORDER BY x.critical DESC, x.next_attempt_at, x.id
+    LIMIT $6
+    FOR NO KEY UPDATE OF x SKIP LOCKED
+)
+UPDATE gateway_calls c
+SET lease_owner = $1::text, lease_until = $2::timestamptz
+FROM due
+WHERE c.org_id = $3 AND c.id = due.id
+RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
+          c.next_attempt_at::timestamptz AS next_attempt_at
+`
+
+type ClaimDueCallsParams struct {
+	Owner      string
+	LeaseUntil time.Time
+	OrgID      int64
+	Due        time.Time
+	Now        time.Time
+	Lim        int32
+}
+
+type ClaimDueCallsRow struct {
+	ID            int64
+	PublicID      string
+	ConnectionID  int64
+	UserID        int64
+	Critical      bool
+	NextAttemptAt time.Time
+}
+
+// ClaimDueCalls leases the due calls that wait for their first attempt or are being retried, whose lease is free or
+// ran out, critical first, then by when they are due. The choice is a materialized CTE, run once, as in
+// ClaimDueDeliveries.
+func (q *Queries) ClaimDueCalls(ctx context.Context, arg ClaimDueCallsParams) ([]ClaimDueCallsRow, error) {
+	rows, err := q.db.Query(ctx, claimDueCalls,
+		arg.Owner,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.Due,
+		arg.Now,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimDueCallsRow{}
+	for rows.Next() {
+		var i ClaimDueCallsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.ConnectionID,
+			&i.UserID,
+			&i.Critical,
+			&i.NextAttemptAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const confirmContact = `-- name: ConfirmContact :exec
 UPDATE gateway_contacts
 SET confirmed_at = $1::timestamptz
@@ -292,6 +419,77 @@ func (q *Queries) DeleteUserContacts(ctx context.Context, arg DeleteUserContacts
 	return items, nil
 }
 
+const dropCallItems = `-- name: DropCallItems :exec
+UPDATE gateway_call_items
+SET dropped_at = $1::timestamptz
+WHERE org_id = $2 AND call_id = $3 AND alert_group_id = ANY($4::bigint[])
+  AND dropped_at IS NULL
+`
+
+type DropCallItemsParams struct {
+	Now           time.Time
+	OrgID         int64
+	CallID        int64
+	AlertGroupIds []int64
+}
+
+// DropCallItems drops from a call, before its first attempt, the Alert Groups that stopped.
+func (q *Queries) DropCallItems(ctx context.Context, arg DropCallItemsParams) error {
+	_, err := q.db.Exec(ctx, dropCallItems,
+		arg.Now,
+		arg.OrgID,
+		arg.CallID,
+		arg.AlertGroupIds,
+	)
+	return err
+}
+
+const endCall = `-- name: EndCall :one
+UPDATE gateway_calls
+SET state = $1::text, reason = $2::text, notification_id = $3::text,
+    attempts = attempts + $4::bigint, ended_at = $5::timestamptz, next_attempt_at = NULL,
+    lease_owner = NULL, lease_until = NULL,
+    first_failed_at = CASE WHEN $6::text IS NULL THEN first_failed_at
+                           ELSE coalesce(first_failed_at, $5::timestamptz) END,
+    last_error_class = coalesce($6::text, last_error_class),
+    last_error = coalesce($7::text, last_error)
+WHERE org_id = $8 AND id = $9 AND state IN ('waiting', 'sending') AND lease_owner = $10::text
+RETURNING (first_attempt_at IS NOT NULL)::boolean AS went
+`
+
+type EndCallParams struct {
+	State          string
+	Reason         pgtype.Text
+	NotificationID pgtype.Text
+	Attempted      int64
+	Now            time.Time
+	ErrorClass     pgtype.Text
+	Error          pgtype.Text
+	OrgID          int64
+	ID             int64
+	Owner          string
+}
+
+// EndCall ends a call — accepted, Not delivered with its reason, or dropped — counting the attempt that ended it, if
+// one did. It returns whether the call went, which starts the combine window of the next one.
+func (q *Queries) EndCall(ctx context.Context, arg EndCallParams) (bool, error) {
+	row := q.db.QueryRow(ctx, endCall,
+		arg.State,
+		arg.Reason,
+		arg.NotificationID,
+		arg.Attempted,
+		arg.Now,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	var went bool
+	err := row.Scan(&went)
+	return went, err
+}
+
 const getGateway = `-- name: GetGateway :one
 SELECT id, public_id, name
 FROM connections
@@ -316,6 +514,145 @@ func (q *Queries) GetGateway(ctx context.Context, arg GetGatewayParams) (GetGate
 	var i GetGatewayRow
 	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
 	return i, err
+}
+
+const getLeasedCall = `-- name: GetLeasedCall :one
+SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
+       g.first_failed_at, c.public_id AS connection_public_id, c.name AS connection_name,
+       u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.language AS user_language,
+       k.contact AS contact
+FROM gateway_calls g
+JOIN connections c ON c.org_id = g.org_id AND c.id = g.connection_id
+JOIN users u ON u.org_id = g.org_id AND u.id = g.user_id
+LEFT JOIN gateway_contacts k ON k.org_id = g.org_id AND k.id = g.contact_id AND k.confirmed_at IS NOT NULL
+WHERE g.org_id = $1 AND g.id = $2 AND g.state IN ('waiting', 'sending') AND g.lease_owner = $3::text
+  AND g.lease_until > $4::timestamptz
+FOR NO KEY UPDATE OF g
+`
+
+type GetLeasedCallParams struct {
+	OrgID int64
+	ID    int64
+	Owner string
+	Now   time.Time
+}
+
+type GetLeasedCallRow struct {
+	ID                 int64
+	PublicID           string
+	ConnectionID       int64
+	UserID             int64
+	State              string
+	Critical           bool
+	Language           pgtype.Text
+	Text               pgtype.Text
+	Attempts           int64
+	FirstFailedAt      pgtype.Timestamptz
+	ConnectionPublicID string
+	ConnectionName     string
+	UserPublicID       string
+	UserName           string
+	UserLogin          string
+	UserLanguage       pgtype.Text
+	Contact            pgtype.Text
+}
+
+// GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway,
+// its User and, from its first attempt, its contact while that is still confirmed. No row when the lease ran out or
+// went to another replica, or the call ended.
+func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (GetLeasedCallRow, error) {
+	row := q.db.QueryRow(ctx, getLeasedCall,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+		arg.Now,
+	)
+	var i GetLeasedCallRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.ConnectionID,
+		&i.UserID,
+		&i.State,
+		&i.Critical,
+		&i.Language,
+		&i.Text,
+		&i.Attempts,
+		&i.FirstFailedAt,
+		&i.ConnectionPublicID,
+		&i.ConnectionName,
+		&i.UserPublicID,
+		&i.UserName,
+		&i.UserLogin,
+		&i.UserLanguage,
+		&i.Contact,
+	)
+	return i, err
+}
+
+const getPage = `-- name: GetPage :one
+
+SELECT a.number, (a.severity_level = 'critical')::boolean AS critical, c.public_id AS connection_public_id,
+       u.public_id AS user_public_id
+FROM alert_groups a, connections c, users u
+WHERE a.org_id = $1 AND a.id = $2
+  AND c.org_id = $1 AND c.id = $3 AND c.type = 'bridge' AND c.deleted_at IS NULL
+  AND c.bridge_info->'roles' @> '["gateway"]'::jsonb
+  AND u.org_id = $1 AND u.id = $4 AND u.status <> 'deleted'
+`
+
+type GetPageParams struct {
+	OrgID        int64
+	AlertGroupID int64
+	ConnectionID int64
+	UserID       int64
+}
+
+type GetPageRow struct {
+	Number             int64
+	Critical           bool
+	ConnectionPublicID string
+	UserPublicID       string
+}
+
+// The calls through Notification gateways (C-30.FR-4): a row per call to a person through a gateway, the Alert Groups
+// it is about, claimed with a lease by any replica's gateway sender (sender.go, calls.go).
+// GetPage reads what a Page names: the Alert Group, with whether it is critical, which puts its call first; the
+// Notification gateway, not deleted; and the User, not deleted. No row when one of them is not so.
+func (q *Queries) GetPage(ctx context.Context, arg GetPageParams) (GetPageRow, error) {
+	row := q.db.QueryRow(ctx, getPage,
+		arg.OrgID,
+		arg.AlertGroupID,
+		arg.ConnectionID,
+		arg.UserID,
+	)
+	var i GetPageRow
+	err := row.Scan(
+		&i.Number,
+		&i.Critical,
+		&i.ConnectionPublicID,
+		&i.UserPublicID,
+	)
+	return i, err
+}
+
+const getPageGroupID = `-- name: GetPageGroupID :one
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND public_id = $2
+`
+
+type GetPageGroupIDParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// GetPageGroupID reads the internal id of the Alert Group public_id, for the hook of muster dev.
+func (q *Queries) GetPageGroupID(ctx context.Context, arg GetPageGroupIDParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getPageGroupID, arg.OrgID, arg.PublicID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getUserByPublicID = `-- name: GetUserByPublicID :one
@@ -405,6 +742,90 @@ func (q *Queries) InsertContact(ctx context.Context, arg InsertContactParams) (i
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertWaitingCall = `-- name: InsertWaitingCall :one
+INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, critical, not_before, next_attempt_at,
+                           created_at)
+VALUES ($1, $2, $3, $4, 'waiting', $5, $6::timestamptz,
+        $6::timestamptz, $7::timestamptz)
+RETURNING id
+`
+
+type InsertWaitingCallParams struct {
+	OrgID        int64
+	PublicID     string
+	ConnectionID int64
+	UserID       int64
+	Critical     bool
+	NotBefore    pgtype.Timestamptz
+	Now          time.Time
+}
+
+// InsertWaitingCall creates the call that waits for its first attempt, due at not_before, never while it is null.
+func (q *Queries) InsertWaitingCall(ctx context.Context, arg InsertWaitingCallParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertWaitingCall,
+		arg.OrgID,
+		arg.PublicID,
+		arg.ConnectionID,
+		arg.UserID,
+		arg.Critical,
+		arg.NotBefore,
+		arg.Now,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listCallGroups = `-- name: ListCallGroups :many
+SELECT a.id, a.public_id, a.number, a.title, a.severity_level, a.status
+FROM gateway_call_items i
+JOIN alert_groups a ON a.org_id = i.org_id AND a.id = i.alert_group_id
+WHERE i.org_id = $1 AND i.call_id = $2 AND i.dropped_at IS NULL
+ORDER BY a.number, a.id
+`
+
+type ListCallGroupsParams struct {
+	OrgID  int64
+	CallID int64
+}
+
+type ListCallGroupsRow struct {
+	ID            int64
+	PublicID      string
+	Number        int64
+	Title         string
+	SeverityLevel string
+	Status        string
+}
+
+// ListCallGroups lists the Alert Groups a call is about, without those dropped before its first attempt, by number.
+func (q *Queries) ListCallGroups(ctx context.Context, arg ListCallGroupsParams) ([]ListCallGroupsRow, error) {
+	rows, err := q.db.Query(ctx, listCallGroups, arg.OrgID, arg.CallID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCallGroupsRow{}
+	for rows.Next() {
+		var i ListCallGroupsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Number,
+			&i.Title,
+			&i.SeverityLevel,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listContactsOfUser = `-- name: ListContactsOfUser :many
@@ -503,6 +924,31 @@ func (q *Queries) ListGateways(ctx context.Context, orgID int64) ([]ListGateways
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCallPerson = `-- name: LockCallPerson :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s/%s', $2::bigint, $3::bigint,
+                                                                $4::bigint)))
+`
+
+type LockCallPersonParams struct {
+	LockClass    int32
+	OrgID        int64
+	ConnectionID int64
+	UserID       int64
+}
+
+// LockCallPerson takes, until the transaction ends, the lock of the calls of a User through a Notification gateway
+// (class db.GatewayCallLockClass): a Page joining or creating the waiting call, the start of a first attempt and the
+// end of a call serialize. A collision of the hash only serializes two people.
+func (q *Queries) LockCallPerson(ctx context.Context, arg LockCallPersonParams) error {
+	_, err := q.db.Exec(ctx, lockCallPerson,
+		arg.LockClass,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.UserID,
+	)
+	return err
 }
 
 const lockContactOfUser = `-- name: LockContactOfUser :one
@@ -656,6 +1102,49 @@ func (q *Queries) LockNewestCode(ctx context.Context, arg LockNewestCodeParams) 
 	return i, err
 }
 
+const lockWaitingCall = `-- name: LockWaitingCall :one
+SELECT id, public_id
+FROM gateway_calls
+WHERE org_id = $1 AND connection_id = $2 AND user_id = $3 AND state = 'waiting'
+FOR NO KEY UPDATE
+`
+
+type LockWaitingCallParams struct {
+	OrgID        int64
+	ConnectionID int64
+	UserID       int64
+}
+
+type LockWaitingCallRow struct {
+	ID       int64
+	PublicID string
+}
+
+// LockWaitingCall locks the call of a User through a gateway that waits for its first attempt.
+func (q *Queries) LockWaitingCall(ctx context.Context, arg LockWaitingCallParams) (LockWaitingCallRow, error) {
+	row := q.db.QueryRow(ctx, lockWaitingCall, arg.OrgID, arg.ConnectionID, arg.UserID)
+	var i LockWaitingCallRow
+	err := row.Scan(&i.ID, &i.PublicID)
+	return i, err
+}
+
+const markCallCritical = `-- name: MarkCallCritical :exec
+UPDATE gateway_calls
+SET critical = true
+WHERE org_id = $1 AND id = $2 AND state = 'waiting'
+`
+
+type MarkCallCriticalParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// MarkCallCritical makes a waiting call critical once a critical Alert Group joins it.
+func (q *Queries) MarkCallCritical(ctx context.Context, arg MarkCallCriticalParams) error {
+	_, err := q.db.Exec(ctx, markCallCritical, arg.OrgID, arg.ID)
+	return err
+}
+
 const markCodeSent = `-- name: MarkCodeSent :exec
 UPDATE gateway_contact_codes
 SET sent_at = $1::timestamptz
@@ -672,6 +1161,72 @@ type MarkCodeSentParams struct {
 func (q *Queries) MarkCodeSent(ctx context.Context, arg MarkCodeSentParams) error {
 	_, err := q.db.Exec(ctx, markCodeSent, arg.Now, arg.OrgID, arg.ID)
 	return err
+}
+
+const nextCallWork = `-- name: NextCallWork :one
+SELECT coalesce(min(next_attempt_at) FILTER (WHERE lease_until IS NULL OR lease_until <= $1::timestamptz),
+                '0001-01-01 00:00:00+00')::timestamptz AS free_at,
+       coalesce(min(lease_until) FILTER (WHERE lease_until > $1::timestamptz),
+                '0001-01-01 00:00:00+00')::timestamptz AS lease_end
+FROM gateway_calls
+WHERE org_id = $2 AND state IN ('waiting', 'sending') AND next_attempt_at IS NOT NULL
+`
+
+type NextCallWorkParams struct {
+	Now   time.Time
+	OrgID int64
+}
+
+type NextCallWorkRow struct {
+	FreeAt   time.Time
+	LeaseEnd time.Time
+}
+
+// NextCallWork is when the next call can be claimed: the earliest due time of a call without a live lease (business
+// clock), and the earliest end of a live lease (real clock), the zero time for none.
+func (q *Queries) NextCallWork(ctx context.Context, arg NextCallWorkParams) (NextCallWorkRow, error) {
+	row := q.db.QueryRow(ctx, nextCallWork, arg.Now, arg.OrgID)
+	var i NextCallWorkRow
+	err := row.Scan(&i.FreeAt, &i.LeaseEnd)
+	return i, err
+}
+
+const notifyCalls = `-- name: NotifyCalls :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyCalls wakes the gateway senders of every replica once the transaction commits.
+func (q *Queries) NotifyCalls(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyCalls, channel)
+	return err
+}
+
+const previousCall = `-- name: PreviousCall :one
+SELECT state, ended_at
+FROM gateway_calls
+WHERE org_id = $1 AND connection_id = $2 AND user_id = $3 AND first_attempt_at IS NOT NULL
+ORDER BY id DESC
+LIMIT 1
+`
+
+type PreviousCallParams struct {
+	OrgID        int64
+	ConnectionID int64
+	UserID       int64
+}
+
+type PreviousCallRow struct {
+	State   string
+	EndedAt pgtype.Timestamptz
+}
+
+// PreviousCall reads the latest call of a User through a gateway that went — whose first attempt was made, or tried —
+// with its state and its end, null while it is being sent.
+func (q *Queries) PreviousCall(ctx context.Context, arg PreviousCallParams) (PreviousCallRow, error) {
+	row := q.db.QueryRow(ctx, previousCall, arg.OrgID, arg.ConnectionID, arg.UserID)
+	var i PreviousCallRow
+	err := row.Scan(&i.State, &i.EndedAt)
+	return i, err
 }
 
 const pruneCodes = `-- name: PruneCodes :execrows
@@ -704,6 +1259,41 @@ func (q *Queries) PruneCodes(ctx context.Context, arg PruneCodesParams) (int64, 
 	return result.RowsAffected(), nil
 }
 
+const recordCallRetry = `-- name: RecordCallRetry :execrows
+UPDATE gateway_calls
+SET attempts = attempts + 1, first_failed_at = coalesce(first_failed_at, $1::timestamptz),
+    next_attempt_at = $2::timestamptz, lease_owner = NULL, lease_until = NULL, last_error_class = $3::text,
+    last_error = $4::text
+WHERE org_id = $5 AND id = $6 AND state = 'sending' AND lease_owner = $7::text
+`
+
+type RecordCallRetryParams struct {
+	Now        time.Time
+	At         time.Time
+	ErrorClass string
+	Error      pgtype.Text
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RecordCallRetry counts a failed attempt of the budget and makes the call due again at a later time.
+func (q *Queries) RecordCallRetry(ctx context.Context, arg RecordCallRetryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordCallRetry,
+		arg.Now,
+		arg.At,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordWrongCode = `-- name: RecordWrongCode :one
 UPDATE gateway_contact_codes
 SET attempts = attempts + 1,
@@ -730,6 +1320,130 @@ func (q *Queries) RecordWrongCode(ctx context.Context, arg RecordWrongCodeParams
 	var attempts int64
 	err := row.Scan(&attempts)
 	return attempts, err
+}
+
+const releaseWaitingCall = `-- name: ReleaseWaitingCall :exec
+UPDATE gateway_calls
+SET not_before = $1::timestamptz, next_attempt_at = $1::timestamptz
+WHERE org_id = $2 AND connection_id = $3 AND user_id = $4 AND state = 'waiting'
+  AND not_before IS NULL
+`
+
+type ReleaseWaitingCallParams struct {
+	At           time.Time
+	OrgID        int64
+	ConnectionID int64
+	UserID       int64
+}
+
+// ReleaseWaitingCall sets when the call that waits behind a call being sent may go, once that call ended.
+func (q *Queries) ReleaseWaitingCall(ctx context.Context, arg ReleaseWaitingCallParams) error {
+	_, err := q.db.Exec(ctx, releaseWaitingCall,
+		arg.At,
+		arg.OrgID,
+		arg.ConnectionID,
+		arg.UserID,
+	)
+	return err
+}
+
+const renewCallLease = `-- name: RenewCallLease :execrows
+UPDATE gateway_calls
+SET lease_until = $1::timestamptz
+WHERE org_id = $2 AND id = $3 AND state = 'sending' AND lease_owner = $4::text
+`
+
+type RenewCallLeaseParams struct {
+	LeaseUntil time.Time
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RenewCallLease renews the lease of a call being retried for its next attempt.
+func (q *Queries) RenewCallLease(ctx context.Context, arg RenewCallLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewCallLease,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const rescheduleCall = `-- name: RescheduleCall :execrows
+UPDATE gateway_calls
+SET next_attempt_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
+    last_error_class = coalesce($2::text, last_error_class),
+    last_error = coalesce($3::text, last_error)
+WHERE org_id = $4 AND id = $5 AND state IN ('waiting', 'sending') AND lease_owner = $6::text
+`
+
+type RescheduleCallParams struct {
+	At         time.Time
+	ErrorClass pgtype.Text
+	Error      pgtype.Text
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// RescheduleCall makes a call due again at a later time without counting an attempt — no limiter token was free, or
+// the gateway asked to wait — and frees its lease.
+func (q *Queries) RescheduleCall(ctx context.Context, arg RescheduleCallParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rescheduleCall,
+		arg.At,
+		arg.ErrorClass,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const startCall = `-- name: StartCall :execrows
+UPDATE gateway_calls
+SET state = 'sending', contact_id = $1::bigint, language = $2::text, text = $3::text,
+    first_attempt_at = $4::timestamptz, next_attempt_at = $4::timestamptz, not_before = coalesce(not_before, $4),
+    lease_until = $5::timestamptz
+WHERE org_id = $6 AND id = $7 AND state = 'waiting' AND lease_owner = $8::text
+`
+
+type StartCallParams struct {
+	ContactID  pgtype.Int8
+	Language   string
+	Text       string
+	Now        time.Time
+	LeaseUntil time.Time
+	OrgID      int64
+	ID         int64
+	Owner      string
+}
+
+// StartCall makes the first attempt of a waiting call: it keeps its contact, its text and its language from now on,
+// takes no more Alert Groups and is due now, its lease renewed for the attempt.
+func (q *Queries) StartCall(ctx context.Context, arg StartCallParams) (int64, error) {
+	result, err := q.db.Exec(ctx, startCall,
+		arg.ContactID,
+		arg.Language,
+		arg.Text,
+		arg.Now,
+		arg.LeaseUntil,
+		arg.OrgID,
+		arg.ID,
+		arg.Owner,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const useCode = `-- name: UseCode :execrows

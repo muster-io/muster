@@ -21,6 +21,7 @@ const (
 	AlertGroup         Prefix = "AG"
 	AccountLink        Prefix = "AK"
 	AccountLinkRequest Prefix = "AR"
+	GatewayCall        Prefix = "CA"
 	Connection         Prefix = "CN"
 	CheckRun           Prefix = "CR"
 	DeliveryEvent      Prefix = "DE"

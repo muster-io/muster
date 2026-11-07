@@ -76,7 +76,11 @@
   `routes.run_team_chains`, `team_destinations`, `deliveries.entries`, the lifecycle event `destination_joined` and the
   kind `team_destinations` of `open_group_updates`, C-26.FR-1 to FR-5, S-121) and
   [`0033_gateway_contacts`](../../internal/db/migrations/0033_gateway_contacts.up.sql)
-  (the contacts of people at Notification gateways and their confirmation codes, C-30.FR-3, S-167), in
+  (the contacts of people at Notification gateways and their confirmation codes, C-30.FR-3, S-167) and
+  [`0034_gateway_calls`](../../internal/db/migrations/0034_gateway_calls.up.sql)
+  (the queue of calls through Notification gateways, the Timeline kind `escalation` with its events, the Mention
+  `paged`, `timeline_entries.paged_user_ids` and `gateway_connection_id`, and the Transport `gateway`, C-30.FR-4,
+  FR-7, C-32.FR-19, S-148), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -177,7 +181,8 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 `alert_group_teams` (0024), the Schedules, `schedules`, `rotation_layers`, `rotation_layer_users` and
 `schedule_overrides` (0025), the personal iCal feeds, `ical_feeds` (0026), the identity provider entries
 of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_destinations` (0032), and the contacts at
-Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), which makes 74 tables.
+Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), and the calls through
+them, `gateway_calls` and `gateway_call_items` (0034), which makes 76 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -192,7 +197,7 @@ Notification gateways with their codes, `gateway_contacts` and `gateway_contact_
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
-| Notification gateways | `gateway_contacts`, `gateway_contact_codes` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion |
+| Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; calls kept, their items with their Alert Group |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
@@ -1204,12 +1209,12 @@ are not copied: they are the identity of the Alert and stay on `alerts`.
 `event`, `event_seq` (position among the Alert Group's lifecycle events, the webhook `sequence`), `loudness` and
 symbolic `mentions`; and system entries without a lifecycle event (`muster_unavailable`, `fallback_template_used`,
 `template_value_missing`). The actor (`user`, `service_account` or `system` with `transport = 'system'`), the token used
-and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`, `system`) are recorded; the
-Transport CHECK is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the
+and the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `cli`, `system`) are
+recorded; the Transport CHECK is widened as the one of `audit_log` is ([4.13](#413-audit-log)). `CHECK` constraints encode the
 lifecycle event tables: every event has its Timeline kind (`x-event-kinds` of the API specification), a lifecycle
 event always carries loudness and a sequence number, an entry without an event is a `system` entry,
-`moved_to_default_route`, `unknown_team_value` and `destination_joined` are both, and `mentions` only uses the eight
-symbolic names.
+`moved_to_default_route`, `unknown_team_value` and `destination_joined` are both, and `mentions` only uses the nine
+symbolic names, `paged` among them from 0034.
 Migration 0024 replaced the `CHECK`s of the events, event kinds, system events and the system rule of `0001` by `_v2`
 ones with `team_joined` (kind `alerts`) and `unknown_team_value` (kind `system`, with the same `system_event`), added
 `NOT VALID`, validated in a second transaction and the old ones dropped in a third, and added the columns of the Teams:
@@ -1217,7 +1222,16 @@ ones with `team_joined` (kind `alerts`) and `unknown_team_value` (kind `system`,
 foreign key, as the actor columns have none, and names a Team that may be deleted since. Migration 0032 replaced the
 `_v2` `CHECK`s by `_v3` ones with `destination_joined` (kind `system`, with the same `system_event`), in the same three
 transactions, and added `destination_id`, the Destination an Alert Group joined after its first Publication elsewhere
-(C-26.FR-5), likewise without a foreign key. Delivery events are not stored
+(C-26.FR-5), likewise without a foreign key. Migration 0034 replaced the `CHECK`s of the kinds, events, event kinds
+and Mentions by `_v4` ones (`timeline_entries_kind_v4_check` replacing the `kind` CHECK of `0001`,
+`timeline_entries_mentions_v4_check` its `timeline_entries_mentions_check`) with the kind `escalation` of C-32.FR-19 and
+every event of that kind in the L2 lifecycle event table — `paged`, `page_not_delivered`, `escalation_step_skipped`,
+`assignees_changed`, `escalation_webhook` — and the symbolic Mention `paged`, so that the later stories of C-30 and
+C-32 record their events without a new version; and `timeline_entries_transport_v4_check` with `gateway`, in the same
+three transactions. It added `paged_user_ids` (`users.id` of the people a Page names) and `gateway_connection_id`
+(`connections.id` of the Notification gateway of a call), without foreign keys; the reason of `page_not_delivered` is
+`reason`. The dispatcher records `page_not_delivered` for a call that ended Not delivered ([4.17](#417-notification-gateways)).
+Delivery events are not stored
 here; the Timeline endpoint merges `delivery_events` by time as the kind `delivery`
 ([ADR-0005](../adr/0005-delivery-as-desired-state-reconciliation.md)), and Notes as the kind `notes`. One index,
 `(org_id, alert_group_id, at, id)`, serves the Timeline (both directions, kind filter).
@@ -1347,8 +1361,9 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   attempted, the next waits until it is `delivered` or `not_delivered` (at least once, in order, never collapsed). Not
   subject to Storms and never dropped while the Destination is Broken, with no age limit. The `CHECK` of `event` lists
   every lifecycle event; migration 0024 replaced the one of `0001` by `webhook_events_event_v2_check` with
-  `team_joined` and `unknown_team_value`, and migration 0032 replaced it by `webhook_events_event_v3_check` with
-  `destination_joined`, in the three transactions of the Timeline's.
+  `team_joined` and `unknown_team_value`, migration 0032 replaced it by `webhook_events_event_v3_check` with
+  `destination_joined`, and migration 0034 by `webhook_events_event_v4_check` with the five events of the kind
+  `escalation`, each in the three transactions of the Timeline's.
 - **`delivery_events`** (partitioned by month on `occurred_at`) — what happened while delivering: Publication, possible
   duplicate, Not delivered with its error class and error, delivered late, deleted in the messenger, republished, Thread
   not attached, rejected markup, Broken and recovered, Storm summary, final edit, republished past the edit window
@@ -1468,7 +1483,9 @@ row with the Transport `bridge` — the Audit log is append-only and the Timelin
 `NOT VALID`, which hold every new row, and validates them only when no such row exists. Migration 0018 adds `slack`
 the same way, `..._transport_v3_check` replacing `..._transport_v2_check`; its down migration keeps the rows with the
 Transport `slack`, as 0011's keeps those with `bridge`, and restores the `_v2` CHECKs under their names, which 0011's
-own down migration drops.
+own down migration drops. Migration 0034 adds `gateway`, the Transport of an Acknowledge through a Notification gateway
+(C-30.FR-6), as `..._transport_v4_check`, the same way; its down migration keeps the rows with the Transport
+`gateway`.
 
 **Append-only** is enforced by triggers, not by privileges: a `BEFORE UPDATE OR DELETE` row trigger and a
 `BEFORE TRUNCATE` statement trigger raise `insufficient_privilege`. Row triggers on a partitioned table are cloned to
@@ -1615,6 +1632,28 @@ stored `info` declares the role `gateway`; it has no table of its own.
   and checked under the lock of its User (`FOR NO KEY UPDATE`) and of the code's row, so that parallel wrong codes never
   pass the attempts of `gateway.contact_code`; the requests for one contact text of several Users serialize on the
   transaction advisory lock of class `GatewayContactLockClass`.
+- **`gateway_calls`** (migration 0034, C-30.FR-4) — a call to a person (`user_id`) through a gateway
+  (`connection_id`), with its `CA` `public_id`: its `state` — `waiting` for its first attempt, `sending` from it on,
+  then `accepted`, `not_delivered` with its `reason` (`gateway_calls_reason_check`: a reason exactly when Not
+  delivered) or `dropped` — and `ended_at` exactly once it ended (`gateway_calls_ended_check`); `critical` once a
+  critical Alert Group joined it; from its first attempt (`first_attempt_at`) its `contact_id`, `language` and `text`,
+  which every retry sends again under the `Idempotency-Key` `calls/<public_id>` (`gateway_calls_text_check`), the
+  contact turning null when it is removed (`ON DELETE SET NULL`, `gateway_calls_contact_idx`); `not_before`, the end
+  of the previous call plus `gateway.combine_window`, null while that call is still sent; `next_attempt_at`;
+  the lease (`gateway_calls_lease_check`); `attempts`, `first_failed_at`, `last_error_class` and `last_error` of
+  `delivery.transient_budget`; and the gateway's `notification_id` of an accepted call. The partial unique index
+  `gateway_calls_waiting_key` on `(connection_id, user_id) WHERE state = 'waiting'` keeps one waiting call per person
+  and gateway, which the later Pages join; `gateway_calls_due_idx` on `(org_id, next_attempt_at) WHERE state IN
+  ('waiting', 'sending')` serves the claim, `gateway_calls_person_idx` on `(org_id, connection_id, user_id, id)` the
+  previous call whose end starts the window, `gateway_calls_user_idx` on `(org_id, user_id)` the calls of a User.
+  `not_before`, `next_attempt_at` and `ended_at` are times of the business clock, `lease_until` of the real clock. A
+  Page, the start of a first attempt and the end of a call take the transaction advisory lock of class
+  `GatewayCallLockClass` of their person and gateway first ([5](#5-queues-and-claims)). Calls are kept; written only by
+  `gateways`.
+- **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
+  `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
+  about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`
+  on `(alert_group_id)`).
 
 ## 5. Queues and claims
 
@@ -1783,6 +1822,34 @@ INSERT INTO bridge_events_seen (org_id, connection_id, event_id, seen_at) VALUES
 A second copy of the event — a push retried while the first runs, or an overlapping poll — waits on the lock and then
 finds the id. The claim holds no row lock the dispatcher takes; a crash between the Command and the insert repeats the
 Command once on redelivery, which the dispatcher's preconditions turn into a refusal or a no-op (ADR-0017).
+
+**Calls through Notification gateways** (C-30.FR-4, migration 0034): the gateway sender of every replica claims the due
+calls — waiting for their first attempt or being retried — critical first, in one statement:
+
+```sql
+WITH due AS MATERIALIZED (
+    SELECT id FROM gateway_calls
+     WHERE org_id = $1 AND state IN ('waiting', 'sending') AND next_attempt_at <= $business_now
+       AND (lease_until IS NULL OR lease_until <= $real_now)
+     ORDER BY critical DESC, next_attempt_at, id LIMIT $n
+       FOR NO KEY UPDATE SKIP LOCKED)
+UPDATE gateway_calls c SET lease_owner = $owner, lease_until = $real_now + lease FROM due
+ WHERE c.org_id = $1 AND c.id = due.id;
+```
+
+A waiting call whose previous call is still being sent has no `next_attempt_at` and is never claimed; the end of that
+call sets its `not_before` and `next_attempt_at` to the end plus `gateway.combine_window`. Lock order: the Alert Groups
+by id (the dispatcher's lock, with what its re-render step locks after it), then the transaction advisory lock of class
+`0x6d75_000b` (`db.GatewayCallLockClass`, keyed by `hashtext` of the Organization, the Connection and the User), then
+that person's `gateway_calls` by id — the call that ends before the call waiting behind it — then
+`gateway_call_items`, then the gateway's `rate_limit_buckets`. A Page runs in its caller's transaction after the Alert
+Groups that transaction holds, takes the advisory lock and then joins the waiting call or inserts one; a caller takes
+every Alert Group it locks before its first Page. The preparation of an attempt takes the advisory lock, the call,
+drops the stopped items and takes the limiter token, reading the Alert Groups' status unlocked; the end of a call Not
+delivered records `page_not_delivered` through the dispatcher first and then takes the advisory lock and the call, in
+one transaction; every other outcome takes no Alert Group. Explicit locks of `gateway_calls` are `FOR NO KEY UPDATE`,
+since the foreign-key check of a new item takes `FOR KEY SHARE` on its call. The test
+`TestNotDeliveredAgainstPageLockOrder` (`internal/gateways`) shows the deadlock (40P01) the reversed order makes.
 
 ## 6. Partitions and retention
 

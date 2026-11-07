@@ -579,6 +579,9 @@ type process struct {
 	// gatewayContacts are the contacts of people at the Notification gateways, whose codes go through the gateway on
 	// the interactive path (C-30.FR-3).
 	gatewayContacts *gateways.Service
+	// calls queues the calls through Notification gateways and gatewaySender sends them, on every replica (C-30.FR-4).
+	calls         *gateways.Calls
+	gatewaySender *gateways.Sender
 	// mattermost, telegram, bridge and slack are the adapters of the messenger Destinations, which the delivery worker
 	// and the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by
 	// the callback of any replica, with the test that waits for it.
@@ -678,13 +681,14 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	p.timers = &timers.Worker{Log: log}
 	p.openUpdates = &groups.UpdateWorker{Log: log}
 	p.deliverer = &delivery.Worker{Log: log}
+	p.gatewaySender = &gateways.Sender{Log: log}
 	if opts.Development {
 		// The development clock comes before anything reads the business clock, the partitions among them. A move
 		// wakes the processing worker, the timer worker, the open Alert Group update worker and the delivery worker,
 		// which re-read their due times at the new time.
 		p.devClock = devmode.NewClock(d.ClockStore(), business, func(ctx context.Context, at time.Time) error {
 			return partitions.New(d.PartitionSession, clock.NewManual(at), log).Maintain(ctx)
-		}, p.worker.Wake, p.timers.Wake, p.openUpdates.Wake, p.deliverer.Wake)
+		}, p.worker.Wake, p.timers.Wake, p.openUpdates.Wake, p.deliverer.Wake, p.gatewaySender.Wake)
 		if err := p.devClock.Load(ctx); err != nil {
 			d.Close()
 			return nil, failed(ctx, log, err)
@@ -877,7 +881,8 @@ func drainSlackPresses(shutdown context.Context, presses *slack.Presses, end con
 	return false
 }
 
-// internalHandler serves health and metrics, and in development mode the development clock.
+// internalHandler serves health and metrics, and in development mode the development clock and the hook that queues
+// calls through a Notification gateway.
 func (p *process) internalHandler(health *server.Health) http.Handler {
 	internal := server.Internal(health, metrics.Handler(p.keeper.Leading))
 	if p.devClock == nil {
@@ -885,6 +890,11 @@ func (p *process) internalHandler(health *server.Health) http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.Handle(devmode.ClockPath, p.devClock.Handler())
+	store := gateways.NewCallStore(p.db.AccountLinksDB())
+	mux.Handle(devmode.GatewayCallsPath, devmode.GatewayCallsHandler(func(ctx context.Context, user, gateway string,
+		groups []string) error {
+		return p.calls.DevPage(ctx, store, user, gateway, groups)
+	}, gateways.ErrNoPage))
 	mux.Handle("/", internal)
 	return mux
 }
@@ -1040,6 +1050,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// The contacts at Notification gateways are kept in the main pool, as the Account links are (C-30.FR-3).
 	p.gatewayContacts = gateways.New(gateways.Config{OrgID: orgID, Store: gateways.NewStore(p.db.AccountLinksDB()),
 		Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
+	p.calls = gateways.NewCalls(orgID, p.clocks.Business, p.log)
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
 		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)
@@ -1412,6 +1423,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 	p.listener.Listen(groups.TimersChannel, func(string) { p.timers.Wake() })
 	p.listener.Listen(groups.OpenGroupUpdatesChannel, func(string) { p.openUpdates.Wake() })
 	p.listener.Listen(delivery.Channel, func(string) { p.deliverer.Wake() })
+	p.listener.Listen(gateways.CallsChannel, func(string) { p.gatewaySender.Wake() })
 	p.listener.Listen(mattermost.TestPressChannel, p.testPresses.Arrived)
 	// A change of the outbound address policy, maybe on another replica, applies here at once (C-20.FR-3).
 	p.listener.Listen(organization.OutboundPolicyChannel, func(string) { p.policies.Invalidate() })
@@ -1468,12 +1480,14 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 			p.timers.Wake()
 			p.openUpdates.Wake()
 			p.deliverer.Wake()
+			p.gatewaySender.Wake()
 		})
 	})
 	wg.Go(func() { p.worker.Run(ctx) })
 	wg.Go(func() { p.timers.Run(ctx) })
 	wg.Go(func() { p.openUpdates.Run(ctx) })
 	wg.Go(func() { p.deliverer.Run(ctx) })
+	wg.Go(func() { p.gatewaySender.Run(ctx) })
 	wg.Go(func() { p.rechecker().Run(ctx) })
 	wg.Go(func() { p.integrations.RunTouches(ctx) })
 	wg.Go(func() {
@@ -1557,6 +1571,14 @@ func (p *process) configureWorker() {
 	p.deliverer.Mentions = p.mentions
 	p.deliverer.Events = p.requests
 	p.deliverer.Published = p.groups.MarkPublished
+	// The gateway sender runs on every replica, under leases of its own, as the delivery worker does; it is not a
+	// Leader task (C-30.FR-4, NFR-4).
+	p.gatewaySender.OrgID = p.orgID
+	p.gatewaySender.Store = gateways.NewCallStore(p.db.AccountLinksDB())
+	p.gatewaySender.Lease = db.Lease{Owner: p.replica.ID(), Duration: gateways.SenderLease, Clocks: p.clocks}
+	p.gatewaySender.Gateway = p.bridge
+	p.gatewaySender.Keys = p.keyring
+	p.gatewaySender.Pages = p.groups
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {

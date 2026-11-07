@@ -13,6 +13,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2737,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (33)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (34)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":33`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":34`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":33`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":34`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2764,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (33)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (34)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":33`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":34`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3235,6 +3236,305 @@ func TestIntegrationGatewayContacts(t *testing.T) {
 		}
 		if err := e.mm.Migrate(33); err != nil {
 			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationGatewayCalls runs 0034 over a database at 33 with a partition of timeline_entries holding an entry of
+// every kind of _v3, a webhook event of _v3, a User with a confirmed contact at a Notification gateway and an Alert
+// Group: the kind, event, event kind, Mention and transport CHECKs of _v4 replace the old ones on the parent and the
+// partition, validated, and take every row of _v3 with page_not_delivered of the kind escalation, the Mention paged
+// and the Transport gateway; gateway_calls takes a call with its CA public_id, one waiting call per person and
+// gateway, a lease only with its owner, a reason only Not delivered, and keeps the call of a removed contact without
+// it; an Alert Group deleted takes its items. Down drops the tables and columns, deletes the escalation entries and
+// their webhook events and restores the old CHECKs, validated; up again works.
+func TestIntegrationGatewayCalls(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 33)
+		e.exec(t, `CREATE TABLE timeline_entries_p202611 PARTITION OF timeline_entries
+			FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00')`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PA', 'petr', 'petr', 'responder', 'local', 'active', '2026-11-07', '2026-11-07'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CN0000000000G1', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', '2026-11-07', 1, 1,
+				'2026-11-07', '2026-11-07'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO gateway_contacts (org_id, public_id, user_id, connection_id, contact, confirmed_at,
+			created_at)
+			SELECT u.org_id, 'GC0000000000A1', u.id, c.id, '+10000000001', '2026-11-07', '2026-11-07'
+			FROM users u, connections c`)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, 'NT0000000000E1', 'am', 'webhook_only', '{}', 45, false, 300, 'not_configured', '2026-11-07',
+				'2026-11-07'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000E1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-11-07', '2026-11-07'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000E1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-11-07', '{}', 1, 1,
+				'healthy', '2026-11-07', '2026-11-07'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000E1', 1, id, '{alertname}', '{}', sha256('e1'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-11-07', '2026-11-07'
+			FROM routes`)
+		n := 0
+		entry := func(t *testing.T, kind, event, extra string) error {
+			t.Helper()
+			n++
+			columns, values := "", ""
+			if extra != "" {
+				parts := strings.SplitN(extra, "|", 2)
+				columns, values = ", "+parts[0], ", "+parts[1]
+			}
+			ev, seq, loud := "NULL", "NULL", "NULL"
+			if event != "" {
+				ev, seq, loud = "'"+event+"'", fmt.Sprint(n), "'quiet'"
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id, at,
+				kind, event, event_seq, loudness, actor_kind, transport`+columns+`)
+				SELECT org_id, $1, id, '2026-11-07 12:00:00+00', $2, `+ev+`, `+seq+`, `+loud+`, 'system', 'system'`+
+				values+` FROM alert_groups`, fmt.Sprintf("TE0000000%05d", n), kind)
+			return err
+		}
+		hook := func(t *testing.T, event string) error {
+			t.Helper()
+			n++
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO webhook_events (org_id, destination_id, alert_group_id,
+				sequence, webhook_id, event, notify, occurred_at, body, state, next_attempt_at, created_at)
+				SELECT g.org_id, d.id, g.id, $1, $2, $3, false, '2026-11-07', '{}', 'pending', '2026-11-07',
+					'2026-11-07'
+				FROM alert_groups g, destinations d`, n, fmt.Sprintf("wh-%d", n), event)
+			return err
+		}
+		// refused checks that err is the refusal by one of the constraints, separated by |.
+		refused := func(t *testing.T, name string, err error, constraints string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok ||
+				!slices.Contains(strings.Split(constraints, "|"), pe.ConstraintName) {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		for _, c := range []struct{ kind, event, extra string }{
+			{"status", "acknowledged", ""}, {"alerts", "team_joined", ""}, {"timers", "reminder", ""},
+			{"system", "destination_joined", `system_event|'destination_joined'`},
+			{"system", "", `system_event, mentions|'muster_unavailable', '{owner,rise_to_urgent}'`},
+		} {
+			if err := entry(t, c.kind, c.event, c.extra); err != nil {
+				t.Fatalf("%s before up: %v", c.event, err)
+			}
+		}
+		if err := hook(t, "destination_joined"); err != nil {
+			t.Fatal(err)
+		}
+		const escalation = `paged_user_ids|ARRAY[(SELECT id FROM users)]`
+		if err := entry(t, "escalation", "page_not_delivered", ""); err == nil {
+			t.Error("escalation before up was taken")
+		} else if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" ||
+			!strings.HasPrefix(pe.ConstraintName, "timeline_entries_") {
+			t.Errorf("escalation before up: %v", err)
+		}
+		refused(t, "a webhook event page_not_delivered before up", hook(t, "page_not_delivered"),
+			"webhook_events_event_v3_check")
+		checks := func(t *testing.T) string {
+			t.Helper()
+			parts := []string{"timeline_entries", "timeline_entries_p202611"}
+			return e.constraints(t, parts, "timeline_entries_kind") + " " +
+				e.constraints(t, parts, "timeline_entries_event") + " " +
+				e.constraints(t, parts, "timeline_entries_mentions") + " " +
+				e.constraints(t, parts, "timeline_entries_transport") + " " +
+				e.constraints(t, []string{"audit_log"}, "audit_log_transport") + " " +
+				e.constraints(t, []string{"webhook_events"}, "webhook_events_event")
+		}
+		before := checks(t)
+		if !strings.Contains(before, "timeline_entries.timeline_entries_kind_check:true") ||
+			!strings.Contains(before, "timeline_entries_p202611.timeline_entries_event_v3_check:true") {
+			t.Fatalf("before up: constraints %s", before)
+		}
+
+		if err := e.mm.Migrate(34); err != nil {
+			t.Fatalf("up to 34: %v", err)
+		}
+		after := checks(t)
+		for _, want := range []string{"timeline_entries_kind_v4_check:true", "timeline_entries_event_v4_check:true",
+			"timeline_entries_event_kind_v4_check:true", "timeline_entries_mentions_v4_check:true",
+			"timeline_entries_transport_v4_check:true", "audit_log_transport_v4_check:true",
+			"webhook_events_event_v4_check:true"} {
+			if strings.Count(after, want) < 1 || (strings.HasPrefix(want, "timeline") &&
+				!strings.Contains(after, "timeline_entries_p202611."+want)) {
+				t.Errorf("after up: %s missing in %s", want, after)
+			}
+		}
+		for _, gone := range []string{"timeline_entries_kind_check", "timeline_entries_event_v3_check",
+			"timeline_entries_mentions_check", "timeline_entries_transport_v3_check", "audit_log_transport_v3_check",
+			"webhook_events_event_v3_check"} {
+			if strings.Contains(after, "."+gone+":") {
+				t.Errorf("after up: %s is left", gone)
+			}
+		}
+		if err := entry(t, "escalation", "page_not_delivered", `paged_user_ids, gateway_connection_id, reason|
+			ARRAY[(SELECT id FROM users)], (SELECT id FROM connections), 'call_refused'`); err != nil {
+			t.Errorf("page_not_delivered: %v", err)
+		}
+		if err := entry(t, "escalation", "paged",
+			`mentions, paged_user_ids|'{paged}', ARRAY[(SELECT id FROM users)]`); err != nil {
+			t.Errorf("paged: %v", err)
+		}
+		if _, err := e.d.Pool.Exec(t.Context(), `UPDATE timeline_entries SET transport = 'gateway', actor_kind = 'user',
+			actor_user_id = (SELECT id FROM users) WHERE event = 'acknowledged'`); err != nil {
+			t.Errorf("the Transport gateway: %v", err)
+		}
+		for _, ev := range []string{"page_not_delivered", "paged", "escalation_step_skipped", "assignees_changed",
+			"escalation_webhook"} {
+			if err := hook(t, ev); err != nil {
+				t.Errorf("a webhook event %s: %v", ev, err)
+			}
+		}
+		refused(t, "page_not_delivered of kind system", entry(t, "system", "page_not_delivered",
+			`system_event|'muster_unavailable'`), "timeline_entries_event_kind_v4_check")
+		refused(t, "an unknown kind", entry(t, "paging", "page_not_delivered", ""),
+			"timeline_entries_kind_v4_check|timeline_entries_event_kind_v4_check")
+		refused(t, "an unknown Mention", entry(t, "escalation", "paged", `mentions|'{called}'`),
+			"timeline_entries_mentions_v4_check")
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE timeline_entries SET transport = 'phone'
+			WHERE event = 'acknowledged'`)
+		refused(t, "an unknown Transport", err, "timeline_entries_transport_v4_check")
+
+		call := func(id, state, extra string) error {
+			columns, values := "", ""
+			if extra != "" {
+				parts := strings.SplitN(extra, "|", 2)
+				columns, values = ", "+parts[0], ", "+parts[1]
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id,
+				state, created_at`+columns+`)
+				SELECT u.org_id, $1, c.id, u.id, $2, '2026-11-07'`+values+` FROM users u, connections c`, id, state)
+			return err
+		}
+		const columns = `contact_id, language, text, first_attempt_at, next_attempt_at`
+		const values = `(SELECT id FROM gateway_contacts), 'en', 'Muster: 1 Alert Group needs you.', '2026-11-07',
+			'2026-11-07'`
+		const sending = columns + "|" + values
+		if err := call("CA0000000000A1", "waiting", `not_before, next_attempt_at|'2026-11-07', '2026-11-07'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := call("CA0000000000A2", "sending", sending); err != nil {
+			t.Fatal(err)
+		}
+		if err := call("CA0000000000A3", "waiting", ""); err != nil {
+			pe, ok := errors.AsType[*pgconn.PgError](err)
+			if !ok || pe.Code != "23505" || pe.ConstraintName != "gateway_calls_waiting_key" {
+				t.Errorf("a second waiting call: %v", err)
+			}
+		} else {
+			t.Error("a second waiting call was taken")
+		}
+		refused(t, "a call of another prefix", call("XX0000000000A4", "accepted", `ended_at|'2026-11-07'`),
+			"gateway_calls_public_id_check")
+		refused(t, "a lease without an owner", call("CA0000000000A5", "sending",
+			`lease_until, `+columns+`|'2026-11-07', `+values), "gateway_calls_lease_check")
+		refused(t, "Not delivered without a reason", call("CA0000000000A6", "not_delivered", `ended_at|'2026-11-07'`),
+			"gateway_calls_reason_check")
+		refused(t, "an ended call without its end", call("CA0000000000A7", "accepted", ""), "gateway_calls_ended_check")
+		refused(t, "an unknown state", call("CA0000000000A8", "ringing", `ended_at|'2026-11-07'`),
+			"gateway_calls_state_check")
+		refused(t, "a text before the first attempt", call("CA0000000000A9", "dropped",
+			`ended_at, text, language|'2026-11-07', 'x', 'en'`), "gateway_calls_text_check")
+		e.exec(t, `INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
+			SELECT c.org_id, c.id, g.id, '2026-11-07' FROM gateway_calls c, alert_groups g`)
+		e.exec(t, `DELETE FROM gateway_contacts`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_calls WHERE public_id = 'CA0000000000A2'
+			AND contact_id IS NULL`); got != 1 {
+			t.Error("the call of a removed contact")
+		}
+		for what, sql := range map[string]string{
+			"the index of the waiting call": `SELECT count(*) FROM pg_indexes WHERE indexname = 'gateway_calls_waiting_key'
+				AND indexdef LIKE '%(connection_id, user_id) WHERE (state = ''waiting''::text)'`,
+			"the claim index": `SELECT count(*) FROM pg_indexes WHERE indexname = 'gateway_calls_due_idx'
+				AND indexdef LIKE '%(org_id, next_attempt_at)%'`,
+			"the index of the contact": `SELECT count(*) FROM pg_indexes WHERE indexname = 'gateway_calls_contact_idx'`,
+			"the index of the items' Alert Groups": `SELECT count(*) FROM pg_indexes
+				WHERE indexname = 'gateway_call_items_alert_group_idx'`,
+		} {
+			if got := e.count(t, sql); got != 1 {
+				t.Errorf("after up: %d rows of %s", got, what)
+			}
+		}
+		e.exec(t, `DELETE FROM timeline_entries`)
+		e.exec(t, `DELETE FROM webhook_events`)
+		e.exec(t, `DELETE FROM alert_groups`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_call_items`); got != 0 {
+			t.Errorf("%d items of a deleted Alert Group", got)
+		}
+		// The rows of the down migration: the entries again, with an escalation one and a webhook event of it.
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000E2', 2, id, '{alertname}', '{}', sha256('e2'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-11-07', '2026-11-07'
+			FROM routes`)
+		for _, c := range []struct{ kind, event, extra string }{
+			{"status", "acknowledged", ""}, {"system", "destination_joined", `system_event|'destination_joined'`},
+			{"escalation", "page_not_delivered", escalation},
+			{"timers", "reminder", `mentions|'{owner,paged}'`},
+		} {
+			if err := entry(t, c.kind, c.event, c.extra); err != nil {
+				t.Fatalf("%s after up: %v", c.event, err)
+			}
+		}
+		if err := hook(t, "page_not_delivered"); err != nil {
+			t.Fatal(err)
+		}
+		if err := hook(t, "destination_joined"); err != nil {
+			t.Fatal(err)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 33 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if got := checks(t); got != before {
+			t.Errorf("after down: constraints\n%s\nwant\n%s", got, before)
+		}
+		for what, sql := range map[string]string{
+			"the escalation entry": `SELECT count(*) FROM timeline_entries WHERE kind = 'escalation'`,
+			"its webhook event":    `SELECT count(*) FROM webhook_events WHERE event = 'page_not_delivered'`,
+			"the Mention paged":    `SELECT count(*) FROM timeline_entries WHERE 'paged' = ANY(mentions)`,
+			"the tables of calls":  `SELECT count(*) FROM pg_tables WHERE tablename LIKE 'gateway_call%'`,
+			"the columns of the Timeline": `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'timeline_entries' AND column_name IN ('paged_user_ids', 'gateway_connection_id')`,
+		} {
+			if got := e.count(t, sql); got != 0 {
+				t.Errorf("after down: %d rows of %s", got, what)
+			}
+		}
+		for what, sql := range map[string]string{
+			"the entry of _v3":         `SELECT count(*) FROM timeline_entries WHERE event = 'destination_joined'`,
+			"the webhook event of _v3": `SELECT count(*) FROM webhook_events WHERE event = 'destination_joined'`,
+			"the reminder":             `SELECT count(*) FROM timeline_entries WHERE mentions = '{owner}'`,
+		} {
+			if got := e.count(t, sql); got != 1 {
+				t.Errorf("after down: %d rows of %s", got, what)
+			}
+		}
+		if err := e.mm.Migrate(34); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_tables WHERE tablename LIKE 'gateway_call%'`); got != 2 {
+			t.Errorf("up again: %d tables of calls", got)
 		}
 	})
 }

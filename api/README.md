@@ -84,6 +84,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `AG` | Alert Group | `alert_groups` |
 | `AK` | Account link | `account_links` |
 | `AR` | Account link request | `account_link_requests` |
+| `CA` | Call through a Notification gateway (from S-148) | `gateway_calls` |
 | `CN` | Connection | `connections` |
 | `CR` | Check run: the requests of one check or test share it (from S-089) | — (no table of its own) |
 | `DE` | Delivery event (a Timeline entry of the kind `delivery`) | `delivery_events` |

@@ -249,6 +249,11 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
 - The development clock (from S-020): `curl -s -X POST localhost:8082/_dev/clock -d '{"advance_seconds": 600}'`, and
   `GET` to read it. It moves the business clock of every replica of the database, never the real clock. An advance
   past `auth.session_idle_timeout` ends sessions, so create a Personal access token before it.
+- The hook of calls through Notification gateways (from S-148): `curl -s -X POST localhost:8082/_dev/gateway-calls -d
+  '{"user_id": "SR…", "connection_id": "CN…", "alert_group_ids": ["AG…"]}'` queues a Page of each Alert Group to the
+  User through the gateway, as a Notification rule's call would, until Escalation chains and Notification rules make
+  calls (S-157); like the clock it is served only under `muster dev`. The fake bridge lists the calls at
+  `/_fake/notifications`.
 
 ## Quality bar
 

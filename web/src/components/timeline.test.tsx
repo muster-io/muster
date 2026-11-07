@@ -22,6 +22,7 @@ import type {
   TimelineAlertsEntry,
   TimelineDeliveryEntry,
   TimelineEntry,
+  TimelineEscalationEntry,
   TimelineNoteEntry,
   TimelineStatusEntry,
   TimelineSystemEntry,
@@ -33,7 +34,7 @@ import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { formatDateTime } from "../lib/time";
 import { telegramConnection } from "../test/fixtures/connections";
 import { telegramDestination } from "../test/fixtures/destinations";
-import { Timeline, actorText, entryText } from "./timeline";
+import { Timeline, actorText, entryText, kindLabel } from "./timeline";
 
 const AT = "2026-10-07T09:00:00Z";
 const ZONE = "Europe/Berlin";
@@ -277,6 +278,23 @@ describe("entryText", () => {
     for (const [entry, expected] of cases) {
       expect(text(entry), entry.kind).toBe(expected);
     }
+  });
+
+  test("names the events of the kind escalation until they are rendered fully", () => {
+    const entry: TimelineEscalationEntry = {
+      id: "TE00000000ES01",
+      at: AT,
+      kind: "escalation",
+      actor: SYSTEM,
+      event: "page_not_delivered",
+      loudness: "quiet",
+      mentions: [],
+      paged_users: [{ id: "SR0000000000PE", name: "Petr", login: "petr", deactivated: false }],
+      gateway: { id: "CN0000000000GW", name: "Example Gateway" },
+      reason: "call_refused",
+    };
+    expect(text(entry)).toBe("page_not_delivered");
+    expect(kindLabel(i18n.t, "escalation")).toBe("Escalation chains");
   });
 
   test("has a text for system entries and delivery events", () => {

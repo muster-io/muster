@@ -533,3 +533,22 @@ var ScheduleGap = newGauge(Definition{
 	Capability: "C-27",
 	LeaderOnly: true,
 })
+
+// The outcome values of muster_gateway_calls_total: accepted, or the error class of the answer.
+const OutcomeAccepted = "accepted"
+
+// GatewayCallOutcomes are the outcome values of muster_gateway_calls_total.
+var GatewayCallOutcomes = []string{OutcomeAccepted, "retry_after", "transient", "fatal", "unknown"}
+
+// GatewayCalls counts every ended attempt of a call through a Notification gateway, by gateway and outcome
+// (C-30.FR-10).
+var GatewayCalls = newCounter(Definition{
+	Name: "muster_gateway_calls_total",
+	Help: "Attempts of calls through a Notification gateway, one per attempt that ended, by the gateway's Connection " +
+		"and the outcome; a replayed answer to the call's idempotency key is accepted.",
+	Labels: []Label{
+		entity("connection"),
+		closed("outcome", "accepted, or the error class of the answer", GatewayCallOutcomes...),
+	},
+	Capability: "C-30",
+})

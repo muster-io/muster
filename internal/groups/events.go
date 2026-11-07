@@ -60,6 +60,13 @@ const (
 // firing, Quiet while it is acknowledged or snoozed. One is recorded per Destination it joins.
 const EventDestinationJoined Event = "destination_joined"
 
+// EventPageNotDelivered is the lifecycle event of C-30.FR-7 and C-32.FR-10 (revised C-09.FR-22): a Page that reached
+// its person nowhere, here a call through a Notification gateway that ended Not delivered — Quiet, without Mentions,
+// of the Timeline kind escalation, nothing in a messenger. Its entry names the people in paged_user_ids, the gateway
+// and the reason. The other events of the kind escalation (paged, escalation_step_skipped, assignees_changed,
+// escalation_webhook) join the table with the stories that record them.
+const EventPageNotDelivered Event = "page_not_delivered"
+
 // ReachEvents are the lifecycle events by which the Destinations an Alert Group reaches can grow (C-26.FR-4, FR-5): a
 // Team that joins it, which adds the Team's Destinations, and a rise of its Severity level, which adds the Destinations
 // whose condition it now meets. The dispatcher records destination_joined only after one of them that Alerts made, and
@@ -78,6 +85,8 @@ const (
 	KindSystem   Kind = "system"
 	KindNotes    Kind = "notes"
 	KindDelivery Kind = "delivery"
+	// KindEscalation is the kind of the events of Escalation chains and Pages (C-32.FR-19), from L2.
+	KindEscalation Kind = "escalation"
 )
 
 // Loudness says whether an event asks for attention (Loud) or only updates what is shown (Quiet).
@@ -131,8 +140,8 @@ type Row struct {
 	Mentions []Mention
 }
 
-// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11, C-25 and C-26, a closed
-// list:
+// Table is the lifecycle event table of C-09.FR-22 with the rows of C-10.FR-15, C-17.FR-11, C-25, C-26 and C-30, a
+// closed list:
 // every transition and change of an Alert Group records exactly one entry of one of its rows. The CHECKs of
 // timeline_entries back the kinds and Mentions. notices_missed has no Mentions of its own: its entry carries those of
 // the notices it stands for (ack_timeout or owner).
@@ -173,6 +182,7 @@ var Table = []Row{
 	{EventReminderAnswered, VariantAny, KindTimers, Quiet, nil},
 	{EventAutoUnacknowledged, VariantAny, KindStatus, Loud, []Mention{MentionOwner}},
 	{EventNoticesMissed, VariantAny, KindTimers, Loud, nil},
+	{EventPageNotDelivered, VariantAny, KindEscalation, Quiet, nil},
 }
 
 // rowOf is the row of the event and variant; an event outside the table is a programming error.

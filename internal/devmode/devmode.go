@@ -664,3 +664,45 @@ func (c *Clock) answer(w http.ResponseWriter) {
 func (c *Clock) OffsetSeconds() int64 {
 	return int64(c.business.Offset() / time.Second)
 }
+
+// GatewayCallsPath is where the internal listener serves, in development mode only, the hook that queues calls through
+// a Notification gateway for the live checks (C-30.FR-4): POST {"user_id", "connection_id", "alert_group_ids"} queues
+// a Page of each Alert Group to the User through the gateway, as a Notification rule's call would, until S-157 makes
+// calls.
+const GatewayCallsPath = "/_dev/gateway-calls"
+
+// maxDevCallGroups bounds the Alert Groups of one request of the hook.
+const maxDevCallGroups = 100
+
+// GatewayCallsHandler serves POST on GatewayCallsPath: page queues the Pages of the public_ids user, gateway and
+// groups in one transaction and fails with an error that wraps notFound when one names nothing. It answers 204 once
+// they are queued, 400 for a body it cannot read, 404 for an id that names nothing and 500 otherwise.
+func GatewayCallsHandler(page func(ctx context.Context, user, gateway string, groups []string) error,
+	notFound error) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+GatewayCallsPath, func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			UserID        string   `json:"user_id"`
+			ConnectionID  string   `json:"connection_id"`
+			AlertGroupIDs []string `json:"alert_group_ids"`
+		}
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<14))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil || in.UserID == "" || in.ConnectionID == "" ||
+			len(in.AlertGroupIDs) == 0 || len(in.AlertGroupIDs) > maxDevCallGroups {
+			fakeserver.WriteError(w, http.StatusBadRequest, fmt.Sprintf(`the body is {"user_id": "SR…", `+
+				`"connection_id": "CN…", "alert_group_ids": ["AG…"]} with 1 to %d Alert Groups`, maxDevCallGroups))
+			return
+		}
+		err := page(r.Context(), in.UserID, in.ConnectionID, in.AlertGroupIDs)
+		switch {
+		case errors.Is(err, notFound):
+			fakeserver.WriteError(w, http.StatusNotFound, err.Error())
+		case err != nil:
+			fakeserver.WriteError(w, http.StatusInternalServerError, err.Error())
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	return mux
+}

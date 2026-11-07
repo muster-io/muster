@@ -474,6 +474,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_team_info` | gauge | `team`, `name` | C-25 |
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
 | `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while the Schedule, whose gap alert is active, has a gap now or one that starts within `schedule.gap_alert_horizon`, 0 for every other Schedule, those whose gap alert is not active included | C-27 |
+| `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) — every attempt of a call through a Notification gateway that ended, a replayed answer counted as accepted | C-30 |
 
 ## Chart rules
 
@@ -519,6 +520,5 @@ holds them, outside the catalogue that the code checks. The value `gateway` join
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |
-| `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) | C-30 |
 | `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
 | `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) | C-32 |

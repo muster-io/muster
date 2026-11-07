@@ -60,17 +60,19 @@ func StyleOf(command string) Style {
 }
 
 // Subject is what a button is about: the Root message of an Alert Group, a Thread reply of one, or the test message
-// of a Destination.
+// of a Destination; or what the action data of a call through a Notification gateway names, the call (C-30.FR-2).
 type Subject string
 
-// The subjects of action ids.
+// The subjects of action ids. A call's public_id stands for every Alert Group the call is about, so that its action
+// data stays within MaxLen however many there are.
 const (
 	SubjectRoot  Subject = "root"
 	SubjectReply Subject = "reply"
 	SubjectTest  Subject = "test"
+	SubjectCall  Subject = "call"
 )
 
-var subjectCodes = map[Subject]byte{SubjectRoot: 'r', SubjectReply: 'p', SubjectTest: 't'}
+var subjectCodes = map[Subject]byte{SubjectRoot: 'r', SubjectReply: 'p', SubjectTest: 't', SubjectCall: 'c'}
 
 // Button is a button before it is signed: its Command and the argument of a Snooze button, the index of a Snooze
 // duration or the argument of a Snooze preset.

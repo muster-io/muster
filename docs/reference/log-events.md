@@ -236,6 +236,36 @@ WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
 
+### `gateway_call_attempted`
+
+INFO · fields: `call`, `connection`, `attempt`, `outcome`, `replayed` · C-30
+
+An attempt of a call through a Notification gateway ended: call is the public_id of the call, connection of the gateway's Connection, attempt its number, and outcome accepted — a replayed answer to its Idempotency-Key included, with replayed true — or the error class of the answer, retry_after, transient, fatal or unknown, as muster_gateway_calls_total counts it. Never carries the contact or the text of the call.
+
+### `gateway_call_dropped`
+
+INFO · fields: `call`, `connection`, `attempts` · C-30
+
+A call through a Notification gateway ended dropped: every Alert Group it is about had stopped — acknowledged, snoozed or resolved — before its first attempt, so it was never sent, or while it was being retried, so its retries ended. call is the public_id of the call, connection of the gateway's Connection, and attempts how many attempts it made.
+
+### `gateway_call_failed`
+
+WARN · fields: `call`, `error` · C-30
+
+The gateway sender could not attempt a call through a Notification gateway, or record how its attempt ended, because of error, such as a lost database connection: call is the public_id of the call. Any replica attempts it again once its lease runs out, with the same Idempotency-Key, so that a gateway that already accepted it answers replayed. Never carries the contact or the text of the call.
+
+### `gateway_call_not_delivered`
+
+WARN · fields: `call`, `connection`, `user`, `reason`, `error` · C-30
+
+A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, or no_confirmed_contact when the person had no confirmed contact at the gateway, and error the gateway's answer, masked. Never carries the contact or the text of the call.
+
+### `gateway_call_queued`
+
+INFO · fields: `call`, `connection`, `user`, `group`, `joined`, `not_before` · C-30
+
+A Page through a Notification gateway joined the call that waits for its first attempt, or started one: call is the public_id of the call, connection of the gateway's Connection, user of the User called, group the #N of the Alert Group, joined true when the call was waiting already, and not_before when it may go, empty while the previous call to the person through that gateway is still being sent. Never carries the contact or the text of the call.
+
 ### `gateway_contact_code_rejected`
 
 WARN · fields: `user`, `connection`, `contact`, `reason`, `attempts_remaining` · C-30

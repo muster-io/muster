@@ -9,6 +9,7 @@ import type { WebhookAlertGroup } from './webhookAlertGroup';
 import type { WebhookDestinationRef } from './webhookDestinationRef';
 import type { WebhookEventName } from './webhookEventName';
 import type { WebhookMentionTarget } from './webhookMentionTarget';
+import type { WebhookPage } from './webhookPage';
 
 /**
  * Body of an events-mode request. The id of the event travels in the `webhook-id` header and is kept across retries. Events of one Alert Group are sent in order, at least once and never collapsed; a greater `sequence` means a newer event of the same Alert Group, and nothing more. New event names and new fields are added within `version` 1; removing a field or changing its meaning needs a new `version`. Receivers must ignore unknown `event` values and unknown fields.
@@ -31,6 +32,8 @@ export interface OutgoingWebhookEvent {
   alerts: WebhookAlert[];
   /** The Destination the Alert Group joined, only on `destination_joined`. */
   destination?: WebhookDestinationRef;
+  /** The Page, only on `page_not_delivered`. */
+  page?: WebhookPage;
   /** True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert Group's order. */
   test?: boolean;
 }

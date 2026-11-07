@@ -388,6 +388,9 @@ type entry struct {
 	TeamValue   string
 	// Destination is the Destination of a destination_joined (C-26.FR-5).
 	Destination *JoinedDestination
+	// Page is the Page of an event of the kind escalation: the people it names, its gateway and its reason
+	// (C-32.FR-19, C-30.FR-7).
+	Page *Page
 }
 
 // change is what one transition does to a locked Alert Group: the entries it records and, for a status change, the
@@ -493,6 +496,8 @@ type Recorded struct {
 	// Destination is the Destination a destination_joined joined, and Team the Team a team_joined joined, 0 for none.
 	Destination *JoinedDestination
 	Team        int64
+	// Page is the Page of an event of the kind escalation, which outgoing webhooks carry (C-15.FR-2).
+	Page *Page
 }
 
 // JoinedDestination is the Destination of a destination_joined: its internal id, public_id, name and type, and the
@@ -729,6 +734,10 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 		if e.Destination != nil {
 			p.DestinationID = pgtype.Int8{Int64: e.Destination.ID, Valid: true}
 		}
+		if e.Page != nil {
+			p.PagedUserIds, p.GatewayConnectionID, p.Reason = e.Page.userIDs(), e.Page.gatewayID(),
+				nonEmpty(e.Page.Reason)
+		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:
 			p.ActorUserID = pgtype.Int8{Int64: person.ID, Valid: true}
@@ -755,7 +764,8 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 				p.Mentions = append(p.Mentions, string(m))
 			}
 			rec := Recorded{Seq: g.EventSeq, Event: row.Event, Variant: row.Variant, Loudness: row.Loudness,
-				Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason, Destination: e.Destination}
+				Mentions: mentions, Fingerprints: e.Fingerprints, Reason: e.Reason, Destination: e.Destination,
+				Page: e.Page}
 			if e.TeamID != nil {
 				rec.Team = *e.TeamID
 			}

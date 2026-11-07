@@ -2924,6 +2924,9 @@
       "replacedLabel": "Changed label"
     },
     "empty": "No entries.",
+    "escalation": {
+      "event": "{{event}}"
+    },
     "events": {
       "acknowledged": "Acknowledged",
       "ackTimeout": "Ack timeout notice {{number}} of {{total}}",
@@ -2967,6 +2970,7 @@
     "kinds": {
       "alerts": "Alerts",
       "delivery": "Delivery",
+      "escalation": "Escalation chains",
       "notes": "Notes",
       "status": "Status",
       "system": "System",

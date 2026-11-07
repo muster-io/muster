@@ -89,12 +89,11 @@ func DefaultConfig() Config {
 			Does:    "sends or edits a messenger message",
 			Belongs: "the delivery worker and the interactive path",
 		},
-		// S-148 adds the gateway sender.
 		Gateway: MessengerConfig{
 			Package:      "internal/delivery",
 			Interface:    "Gateway",
 			Methods:      []string{"Notify"},
-			AllowedFiles: []string{"internal/delivery/interactive.go"},
+			AllowedFiles: []string{"internal/delivery/interactive.go", "internal/gateways/sender.go"},
 			Does:         "sends a notification through a Notification gateway",
 			Belongs:      "the interactive path and the gateway sender",
 		},

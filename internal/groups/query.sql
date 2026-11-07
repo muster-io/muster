@@ -257,7 +257,8 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
+    paged_user_ids, gateway_connection_id
 )
 VALUES (
     @org_id, @public_id, @alert_group_id, @at, @kind, sqlc.narg('event'), sqlc.narg('event_seq'),
@@ -268,7 +269,7 @@ VALUES (
     sqlc.narg('replaced_label'), sqlc.narg('label_conflicts')::text[], sqlc.narg('period_from'),
     sqlc.narg('period_to'), sqlc.narg('detail'), sqlc.narg('notice_number'), sqlc.narg('missed_count'),
     sqlc.narg('team_id'), sqlc.narg('team_rule'), sqlc.narg('team_matcher'), sqlc.narg('team_value'),
-    sqlc.narg('destination_id')
+    sqlc.narg('destination_id'), sqlc.narg('paged_user_ids')::bigint[], sqlc.narg('gateway_connection_id')
 );
 
 -- InsertNote records a Note with the event_seq of its note_added lifecycle event (C-10.FR-8).
@@ -500,7 +501,8 @@ ORDER BY p.alert_id, g.group_key;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
+       paged_user_ids, gateway_connection_id
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -514,7 +516,8 @@ LIMIT @lim;
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
+       paged_user_ids, gateway_connection_id
 FROM timeline_entries
 WHERE org_id = @org_id AND alert_group_id = @alert_group_id
   AND (cardinality(@kinds::text[]) = 0 OR kind = ANY(@kinds::text[]))
@@ -1360,4 +1363,10 @@ ORDER BY e.destination_id, e.kind, e.team_id;
 -- name: ListTimelineDestinations :many
 SELECT id, public_id, name, type, health, broken_since, broken_reason
 FROM destinations
+WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);
+
+-- ListTimelineGateways names the Notification gateways of the escalation entries of calls, deleted ones included.
+-- name: ListTimelineGateways :many
+SELECT id, public_id, name
+FROM connections
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[]);

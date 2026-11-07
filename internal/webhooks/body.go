@@ -34,8 +34,19 @@ type Body struct {
 	Alerts     []Alert         `json:"alerts"`
 	// Destination is set only on destination_joined: the Destination the Alert Group joined (C-15.FR-2, C-26.FR-5).
 	Destination *DestinationRef `json:"destination,omitempty"`
+	// Page is set only on page_not_delivered: the people of the Page, its Notification gateway and the reason
+	// (C-15.FR-2, C-30.FR-7).
+	Page *Page `json:"page,omitempty"`
 	// Test is set only on the test event of a Destination test (C-16.FR-1), which belongs to no Alert Group's order.
 	Test bool `json:"test,omitempty"`
+}
+
+// Page is the Page of a page_not_delivered (WebhookPage): the people it names, the Notification gateway of a call,
+// null for a Page by Mention, and the reason.
+type Page struct {
+	Users   []User    `json:"users"`
+	Gateway *RouteRef `json:"gateway"`
+	Reason  *string   `json:"reason"`
 }
 
 // DestinationRef names the Destination of a destination_joined (WebhookDestinationRef).
@@ -64,7 +75,7 @@ type User struct {
 	Login string `json:"login"`
 }
 
-// RouteRef names the Route of an Alert Group (EntityRef).
+// RouteRef names the Route of an Alert Group, or the Notification gateway of a Page (EntityRef).
 type RouteRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -189,8 +200,27 @@ func (s *Service) eventBodies(ctx context.Context, q bodyQueries, in delivery.Ev
 		if d := e.Event.Destination; d != nil && e.Event.Event == groups.EventDestinationJoined {
 			b.Destination = &DestinationRef{ID: d.PublicID, Name: d.Name, Type: d.Type}
 		}
+		if p := e.Event.Page; p != nil && e.Event.Event == groups.EventPageNotDelivered {
+			b.Page = pageOf(p)
+		}
 		return json.Marshal(b)
 	}, nil
+}
+
+// pageOf is the Page of a page_not_delivered as the body names it.
+func pageOf(p *groups.Page) *Page {
+	out := &Page{Users: make([]User, len(p.Users))}
+	for i, u := range p.Users {
+		out.Users[i] = User{ID: u.PublicID, Name: u.Name, Login: u.Login}
+	}
+	if g := p.Gateway; g != nil {
+		out.Gateway = &RouteRef{ID: g.PublicID, Name: g.Name}
+	}
+	if p.Reason != "" {
+		reason := p.Reason
+		out.Reason = &reason
+	}
+	return out
 }
 
 // actor is the actor of a change as the body names it: a User with their login, a Service account with its token, or

@@ -99,11 +99,23 @@ func exhausted(attempts int64, firstFailed pgtype.Timestamptz, now time.Time) bo
 	return attempts >= TransientBudgetAttempts || (firstFailed.Valid && now.Sub(firstFailed.Time) > TransientBudgetTime)
 }
 
+// TransientExhausted reports whether the Transient budget of delivery.transient_budget ran out after attempts failed
+// attempts, the first of them at firstFailed, at now: the rule of the worker, which the gateway sender applies to calls
+// (C-30.FR-4).
+func TransientExhausted(attempts int64, firstFailed pgtype.Timestamptz, now time.Time) bool {
+	return exhausted(attempts, firstFailed, now)
+}
+
 // backoff is the wait after the n-th Transient attempt: delivery.transient_backoff, exponential with equal jitter. The
 // step doubles from TransientFirstStep up to TransientBackoffMax; the wait is half the step plus a random part of the
 // other half, and never shorter than TransientFirstStep.
 func (w *Worker) backoff(n int64) time.Duration {
-	random := w.Random
+	return TransientBackoff(n, w.Random)
+}
+
+// TransientBackoff is the wait after the n-th Transient attempt, delivery.transient_backoff, as the worker's backoff
+// computes it; random is uniform in [0, 1), nil math/rand/v2. The gateway sender retries calls with it (C-30.FR-4).
+func TransientBackoff(n int64, random func() float64) time.Duration {
 	if random == nil {
 		random = rand.Float64
 	}

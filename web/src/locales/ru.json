@@ -3024,6 +3024,9 @@
       "replacedLabel": "Изменившаяся метка"
     },
     "empty": "Записей нет.",
+    "escalation": {
+      "event": "{{event}}"
+    },
     "events": {
       "acknowledged": "Подтверждена",
       "ackTimeout": "Уведомление о тайм-ауте подтверждения {{number}} из {{total}}",
@@ -3075,6 +3078,7 @@
     "kinds": {
       "alerts": "Алерты",
       "delivery": "Доставка",
+      "escalation": "Цепочки эскалации",
       "notes": "Заметки",
       "status": "Статус",
       "system": "Система",
