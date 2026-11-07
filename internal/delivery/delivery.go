@@ -273,6 +273,34 @@ type EditWindowed interface {
 	FinalKey(d Destination, deliveryID int64) string
 }
 
+// Notification is one notification through a Notification gateway (C-30.FR-2): the Connection of the gateway, the
+// person's contact, the plain text in the person's language (en or ru), and the action that acknowledges it, nil for a
+// confirmation code, which there is nothing to acknowledge in. The contact and the text are personal data: no log line
+// and no Outcome's error carries them.
+type Notification struct {
+	Connection int64
+	Contact    string
+	Text       string
+	Language   string
+	Action     *NotificationAction
+}
+
+// NotificationAction is how the person acknowledges a notification: Data, signed action data of at most 64 printable
+// ASCII bytes like a button's, which the event notification_acknowledged returns unchanged, and Label, how to do it,
+// such as "Press 1 to acknowledge".
+type NotificationAction struct {
+	Data  string
+	Label string
+}
+
+// Gateway is a Notification gateway (C-30.FR-5), declared here by its consumer (ADR-0016); *bridge.Adapter implements
+// it. Notify sends n with the idempotency key of c in its client class, limited by its caller through the gateway
+// Connection's limiter; an ok outcome names the notification in MessageID and whether the answer was Replayed. Lint 3
+// allows the call only in interactive.go and, from S-148, in the gateway sender.
+type Gateway interface {
+	Notify(ctx context.Context, c Call, n Notification) Outcome
+}
+
 // Checker is the Destination check an adapter may offer (C-13.FR-10, C-14.FR-14): whether the bot can still reach and
 // write to its chat, without sending a message. The Broken probe uses it from S-035 on.
 type Checker interface {

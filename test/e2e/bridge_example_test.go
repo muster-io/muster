@@ -325,8 +325,8 @@ func TestBridgeExampleCheck(t *testing.T) {
 		x := x.on(t)
 		x.restart(exampleRun{})
 		code, stdout, stderr := run(t, "--no-interactive")
-		want := append(slices.Clone(checkPassed), "SKIP press: --no-interactive", "SKIP push: --no-interactive",
-			"PASS answer")
+		want := slices.Concat(checkPassed, []string{"SKIP press: --no-interactive", "SKIP push: --no-interactive",
+			"PASS answer"}, checkNoGateway)
 		if code != 0 || !slices.Equal(lines(stdout), want) {
 			t.Fatalf("exit %d, stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}
@@ -346,13 +346,13 @@ func TestBridgeExampleCheck(t *testing.T) {
 		x := x.on(t)
 		x.restart(exampleRun{features: "thread_messages"})
 		code, stdout, stderr := run(t, "--no-interactive")
-		want := []string{"PASS info", "PASS channel_check", "PASS post", "PASS replayed_key",
+		want := []string{"PASS info", "ROLES messenger", "PASS channel_check", "PASS post", "PASS replayed_key",
 			"SKIP buttons: the bridge does not offer buttons", "PASS edit", "PASS thread_reply", "PASS thread_ref",
 			"PASS forbidden_channel", "SKIP user_lookup: the bridge looks up nobody",
 			"SKIP direct_message: the bridge does not offer direct_messages",
 			"SKIP delete: the bridge does not offer delete", "PASS poll",
 			"SKIP press: the bridge does not offer buttons", "SKIP push: the bridge does not offer buttons",
-			"PASS answer"}
+			"PASS answer", checkNoGateway[0], checkNoGateway[1]}
 		if code != 0 || !slices.Equal(lines(stdout), want) {
 			t.Fatalf("exit %d, stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}
@@ -398,7 +398,8 @@ func TestBridgeExampleCheck(t *testing.T) {
 		passed := slices.DeleteFunc(slices.Clone(got), func(l string) bool {
 			return l == pushLine || strings.HasPrefix(l, "WAIT ")
 		})
-		if want := append(slices.Clone(checkPassed), "PASS press", "PASS push", "PASS answer"); pressed == "" ||
+		want := slices.Concat(checkPassed, []string{"PASS press", "PASS push", "PASS answer"}, checkNoGateway)
+		if pressed == "" ||
 			len(got) != len(want)+2 || !slices.Equal(passed, want) {
 			t.Fatalf("stdout:\n%s\nstderr:\n%s", strings.Join(got, "\n"), stderr.String())
 		}

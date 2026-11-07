@@ -14,36 +14,46 @@ import (
 	"os"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/logging"
 )
 
-const bridgeUsage = `Usage: muster bridge check <url> --token-file <file> --channel <id> [flags]
+const bridgeUsage = `Usage: muster bridge check <url> --token-file <file> [--channel <id>] [--contact <contact>] [flags]
 
 Runs the Bridge protocol against the bridge at <url> (C-22.FR-21): the steps info, channel_check, post, replayed_key,
-buttons, edit, thread_reply, thread_ref, forbidden_channel, user_lookup, direct_message, delete, poll, press, push and
-answer, in this order, each printed as one line PASS <step>, FAIL <step>: <reason> or SKIP <step>: <why> as soon as it
-ends. A failed info ends the run. An interactive run against a bridge that offers push opens a push listener and prints
-PUSH <url> <secret>, or PUSH <url> with --push-secret-file, to point the bridge at before anything is pressed; before
-it waits for a person, up to five minutes, it prints WAIT <step>: <what to do>, message_id <id>. The check needs no
-database, master key or configuration file, writes nothing and never changes the bridge's configuration.
+buttons, edit, thread_reply, thread_ref, forbidden_channel, user_lookup, direct_message, delete, poll, press, push,
+answer, notification and notification_acknowledged, in this order, each printed as one line PASS <step>,
+FAIL <step>: <reason> or SKIP <step>: <why> as soon as it ends. A failed info ends the run; once it passed, the run
+prints ROLES <role>..., the roles of the bridge, and skips the steps of a role it lacks: from channel_check to delete,
+press and push are those of the role messenger, notification and notification_acknowledged those of the role gateway.
+An interactive run against a bridge that offers push opens a push listener and prints PUSH <url> <secret>, or
+PUSH <url> with --push-secret-file, to point the bridge at before anything is pressed or acknowledged; before it waits
+for a person, up to five minutes, it prints WAIT <step>: <what to do>, message_id <id> or notification_id <id>. The
+check needs no database, master key or configuration file, writes nothing and never changes the bridge's
+configuration.
 
 Flags, before or after <url>:
   --token-file <file>        the bridge's token, alone in the file (required)
-  --channel <id>             a channel the bot can post to (required)
+  --channel <id>             a channel the bot can post to (required for a bridge in the role messenger)
   --forbidden-channel <id>   a channel the bot cannot use; without it forbidden_channel is skipped
   --handle <handle>          a person to look up and write to; without it user_lookup and direct_message are skipped
+  --contact <contact>        where a gateway reaches the person who checks it, such as a phone number; without it
+                             notification and notification_acknowledged are skipped
   --push-listen <addr>       where the push listener listens (default 127.0.0.1:0)
   --push-url <url>           where the bridge reaches the push listener (default: the listener's own address)
   --push-secret-file <file>  the push secret, whsec_ followed by base64, instead of a generated one
-  --no-interactive           skip press and push, which need a person
+  --no-interactive           skip press, push and notification_acknowledged, which need a person
 
 Exits 0 when no step failed, 1 when one did, 2 on a usage error.
 `
 
 // maxSecretFile bounds what a token or push secret file holds.
 const maxSecretFile = 64 << 10
+
+// maxContact is the longest contact of a notification (api/bridge.yaml NotificationInput).
+const maxContact = 200
 
 // runBridge is `muster bridge <command>`.
 func runBridge(args []string, stdout, stderr io.Writer) int {
@@ -67,8 +77,9 @@ func runBridge(args []string, stdout, stderr io.Writer) int {
 }
 
 // BridgeCheckCommand is `muster bridge check` with the arguments after check; the secret-leak probe of lint 5 runs it.
-// A broken invocation — no URL or one that is not a bridge's base URL, a missing required flag, or a token or push
-// secret file that cannot be read or holds more than the secret — exits 2 before any request, so that it never looks
+// A broken invocation — no URL or one that is not a bridge's base URL, a missing required flag, a contact longer than a
+// notification takes, or a token or push secret file that cannot be read or holds more than the secret — exits 2
+// before any request, so that it never looks
 // like a broken bridge. The token and the push secret appear in no line it prints, only a push secret it generated.
 func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
@@ -77,6 +88,7 @@ func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 	channel := fs.String("channel", "", "")
 	forbidden := fs.String("forbidden-channel", "", "")
 	handle := fs.String("handle", "", "")
+	contact := fs.String("contact", "", "")
 	pushListen := fs.String("push-listen", bridge.DefaultPushListen, "")
 	pushURL := fs.String("push-url", "", "")
 	pushSecretFile := fs.String("push-secret-file", "", "")
@@ -106,8 +118,8 @@ func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 			"information, query or fragment")
 	case *tokenFile == "":
 		return bridgeUsageError(stderr, "--token-file is required")
-	case strings.TrimSpace(*channel) == "":
-		return bridgeUsageError(stderr, "--channel is required")
+	case utf8.RuneCountInString(strings.TrimSpace(*contact)) > maxContact:
+		return bridgeUsageError(stderr, "--contact is longer than 200 characters")
 	}
 	if _, _, err := net.SplitHostPort(*pushListen); err != nil {
 		return bridgeUsageError(stderr, "--push-listen is not a host and port such as 127.0.0.1:0")
@@ -132,7 +144,8 @@ func BridgeCheckCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 	}
 	failed, err := bridge.RunConformance(ctx, bridge.ConformanceConfig{BaseURL: base, Token: token,
 		PushSecret: pushSecret, Channel: strings.TrimSpace(*channel), ForbiddenChannel: strings.TrimSpace(*forbidden),
-		Handle: strings.TrimSpace(*handle), PushListen: *pushListen, PushURL: *pushURL, Interactive: !*noInteractive,
+		Handle: strings.TrimSpace(*handle), Contact: strings.TrimSpace(*contact), PushListen: *pushListen,
+		PushURL: *pushURL, Interactive: !*noInteractive,
 		Out: stdout, Log: logging.New(stderr, logging.LevelInfo)})
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):

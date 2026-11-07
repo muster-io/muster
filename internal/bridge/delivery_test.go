@@ -22,6 +22,7 @@ import (
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/logging"
@@ -55,6 +56,8 @@ func opOf(method, path string) string {
 		return "reply"
 	case strings.HasPrefix(p, "channels/"):
 		return "check"
+	case p == "notifications":
+		return "notify"
 	case method == http.MethodPatch:
 		return "edit"
 	}
@@ -132,6 +135,20 @@ func (ts *targets) BridgeTarget(_ context.Context, id int64) (Target, error) {
 	return t, nil
 }
 
+func (ts *targets) BridgeConnection(_ context.Context, id int64) (Conn, error) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if ts.err != nil {
+		return Conn{}, ts.err
+	}
+	for _, t := range ts.byID {
+		if t.Conn.ID == id {
+			return t.Conn, nil
+		}
+	}
+	return Conn{}, ErrNoTarget
+}
+
 func (ts *targets) BridgeInfo(ctx context.Context, conn Conn, class outbound.Class) (Info, Result) {
 	ts.mu.Lock()
 	fixed, failed := ts.fixed, ts.failed
@@ -169,7 +186,7 @@ func newAdapterEnv(t *testing.T, mutate ...func(map[string]any)) *adapterEnv {
 	e.targets = &targets{byID: map[int64]Target{1: {Conn: Conn{ID: 1, PublicID: "CB0123456789AB", Version: 1,
 		Client: e.client}, ChannelID: "ch-alerts"}},
 		cache: NewInfoCache(e.store, e.clock, 0, logging.New(e.log, logging.LevelInfo))}
-	e.adapter = &Adapter{Targets: e.targets}
+	e.adapter = &Adapter{Targets: e.targets, Log: logging.New(e.log, logging.LevelInfo)}
 	return e
 }
 
@@ -1027,5 +1044,147 @@ func TestLayoutCutWithTheBody(t *testing.T) {
 		strings.Contains(body, "The queue jobs") || l["title"] != "QueueFull" || len(l["links"].([]any)) != 2 ||
 		len(env["buttons"].([]any)) != 7 {
 		t.Fatalf("a cut Root message: layout %v, body %q", l, body)
+	}
+}
+
+// gatewayInfo makes the info of the stand-in bridge declare the role gateway alone.
+func gatewayInfo(m map[string]any) { m["roles"] = []string{RoleGateway} }
+
+// notification is the notification of the tests through the Connection 1.
+func notification() delivery.Notification {
+	return delivery.Notification{Connection: 1, Contact: "+10000000001", Text: "#7 DiskFull is firing", Language: "ru",
+		Action: &delivery.NotificationAction{Data: strings.Repeat("d", 64), Label: "Press 1 to acknowledge"}}
+}
+
+// TestNotify is C-30.FR-2, FR-5 and FR-10: Notify sends sendNotification to a bridge in the role gateway with the
+// contact, the text, the language, the action and the Idempotency-Key of its call, in its client class; the outcome
+// names the notification; gateway_notification_sent logs the Connection, the key and the class, never the contact or
+// the text; a replayed answer is Replayed; a notification without an action sends none.
+func TestNotify(t *testing.T) {
+	e := newAdapterEnv(t, gatewayInfo)
+	e.bridge.answer("notify", answerJSON(http.StatusCreated, "application/json",
+		`{"notification_id":"n-1","replayed":false}`))
+	n := notification()
+	o := e.adapter.Notify(t.Context(), delivery.Call{Class: outbound.ClassInteractive, Key: "notify-1"}, n)
+	if o.Kind != delivery.OutcomeOK || o.MessageID != "n-1" || o.Replayed {
+		t.Fatalf("outcome %+v", o)
+	}
+	reqs := e.bridge.requests("notify")
+	if len(reqs) != 1 || reqs[0].Method != http.MethodPost || reqs[0].Header.Get("Idempotency-Key") != "notify-1" {
+		t.Fatalf("requests %+v", reqs)
+	}
+	body := decode(t, reqs[0])
+	want := map[string]any{"contact": "+10000000001", "text": "#7 DiskFull is firing", "language": "ru",
+		"action": map[string]any{"data": strings.Repeat("d", 64), "label": "Press 1 to acknowledge"}}
+	if !reflect.DeepEqual(body, want) {
+		t.Errorf("body %v, want %v", body, want)
+	}
+	line := lineOf(t, e.log, "gateway_notification_sent")
+	if line["connection"] != "CB0123456789AB" || line["key"] != "notify-1" || line["class"] != "ok" ||
+		line["level"] != "INFO" {
+		t.Errorf("line %v", line)
+	}
+	if strings.Contains(e.log.String(), n.Contact) || strings.Contains(e.log.String(), n.Text) {
+		t.Errorf("the contact or the text reached the log:\n%s", e.log)
+	}
+
+	e.bridge.answer("notify", answerJSON(http.StatusCreated, "application/json",
+		`{"notification_id":"n-1","replayed":true}`))
+	n.Action = nil
+	c := delivery.Call{Class: outbound.ClassDelivery, Key: "notify-1"}
+	if o := e.adapter.Notify(t.Context(), c, n); !o.Replayed || o.MessageID != "n-1" {
+		t.Errorf("replayed %+v", o)
+	}
+	if body := decode(t, e.bridge.requests("notify")[1]); body["action"] != nil {
+		t.Errorf("a confirmation code carries an action: %v", body)
+	}
+}
+
+// lineOf is the last line of the log event name in log.
+func lineOf(t *testing.T, log *bytes.Buffer, name string) map[string]any {
+	t.Helper()
+	var last map[string]any
+	for _, l := range strings.Split(strings.TrimSpace(log.String()), "\n") {
+		var m map[string]any
+		if json.Unmarshal([]byte(l), &m) == nil && m["event"] == name {
+			last = m
+		}
+	}
+	if last == nil {
+		t.Fatalf("no %s line in:\n%s", name, log)
+	}
+	return last
+}
+
+// TestNotifyRefused is C-30.FR-2 and FR-10: a bridge whose info does not declare the role gateway, and a Connection
+// that is no Bridge Connection, are Fatal without a call; an answer that echoes the contact and the text is classified
+// as a delivery's with both masked in its error, and logged with its class.
+func TestNotifyRefused(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := delivery.Call{Class: outbound.ClassDelivery, Key: "notify-2"}
+	if o := e.adapter.Notify(t.Context(), c, notification()); o.Kind != delivery.OutcomeFatal ||
+		o.Error != MessageNotGateway {
+		t.Errorf("a messenger: %+v", o)
+	}
+	n := notification()
+	n.Connection = 9
+	if o := e.adapter.Notify(t.Context(), c, n); o.Kind != delivery.OutcomeFatal {
+		t.Errorf("no connection: %+v", o)
+	}
+	e.targets.err = errors.New("the database is down")
+	if o := e.adapter.Notify(t.Context(), c, notification()); o.Kind != delivery.OutcomeTransient {
+		t.Errorf("the connection could not be read: %+v", o)
+	}
+	if len(e.bridge.requests("notify")) != 0 {
+		t.Fatal("a notification was sent")
+	}
+
+	e = newAdapterEnv(t, gatewayInfo)
+	n = notification()
+	for _, tc := range []struct {
+		status int
+		class  string
+		kind   delivery.OutcomeKind
+	}{
+		{http.StatusBadRequest, "invalid", delivery.OutcomeUnknown},
+		{http.StatusForbidden, "forbidden", delivery.OutcomeFatal},
+		{http.StatusServiceUnavailable, "transient", delivery.OutcomeTransient},
+	} {
+		e.bridge.answer("notify", answerJSON(tc.status, "application/problem+json", fmt.Sprintf(
+			`{"title":"refused","class":%q,"detail":"cannot call %s to say %s"}`, tc.class, n.Contact, n.Text)))
+		o := e.adapter.Notify(t.Context(), c, n)
+		text := string(o.Error)
+		if o.Kind != tc.kind || strings.Contains(text, n.Contact) || strings.Contains(text, n.Text) ||
+			!strings.Contains(text, "[redacted]") {
+			t.Errorf("%s: %+v", tc.class, o)
+		}
+		if line := lineOf(t, e.log, "gateway_notification_sent"); line["class"] != tc.class {
+			t.Errorf("%s: line %v", tc.class, line)
+		}
+	}
+	e.bridge.answer("notify", answerJSON(http.StatusCreated, "application/json", `{"replayed":false}`))
+	if o := e.adapter.Notify(t.Context(), c, n); o.Kind != delivery.OutcomeUnknown {
+		t.Errorf("no notification_id: %+v", o)
+	}
+	if strings.Contains(e.log.String(), n.Contact) || strings.Contains(e.log.String(), n.Text) {
+		t.Errorf("the contact or the text reached the log:\n%s", e.log)
+	}
+}
+
+// TestNotifyInteractive is C-30.FR-5: NotifyOp on the interactive path calls Notify with its key, limited by the
+// gateway's Connection.
+func TestNotifyInteractive(t *testing.T) {
+	e := newAdapterEnv(t, gatewayInfo)
+	e.bridge.answer("notify", answerJSON(http.StatusCreated, "application/json",
+		`{"notification_id":"n-3","replayed":false}`))
+	conn := int64(1)
+	path := deliverytest.Unlimited(1, clock.Clocks{Business: e.clock, Real: clock.Real{}})
+	o, err := path.Do(t.Context(), delivery.Subject{Connection: &conn}, delivery.NotifyOp(e.adapter, "code-1",
+		notification()))
+	if err != nil || o.Kind != delivery.OutcomeOK || o.MessageID != "n-3" {
+		t.Fatalf("outcome %+v, %v", o, err)
+	}
+	if reqs := e.bridge.requests("notify"); len(reqs) != 1 || reqs[0].Header.Get("Idempotency-Key") != "code-1" {
+		t.Errorf("requests %+v", reqs)
 	}
 }

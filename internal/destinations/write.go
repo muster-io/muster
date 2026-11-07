@@ -61,12 +61,14 @@ const (
 	ActionUpdated = "destination.updated"
 )
 
-// The codes of FieldError.
+// The codes of FieldError; gateway_only refuses a Bridge Connection whose stored info declares only the role gateway
+// (C-30.FR-1).
 const (
 	CodeRequired           = "required"
 	CodeInvalidFormat      = "invalid_format"
 	CodeTooLong            = "too_long"
 	CodeUnknownID          = "unknown_id"
+	CodeGatewayOnly        = "gateway_only"
 	CodeUnsupported        = "unsupported"
 	CodeCheckNotSupported  = "check_not_supported"
 	CodeCheckFailed        = "destination_check_failed"
@@ -315,6 +317,10 @@ type BridgeChannelChecked struct {
 // that is not deleted is ErrUnknownConnection; no limiter token within the budget is a *delivery.LimitedError.
 type BridgeChecker interface {
 	CheckBridgeChannel(ctx context.Context, c BridgeChannelCheck) (BridgeChannelChecked, error)
+	// GatewayOnly reports whether the Connection connection (public_id) is a Bridge Connection whose stored info
+	// declares only the role gateway, a Notification gateway (C-30.FR-1); any other Connection, unknown ones included,
+	// is not.
+	GatewayOnly(ctx context.Context, connection string) (bool, error)
 }
 
 // SlackChannelCheck is the Destination check of a Slack channel through the Connection Connection (public_id): of the
@@ -532,7 +538,7 @@ func (s *Service) validateFields(ctx context.Context, in *Input, stored *Destina
 	case in.Type == TypeTelegram:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeBridge && in.Bridge != nil:
-		return s.validateBridge(ctx, in)
+		return s.validateBridge(ctx, in, stored)
 	case in.Type == TypeBridge:
 		return &FieldError{Pointer: "/type", Code: CodeInvalidFormat, Detail: "The fields of the type are missing."}
 	case in.Type == TypeSlack && in.Slack != nil:
@@ -1458,8 +1464,12 @@ func unknownBridgeConnection() *FieldError {
 }
 
 // validateBridge checks the common fields of in, its channel id, trimmed, of 1 to 512 characters, and its Connection
-// (C-22.FR-3).
-func (s *Service) validateBridge(ctx context.Context, in *Input) error {
+// (C-22.FR-3) — stored is nil on a creation — which a creation, or an update that moves the Destination to another
+// Connection, may not give as a Notification gateway alone: a Bridge Connection whose stored info declares only the
+// role gateway is refused with gateway_only before the Mention settings are validated, so that it never takes a
+// Mention entry either (C-30.FR-1). A Destination saved before its bridge became one keeps its delivery and stays
+// editable on that Connection.
+func (s *Service) validateBridge(ctx context.Context, in *Input, stored *Destination) error {
 	if err := validateCommon(in); err != nil {
 		return err
 	}
@@ -1477,6 +1487,17 @@ func (s *Service) validateBridge(ctx context.Context, in *Input) error {
 		return unknownBridgeConnection()
 	}
 	b.Connection = conn
+	if stored != nil && stored.Connection != nil && *stored.Connection == conn {
+		return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
+	}
+	only, err := s.writer.Bridge.GatewayOnly(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if only {
+		return &FieldError{Pointer: pointerConnection, Code: CodeGatewayOnly,
+			Detail: "The Bridge Connection is a Notification gateway, which cannot be a Destination."}
+	}
 	return s.writer.Mentions.Validate(ctx, in.Type, in.Mentions)
 }
 

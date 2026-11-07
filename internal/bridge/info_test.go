@@ -324,6 +324,11 @@ func TestInvalidInfo(t *testing.T) {
 		{set("capabilities.delete", "max_age_seconds", 0), "capabilities.delete.max_age_seconds is below 1"},
 		{set("capabilities", "native_mentions", nil), "capabilities.native_mentions is null"},
 		{set("capabilities", "native_mentions", "yes"), "capabilities.native_mentions has the wrong type"},
+		{set("", "roles", nil), "roles is null"},
+		{set("", "roles", []any{}), "roles is empty"},
+		{set("", "roles", []any{"pager"}), "roles has an unknown value"},
+		{set("", "roles", []any{"gateway", "gateway"}), "roles has a repeated value"},
+		{set("", "roles", "gateway"), "roles has the wrong type"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			body := validInfo(t, tc.mutate)
@@ -650,5 +655,45 @@ func TestInfoCacheForget(t *testing.T) {
 	if _, r := ic.Info(t.Context(), c7, outbound.ClassInteractive); !r.OK() || store.reads != reads+1 ||
 		len(b.seen()) != 2 {
 		t.Errorf("a read after Forget: %+v, %d store reads, %d bridge reads", r, store.reads-reads, len(b.seen()))
+	}
+}
+
+// TestInfoRoles covers C-30.FR-1 and C-22.FR-2 as revised: info without roles, as a bridge written before roles
+// existed sends it, is a messenger; one with roles has them, in their order, and each fixture passes api/bridge.yaml;
+// StoredRoles reads them from a stored copy, messenger for none and for a copy that does not decode.
+func TestInfoRoles(t *testing.T) {
+	schema := bridgeInfoSchema(t)
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+		want   []string
+	}{
+		{"no roles", nil, []string{RoleMessenger}},
+		{"gateway", set("", "roles", []any{"gateway"}), []string{RoleGateway}},
+		{"both", set("", "roles", []any{"messenger", "gateway"}), []string{RoleMessenger, RoleGateway}},
+		{"both the other way", set("", "roles", []any{"gateway", "messenger"}), []string{RoleGateway, RoleMessenger}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := validInfo(t, tc.mutate)
+			if err := visit(t, schema, body); err != nil {
+				t.Fatalf("api/bridge.yaml refuses the fixture: %v", err)
+			}
+			i, err := ParseInfo(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(i.Roles(), tc.want) || !slices.Equal(StoredRoles(i.Raw), tc.want) {
+				t.Errorf("roles %v, stored %v, want %v", i.Roles(), StoredRoles(i.Raw), tc.want)
+			}
+			if i.HasRole(RoleMessenger) != slices.Contains(tc.want, RoleMessenger) ||
+				i.HasRole(RoleGateway) != slices.Contains(tc.want, RoleGateway) {
+				t.Errorf("HasRole of %v", tc.want)
+			}
+		})
+	}
+	for _, raw := range []string{"", "null", "{", `{"roles":"gateway"}`} {
+		if got := StoredRoles([]byte(raw)); !slices.Equal(got, []string{RoleMessenger}) {
+			t.Errorf("StoredRoles(%q) = %v", raw, got)
+		}
 	}
 }

@@ -112,6 +112,34 @@ A failed step names its cause with a code:
 `request_failed`
 :   The bridge answered with another error; the message names its class and the bridge's text.
 
+## Roles
+
+A bridge declares its roles in its `info`, and the check shows them. A bridge in the role `messenger`, which is every
+bridge that declares no roles, connects a messenger: its channels are Destinations, and people link their accounts
+through it. A bridge in the role `gateway` is a **Notification gateway**: it reaches people outside messengers, by
+phone call or SMS for example, through a provider of its own. A bridge may have both roles.
+
+A Bridge Connection whose only role is `gateway` cannot be a Destination: creating or saving a Destination for it is
+refused with `422` and the code `gateway_only` at `connection_id`. It is not offered for Account links either, since
+it looks nobody up in a messenger. Its read in the API has `roles`, from the `info` of its last check:
+
+```sh
+curl https://muster.example.org/api/v1/connections/CNK7M3QX9P2RTA \
+  -H "Authorization: Bearer $MUSTER_TOKEN"
+```
+
+```json
+{
+  "id": "CNK7M3QX9P2RTA",
+  "type": "bridge",
+  "name": "Phone calls",
+  "roles": ["gateway"]
+}
+```
+
+The Connection list takes `role`: `role=gateway` lists the Notification gateways, `role=messenger` every Connection of
+a messenger, Mattermost, Slack and Telegram ones included.
+
 ## Check before saving
 
 The check above reads a saved Connection. **Check connection** in the form of a new Connection, or on the page of a

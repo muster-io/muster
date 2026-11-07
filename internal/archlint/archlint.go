@@ -48,18 +48,24 @@ type Config struct {
 	GroupQueries string
 
 	Messenger MessengerConfig
+	// Gateway is the second interface of rule 3: the Notification gateway, whose sends are checked like the messenger
+	// adapter's (ADR-0016 as amended for L2).
+	Gateway MessengerConfig
 
 	// HTTPExempt lists the directories where rule 4 allows HTTP clients and transports and WebSocket dials.
 	HTTPExempt []string
 }
 
-// MessengerConfig describes rule 3: the messenger adapter interface, its send and edit methods, and the only files
-// that may call them.
+// MessengerConfig describes one interface of rule 3: the messenger adapter interface or the Notification gateway, its
+// send and edit methods, the only files that may call them, and what a finding says the call does and where it
+// belongs.
 type MessengerConfig struct {
 	Package      string
 	Interface    string
 	Methods      []string
 	AllowedFiles []string
+	Does         string
+	Belongs      string
 }
 
 func DefaultConfig() Config {
@@ -80,6 +86,17 @@ func DefaultConfig() Config {
 				"internal/delivery/threads.go",
 				"internal/delivery/interactive.go",
 			},
+			Does:    "sends or edits a messenger message",
+			Belongs: "the delivery worker and the interactive path",
+		},
+		// S-148 adds the gateway sender.
+		Gateway: MessengerConfig{
+			Package:      "internal/delivery",
+			Interface:    "Gateway",
+			Methods:      []string{"Notify"},
+			AllowedFiles: []string{"internal/delivery/interactive.go"},
+			Does:         "sends a notification through a Notification gateway",
+			Belongs:      "the interactive path and the gateway sender",
 		},
 		HTTPExempt: []string{"internal/outbound", "internal/fakes", "internal/devmode", "test/load", "pkg/apiclient"},
 	}

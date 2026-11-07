@@ -740,14 +740,21 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
 FROM connections c
 WHERE c.org_id = $1 AND c.deleted_at IS NULL
   AND ($2::text IS NULL OR c.type = $2::text)
-  AND ($3::bigint IS NULL OR c.id > $3::bigint)
+  AND ($3::text IS NULL
+       OR ($3::text = 'messenger'
+           AND (c.type <> 'bridge' OR c.bridge_info->'roles' IS NULL
+                OR c.bridge_info->'roles' @> '["messenger"]'::jsonb))
+       OR ($3::text = 'gateway' AND c.type = 'bridge'
+           AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false)))
+  AND ($4::bigint IS NULL OR c.id > $4::bigint)
 ORDER BY c.id
-LIMIT $4
+LIMIT $5
 `
 
 type ListConnectionsParams struct {
 	OrgID    int64
 	Type     pgtype.Text
+	Role     pgtype.Text
 	AfterID  pgtype.Int8
 	PageSize int32
 }
@@ -807,12 +814,15 @@ type ListConnectionsRow struct {
 // Destinations post. The bot token, the proxy password, the Telegram webhook secret token, the push secret of a Bridge
 // and the app-level token and Slack signing secret of a Slack Connection are read as ciphertexts only to build the
 // Connection's client or to check a request to Muster; reads show their status.
-// ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type,
-// each with the count of its Destinations that are not deleted.
+// ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type
+// and by role (C-30.FR-1) — messenger: every Connection but a Bridge Connection whose stored info lists roles without
+// messenger; gateway: the Bridge Connections whose stored info lists gateway — each with the count of its Destinations
+// that are not deleted.
 func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams) ([]ListConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, listConnections,
 		arg.OrgID,
 		arg.Type,
+		arg.Role,
 		arg.AfterID,
 		arg.PageSize,
 	)

@@ -33,10 +33,13 @@ import (
 // replies and deletes through the protocol client directly, outside delivery, which ADR-0017 permits; it needs no
 // database, master key or configuration file and writes nothing to the file system. The messages it posts and edits
 // carry `layout` beside `body`, as Root messages do, and the bridge's answers are judged whether it renders `layout` or
-// ignores it (C-29.FR-8). Every step prints one line as soon
+// ignores it (C-29.FR-8). The roles of info choose the steps (C-30.FR-2): a bridge in the role messenger runs the
+// messenger's steps, one in the role gateway sends a notification to the contact given and, interactively, waits for
+// its notification_acknowledged; the steps of a role the bridge lacks are skipped. Every step prints one line as soon
 // as it ends — `PASS <step>`, `FAIL <step>: <reason>` or `SKIP <step>: <why>` — with the token and the push secret
-// masked in every reason; an interactive run also prints `PUSH <url> [<secret>]` once its push listener listens and
-// `WAIT <step>: <what to do>, message_id <id>` before it waits for a person.
+// masked in every reason; a run prints `ROLES <role>…` once info passed, and an interactive run also prints
+// `PUSH <url> [<secret>]` once its push listener listens and `WAIT <step>: <what to do>, <id>` before it waits for a
+// person.
 
 // ConformanceWait is how long the press step waits for a person.
 const ConformanceWait = 5 * time.Minute
@@ -52,6 +55,12 @@ const (
 	checkTitle = "muster bridge check: "
 	checkLink  = "https://muster-io.github.io/muster/"
 	checkBody  = "Posted by muster bridge check, the conformance check of the Bridge protocol."
+	// checkNotification is the text of the test notification, and checkNotificationLabel how to acknowledge it.
+	checkNotification      = "muster bridge check: a test notification of the conformance check of the Bridge protocol."
+	checkNotificationLabel = "Press 1 to acknowledge"
+	// The reasons of the steps of a role the bridge lacks.
+	notMessenger = "the bridge is not in the role messenger"
+	notGateway   = "the bridge is not in the role gateway"
 	// maxAttempts bounds the pushes the listener keeps, the oldest dropped first.
 	maxAttempts = 1000
 )
@@ -60,8 +69,9 @@ const (
 var buttonStyles = []gen.ButtonStyle{gen.Primary, gen.Success, gen.Neutral, gen.Danger}
 
 // ConformanceConfig is a run of the conformance check: the bridge's base URL and token; the push secret, generated
-// when it is empty; the channel the bot posts to, the channel it cannot use and the handle of a person, the last two
-// skipping their steps when empty; where the push listener listens (DefaultPushListen when empty) and the URL the
+// when it is empty; the channel the bot posts to, which a bridge in the role messenger needs, the channel it cannot
+// use, the handle of a person and the contact a gateway sends the test notification to, the last three skipping their
+// steps when empty; where the push listener listens (DefaultPushListen when empty) and the URL the
 // bridge reaches it at (the listener's own when empty); whether a person takes part; how long press waits for them
 // (ConformanceWait when zero); where the lines go; the logger of the outbound client (nothing logged when nil); and
 // the real clock (the system clock when nil).
@@ -72,6 +82,7 @@ type ConformanceConfig struct {
 	Channel          string
 	ForbiddenChannel string
 	Handle           string
+	Contact          string
 	PushListen       string
 	PushURL          string
 	Interactive      bool
@@ -119,6 +130,20 @@ type conformance struct {
 	server     *http.Server
 	listenErr  string
 	pressed    *Event
+	// messenger and gateway are the roles info declares.
+	messenger bool
+	gateway   bool
+	// notificationID and notificationData name the test notification and its action data.
+	notificationID   string
+	notificationData string
+}
+
+// conformanceStep is one step of a run, by name, and the role it belongs to, empty for every bridge; openListener has
+// no name and prints no line of its own.
+type conformanceStep struct {
+	name string
+	role string
+	run  func(context.Context)
 }
 
 // RunConformance runs the conformance check of cfg and prints each line to cfg.Out as soon as its step ends. failed
@@ -146,21 +171,45 @@ func RunConformance(ctx context.Context, cfg ConformanceConfig) (failed bool, er
 		return false, err
 	}
 	defer cn.closeListener()
-	steps := []func(context.Context){cn.infoStep, cn.channelCheck, cn.post, cn.replayedKey, cn.buttons, cn.edit,
-		cn.threadReply, cn.threadRefStep, cn.forbiddenChannel, cn.userLookup, cn.directMessage, cn.deleteStep, cn.poll,
-		cn.openListener, cn.press, cn.push, cn.answer}
-	for n, step := range steps {
+	if err := ctx.Err(); err != nil {
+		return true, err
+	}
+	cn.infoStep(ctx)
+	if cn.failed {
+		// Every later step depends on what info declares.
+		return true, ctx.Err()
+	}
+	if cn.messenger && cn.cfg.Channel == "" {
+		cn.fail("channel_check", "--channel is required for a bridge in the role messenger")
+		return true, ctx.Err()
+	}
+	for _, step := range cn.steps() {
 		if err := ctx.Err(); err != nil {
 			return true, err
 		}
-		step(ctx)
-		if n == 0 && cn.failed {
-			// Every later step depends on what info declares.
-			return true, ctx.Err()
+		switch {
+		case step.role == RoleMessenger && !cn.messenger:
+			cn.skip(step.name, notMessenger)
+		case step.role == RoleGateway && !cn.gateway:
+			cn.skip(step.name, notGateway)
+		default:
+			step.run(ctx)
 		}
 	}
 	err = ctx.Err()
 	return cn.failed || err != nil, err
+}
+
+// steps are the steps after info, in their order.
+func (cn *conformance) steps() []conformanceStep {
+	m, g := RoleMessenger, RoleGateway
+	return []conformanceStep{{"channel_check", m, cn.channelCheck}, {"post", m, cn.post},
+		{"replayed_key", m, cn.replayedKey}, {"buttons", m, cn.buttons}, {"edit", m, cn.edit},
+		{"thread_reply", m, cn.threadReply}, {"thread_ref", m, cn.threadRefStep},
+		{"forbidden_channel", m, cn.forbiddenChannel}, {"user_lookup", m, cn.userLookup},
+		{"direct_message", m, cn.directMessage}, {"delete", m, cn.deleteStep}, {"poll", "", cn.poll},
+		{"", "", cn.openListener}, {"press", m, cn.press}, {"push", m, cn.push}, {"answer", "", cn.answer},
+		{"notification", g, cn.notification}, {"notification_acknowledged", g, cn.notificationAcknowledged}}
 }
 
 func (cfg ConformanceConfig) withDefaults() ConformanceConfig {
@@ -303,11 +352,14 @@ func (cn *conformance) reply(step, threadRef string) gen.ThreadReplyInput {
 		Mentions: []gen.Mention{}}
 }
 
+// infoStep reads info and prints its roles after it passed.
 func (cn *conformance) infoStep(ctx context.Context) {
 	i, r := cn.c.GetInfo(ctx, outbound.ClassInteractive)
 	if cn.status("info", r, http.StatusOK) {
 		cn.info = i
+		cn.messenger, cn.gateway = i.HasRole(RoleMessenger), i.HasRole(RoleGateway)
 		cn.pass("info")
+		_, _ = fmt.Fprintf(cn.cfg.Out, "ROLES %s\n", strings.Join(i.Roles(), " "))
 	}
 }
 
@@ -532,9 +584,11 @@ func (cn *conformance) poll(ctx context.Context) {
 }
 
 // openListener opens the push listener of an interactive run against a bridge that offers push and showed the buttons
-// to press, and prints the PUSH line: where to push to and the push secret, unless it was given.
+// to press, or a gateway without poll that will send the test notification, and prints the PUSH line: where to push to
+// and the push secret, unless it was given.
 func (cn *conformance) openListener(ctx context.Context) {
-	if !cn.cfg.Interactive || !cn.offers(gen.Push) || cn.buttonsID == "" {
+	notifies := cn.gateway && cn.cfg.Contact != "" && !cn.offers(gen.Poll)
+	if !cn.cfg.Interactive || !cn.offers(gen.Push) || (cn.buttonsID == "" && !notifies) {
 		return
 	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cn.cfg.PushListen)
@@ -578,13 +632,9 @@ func (cn *conformance) press(ctx context.Context) {
 	id := cn.text(cn.buttonsID)
 	_, _ = fmt.Fprintf(cn.cfg.Out, "WAIT %s: press a button of the message %q within %s, message_id %s\n", step,
 		checkTitle+"buttons", cn.cfg.Wait, id)
-	var ev *Event
-	var why string
-	if cn.offers(gen.Poll) {
-		ev, why = cn.pressByPolling(ctx)
-	} else {
-		ev, why = cn.pressByPush(ctx)
-	}
+	ev, why := cn.await(ctx, "press of message "+cn.buttonsID, func(ev Event) bool {
+		return ev.Type == TypePress && ev.MessageID == cn.buttonsID
+	})
 	switch {
 	case ctx.Err() != nil:
 		cn.fail(step, "interrupted")
@@ -601,14 +651,23 @@ func (cn *conformance) press(ctx context.Context) {
 	cn.pass(step)
 }
 
-// pressByPolling polls from the cursor of poll until a press of the buttons message comes, or Wait passed: the press,
-// or nil and why.
-func (cn *conformance) pressByPolling(ctx context.Context) (*Event, string) {
+// await waits for the first event that match takes, by polling when the bridge offers poll and at the push listener
+// otherwise: the event, or nil and why; what names the event in the reasons.
+func (cn *conformance) await(ctx context.Context, what string, match func(Event) bool) (*Event, string) {
+	if cn.offers(gen.Poll) {
+		return cn.awaitByPolling(ctx, what, match)
+	}
+	return cn.awaitByPush(ctx, what, match)
+}
+
+// awaitByPolling polls from the cursor of poll, or of the last wait, until an event that match takes comes, or Wait
+// passed: the event, or nil and why.
+func (cn *conformance) awaitByPolling(ctx context.Context, what string, match func(Event) bool) (*Event, string) {
 	deadline := cn.cfg.Real.Now().Add(cn.cfg.Wait)
 	for ctx.Err() == nil {
 		remaining := deadline.Sub(cn.cfg.Real.Now())
 		if remaining <= 0 {
-			return nil, cn.noPress()
+			return nil, cn.none(what)
 		}
 		b, r := cn.pollEvents(ctx, cn.cursor, min(remaining, cn.cfg.longPoll).Truncate(time.Second))
 		if ctx.Err() != nil {
@@ -622,7 +681,9 @@ func (cn *conformance) pressByPolling(ctx context.Context) (*Event, string) {
 			if err != nil {
 				return nil, fmt.Sprintf("polling returned an event that is not one of the protocol: %v", err)
 			}
-			if ev.Type == TypePress && ev.MessageID == cn.buttonsID {
+			if match(ev) {
+				next := b.NextCursor
+				cn.cursor = &next
 				return &ev, ""
 			}
 		}
@@ -635,10 +696,10 @@ func (cn *conformance) pressByPolling(ctx context.Context) (*Event, string) {
 	return nil, "interrupted"
 }
 
-// pressByPush waits at the push listener until a press of the buttons message comes, Wait passed, or pushGrace passed
-// since the wait saw the first push the listener refused, so that a bridge whose pushes are all refused does not hold
-// the run for the whole of Wait: the press, or nil and why.
-func (cn *conformance) pressByPush(ctx context.Context) (*Event, string) {
+// awaitByPush waits at the push listener until an event that match takes comes, Wait passed, or pushGrace passed since
+// the wait saw the first push the listener refused, so that a bridge whose pushes are all refused does not hold the
+// run for the whole of Wait: the event, or nil and why.
+func (cn *conformance) awaitByPush(ctx context.Context, what string, match func(Event) bool) (*Event, string) {
 	timeout, stop := cn.cfg.timer(cn.cfg.Wait)
 	defer stop()
 	var grace <-chan time.Time
@@ -646,7 +707,7 @@ func (cn *conformance) pressByPush(ctx context.Context) (*Event, string) {
 	defer func() { stopGrace() }()
 	for {
 		changed := cn.listener.changes()
-		if ev := cn.listener.press(cn.buttonsID); ev != nil {
+		if ev := cn.listener.first(match); ev != nil {
 			return ev, ""
 		}
 		if grace == nil && cn.listener.refusedAny() {
@@ -657,16 +718,16 @@ func (cn *conformance) pressByPush(ctx context.Context) (*Event, string) {
 		case <-ctx.Done():
 			return nil, "interrupted"
 		case <-timeout:
-			return nil, cn.noPress() + cn.listener.refusals()
+			return nil, cn.none(what) + cn.listener.refusals()
 		case <-grace:
-			return nil, fmt.Sprintf("no valid press of message %s within %s of the first refused push",
-				cn.buttonsID, pushGrace) + cn.listener.refusals()
+			return nil, fmt.Sprintf("no valid %s within %s of the first refused push", what, pushGrace) +
+				cn.listener.refusals()
 		}
 	}
 }
 
-func (cn *conformance) noPress() string {
-	return fmt.Sprintf("no press of message %s within %s", cn.buttonsID, cn.cfg.Wait)
+func (cn *conformance) none(what string) string {
+	return fmt.Sprintf("no %s within %s", what, cn.cfg.Wait)
 }
 
 func (cn *conformance) push(ctx context.Context) {
@@ -745,6 +806,82 @@ func (cn *conformance) answer(ctx context.Context) {
 		cn.pass(step)
 	default:
 		cn.fail(step, "expected gone for an unknown event id; "+cn.failure(r))
+	}
+}
+
+// notification sends the test notification to the contact with test action data of the most bytes a button's data
+// has, so that the bridge proves it carries them, and passes on 201; the same request again with its Idempotency-Key
+// must answer the same notification_id with replayed true.
+func (cn *conformance) notification(ctx context.Context) {
+	const step = "notification"
+	if cn.cfg.Contact == "" {
+		cn.skip(step, "no --contact")
+		return
+	}
+	data := ("check-notification-" + randomText(maxData))[:maxData]
+	in := gen.NotificationInput{Contact: cn.cfg.Contact, Text: checkNotification, Language: gen.En,
+		Action: &gen.NotificationAction{Data: data, Label: checkNotificationLabel}}
+	out, r := cn.c.SendNotification(ctx, outbound.ClassInteractive, cn.key(step), in)
+	switch {
+	case !cn.status(step, r, http.StatusCreated):
+		return
+	case out.Replayed:
+		cn.fail(step, "a new Idempotency-Key answered replayed true")
+		return
+	}
+	cn.notificationID, cn.notificationData = out.NotificationId, data
+	again, r := cn.c.SendNotification(ctx, outbound.ClassInteractive, cn.key(step), in)
+	switch {
+	case !cn.status(step, r, http.StatusCreated):
+	case again.NotificationId != out.NotificationId:
+		cn.fail(step, fmt.Sprintf("the second request with the same Idempotency-Key sent notification %s instead of "+
+			"returning %s", again.NotificationId, out.NotificationId))
+	case !again.Replayed:
+		cn.fail(step, fmt.Sprintf("the second request with the same Idempotency-Key returned notification %s without "+
+			"replayed true", again.NotificationId))
+	default:
+		cn.pass(step)
+	}
+}
+
+// notificationAcknowledged waits, in an interactive run, for the notification_acknowledged of the test notification,
+// which must carry its action data unchanged, and answers it with answerEvent.
+func (cn *conformance) notificationAcknowledged(ctx context.Context) {
+	const step = "notification_acknowledged"
+	switch {
+	case cn.cfg.Contact == "":
+		cn.skip(step, "no --contact")
+		return
+	case !cn.cfg.Interactive:
+		cn.skip(step, "--no-interactive")
+		return
+	case cn.notificationID == "":
+		cn.fail(step, "the notification step failed")
+		return
+	case !cn.offers(gen.Poll) && cn.listener == nil:
+		cn.fail(step, cmp.Or(cn.listenErr, "the push listener is not open"))
+		return
+	}
+	id := cn.text(cn.notificationID)
+	_, _ = fmt.Fprintf(cn.cfg.Out, "WAIT %s: acknowledge the notification sent to the contact within %s, "+
+		"notification_id %s\n", step, cn.cfg.Wait, id)
+	ev, why := cn.await(ctx, "notification_acknowledged of notification "+cn.notificationID, func(ev Event) bool {
+		return ev.Type == TypeNotificationAcknowledged && ev.NotificationID == cn.notificationID
+	})
+	switch {
+	case ctx.Err() != nil:
+		cn.fail(step, "interrupted")
+		return
+	case ev == nil:
+		cn.fail(step, why)
+		return
+	case ev.Data != cn.notificationData:
+		cn.fail(step, "the notification_acknowledged of notification "+id+" carries data that its action did not have")
+		return
+	}
+	if _, r := cn.c.AnswerEvent(ctx, outbound.ClassInteractive, ev.ID, checkTitle+step); cn.status(step, r,
+		http.StatusOK) {
+		cn.pass(step)
 	}
 }
 
@@ -847,12 +984,12 @@ func (l *pushListener) changes() <-chan struct{} {
 	return l.changed
 }
 
-// press is the first valid press of the message messageID, nil before one came.
-func (l *pushListener) press(messageID string) *Event {
+// first is the first valid event that match takes, nil before one came.
+func (l *pushListener) first(match func(Event) bool) *Event {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, a := range l.attempts {
-		if a.event != nil && a.event.Type == TypePress && a.event.MessageID == messageID {
+		if a.event != nil && match(*a.event) {
 			return a.event
 		}
 	}

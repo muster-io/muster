@@ -35,6 +35,8 @@ func eventFixture(typ string, mutate ...func(map[string]any)) map[string]any {
 		m["user"], m["token"] = user, strings.Repeat("A", 43)
 	case TypeMessageDeleted:
 		m["message_id"] = "m1"
+	case TypeNotificationAcknowledged:
+		m["notification_id"], m["data"] = "n-1", strings.Repeat("d", 64)
 	}
 	for _, f := range mutate {
 		f(m)
@@ -67,8 +69,8 @@ func withoutUser(key string) func(map[string]any) {
 	return func(m map[string]any) { delete(m["user"].(map[string]any), key) }
 }
 
-// TestDecodeEvent covers C-22.FR-11: each of the four event types decodes with its members, unknown members ignored,
-// and passes the schema Event of api/bridge.yaml.
+// TestDecodeEvent covers C-22.FR-11 as revised for L2: each of the five event types decodes with its members, unknown
+// members ignored, and passes the schema Event of api/bridge.yaml.
 func TestDecodeEvent(t *testing.T) {
 	schema := bridgeSchema(t, "Event")
 	ref := "t-7"
@@ -91,6 +93,14 @@ func TestDecodeEvent(t *testing.T) {
 			Event{ID: "ev-1", Type: TypeAccountLink, OccurredAt: eventTime, Token: strings.Repeat("A", 43)}},
 		{"message deleted", eventFixture(TypeMessageDeleted, member("id", strings.Repeat("~", 200))),
 			Event{ID: strings.Repeat("~", 200), Type: TypeMessageDeleted, OccurredAt: eventTime, MessageID: "m1"}},
+		{"notification acknowledged", eventFixture(TypeNotificationAcknowledged, member("future", 1)),
+			Event{ID: "ev-1", Type: TypeNotificationAcknowledged, OccurredAt: eventTime, NotificationID: "n-1",
+				Data: strings.Repeat("d", 64)}},
+		{"notification acknowledged with a long id",
+			eventFixture(TypeNotificationAcknowledged, member("notification_id", strings.Repeat("n", 512)),
+				member("data", "~")),
+			Event{ID: "ev-1", Type: TypeNotificationAcknowledged, OccurredAt: eventTime,
+				NotificationID: strings.Repeat("n", 512), Data: "~"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := eventJSON(t, tc.m)
@@ -101,8 +111,9 @@ func TestDecodeEvent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.want.Type != TypeMessageDeleted && (got.User.ExternalId != "u-bob" ||
-				got.User.DisplayName != "Bob Brown") {
+			if tc.want.Type != TypeMessageDeleted && tc.want.Type != TypeNotificationAcknowledged &&
+				(got.User.ExternalId != "u-bob" ||
+					got.User.DisplayName != "Bob Brown") {
 				t.Errorf("user %+v", got.User)
 			}
 			got.User = tc.want.User
@@ -170,6 +181,19 @@ func TestDecodeEventRefuses(t *testing.T) {
 		{name: "a token outside base64url", m: eventFixture(TypeAccountLink, member("token", strings.Repeat("+", 43)))},
 		{name: "an account link without user", m: eventFixture(TypeAccountLink, without("user"))},
 		{name: "a deletion without message_id", m: eventFixture(TypeMessageDeleted, without("message_id"))},
+		{name: "an acknowledgement without notification_id",
+			m: eventFixture(TypeNotificationAcknowledged, without("notification_id"))},
+		{name: "an acknowledgement with an empty notification_id",
+			m: eventFixture(TypeNotificationAcknowledged, member("notification_id", ""))},
+		{name: "an acknowledgement with a long notification_id",
+			m: eventFixture(TypeNotificationAcknowledged, member("notification_id", strings.Repeat("n", 513)))},
+		{name: "an acknowledgement without data", m: eventFixture(TypeNotificationAcknowledged, without("data"))},
+		{name: "an acknowledgement with null data", m: eventFixture(TypeNotificationAcknowledged, member("data", nil))},
+		{name: "an acknowledgement with empty data", m: eventFixture(TypeNotificationAcknowledged, member("data", ""))},
+		{name: "an acknowledgement with data longer than 64 bytes",
+			m: eventFixture(TypeNotificationAcknowledged, member("data", strings.Repeat("d", 65)))},
+		{name: "an acknowledgement with data that has a space",
+			m: eventFixture(TypeNotificationAcknowledged, member("data", "d "+secret))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := []byte(tc.raw)
@@ -575,5 +599,82 @@ func TestMessageDeletedCallsRootDeleted(t *testing.T) {
 	e.handle(t, ev)
 	if d := e.bindings.deletions(); len(d) != 5 || d[4] != "3/m1" || !e.store.recorded(e.conn.ID, "ev-x") {
 		t.Errorf("redelivered: RootDeleted for %v", d)
+	}
+}
+
+// acknowledgements is the handler of notification_acknowledged events that S-173 registers, as a test sets it: what it
+// saw, and the answer it gives.
+type acknowledgements struct {
+	mu     sync.Mutex
+	seen   []Event
+	answer string
+	err    error
+}
+
+func (a *acknowledgements) Acknowledged(_ context.Context, _ Conn, ev Event) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.seen = append(a.seen, ev)
+	return a.answer, a.err
+}
+
+// TestNotificationAcknowledgedUnhandled covers C-22.FR-11 and C-30.FR-2: without a handler a notification_acknowledged
+// event is recorded as handled, unanswered, and logged as bridge_event_unhandled with the Connection, its id and type,
+// once however often it comes; with one, the handler gets it and its answer goes to the person; a failing handler
+// fails the event, which is not recorded.
+func TestNotificationAcknowledgedUnhandled(t *testing.T) {
+	e := newPressEnv(t)
+	ev := e.event(t, TypeNotificationAcknowledged)
+	for range 2 {
+		if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := `"level":"INFO","event":"bridge_event_unhandled","connection":"CN0000000000B3","event_id":"ev-1",` +
+		`"type":"notification_acknowledged"}`
+	if got := e.log.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, strings.TrimSuffix(want, "}")) ||
+		!e.store.recorded(e.conn.ID, "ev-1") {
+		t.Errorf("logged %s", got)
+	}
+	if a := e.answers(t); len(a) != 0 {
+		t.Errorf("answered %v", a)
+	}
+
+	e = newPressEnv(t)
+	acks := &acknowledgements{answer: "Done: Acknowledged #7"}
+	e.events.Acknowledgements = acks
+	if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
+		t.Fatal(err)
+	}
+	if len(acks.seen) != 1 || acks.seen[0].Data != strings.Repeat("d", 64) || acks.seen[0].NotificationID != "n-1" ||
+		strings.Contains(e.log.String(), "bridge_event_unhandled") {
+		t.Errorf("handler saw %+v, logged %s", acks.seen, e.log.String())
+	}
+	if a := e.answers(t); len(a) != 1 || a[0] != (answered{key: "answer-ev-1", eventID: "ev-1",
+		text: "Done: Acknowledged #7"}) {
+		t.Errorf("answered %v", a)
+	}
+
+	e = newPressEnv(t)
+	e.events.Acknowledgements = &acknowledgements{err: errors.New("the call is unknown")}
+	if err := e.events.Handle(t.Context(), e.conn, ev); err == nil || e.store.recorded(e.conn.ID, "ev-1") {
+		t.Errorf("a failed handler: %v", err)
+	}
+}
+
+// TestPollerTakesTheEventsOfAGateway covers C-30.FR-2: Bridge polling takes the events of a Connection whose only role
+// is gateway like any other's — the poller never reads the roles — and a polled notification_acknowledged is handled
+// once and logged as unhandled.
+func TestPollerTakesTheEventsOfAGateway(t *testing.T) {
+	e := newPollEnv(t)
+	e.bridge.add(eventJSON(t, eventFixture(TypeNotificationAcknowledged, member("id", "ev-ack"))))
+	stop := runPoller(t, e.poller())
+	eventually(t, "the second poll", func() bool { return len(e.bridge.calls()) == 2 })
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if !e.store.recorded(e.conn.ID, "ev-ack") ||
+		strings.Count(e.log.String(), `"event":"bridge_event_unhandled","connection":"CN0000000000B3"`) != 1 {
+		t.Errorf("the acknowledgement was not handled once: %s", e.log.String())
 	}
 }

@@ -9,6 +9,7 @@ import type { BridgeInfoMessenger } from './bridgeInfoMessenger';
 import type { BridgeInfoProtocolVersion } from './bridgeInfoProtocolVersion';
 import type { BridgeInfoUserLookup } from './bridgeInfoUserLookup';
 import type { BridgeLimits } from './bridgeLimits';
+import type { BridgeRole } from './bridgeRole';
 
 /**
  * The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).
@@ -34,4 +35,9 @@ export interface BridgeInfo {
      * @pattern ^https?://\S*\{token\}\S*$
      */
   link_url_template?: string | null;
+  /**
+     * What the bridge is; `messenger` when it is missing.
+     * @minItems 1
+     */
+  roles?: BridgeRole[];
 }

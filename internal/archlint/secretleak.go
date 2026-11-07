@@ -129,6 +129,7 @@ var registry = []Probe{
 	{Name: "account_links", Run: probeAccountLinks},
 	{Name: "bridge_links", Run: probeBridgeLinks},
 	{Name: "bridge_check", Run: probeBridgeCheck},
+	{Name: "gateway_notifications", Run: probeGatewayNotifications},
 	{Name: "slack_connections", Run: probeSlack},
 	{Name: "slack_presses", Run: probeSlackPresses},
 	{Name: "slack_socket", Run: probeSlackSocket},
@@ -2022,6 +2023,113 @@ func probeBridgeAdapter(ctx context.Context, svc *connections.Service, clocks cl
 	errs = append(errs, errors.New(string(o.Error)))
 	errs = append(errs, probeTester(ctx, &bridge.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
 		Real: clocks.Real}, dest))
+	return errors.Join(errs...)
+}
+
+// gatewayTargets are the Targets of probeGatewayNotifications: the one Connection of the stand-in gateway, and its info
+// read through its client.
+type gatewayTargets struct{ conn bridge.Conn }
+
+func (g gatewayTargets) BridgeTarget(context.Context, int64) (bridge.Target, error) {
+	return bridge.Target{}, bridge.ErrNoTarget
+}
+
+func (g gatewayTargets) BridgeConnection(context.Context, int64) (bridge.Conn, error) {
+	return g.conn, nil
+}
+
+func (g gatewayTargets) BridgeInfo(ctx context.Context, conn bridge.Conn, class outbound.Class) (bridge.Info,
+	bridge.Result) {
+	return conn.Client.GetInfo(ctx, class)
+}
+
+// probeGatewayNotifications pushes the token, a contact and a notification's text through the Notification gateway of a
+// bridge (C-30.FR-10): the first secret is the token, the second the contact and the third is in the text, which are
+// personal data that no log line and no outcome may carry. Against a stand-in gateway whose info declares the role
+// gateway, Notify sends on the interactive path, as lint 3 allows, while sendNotification answers with 201, and with a
+// 400, a 401, a 403, a 503 and a 429 problem and a 500 that is no problem, each echoing the token, the Authorization
+// header and the whole request body; and with a notification_id that breaks the protocol.
+func probeGatewayNotifications(ctx context.Context, secrets []string, log io.Writer) error {
+	var lines bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &lines), logging.LevelInfo)
+	clocks := clock.Clocks{Business: clock.NewManual(time.Now().UTC()), Real: clock.Real{}}
+	var answer atomic.Int32
+	answers := []struct {
+		status int
+		class  string
+	}{{http.StatusCreated, ""}, {http.StatusBadRequest, "invalid"}, {http.StatusUnauthorized, ""},
+		{http.StatusForbidden, "forbidden"}, {http.StatusServiceUnavailable, "transient"},
+		{http.StatusTooManyRequests, "rate_limited"}, {http.StatusInternalServerError, "text"},
+		{http.StatusCreated, "malformed"}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/info" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+				`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":500,`+
+				`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll"],"roles":["gateway"]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		echo := "token " + secrets[0] + " " + r.Header.Get("Authorization") + " request " + string(body)
+		a := answers[int(answer.Load())%len(answers)]
+		switch a.class {
+		case "":
+			if a.status == http.StatusCreated {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(a.status)
+				_, _ = io.WriteString(w, `{"notification_id":"n1","replayed":false}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(a.status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"title": echo, "detail": echo, "status": a.status})
+		case "malformed":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(a.status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"notification_id": strings.Repeat(echo, 20)})
+		case "text":
+			w.WriteHeader(a.status)
+			_, _ = io.WriteString(w, echo) //nolint:gosec // G705: the stand-in echoes the request on purpose
+		default:
+			w.Header().Set("Content-Type", "application/problem+json")
+			if a.class == "rate_limited" {
+				w.Header().Set("Retry-After", "1")
+			}
+			w.WriteHeader(a.status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"title": echo, "detail": echo, "status": a.status,
+				"class": a.class, "type": "urn:" + secrets[1]})
+		}
+	}))
+	defer srv.Close()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	c, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+		bridge.Settings{BaseURL: srv.URL, Token: logging.Secret(secrets[0]),
+			Owner: outbound.Owner{Connection: 1, PublicID: "CNAAAAAAAAAAG1"}})
+	if err != nil {
+		return err
+	}
+	a := &bridge.Adapter{Targets: gatewayTargets{conn: bridge.Conn{ID: 1, PublicID: "CNAAAAAAAAAAG1", Version: 1,
+		Client: c}}, Log: logger}
+	n := delivery.Notification{Connection: 1, Contact: secrets[1], Text: "#7 DiskFull is firing on " + secrets[2],
+		Language: "en", Action: &delivery.NotificationAction{Data: "probe-data", Label: "Press 1 to acknowledge"}}
+	path := deliverytest.Unlimited(1, clocks)
+	conn := int64(1)
+	var errs []error
+	sent := 0
+	for i := range answers {
+		answer.Store(int32(i))
+		o, err := path.Do(ctx, delivery.Subject{Connection: &conn}, delivery.NotifyOp(a, "notify-probe", n))
+		errs = append(errs, err, errors.New(string(o.Error)), errors.New(o.MessageID))
+		if o.Kind == delivery.OutcomeOK {
+			sent++
+		}
+	}
+	if sent != 1 || strings.Count(lines.String(), `"event":"gateway_notification_sent"`) != len(answers) {
+		return errors.Join(append(errs, &probeIncomplete{what: "no notification was sent and logged"})...)
+	}
 	return errors.Join(errs...)
 }
 
@@ -5003,6 +5111,10 @@ func (p probeRLTargets) BridgeTarget(context.Context, int64) (bridge.Target, err
 }
 
 func (p probeRLTargets) BridgeConn(context.Context, string) (bridge.Conn, error) { return p.br, nil }
+
+func (p probeRLTargets) BridgeConnection(context.Context, int64) (bridge.Conn, error) {
+	return p.br, nil
+}
 
 func (p probeRLTargets) BridgeInfo(ctx context.Context, conn bridge.Conn, class outbound.Class) (bridge.Info,
 	bridge.Result) {

@@ -160,7 +160,7 @@ the example bridge are not in this repository: they live in `muster-io/muster-br
 |---|---|
 | 1 | a query on a table with `org_id` does not filter by it, at every query level, with a value from a parameter or an outer query |
 | 2 | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, `timeline_entries`, `notes` or `alert_group_counters` is written outside `internal/groups`, or `internal/groups/dbgen` is imported outside it |
-| 3 | a messenger send or edit through `delivery.Adapter` (`Publish`, `Update`, `Reply`) is called outside the delivery worker and the interactive path; the messenger clients beneath the adapters, which `muster bridge check` calls directly, are not checked |
+| 3 | a messenger send or edit through `delivery.Adapter` (`Publish`, `Update`, `Reply`) is called outside the delivery worker and the interactive path, or a notification through `delivery.Gateway.Notify` outside the interactive path and the gateway sender; the messenger clients beneath the adapters, which `muster bridge check` calls directly, are not checked |
 | 4 | an `http.Client` or `http.Transport`, `http.DefaultClient` or `http.Get`/`Post`/`Head`/`PostForm` is used, or a WebSocket is dialled with `websocket.Dial` of `github.com/coder/websocket`, outside `internal/outbound` (fakes, dev mode, the load test, the generated client and tests excepted) |
 | 5 | a known secret value reaches a log line or a returned error |
 | 6 | `context.Background()` or `context.TODO()` is used outside `cmd/`, `internal/runtime`, `internal/cli`, `test/load/main.go` and tests |
@@ -221,10 +221,13 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   `ch-payments-notice` and `ch-search-notice` for routing to Teams by Severity, with the bot a member of each. Both
   Mattermost servers and the Telegram server also serve a second bot, with the published tokens
   `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. The
-  fake bridge serves two bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll mode,
-  and `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection; `/_fake/config` changes what its `info`
-  says, and `/_fake/messages` lists every message and edit with the `layout` Muster sent, from which the fake renders
-  nothing. The fake Slack server serves two Slack apps, each a
+  fake bridge serves three bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll
+  mode, `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection, and the Notification gateway
+  `muster-dev-gateway-token`, whose `info` declares only the role `gateway`, which the demo Connection "Example Gateway"
+  uses in poll mode under the path prefix `/gateway`, checked at start; `/_fake/config` changes what its `info` says,
+  the roles of each bot included, `/_fake/messages` lists every message and edit with the `layout` Muster sent, from
+  which the fake renders nothing, `/_fake/notifications` lists the notifications the bots sent, and
+  `POST /_fake/acknowledge` acknowledges one. The fake Slack server serves two Slack apps, each a
   workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
   `xapp-muster-dev-slack-token`, which the demo Connection "Example Slack" uses in `socket` mode, and
   `xoxb-muster-dev-slack-token-b` with `xapp-muster-dev-slack-token-b`, for which `muster dev` creates no Connection;

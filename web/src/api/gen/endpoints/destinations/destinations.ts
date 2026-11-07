@@ -189,7 +189,7 @@ export const getCreateDestinationUrl = () => {
 }
 
 /**
- * `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+ * `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
  * @summary Create Destination
  */
 export const createDestination = async (destinationInput: DestinationInput, options?: Parameters<typeof apiFetch>[1]): Promise<DestinationCreated> => {
@@ -377,7 +377,7 @@ export const getUpdateDestinationUrl = (destinationId: string,) => {
 }
 
 /**
- * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+ * Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
  * @summary Update Destination
  */
 export const updateDestination = async (destinationId: string,

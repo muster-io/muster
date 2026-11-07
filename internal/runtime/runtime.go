@@ -809,7 +809,7 @@ func (p *process) messengerAdapters() {
 		p.telegram = &telegram.Adapter{Targets: p.connections, Clock: p.clocks.Real}
 	}
 	if p.bridge == nil {
-		p.bridge = &bridge.Adapter{Targets: p.connections}
+		p.bridge = &bridge.Adapter{Targets: p.connections, Log: p.log}
 	}
 	if p.slack == nil {
 		p.slack = &slack.Adapter{Targets: p.connections, Version: buildinfo.Version}
@@ -1103,6 +1103,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		if err := conns.EnsureDemo(ctx, devmode.BridgeDemo()); err != nil {
 			return nil, fmt.Errorf("the demo bridge connection: %w", err)
 		}
+		if err := conns.EnsureDemo(ctx, devmode.GatewayDemo()); err != nil {
+			return nil, fmt.Errorf("the demo gateway connection: %w", err)
+		}
 		if err := conns.EnsureDemo(ctx, devmode.SlackDemo()); err != nil {
 			return nil, fmt.Errorf("the demo slack connection: %w", err)
 		}
@@ -1111,6 +1114,12 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		}
 		if err := p.integrations.EnsureDemo(ctx, devmode.IntegrationDemo()); err != nil {
 			return nil, fmt.Errorf("the demo integration: %w", err)
+		}
+		// Checked at start, so that it reads the role gateway of its info at once (C-30.FR-1); after the demo OIDC
+		// configuration, which allows the loopback network the fakes listen on, so that the check and the outbound
+		// address policy it loads see it.
+		if err := conns.CheckDemo(ctx, devmode.GatewayConnectionName); err != nil {
+			return nil, fmt.Errorf("the check of the demo gateway connection: %w", err)
 		}
 	}
 	// The Admin of the API releases the acknowledgements of the users it disables or deletes, and removes the Account

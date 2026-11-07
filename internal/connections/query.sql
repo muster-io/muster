@@ -6,8 +6,10 @@
 -- and the app-level token and Slack signing secret of a Slack Connection are read as ciphertexts only to build the
 -- Connection's client or to check a request to Muster; reads show their status.
 
--- ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type,
--- each with the count of its Destinations that are not deleted.
+-- ListConnections reads a page of the Connections that are not deleted, in id order after a cursor, filtered by type
+-- and by role (C-30.FR-1) — messenger: every Connection but a Bridge Connection whose stored info lists roles without
+-- messenger; gateway: the Bridge Connections whose stored info lists gateway — each with the count of its Destinations
+-- that are not deleted.
 -- name: ListConnections :many
 SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bot_api_base_url,
        c.telegram_update_mode, c.telegram_update_offset, c.telegram_webhook_secret_ciphertext,
@@ -26,6 +28,12 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
 FROM connections c
 WHERE c.org_id = @org_id AND c.deleted_at IS NULL
   AND (sqlc.narg('type')::text IS NULL OR c.type = sqlc.narg('type')::text)
+  AND (sqlc.narg('role')::text IS NULL
+       OR (sqlc.narg('role')::text = 'messenger'
+           AND (c.type <> 'bridge' OR c.bridge_info->'roles' IS NULL
+                OR c.bridge_info->'roles' @> '["messenger"]'::jsonb))
+       OR (sqlc.narg('role')::text = 'gateway' AND c.type = 'bridge'
+           AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false)))
   AND (sqlc.narg('after_id')::bigint IS NULL OR c.id > sqlc.narg('after_id')::bigint)
 ORDER BY c.id
 LIMIT @page_size;

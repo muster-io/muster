@@ -179,7 +179,8 @@ func (s *memStore) ListConnections(_ context.Context, arg dbgen.ListConnectionsP
 	var out []dbgen.ListConnectionsRow
 	for _, id := range slices.Sorted(maps.Keys(s.rows)) {
 		r := s.rows[id]
-		if r.deleted || arg.Type.Valid && r.row.Type != arg.Type.String || arg.AfterID.Valid && id <= arg.AfterID.Int64 {
+		if r.deleted || arg.Type.Valid && r.row.Type != arg.Type.String ||
+			arg.AfterID.Valid && id <= arg.AfterID.Int64 || !hasRole(r.row, arg.Role) {
 			continue
 		}
 		if len(out) == int(arg.PageSize) {
@@ -188,6 +189,24 @@ func (s *memStore) ListConnections(_ context.Context, arg dbgen.ListConnectionsP
 		out = append(out, dbgen.ListConnectionsRow(s.withCount(r.row)))
 	}
 	return out, nil
+}
+
+// hasRole is the role filter of ListConnections: a Connection that is no Bridge Connection is a messenger, and a
+// Bridge Connection has the roles its stored info lists, messenger when it lists none.
+func hasRole(r dbgen.GetConnectionRow, role pgtype.Text) bool {
+	var info struct {
+		Roles *[]string `json:"roles"`
+	}
+	_ = json.Unmarshal(r.BridgeInfo, &info)
+	switch {
+	case !role.Valid:
+		return true
+	case r.Type != connections.TypeBridge:
+		return role.String == bridge.RoleMessenger
+	case info.Roles == nil:
+		return role.String == bridge.RoleMessenger
+	}
+	return slices.Contains(*info.Roles, role.String)
 }
 
 func (s *memStore) GetConnection(_ context.Context, arg dbgen.GetConnectionParams) (dbgen.GetConnectionRow, error) {

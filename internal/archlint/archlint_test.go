@@ -220,6 +220,26 @@ func TestRunErrors(t *testing.T) {
 			},
 			want: "rule 3: internal/delivery.Adapter has no method Reply",
 		},
+		{
+			name: "gateway interface renamed",
+			files: map[string]string{
+				"go.mod": goMod,
+				"internal/delivery/adapter.go": "package delivery\n\ntype Adapter interface {\n" +
+					"\tPublish(text string) error\n\tUpdate(id, text string) error\n" +
+					"\tReply(id, text string) error\n}\n\ntype Pager interface{ Notify(text string) error }\n",
+			},
+			want: "rule 3: internal/delivery has no type Gateway",
+		},
+		{
+			name: "gateway method renamed",
+			files: map[string]string{
+				"go.mod": goMod,
+				"internal/delivery/adapter.go": "package delivery\n\ntype Adapter interface {\n" +
+					"\tPublish(text string) error\n\tUpdate(id, text string) error\n" +
+					"\tReply(id, text string) error\n}\n\ntype Gateway interface{ Call(text string) error }\n",
+			},
+			want: "rule 3: internal/delivery.Gateway has no method Notify",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -63,6 +63,10 @@ func (s *Server) ListConnections(ctx context.Context, req gen.ListConnectionsReq
 		t := string(*req.Params.Type)
 		f.Type = &t
 	}
+	if req.Params.Role != nil {
+		r := string(*req.Params.Role)
+		f.Role = &r
+	}
 	page, err := s.connections.List(ctx, f)
 	if err != nil {
 		return nil, err
@@ -525,12 +529,16 @@ func telegramConnectionOf(c connections.Connection) (gen.Connection, error) {
 }
 
 // bridgeConnectionOf is the API form of a Bridge Connection: its info and when it was read are null before its first
-// check and after its base URL or token changed.
+// check and after its base URL or token changed, and its roles come from that info, messenger without one (C-30.FR-1).
 func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, error) {
 	tag := etag(c.Version)
 	callback := s.connections.BridgeCallbackURL(c.PublicID)
+	roles := []gen.BridgeRole{}
+	for _, r := range c.BridgeRoles() {
+		roles = append(roles, gen.BridgeRole(r))
+	}
 	b := gen.BridgeConnection{Id: c.PublicID, Type: gen.BridgeConnectionTypeBridge, Name: c.Name,
-		BaseUrl: c.BridgeBaseURL, EventDelivery: gen.BridgeEventDelivery(c.EventDelivery),
+		BaseUrl: c.BridgeBaseURL, EventDelivery: gen.BridgeEventDelivery(c.EventDelivery), Roles: &roles,
 		BotTokenStatus: keyStatusOf(c.BotToken), PushSecretStatus: keyStatusOf(c.PushSecret), CallbackUrl: &callback,
 		Proxy:            proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},

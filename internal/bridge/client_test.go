@@ -19,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/clock"
@@ -642,5 +643,46 @@ func TestRoute(t *testing.T) {
 	}
 	if n := len(b.seen()); n != 1 {
 		t.Fatalf("a blocked request reached the stand-in: %d requests", n)
+	}
+}
+
+// TestSendNotification covers C-30.FR-2: sendNotification is a POST of notifications with the Idempotency-Key and the
+// input as JSON, its text cut to MaxNotificationText characters; 201 names the notification; an answer without a
+// notification_id of 1 to 512 characters is invalid, and a problem is classified by its class.
+func TestSendNotification(t *testing.T) {
+	b := startStandIn(t, answerJSON(http.StatusCreated, "application/json",
+		`{"notification_id":"n-1","replayed":true}`))
+	c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
+	in := gen.NotificationInput{Contact: "+10000000001", Text: strings.Repeat("я", MaxNotificationText+5),
+		Language: gen.En, Action: &gen.NotificationAction{Data: "d1", Label: "Press 1"}}
+	out, r := c.SendNotification(t.Context(), outbound.ClassInteractive, "k-1", in)
+	if !r.OK() || r.Status != http.StatusCreated || out.NotificationId != "n-1" || !out.Replayed {
+		t.Fatalf("out %+v, result %+v", out, r)
+	}
+	s := b.seen()[0]
+	var got gen.NotificationInput
+	if err := json.Unmarshal([]byte(s.Body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if s.Method != http.MethodPost || s.Path != "/v1/notifications" || s.Header.Get("Idempotency-Key") != "k-1" ||
+		utf8.RuneCountInString(got.Text) != MaxNotificationText || got.Contact != in.Contact ||
+		got.Action == nil || got.Action.Data != "d1" || got.Language != gen.En {
+		t.Errorf("request %+v, body %+v", s, got)
+	}
+	for _, answer := range []string{`{"replayed":false}`, `{"notification_id":"","replayed":false}`,
+		`{"notification_id":"` + strings.Repeat("n", 513) + `","replayed":false}`} {
+		b := startStandIn(t, answerJSON(http.StatusCreated, "application/json", answer))
+		c := newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
+		if _, r := c.SendNotification(t.Context(), outbound.ClassDelivery, "k-1", in); r.Classification.Class !=
+			ClassInvalid || r.Error != "POST notifications: the answer is not the expected JSON" {
+			t.Errorf("%s: %+v", answer, r)
+		}
+	}
+	b = startStandIn(t, answerJSON(http.StatusForbidden, problemType,
+		`{"title":"Forbidden","class":"forbidden","detail":"the provider refused the credentials"}`))
+	c = newClient(t, network(t, nil), Settings{BaseURL: b.srv.URL, Token: testToken})
+	if _, r := c.SendNotification(t.Context(), outbound.ClassDelivery, "k-1", in); r.Classification.Class !=
+		ClassForbidden || r.Outcome().Kind != delivery.OutcomeFatal {
+		t.Errorf("forbidden: %+v", r)
 	}
 }

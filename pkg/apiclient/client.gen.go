@@ -427,6 +427,24 @@ func (e BridgeInfoUserLookup) Valid() bool {
 	}
 }
 
+// Defines values for BridgeRole.
+const (
+	RoleGateway   BridgeRole = "gateway"
+	RoleMessenger BridgeRole = "messenger"
+)
+
+// Valid indicates whether the value is a known member of the BridgeRole enum.
+func (e BridgeRole) Valid() bool {
+	switch e {
+	case RoleGateway:
+		return true
+	case RoleMessenger:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BulkCommandRequestCommand.
 const (
 	BulkCommandRequestCommandAcknowledge BulkCommandRequestCommand = "acknowledge"
@@ -4429,8 +4447,11 @@ type BridgeConnection struct {
 	Proxy ProxyConfig `json:"proxy"`
 
 	// PushSecretStatus What a read shows instead of a Secret. The value itself is never returned.
-	PushSecretStatus SecretStatus         `json:"push_secret_status"`
-	Type             BridgeConnectionType `json:"type"`
+	PushSecretStatus SecretStatus `json:"push_secret_status"`
+
+	// Roles The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.
+	Roles *[]BridgeRole        `json:"roles,omitempty"`
+	Type  BridgeConnectionType `json:"type"`
 }
 
 // BridgeConnectionType defines model for BridgeConnection.Type.
@@ -4616,6 +4637,9 @@ type BridgeInfo struct {
 	// ProtocolVersion The major version of this protocol the bridge speaks.
 	ProtocolVersion BridgeInfoProtocolVersion `json:"protocol_version"`
 
+	// Roles What the bridge is; `messenger` when it is missing.
+	Roles *[]BridgeRole `json:"roles,omitempty"`
+
 	// UserLookup What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.
 	UserLookup BridgeInfoUserLookup `json:"user_lookup"`
 }
@@ -4681,6 +4705,19 @@ type BridgeMessageDeletedEvent struct {
 	Type       interface{} `json:"type"`
 }
 
+// BridgeNotificationAcknowledgedEvent defines model for BridgeNotificationAcknowledgedEvent.
+type BridgeNotificationAcknowledgedEvent struct {
+	Data string `json:"data"`
+
+	// Id Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.
+	Id             string `json:"id"`
+	NotificationId string `json:"notification_id"`
+
+	// OccurredAt When it happened in the messenger, or when the bridge learned of it.
+	OccurredAt time.Time   `json:"occurred_at"`
+	Type       interface{} `json:"type"`
+}
+
 // BridgePerson A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
 type BridgePerson struct {
 	DisplayName string `json:"display_name"`
@@ -4710,6 +4747,9 @@ type BridgePressEvent struct {
 	// User A messenger account as a bridge names it, a copy of the schema `Person` of the Bridge protocol.
 	User BridgePerson `json:"user"`
 }
+
+// BridgeRole `messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.
+type BridgeRole string
 
 // BridgeThreadMessageEvent defines model for BridgeThreadMessageEvent.
 type BridgeThreadMessageEvent struct {
@@ -9679,6 +9719,9 @@ type ListConnectionsParams struct {
 
 	// Type Filter by type.
 	Type *ConnectionType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Role Filter by role: `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has the role `messenger`, which a bridge that declares no roles has; `gateway` only the Bridge Connections whose stored `info` has the role `gateway`.
+	Role *BridgeRole `form:"role,omitempty" json:"role,omitempty"`
 }
 
 // DeleteConnectionParams defines parameters for DeleteConnection.
@@ -11092,6 +11135,40 @@ func (t *BridgeEvent) MergeBridgeMessageDeletedEvent(v BridgeMessageDeletedEvent
 	return err
 }
 
+// AsBridgeNotificationAcknowledgedEvent returns the union data inside the BridgeEvent as a BridgeNotificationAcknowledgedEvent
+func (t BridgeEvent) AsBridgeNotificationAcknowledgedEvent() (BridgeNotificationAcknowledgedEvent, error) {
+	var body BridgeNotificationAcknowledgedEvent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBridgeNotificationAcknowledgedEvent overwrites any union data inside the BridgeEvent as the provided BridgeNotificationAcknowledgedEvent
+func (t *BridgeEvent) FromBridgeNotificationAcknowledgedEvent(v BridgeNotificationAcknowledgedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"notification_acknowledged"}`))
+	t.union = b
+	return err
+}
+
+// MergeBridgeNotificationAcknowledgedEvent performs a merge with any union data inside the BridgeEvent, using the provided BridgeNotificationAcknowledgedEvent
+func (t *BridgeEvent) MergeBridgeNotificationAcknowledgedEvent(v BridgeNotificationAcknowledgedEvent) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"type":"notification_acknowledged"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t BridgeEvent) Discriminator() (string, error) {
 	var discriminator struct {
 		Discriminator string `json:"type"`
@@ -11110,6 +11187,8 @@ func (t BridgeEvent) ValueByDiscriminator() (interface{}, error) {
 		return t.AsBridgeAccountLinkEvent()
 	case "message_deleted":
 		return t.AsBridgeMessageDeletedEvent()
+	case "notification_acknowledged":
+		return t.AsBridgeNotificationAcknowledgedEvent()
 	case "press":
 		return t.AsBridgePressEvent()
 	case "thread_message":
@@ -12797,7 +12876,7 @@ type ClientInterface interface {
 
 	// CreateDestinationWithBody Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -12806,7 +12885,7 @@ type ClientInterface interface {
 
 	// CreateDestination Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -12827,7 +12906,7 @@ type ClientInterface interface {
 
 	// UpdateDestinationWithBody Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -12836,7 +12915,7 @@ type ClientInterface interface {
 
 	// UpdateDestination Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -15152,7 +15231,7 @@ func (c *Client) ListDestinations(ctx context.Context, params *ListDestinationsP
 
 // CreateDestinationWithBody Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 //
 // Takes any type of body and a specified content type.
 //
@@ -15171,7 +15250,7 @@ func (c *Client) CreateDestinationWithBody(ctx context.Context, contentType stri
 
 // CreateDestination Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -15222,7 +15301,7 @@ func (c *Client) GetDestination(ctx context.Context, destinationId DestinationId
 
 // UpdateDestinationWithBody Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 //
 // Takes any type of body and a specified content type.
 //
@@ -15241,7 +15320,7 @@ func (c *Client) UpdateDestinationWithBody(ctx context.Context, destinationId De
 
 // UpdateDestination Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -20567,6 +20646,18 @@ func NewListConnectionsRequest(server string, params *ListConnectionsParams) (*h
 		if params.Type != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "type", *params.Type, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Role != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "role", *params.Role, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -28174,7 +28265,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDestinationWithBodyWithResponse Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28183,7 +28274,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDestinationWithResponse Create Destination
 	//
-	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+	// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28208,7 +28299,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateDestinationWithBodyWithResponse Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -28217,7 +28308,7 @@ type ClientWithResponsesInterface interface {
 
 	// UpdateDestinationWithResponse Update Destination
 	//
-	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+	// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -45821,7 +45912,7 @@ func (c *ClientWithResponses) ListDestinationsWithResponse(ctx context.Context, 
 
 // CreateDestinationWithBodyWithResponse Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -45836,7 +45927,7 @@ func (c *ClientWithResponses) CreateDestinationWithBodyWithResponse(ctx context.
 
 // CreateDestinationWithResponse Create Destination
 //
-// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`.
+// `type` selects Mattermost, Telegram, outgoing webhook, Bridge or Slack. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -45879,7 +45970,7 @@ func (c *ClientWithResponses) GetDestinationWithResponse(ctx context.Context, de
 
 // UpdateDestinationWithBodyWithResponse Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -45894,7 +45985,7 @@ func (c *ClientWithResponses) UpdateDestinationWithBodyWithResponse(ctx context.
 
 // UpdateDestinationWithResponse Update Destination
 //
-// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+// Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null` on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with `gateway_only`, while one that keeps its Connection stays possible after the bridge became a gateway alone.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

@@ -24,10 +24,14 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 )
 
-// checkPassed are the lines of a check in which every step that ran passed, without press and push.
-var checkPassed = []string{"PASS info", "PASS channel_check", "PASS post", "PASS replayed_key", "PASS buttons",
-	"PASS edit", "PASS thread_reply", "PASS thread_ref", "PASS forbidden_channel", "PASS user_lookup",
+// checkPassed are the lines of a check of a messenger in which every step that ran passed, without press and push.
+var checkPassed = []string{"PASS info", "ROLES messenger", "PASS channel_check", "PASS post", "PASS replayed_key",
+	"PASS buttons", "PASS edit", "PASS thread_reply", "PASS thread_ref", "PASS forbidden_channel", "PASS user_lookup",
 	"PASS direct_message", "PASS delete", "PASS poll"}
+
+// checkNoGateway are the last lines of a check of a bridge without the role gateway.
+var checkNoGateway = []string{"SKIP notification: the bridge is not in the role gateway",
+	"SKIP notification_acknowledged: the bridge is not in the role gateway"}
 
 // TestBridgeCheck is C-22.FR-21 and AC-22 against the fake bridge of `muster dev`: `muster bridge check` with the
 // token of the fake's second bot, which no Connection polls, run with every feature and --no-interactive; with the
@@ -71,8 +75,8 @@ func TestBridgeCheck(t *testing.T) {
 	t.Run("every feature", func(t *testing.T) {
 		reset(t)
 		code, stdout, stderr := h.runCLIEnv(t, nil, append(slices.Clone(every), "--no-interactive")...)
-		want := append(slices.Clone(checkPassed), "SKIP press: --no-interactive", "SKIP push: --no-interactive",
-			"PASS answer")
+		want := slices.Concat(checkPassed, []string{"SKIP press: --no-interactive", "SKIP push: --no-interactive",
+			"PASS answer"}, checkNoGateway)
 		if code != 0 || !slices.Equal(lines(stdout), want) {
 			t.Fatalf("exit %d, stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}
@@ -102,12 +106,13 @@ func TestBridgeCheck(t *testing.T) {
 		reset(t)
 		configure(t, `{"capabilities":{"thread_messages":"all"},"user_lookup":"none","event_delivery":["poll"]}`)
 		code, stdout, stderr := h.runCLIEnv(t, nil, append(slices.Clone(check), "--no-interactive")...)
-		want := []string{"PASS info", "PASS channel_check", "PASS post", "PASS replayed_key",
+		want := []string{"PASS info", "ROLES messenger", "PASS channel_check", "PASS post", "PASS replayed_key",
 			"SKIP buttons: the bridge does not offer buttons", "PASS edit", "PASS thread_reply", "PASS thread_ref",
 			"SKIP forbidden_channel: no --forbidden-channel", "SKIP user_lookup: the bridge looks up nobody",
 			"SKIP direct_message: the bridge does not offer direct_messages",
 			"SKIP delete: the bridge does not offer delete", "PASS poll",
-			"SKIP press: the bridge does not offer buttons", "SKIP push: the bridge does not offer push", "PASS answer"}
+			"SKIP press: the bridge does not offer buttons", "SKIP push: the bridge does not offer push", "PASS answer",
+			checkNoGateway[0], checkNoGateway[1]}
 		if code != 0 || !slices.Equal(lines(stdout), want) {
 			t.Fatalf("exit %d, stdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 		}
@@ -180,7 +185,8 @@ func TestBridgeCheck(t *testing.T) {
 		passed := slices.DeleteFunc(slices.Clone(got), func(l string) bool {
 			return strings.HasPrefix(l, "PUSH ") || strings.HasPrefix(l, "WAIT ")
 		})
-		if want := append(slices.Clone(checkPassed), "PASS press", "PASS push", "PASS answer"); event == "" ||
+		want := slices.Concat(checkPassed, []string{"PASS press", "PASS push", "PASS answer"}, checkNoGateway)
+		if event == "" ||
 			len(got) != len(want)+2 || !slices.Equal(passed, want) {
 			t.Fatalf("stdout:\n%s\nstderr:\n%s", strings.Join(got, "\n"), stderr.String())
 		}

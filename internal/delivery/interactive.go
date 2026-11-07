@@ -64,6 +64,7 @@ func (e *LimitedError) Seconds() int {
 // it nowhere else: PublishOp, UpdateOp and ReplyOp. CheckOp is an adapter's Destination check, and ReadOp a read that
 // changes no message, such as a Connection check or a channel list, whose answer its function keeps. AnswerOp answers
 // a press privately and DirectOp is a bot's message to one person; neither touches a Root message or a Thread reply.
+// NotifyOp is a notification through a Notification gateway, a call of the gateway made here for the same reason.
 type Op interface {
 	call(ctx context.Context, c Call) Outcome
 }
@@ -153,6 +154,23 @@ func (f directOp) call(ctx context.Context, c Call) Outcome { return f(ctx, c) }
 // the Mattermost direct message with an Account link code (C-18.FR-11): it changes no Root message and no Thread reply,
 // and send is the messenger client's own call.
 func DirectOp(send func(ctx context.Context, c Call) Outcome) Op { return directOp(send) }
+
+type notifyOp struct {
+	gateway      Gateway
+	key          string
+	notification Notification
+}
+
+func (o notifyOp) call(ctx context.Context, c Call) Outcome {
+	c.Key = o.key
+	return o.gateway.Notify(ctx, c, o.notification)
+}
+
+// NotifyOp sends n through the Notification gateway g with the idempotency key key, for the confirmation code of a
+// contact that a person waits for (C-30.FR-3); its Subject is the gateway's Connection, whose limiter it takes.
+func NotifyOp(g Gateway, key string, n Notification) Op {
+	return notifyOp{gateway: g, key: key, notification: n}
+}
 
 // Do makes op once a token of s is taken, in the interactive client class. When no token frees within the budget it
 // returns a *LimitedError and calls nothing. A RetryAfter the call answers holds the bucket of its scope, as for the
