@@ -3171,6 +3171,10 @@ critical, and a Route raises the level of its Alert Groups with its
 <li>Migration 0033 adds the <a href="../../messengers/notification-gateways/#contact-for-calls-and-sms">contacts at Notification gateways</a>
   and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
   reads and writes nothing of the new tables.</li>
+<li>Migration 0034 adds the queue of calls through Notification gateways, the Timeline kind <code>escalation</code> with its
+  events, the Mention <code>paged</code> and the Transport <code>gateway</code>; no data is migrated. It is expand only: a 0.1 replica,
+  or one of a development image without it, writes none of the new tables and columns, and every row it writes
+  satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event <code>page_not_delivered</code>.</li>
 </ul>
 <p><strong>The Route for Muster's own alerts groups by more labels.</strong> An installation that accepted the suggestion "Send
 Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is <code>alertname</code>,
@@ -3500,6 +3504,44 @@ database role as Muster:</p>
 the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
 <code>UPDATE schema_migrations SET version = 32, dirty = false;</code> and start the 0.2.0 replica again, or run
 <code>muster migrate</code>.</p>
+<p>Migration 0034 adds the queue of calls through Notification gateways and the kind <code>escalation</code> of the Timeline in
+three transactions: the first adds the tables, the columns and the new CHECKs, the second validates them, the third
+drops the CHECKs they replace. A failure leaves the schema recorded as dirty at version 34. To recover, with the
+same database role as Muster:</p>
+<ol>
+<li>
+<p>Check whether the first transaction took effect:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">information_schema</span><span class="p">.</span><span class="n">tables</span>
+<span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">table_schema</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">current_schema</span><span class="p">()</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="k">table_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'gateway_calls'</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If it returns 0, clear the failed attempt: <code>UPDATE schema_migrations SET version = 33, dirty = false;</code>.</p>
+</li>
+<li>
+<p>If it returns 1, finish the second and the third transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timeline_entries_kind_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timeline_entries_event_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timeline_entries_event_kind_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timeline_entries_mentions_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">timeline_entries_transport_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">audit_log</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">audit_log_transport_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">webhook_events</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">webhook_events_event_v4_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">timeline_entries</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timeline_entries_kind_check</span><span class="p">,</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timeline_entries_event_v3_check</span><span class="p">,</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timeline_entries_event_kind_v3_check</span><span class="p">,</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timeline_entries_mentions_check</span><span class="p">,</span>
+<span class="w">    </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">timeline_entries_transport_v3_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">audit_log</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">audit_log_transport_v3_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">webhook_events</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">webhook_events_event_v3_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that

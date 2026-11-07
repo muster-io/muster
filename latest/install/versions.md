@@ -149,6 +149,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0033 adds the [contacts at Notification gateways](../messengers/notification-gateways.md#contact-for-calls-and-sms)
       and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
       reads and writes nothing of the new tables.
+    - Migration 0034 adds the queue of calls through Notification gateways, the Timeline kind `escalation` with its
+      events, the Mention `paged` and the Transport `gateway`; no data is migrated. It is expand only: a 0.1 replica,
+      or one of a development image without it, writes none of the new tables and columns, and every row it writes
+      satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event `page_not_delivered`.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -469,6 +473,42 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 32, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0034 adds the queue of calls through Notification gateways and the kind `escalation` of the Timeline in
+    three transactions: the first adds the tables, the columns and the new CHECKs, the second validates them, the third
+    drops the CHECKs they replace. A failure leaves the schema recorded as dirty at version 34. To recover, with the
+    same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'gateway_calls';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 33, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_mentions_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_transport_v4_check;
+        ALTER TABLE audit_log VALIDATE CONSTRAINT audit_log_transport_v4_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v4_check;
+        ALTER TABLE timeline_entries
+            DROP CONSTRAINT IF EXISTS timeline_entries_kind_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_mentions_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_transport_v3_check;
+        ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_transport_v3_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

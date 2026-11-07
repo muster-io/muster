@@ -3286,6 +3286,10 @@ its name, <code>[]</code> for none (<a href="../../concepts/teams/#which-alerts-
 <dt><code>destination</code></dt>
 <dd>Only on <code>destination_joined</code>: the <code>id</code>, <code>name</code> and <code>type</code> of the Destination the Alert Group joined. No other
 event carries it.</dd>
+<dt><code>page</code></dt>
+<dd>Only on <code>page_not_delivered</code>: the people the Page names in <code>users</code> (<code>id</code>, <code>name</code>, <code>login</code>), the Notification
+gateway of a call in <code>gateway</code> (<code>id</code>, <code>name</code>), null for a Page by Mention, and the <code>reason</code>. No other event
+carries it.</dd>
 </dl>
 <p>The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.</p>
 <h3 id="event-names">Event names<a class="headerlink" href="#event-names" title="Permanent link">&para;</a></h3>
@@ -3338,6 +3342,12 @@ value and Alert Group.</dd>
 <dd><code>notify</code>: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
 reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
 Destination, named in <code>destination</code> (<a href="../../concepts/routing-to-teams/">Routing to Teams</a>).</dd>
+<dt><code>page_not_delivered</code></dt>
+<dd><code>notify</code>: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
+refused it (<code>call_refused</code>), answered what Muster cannot classify (<code>call_unknown</code>), kept failing until the retry
+budget was used (<code>call_budget_used</code>), the person had no confirmed contact at the gateway
+(<code>no_confirmed_contact</code>), or the gateway was deleted before the call was sent (<code>gateway_deleted</code>); named in
+<code>page</code> (<a href="../../messengers/notification-gateways/">Notification gateways</a>).</dd>
 </dl>
 <p>The event <code>test</code> is sent only by a Destination test: it carries <code>test: true</code> and <code>sequence</code> 0 and belongs to no Alert
 Group's order.</p>

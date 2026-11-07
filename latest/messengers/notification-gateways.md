@@ -100,3 +100,39 @@ A contact is personal data, not a secret: the person, Admins and the gateway rea
 `sendNotification` as `[redacted]`, the code included. Adding, confirming and removing a contact are recorded in the
 Audit log. Deleting a User erases their contacts and codes, and the Audit log then shows their earlier contacts as
 `[erased]`.
+
+## Calls
+
+A call is one notification through a gateway to one person, about one or more Alert Groups. Escalation chains and
+Notification rules make calls in a later release; until then `muster dev` queues them with `POST /_dev/gateway-calls`
+on its internal listener.
+
+- The first call to a person through a gateway goes at once. The Pages to the same person through the same gateway
+  that come due while a call to them waits, is being retried, or within 60 seconds after the previous call ended —
+  accepted or not — go together in the next call, once those 60 seconds have passed.
+- Right before its first attempt, a call drops the Alert Groups that were acknowledged, snoozed or resolved meanwhile;
+  a call left without any is not sent. From its first attempt on, a call keeps its Alert Groups and its text, and
+  takes no more.
+- The text names each Alert Group by number, title and Severity level and says how to acknowledge, in the language
+  of the person's profile: "Muster: 1 Alert Group needs you. #42 DiskFull, critical. Press 1 to acknowledge." Its
+  action data names the call and fits in 64 bytes however many Alert Groups it is about.
+- Every replica sends calls, critical ones first, through the limiter of the gateway's Connection, with the same
+  `Idempotency-Key` `calls/<id of the call>` on every attempt: a gateway that keeps idempotency keys answers a repeated
+  call `replayed`, which Muster counts as accepted, so a replica that restarts after a call never makes the person's
+  phone ring twice. An answer of the class `transient` is retried within the retry budget of deliveries; a gateway
+  that asks to wait (`rate_limited` with `Retry-After`) is waited for, and its waits count toward the time of that
+  budget. Retries end when every Alert Group of the call has stopped.
+- A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
+  more.", and always ends with how to acknowledge.
+- A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
+  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`) and one through a gateway
+  deleted before the call went (`gateway_deleted`). Each of its Alert Groups records
+  `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
+  reason; outgoing webhooks in events mode receive it.
+
+The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
+Alert Group it is about is removed by `retention.alert_group_summaries`.
+
+`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
+`gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
+`gateway_call_failed`, none with the contact or the text.

@@ -1106,6 +1106,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0033 adds the [contacts at Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#contact-for-calls-and-sms)
       and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
       reads and writes nothing of the new tables.
+    - Migration 0034 adds the queue of calls through Notification gateways, the Timeline kind `escalation` with its
+      events, the Mention `paged` and the Transport `gateway`; no data is migrated. It is expand only: a 0.1 replica,
+      or one of a development image without it, writes none of the new tables and columns, and every row it writes
+      satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event `page_not_delivered`.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1426,6 +1430,42 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 32, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0034 adds the queue of calls through Notification gateways and the kind `escalation` of the Timeline in
+    three transactions: the first adds the tables, the columns and the new CHECKs, the second validates them, the third
+    drops the CHECKs they replace. A failure leaves the schema recorded as dirty at version 34. To recover, with the
+    same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.tables
+         WHERE table_schema = current_schema() AND table_name = 'gateway_calls';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 33, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_event_kind_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_mentions_v4_check;
+        ALTER TABLE timeline_entries VALIDATE CONSTRAINT timeline_entries_transport_v4_check;
+        ALTER TABLE audit_log VALIDATE CONSTRAINT audit_log_transport_v4_check;
+        ALTER TABLE webhook_events VALIDATE CONSTRAINT webhook_events_event_v4_check;
+        ALTER TABLE timeline_entries
+            DROP CONSTRAINT IF EXISTS timeline_entries_kind_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_event_kind_v3_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_mentions_check,
+            DROP CONSTRAINT IF EXISTS timeline_entries_transport_v3_check;
+        ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_transport_v3_check;
+        ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_event_v3_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -1954,7 +1994,7 @@ The screenshot is of a development installation, whose test chat servers listen 
 :   Alerts inside Alert Groups, Timeline entries and delivery events. Never Notes.
 
 **Alert Group summaries (days)** (`retention.alert_group_summaries`, 730)
-:   The summary row of an Alert Group, with its Notes.
+:   The summary row of an Alert Group, with its Notes, and the calls through Notification gateways about it.
 
 **Audit log (days)** (`retention.audit_log`, 365)
 :   Who changed or did what.
@@ -6437,6 +6477,42 @@ A contact is personal data, not a secret: the person, Admins and the gateway rea
 Audit log. Deleting a User erases their contacts and codes, and the Audit log then shows their earlier contacts as
 `[erased]`.
 
+## Calls
+
+A call is one notification through a gateway to one person, about one or more Alert Groups. Escalation chains and
+Notification rules make calls in a later release; until then `muster dev` queues them with `POST /_dev/gateway-calls`
+on its internal listener.
+
+- The first call to a person through a gateway goes at once. The Pages to the same person through the same gateway
+  that come due while a call to them waits, is being retried, or within 60 seconds after the previous call ended —
+  accepted or not — go together in the next call, once those 60 seconds have passed.
+- Right before its first attempt, a call drops the Alert Groups that were acknowledged, snoozed or resolved meanwhile;
+  a call left without any is not sent. From its first attempt on, a call keeps its Alert Groups and its text, and
+  takes no more.
+- The text names each Alert Group by number, title and Severity level and says how to acknowledge, in the language
+  of the person's profile: "Muster: 1 Alert Group needs you. #42 DiskFull, critical. Press 1 to acknowledge." Its
+  action data names the call and fits in 64 bytes however many Alert Groups it is about.
+- Every replica sends calls, critical ones first, through the limiter of the gateway's Connection, with the same
+  `Idempotency-Key` `calls/<id of the call>` on every attempt: a gateway that keeps idempotency keys answers a repeated
+  call `replayed`, which Muster counts as accepted, so a replica that restarts after a call never makes the person's
+  phone ring twice. An answer of the class `transient` is retried within the retry budget of deliveries; a gateway
+  that asks to wait (`rate_limited` with `Retry-After`) is waited for, and its waits count toward the time of that
+  budget. Retries end when every Alert Group of the call has stopped.
+- A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
+  more.", and always ends with how to acknowledge.
+- A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
+  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`) and one through a gateway
+  deleted before the call went (`gateway_deleted`). Each of its Alert Groups records
+  `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
+  reason; outgoing webhooks in events mode receive it.
+
+The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
+Alert Group it is about is removed by `retention.alert_group_summaries`.
+
+`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
+`gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
+`gateway_call_failed`, none with the contact or the text.
+
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/account-links.md -->
 # Link your messenger accounts
 
@@ -6818,6 +6894,11 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   Only on `destination_joined`: the `id`, `name` and `type` of the Destination the Alert Group joined. No other
     event carries it.
 
+`page`
+:   Only on `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), the Notification
+    gateway of a call in `gateway` (`id`, `name`), null for a Page by Mention, and the `reason`. No other event
+    carries it.
+
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
 ### Event names
@@ -6891,6 +6972,13 @@ never sent.
 :   `notify`: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
     reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
     Destination, named in `destination` ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md)).
+
+`page_not_delivered`
+:   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
+    refused it (`call_refused`), answered what Muster cannot classify (`call_unknown`), kept failing until the retry
+    budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
+    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
+    `page` ([Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md)).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.
@@ -8418,7 +8506,9 @@ and of the time to resolve. Days are split in your time zone.
 `retention.alert_group_summaries`
 :   kept for: 2 years
 
-    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes.
+    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes; and the calls
+    through a [Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#calls) about it, once every Alert Group
+    a call was about is removed. The text of a call, which names its Alert Groups, is cleared when the call ends.
 
 After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
 summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime
@@ -12321,6 +12411,15 @@ Always 1, one series per Destination that is not deleted; the labels carry its p
 - `destination` (entity): the public_id of the destination
 - `name` (info): the name of the Destination
 
+### `muster_gateway_calls_total`
+
+counter · labels: `connection`, `outcome` · C-30 · exported by every replica
+
+Attempts of calls through a Notification gateway, one per attempt that ended, by the gateway's Connection and the outcome; a replayed answer to the call's idempotency key is accepted.
+
+- `connection` (entity): the public_id of the connection
+- `outcome`: `accepted`, `retry_after`, `transient`, `fatal`, `unknown` — accepted, or the error class of the answer
+
 ### `muster_heartbeat_lost`
 
 gauge · labels: `integration` · C-07 · exported by the Leader only
@@ -12748,6 +12847,36 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_call_attempted`
+
+INFO · fields: `call`, `connection`, `attempt`, `outcome`, `replayed` · C-30
+
+An attempt of a call through a Notification gateway ended: call is the public_id of the call, connection of the gateway's Connection, attempt its number, and outcome accepted — a replayed answer to its Idempotency-Key included, with replayed true — or the error class of the answer, retry_after, transient, fatal or unknown, as muster_gateway_calls_total counts it. Never carries the contact or the text of the call.
+
+### `gateway_call_dropped`
+
+INFO · fields: `call`, `connection`, `attempts` · C-30
+
+A call through a Notification gateway ended dropped: every Alert Group it is about had stopped — acknowledged, snoozed or resolved — before its first attempt, so it was never sent, or while it was being retried, so its retries ended. call is the public_id of the call, connection of the gateway's Connection, and attempts how many attempts it made.
+
+### `gateway_call_failed`
+
+WARN · fields: `call`, `error` · C-30
+
+The gateway sender could not attempt a call through a Notification gateway, or record how its attempt ended, because of error, such as a lost database connection: call is the public_id of the call. Any replica attempts it again once its lease runs out, with the same Idempotency-Key, so that a gateway that already accepted it answers replayed. Never carries the contact or the text of the call.
+
+### `gateway_call_not_delivered`
+
+WARN · fields: `call`, `connection`, `user`, `reason`, `error` · C-30
+
+A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, and error the gateway's answer, masked. Never carries the contact or the text of the call.
+
+### `gateway_call_queued`
+
+INFO · fields: `call`, `connection`, `user`, `group`, `joined`, `not_before` · C-30
+
+A Page through a Notification gateway joined the call that waits for its first attempt, or started one: call is the public_id of the call, connection of the gateway's Connection, user of the User called, group the #N of the Alert Group, joined true when the call was waiting already, and not_before when it may go, empty while the previous call to the person through that gateway is still being sent. Never carries the contact or the text of the call.
 
 ### `gateway_contact_code_rejected`
 

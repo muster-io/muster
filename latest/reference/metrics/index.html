@@ -2911,6 +2911,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_gateway_calls_total" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_gateway_calls_total</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_heartbeat_lost" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3636,6 +3647,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_gateway_calls_total" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_gateway_calls_total</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_heartbeat_lost" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4061,6 +4083,13 @@ only by the replica that is the Leader. The capability is the one that exports t
 <ul>
 <li><code>destination</code> (entity): the public_id of the destination</li>
 <li><code>name</code> (info): the name of the Destination</li>
+</ul>
+<h3 id="muster_gateway_calls_total"><code>muster_gateway_calls_total</code><a class="headerlink" href="#muster_gateway_calls_total" title="Permanent link">&para;</a></h3>
+<p>counter · labels: <code>connection</code>, <code>outcome</code> · C-30 · exported by every replica</p>
+<p>Attempts of calls through a Notification gateway, one per attempt that ended, by the gateway's Connection and the outcome; a replayed answer to the call's idempotency key is accepted.</p>
+<ul>
+<li><code>connection</code> (entity): the public_id of the connection</li>
+<li><code>outcome</code>: <code>accepted</code>, <code>retry_after</code>, <code>transient</code>, <code>fatal</code>, <code>unknown</code> — accepted, or the error class of the answer</li>
 </ul>
 <h3 id="muster_heartbeat_lost"><code>muster_heartbeat_lost</code><a class="headerlink" href="#muster_heartbeat_lost" title="Permanent link">&para;</a></h3>
 <p>gauge · labels: <code>integration</code> · C-07 · exported by the Leader only</p>

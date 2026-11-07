@@ -178,6 +178,11 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 :   Only on `destination_joined`: the `id`, `name` and `type` of the Destination the Alert Group joined. No other
     event carries it.
 
+`page`
+:   Only on `page_not_delivered`: the people the Page names in `users` (`id`, `name`, `login`), the Notification
+    gateway of a call in `gateway` (`id`, `name`), null for a Page by Mention, and the `reason`. No other event
+    carries it.
+
 The body is rendered when the event is recorded, so a retry hours later still carries the state the event described.
 
 ### Event names
@@ -251,6 +256,13 @@ never sent.
 :   `notify`: true while firing; false while acknowledged or snoozed. The Alert Group, already published elsewhere,
     reached a new Destination because its Alerts raised its Severity level or brought a Team; one event per
     Destination, named in `destination` ([Routing to Teams](../concepts/routing-to-teams.md)).
+
+`page_not_delivered`
+:   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
+    refused it (`call_refused`), answered what Muster cannot classify (`call_unknown`), kept failing until the retry
+    budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
+    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
+    `page` ([Notification gateways](../messengers/notification-gateways.md)).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.

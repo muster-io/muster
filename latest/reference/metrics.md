@@ -209,6 +209,15 @@ Always 1, one series per Destination that is not deleted; the labels carry its p
 - `destination` (entity): the public_id of the destination
 - `name` (info): the name of the Destination
 
+### `muster_gateway_calls_total`
+
+counter · labels: `connection`, `outcome` · C-30 · exported by every replica
+
+Attempts of calls through a Notification gateway, one per attempt that ended, by the gateway's Connection and the outcome; a replayed answer to the call's idempotency key is accepted.
+
+- `connection` (entity): the public_id of the connection
+- `outcome`: `accepted`, `retry_after`, `transient`, `fatal`, `unknown` — accepted, or the error class of the answer
+
 ### `muster_heartbeat_lost`
 
 gauge · labels: `integration` · C-07 · exported by the Leader only
