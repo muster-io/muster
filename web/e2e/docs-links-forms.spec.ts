@@ -265,6 +265,8 @@ test("the Route editor has Learn more beside its complex fields", async ({ page,
     ["Matchers", "concepts/routes-and-group-keys/", "#matchers"],
     ["Group key", "concepts/routes-and-group-keys/", "#group-keys"],
     ["Minimum severity", "concepts/routes-and-group-keys/", "#minimum-severity"],
+    ["Severity conditions", "concepts/routing-to-teams/", "#severity-conditions"],
+    ["Routing to Teams", "concepts/routing-to-teams/", "#also-to-the-teams-from-the-label"],
     ["Message templates", "configure/messages-and-templates/", "#the-template-language"],
     ["Loud and Quiet delivery", "concepts/loud-and-quiet/", ""],
     [

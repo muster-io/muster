@@ -246,6 +246,47 @@ function RoutesOf({ destination }: { destination: Destination }) {
   );
 }
 
+/** The Teams that name the Destination among their Destinations (C-26.FR-1). */
+function TeamsOf({ destination }: { destination: Destination }) {
+  const { t } = useTranslation();
+  const canTeams = useCan("teams:read");
+  return (
+    <section className="flex flex-col gap-1" data-testid="destination-teams">
+      <h2 className="text-sm font-medium">{t("destinations.fields.teams")}</h2>
+      {destination.teams.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("destinations.page.noTeams")}</p>
+      ) : (
+        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+          {destination.teams.map((team) => (
+            <li key={team.id} className="wrap-anywhere">
+              {canTeams && !team.deleted ? (
+                <Link
+                  to="/teams/$teamId"
+                  params={{ teamId: team.id }}
+                  className="text-primary underline-offset-4 hover:underline focus-visible:underline"
+                >
+                  {team.name}
+                </Link>
+              ) : (
+                team.name
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function RoutesAndTeams({ destination }: { destination: Destination }) {
+  return (
+    <div className="flex flex-col gap-3">
+      <RoutesOf destination={destination} />
+      <TeamsOf destination={destination} />
+    </div>
+  );
+}
+
 type TestTab = "test" | "preview";
 
 const TEST_TABS: readonly TestTab[] = ["test", "preview"];
@@ -395,7 +436,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
               onSearch={onSearch}
               scope={{ destination: destination.id }}
             >
-              <RoutesOf destination={destination} />
+              <RoutesAndTeams destination={destination} />
               <EditForm current={destination} kind={WEBHOOK_KIND} onDirtyChange={setDirty} />
               <DestinationSecrets destinationId={destination.id} />
               <SigningSecret destination={destination} />
@@ -405,7 +446,7 @@ function DestinationView({ destinationId }: { destinationId: string }) {
             </RequestLogTabs>
           ) : (
             <>
-              <RoutesOf destination={destination} />
+              <RoutesAndTeams destination={destination} />
               {destination.type === "mattermost" ? (
                 <EditForm current={destination} kind={MATTERMOST_KIND} onDirtyChange={setDirty} />
               ) : destination.type === "telegram" ? (

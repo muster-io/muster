@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // A Team (C-25.FR-3, FR-4, FR-5, FR-9; C-25.AC-10): its name, slug and description, "Which Alerts belong to this Team",
-// "People", "Identity provider groups" and "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
+// "Destinations of the Team", "People", "Identity provider groups" and "Working hours". Each section saves on its own. The page keeps the version of the Team it was read at (and moves it on
 // with each of its own saves), sends it as If-Match with every other field as read, and says so when a newer version
 // arrives, so a save over a newer version shows a conflict instead of overwriting it, as the OIDC settings do.
 // Without teams:write the page only shows the Team.
@@ -32,6 +32,7 @@ import {
 } from "../components/claim-entries-editor";
 import { DocsLink, PageTitle } from "../components/docs-link";
 import { TeamAlertRules } from "../components/team-alert-rules";
+import { TeamDestinations } from "../components/team-destinations";
 import { TeamForm } from "../components/team-form";
 import { TeamPeople } from "../components/team-people";
 import { Alert, AlertDescription } from "../components/ui/alert";
@@ -368,6 +369,31 @@ function AlertRules({ session, canWrite }: { session: TeamBase; canWrite: boolea
   );
 }
 
+/** "Destinations of the Team": the Destinations of the Team with their conditions, saved on their own. */
+function DestinationsSection({ session, canWrite }: { session: TeamBase; canWrite: boolean }) {
+  const { t } = useTranslation();
+  const save = useTeamSave(session);
+  return (
+    <Section
+      id="team-destinations-section"
+      title={t("teams.destinations.title")}
+      docs={
+        <DocsLink
+          to="field.severity_condition"
+          kind="learn_more"
+          about={t("docs.fields.severityCondition")}
+        />
+      }
+    >
+      <TeamDestinations
+        team={session.base}
+        canWrite={canWrite}
+        save={(destination_entries) => save.mutateAsync({ destination_entries })}
+      />
+    </Section>
+  );
+}
+
 /** The checks the server repeats on the Working hours, before they are sent. */
 function hoursChecks(hours: WorkingHours): HoursErrors {
   const found: HoursErrors = {};
@@ -631,6 +657,7 @@ export function TeamDetails({ team, reload }: { team: Team; reload: () => void }
         />
       </Section>
       <AlertRules session={session} canWrite={canWrite} />
+      <DestinationsSection session={session} canWrite={canWrite} />
       <TeamPeople teamId={team.id} canWrite={canWrite} />
       <IdpGroups session={session} canWrite={canWrite} />
       <WorkingHoursSection session={session} canWrite={canWrite} />

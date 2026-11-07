@@ -29,6 +29,8 @@ import { HealthBadge } from "./destination-health";
 import { useDestinationLabels } from "./destination-label";
 import { DocsLink } from "./docs-link";
 import { RequestLogButton } from "./request-log";
+import { severityConditionText } from "./route-destinations";
+import { teamNameText } from "./team-membership";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { cn } from "./ui/utils";
 
@@ -143,6 +145,39 @@ function Mark({ children, testId }: { children: ReactNode; testId: string }) {
   );
 }
 
+/** By which entries a Destination was reached: "Route" or "Team payments", each with its condition (C-26.FR-3). */
+function Entries({ delivery }: { delivery: AlertGroupDelivery }) {
+  const { t } = useTranslation();
+  if (delivery.entries.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm text-muted-foreground"
+      data-testid="delivery-entries"
+    >
+      <span>{t("deliveries.entries.label")}:</span>
+      <ul className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5">
+        {delivery.entries.map((entry) => (
+          <li
+            key={`${entry.kind}:${entry.team?.id ?? ""}`}
+            className="wrap-anywhere"
+            data-testid="delivery-entry"
+          >
+            <span className="text-foreground">
+              {entry.kind === "team" && entry.team != null
+                ? t("deliveries.entries.team", { team: teamNameText(t, entry.team) })
+                : t("deliveries.entries.route")}
+            </span>
+            {" · "}
+            {severityConditionText(t, entry.severity_condition)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Row({
   delivery,
   label,
@@ -172,6 +207,7 @@ function Row({
           />
         )}
       </div>
+      <Entries delivery={delivery} />
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <State delivery={delivery} />
         {delivery.state === "not_delivered" && (

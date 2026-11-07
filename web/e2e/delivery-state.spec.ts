@@ -14,11 +14,19 @@ import { type Browser, expect, test, type Page } from "@playwright/test";
 
 import {
   type Api,
+  TEAM_SPEC_PASSWORD,
   adminApi,
+  alertGroupOf,
+  createRoutingRoute,
+  dropRouting,
+  ensureLocalUser,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  seedRouting,
+  setTeamDestinations,
   shot,
   signIn,
   signInAdmin,
@@ -56,6 +64,7 @@ const MENTIONS = Object.fromEntries(
 );
 
 async function cleanUp(admin: Api): Promise<void> {
+  await removeIntegration(admin, "ds-ui");
   const routes = await admin.call<{ items: Named[] }>("GET", "/api/v1/routes");
   for (const r of routes.items.filter((x) => x.name === "ds")) {
     await admin.call("POST", `/api/v1/routes/${r.id}/move-open-alert-groups`);
@@ -349,3 +358,129 @@ async function russianViewer(browser: Browser): Promise<void> {
   expect(csp).toEqual([]);
   await context.close();
 }
+
+const ENTRY_PREFIX = "dse";
+
+test("the delivery state lists by which entry each Destination was reached, and the Timeline shows each Destination joined", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const seed = await seedRouting(ENTRY_PREFIX);
+  const infraCritical = seed.destination("infra-critical");
+  const infraNotice = seed.destination("infra-notice");
+  const paymentsCritical = seed.destination("payments-critical");
+  const paymentsNotice = seed.destination("payments-notice");
+  const searchNotice = seed.destination("search-notice");
+  const alert = seed.alertName("Entry");
+  const state = (name: string) =>
+    page
+      .getByTestId("alert-group-deliveries")
+      .getByTestId("delivery-row")
+      .filter({ has: page.getByTestId("delivery-destination").getByText(name, { exact: true }) });
+  const entries = (name: string) => state(name).getByTestId("delivery-entry");
+  const joined = (name: string) =>
+    page.getByTestId("timeline-entry").filter({
+      has: page.getByTestId("timeline-text").getByText(`Joined ${name}`, { exact: true }),
+    });
+  try {
+    const admin = await adminApi();
+    try {
+      await ensureLocalUser(admin, `${ENTRY_PREFIX}-ru`, "responder");
+      await setTeamDestinations(admin, seed.slugs.pay, [
+        { destination_id: paymentsCritical.id, severity_condition: "critical" },
+        { destination_id: paymentsNotice.id, severity_condition: "below_critical" },
+      ]);
+      await setTeamDestinations(admin, seed.slugs.sea, [
+        { destination_id: searchNotice.id, severity_condition: "any" },
+      ]);
+    } finally {
+      await admin.dispose();
+    }
+    // The key lacks the Team label, so that the Alerts of the Teams share one Alert Group.
+    await createRoutingRoute(seed, `Entries-${ENTRY_PREFIX}`, {
+      entries: [
+        { destination_id: infraCritical.id, severity_condition: "critical" },
+        { destination_id: infraNotice.id, severity_condition: "below_critical" },
+      ],
+      deliverToTeams: true,
+      groupKey: ["alertname", "system"],
+    });
+    await seed.fire([{ alertname: alert, id: "pay", team: seed.slugs.pay, severity: "warning" }]);
+    const group = await alertGroupOf(seed.integrationId, alert);
+
+    await signInAdmin(page);
+    await page.goto(`/alert-groups/${group}`);
+    // A warning of payments: the Route's infra-notice and the Team's payments-notice, each with its condition.
+    await expect(state(infraNotice.name)).toHaveCount(1, { timeout: 30_000 });
+    await expect(entries(infraNotice.name)).toHaveText(["Route · Severity < critical"]);
+    await expect(state(paymentsNotice.name)).toHaveCount(1);
+    await expect(entries(paymentsNotice.name)).toHaveText([
+      `Team ${seed.slugs.pay} · Severity < critical`,
+    ]);
+    await expect(state(paymentsNotice.name).getByTestId("delivery-entries")).toContainText(
+      "Reached by:",
+    );
+    await expect(state(infraCritical.name)).toHaveCount(0);
+    await expect(state(paymentsCritical.name)).toHaveCount(0);
+    await expect(state(infraNotice.name).getByTestId("delivery-state")).toHaveText(
+      "Delivered (opens in a new tab)",
+      { timeout: 30_000 },
+    );
+    await shot(page, "delivery-entries");
+
+    // An Alert of search into the same Alert Group: search-notice joins, and the Timeline says so.
+    await seed.fire([{ alertname: alert, id: "sea", team: seed.slugs.sea, severity: "warning" }]);
+    await expect(state(searchNotice.name)).toHaveCount(1, { timeout: 30_000 });
+    await expect(entries(searchNotice.name)).toHaveText([`Team ${seed.slugs.sea} · Any severity`]);
+    await expect(joined(searchNotice.name)).toHaveCount(1);
+    await expect(joined(searchNotice.name).getByTestId("timeline-actor")).toHaveText("Muster");
+
+    // A critical Alert of payments raises the level: infra-critical and payments-critical join, with the
+    // conditions that now met them, and the first Destinations keep their entries.
+    await seed.fire([
+      { alertname: alert, id: "pay-c", team: seed.slugs.pay, severity: "critical" },
+    ]);
+    await expect(entries(infraCritical.name)).toHaveText(["Route · Severity = critical"], {
+      timeout: 30_000,
+    });
+    await expect(entries(paymentsCritical.name)).toHaveText([
+      `Team ${seed.slugs.pay} · Severity = critical`,
+    ]);
+    await expect(joined(infraCritical.name)).toHaveCount(1);
+    await expect(joined(paymentsCritical.name)).toHaveCount(1);
+    await expect(entries(infraNotice.name)).toHaveText(["Route · Severity < critical"]);
+    await expect(joined(searchNotice.name)).toHaveCount(1);
+
+    // The same page in Russian at 360 px, and no sideways scrolling.
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, `${ENTRY_PREFIX}-ru`, TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto(`/alert-groups/${group}`);
+    const ruRow = ru
+      .getByTestId("alert-group-deliveries")
+      .getByTestId("delivery-row")
+      .filter({
+        has: ru.getByTestId("delivery-destination").getByText(paymentsNotice.name, { exact: true }),
+      });
+    await expect(ruRow.getByTestId("delivery-entry")).toHaveText([
+      `Команда ${seed.slugs.pay} · важность < critical`,
+    ]);
+    await expect(
+      ru
+        .getByTestId("timeline-text")
+        .getByText(`Группа пришла в ${searchNotice.name}`, { exact: true }),
+    ).toBeVisible();
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "delivery-entries-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    await dropRouting(ENTRY_PREFIX);
+  }
+  expect(csp).toEqual([]);
+});

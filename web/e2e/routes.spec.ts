@@ -14,9 +14,11 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   INGEST_URL,
   adminApi,
+  dropRouting,
   expectNoHorizontalScroll,
   fam,
   notify,
+  seedRouting,
   shot,
   signIn,
   signInAdmin,
@@ -520,6 +522,215 @@ test("the Route form chooses the Minimum severity, saves it and the list marks i
     const admin = await adminApi();
     await admin.call("DELETE", `/api/v1/routes/${hb.id}`);
     await admin.dispose();
+  }
+  expect(csp).toEqual([]);
+});
+
+const PREFIX = "rtd";
+
+/** Removes the chips of the Group key one by one, then adds the label names. */
+async function setGroupKey(page: Page, labels: string[]): Promise<void> {
+  const chips = page.getByTestId("group-key-label");
+  while ((await chips.count()) > 0) {
+    await chips.first().getByRole("button").click();
+  }
+  for (const label of labels) {
+    await page.getByPlaceholder("label name").fill(label);
+    await page.getByPlaceholder("label name").press("Enter");
+  }
+  await expect(chips).toHaveText(labels);
+}
+
+test("the Route form gives each Destination a Severity condition and delivers to the Teams from the label, and the list shows them", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const seed = await seedRouting(PREFIX);
+  const critical = seed.destination("infra-critical");
+  const notice = seed.destination("infra-notice");
+  const route = `Paging-${PREFIX}`;
+  try {
+    await signInAdmin(page);
+    await page.goto("/routes");
+    await page.getByRole("link", { name: "Create route" }).click();
+    await page.getByTestId("route-profile-paging").click();
+
+    // The Destinations section with no Destination: its title, hint and empty text, and Learn more.
+    const section = page.getByTestId("route-destinations");
+    await expect(section.getByRole("heading", { name: "Route Destinations" })).toHaveCount(0);
+    await expect(
+      page.getByRole("group", { name: "Route Destinations", exact: true }),
+    ).toBeVisible();
+    await expect(section).toContainText(
+      "Where the Route sends the messages of its Alert Groups; each Destination may have a Severity condition",
+    );
+    await expect(page.getByTestId("route-destinations-none")).toHaveText(
+      "No Destinations: Muster sends no messages for this route.",
+    );
+    await expect(
+      section.getByRole("link", { name: "Learn more: Severity conditions (opens in a new tab)" }),
+    ).toHaveAttribute("href", /\/concepts\/routing-to-teams\/#severity-conditions$/);
+
+    await page.getByRole("textbox", { name: "Name" }).fill(route);
+    await page.getByRole("button", { name: "Add matcher" }).click();
+    await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("category");
+    await page.getByRole("textbox", { name: "Value of matcher 1" }).fill(seed.category);
+    await setGroupKey(page, ["alertname", "system"]);
+
+    // Each Destination gets "Any severity" and the choice of the three conditions.
+    await page.getByLabel("Add a Destination").selectOption(critical.id);
+    await page.getByLabel("Add a Destination").selectOption(notice.id);
+    const criticalCondition = page.getByTestId(`route-destination-condition-${critical.id}`);
+    const noticeCondition = page.getByTestId(`route-destination-condition-${notice.id}`);
+    await expect(criticalCondition).toHaveValue("any");
+    await expect(criticalCondition.locator("option")).toHaveText([
+      "Any severity",
+      "Severity = critical",
+      "Severity < critical",
+    ]);
+    await criticalCondition.selectOption("critical");
+    await noticeCondition.selectOption("below_critical");
+
+    // The option under the Destinations, its sub-option waiting while it is off, and Learn more.
+    const option = page.getByTestId("route-deliver-to-teams");
+    const chains = page.getByTestId("route-run-team-chains");
+    await expect(
+      page.getByLabel("Also to the Teams from the label team", { exact: true }),
+    ).not.toBeChecked();
+    await expect(chains).toBeDisabled();
+    await expect(page.getByTestId("shared-key-hint")).toHaveCount(0);
+    await option.check();
+    await expect(chains).toBeEnabled();
+    await expect(chains).toBeChecked();
+    await expect(page.getByLabel("Run the Teams' Escalation chains")).toBeVisible();
+    await expect(page.getByTestId("route-teams-option")).toContainText(
+      "The Alert Group also goes to the Destinations of the Teams whose values are in its Alerts, with their Severity conditions. A new Team adds channels and removes none.",
+    );
+    await expect(
+      page.getByRole("link", { name: "Learn more: Routing to Teams (opens in a new tab)" }),
+    ).toHaveAttribute("href", /\/concepts\/routing-to-teams\/#also-to-the-teams-from-the-label$/);
+
+    // The hint under the Group key and its button.
+    const hint = page.getByTestId("shared-key-hint");
+    await expect(hint).toContainText(
+      "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add team to the key if each Team needs its own.",
+    );
+    await shot(page, "route-teams-option");
+
+    // A request that names the first Destination twice (the second entry is replaced on its way) is refused by the
+    // server at the entry, which the form shows at that Destination's row, not as a second alert.
+    await page.route("**/api/v1/routes", async (r) => {
+      if (r.request().method() !== "POST") {
+        await r.continue();
+        return;
+      }
+      const body: { destination_entries: unknown[] } = r.request().postDataJSON();
+      await r.continue({
+        postData: JSON.stringify({
+          ...body,
+          destination_entries: [body.destination_entries[0], body.destination_entries[0]],
+        }),
+      });
+    });
+    await page.getByRole("button", { name: "Create" }).click();
+    const second = page.getByTestId("route-destination").nth(1);
+    await expect(second.getByRole("alert")).toHaveText("This Destination is listed twice.");
+    await expect(page.getByRole("alert")).toHaveCount(1);
+    await expect(page).toHaveURL(/\/routes\/new$/);
+    await page.unroute("**/api/v1/routes");
+
+    // "Add team to the key" ends the hint and puts the label last in the key; Create saves.
+    await page.getByRole("button", { name: "Add team to the key" }).click();
+    await expect(hint).toHaveCount(0);
+    await expect(page.getByTestId("group-key-label")).toHaveText(["alertname", "system", "team"]);
+    const request = page.waitForRequest(
+      (r) => r.url().endsWith("/api/v1/routes") && r.method() === "POST",
+    );
+    await page.getByRole("button", { name: "Create" }).click();
+    const body: unknown = (await request).postDataJSON();
+    expect(body).toMatchObject({
+      group_key: ["alertname", "system", "team"],
+      destination_entries: [
+        { destination_id: critical.id, severity_condition: "critical" },
+        { destination_id: notice.id, severity_condition: "below_critical" },
+      ],
+      deliver_to_teams: true,
+      run_team_chains: true,
+    });
+    expect(body).not.toHaveProperty("destination_ids");
+
+    // The list shows the Destinations with their conditions and "+ Teams from the label".
+    await expect(page).toHaveURL(/\/routes$/);
+    const saved = routeRow(page, route);
+    await expect(saved.getByTestId("route-destinations-summary")).toHaveText(
+      `Destinations: ${critical.name} (critical), ${notice.name} (< critical) + Teams from the label`,
+    );
+    await shot(page, "routes-destinations-list");
+
+    // The saved Route's editor shows the same, and the option stays on.
+    await saved.getByRole("link", { name: route, exact: true }).click();
+    await expect(page.getByTestId(`route-destination-condition-${critical.id}`)).toHaveValue(
+      "critical",
+    );
+    await expect(page.getByTestId("route-deliver-to-teams")).toBeChecked();
+    await expect(page.getByTestId("shared-key-hint")).toHaveCount(0);
+
+    // Russian at 360 px: the section, the option, the hint and the list.
+    const ruAdmin = await adminApi();
+    try {
+      const directory = await ruAdmin.call<{ items: { login?: string }[] }>(
+        "GET",
+        `/api/v1/user-directory?q=${encodeURIComponent(RU_ADMIN)}`,
+      );
+      if (!directory.items.some((u) => u.login === RU_ADMIN)) {
+        const { token } = await ruAdmin.createUser(RU_ADMIN, "admin");
+        await ruAdmin.call("POST", "/api/v1/password-setups", { token, password: RU_PASSWORD });
+      }
+    } finally {
+      await ruAdmin.dispose();
+    }
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, RU_ADMIN, RU_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/routes");
+    await expect(routeRow(ru, route).getByTestId("route-destinations-summary")).toHaveText(
+      `Места доставки: ${critical.name} (critical), ${notice.name} (< critical) + командам из метки`,
+    );
+    await expectNoHorizontalScroll(ru);
+    await routeRow(ru, route).getByRole("link", { name: route, exact: true }).click();
+    const ruSection = ru.getByTestId("route-destinations");
+    await expect(ruSection).toContainText("Места доставки маршрута");
+    await expect(ruSection).toContainText(
+      "Куда маршрут отправляет сообщения своих групп алертов. У каждого места доставки может быть условие по важности.",
+    );
+    await expect(ru.getByTestId(`route-destination-condition-${critical.id}`)).toHaveValue(
+      "critical",
+    );
+    await expect(
+      ru.getByTestId(`route-destination-condition-${critical.id}`).locator("option"),
+    ).toHaveText(["любая важность", "важность = critical", "важность < critical"]);
+    await expect(ru.getByLabel("Ещё командам из метки team", { exact: true })).toBeChecked();
+    await expect(ru.getByLabel("Запускать цепочки эскалации команд")).toBeChecked();
+    await expect(ru.getByTestId("route-teams-option")).toContainText(
+      "Группа приходит и в места доставки команд, чьи значения метки есть в её алертах, с их условиями важности. Новая команда добавляет места доставки, ничего не убирает.",
+    );
+    // Without "team" in the key the hint reads in Russian too.
+    await ru.getByTestId("group-key-label").filter({ hasText: "team" }).getByRole("button").click();
+    await expect(ru.getByTestId("shared-key-hint")).toContainText(
+      "Алерты разных команд с одним ключом попадают в одну группу алертов",
+    );
+    await expect(ru.getByRole("button", { name: "Добавить team в ключ" })).toBeVisible();
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "route-teams-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    await dropRouting(PREFIX);
   }
   expect(csp).toEqual([]);
 });

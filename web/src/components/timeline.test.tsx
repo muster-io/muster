@@ -44,6 +44,12 @@ const ALICE = {
   name: "Alice Smith",
   transport: "mattermost",
 } as const;
+const SEARCH_NOTICE = {
+  id: "DS0000000000SN",
+  name: "search-notice",
+  type: "mattermost",
+  health: { state: "healthy" },
+} as const;
 const BOB = { id: "US0000000000BB", name: "Bob", deactivated: false };
 const MARKUP = "<img src=x onerror=alert(1)> {{count}} $t(errors.generic)";
 
@@ -301,6 +307,13 @@ describe("entryText", () => {
     expect(
       text(system("unknown_team_value", { event: "unknown_team_value", team_value: "Payments" })),
     ).toBe("No Team has the value Payments of the Team label");
+    expect(
+      text(
+        system("destination_joined", {
+          destination: SEARCH_NOTICE,
+        }),
+      ),
+    ).toBe("Joined search-notice");
     expect(text(delivery("publication"))).toBe("Published in ops");
     expect(text(delivery("not_delivered"))).toBe("Not delivered to ops");
     expect(text(delivery("final_edit"))).toBe("No longer updated in ops");
@@ -323,6 +336,13 @@ describe("entryText", () => {
     expect(text(system("unknown_team_value", { team_value: "Payments" }))).toBe(
       "Нет команды со значением Payments метки команды",
     );
+    expect(
+      text(
+        system("destination_joined", {
+          destination: SEARCH_NOTICE,
+        }),
+      ),
+    ).toBe("Группа пришла в search-notice");
   });
 
   test("names the actor with the Transport, and Muster for the system", () => {

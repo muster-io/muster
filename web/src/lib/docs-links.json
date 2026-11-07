@@ -1,6 +1,7 @@
 {
   "field.bridge_events": "messengers/bridge.md#create-the-connection",
   "field.buttons": "concepts/statuses-and-commands.md#button-sets",
+  "field.deliver_to_teams": "concepts/routing-to-teams.md#also-to-the-teams-from-the-label",
   "field.group_key": "concepts/routes-and-group-keys.md#group-keys",
   "field.heartbeat": "integrations/heartbeat.md#turn-it-on",
   "field.integration_snippet": "integrations/alertmanager.md#create-a-token-and-paste-the-snippet",
@@ -17,6 +18,7 @@
   "field.permissions": "configure/api-tokens.md#two-kinds-of-token",
   "field.proxy": "messengers/proxies.md#where-you-set-a-proxy",
   "field.route_profile": "concepts/routes-and-group-keys.md#route-profiles",
+  "field.severity_condition": "concepts/routing-to-teams.md#severity-conditions",
   "field.slack_event_mode": "messengers/slack.md#socket-mode-or-http",
   "field.slack_manifest": "messengers/slack.md#create-the-app-from-a-manifest",
   "field.slack_tokens": "messengers/slack.md#install-the-app-and-create-the-tokens",
