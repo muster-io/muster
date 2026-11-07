@@ -80,6 +80,12 @@ WARN · no fields · C-03
 
 The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
 
+### `bridge_acknowledgement_dropped`
+
+INFO · fields: `connection`, `event_id`, `age_seconds` · C-30
+
+A notification_acknowledged event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's real clock — such as one a gateway sent again after bridge.event_dedup_window — and was dropped without an answer, so that it never makes the person an Owner again: connection is the public_id of the Connection, event_id the event's id and age_seconds how old it was. Nothing changed.
+
 ### `bridge_event_failed`
 
 WARN · fields: `connection`, `event_id`, `type`, `error` · C-22
@@ -96,7 +102,7 @@ A Bridge event was refused and changed nothing: connection is the public_id the 
 
 INFO · fields: `connection`, `event_id`, `type` · C-22
 
-A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
+A Bridge event of a type that this Muster reads but no handler of this process takes — notification_acknowledged in a process without the Acknowledge through a Notification gateway, which a running server always has — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
 
 ### `bridge_info_read`
 
@@ -235,6 +241,12 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_acknowledge_refused`
+
+INFO · fields: `call`, `connection`, `reason` · C-30
+
+A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
 
 ### `gateway_call_attempted`
 

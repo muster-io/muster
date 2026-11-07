@@ -3175,6 +3175,9 @@ critical, and a Route raises the level of its Alert Groups with its
   events, the Mention <code>paged</code> and the Transport <code>gateway</code>; no data is migrated. It is expand only: a 0.1 replica,
   or one of a development image without it, writes none of the new tables and columns, and every row it writes
   satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event <code>page_not_delivered</code>.</li>
+<li>Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
+  signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
+  image without it, writes neither column and signs each attempt of a call with the active key, as before.</li>
 </ul>
 <p><strong>The Route for Muster's own alerts groups by more labels.</strong> An installation that accepted the suggestion "Send
 Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is <code>alertname</code>,
@@ -3542,6 +3545,10 @@ same database role as Muster:</p>
 <p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
 </li>
 </ol>
+<p>Migration 0035 adds the action data and the key id of calls in one transaction: a failure leaves nothing of it, but
+the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 34, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that

@@ -72,7 +72,8 @@ when no replica has led for 2 minutes; see [its runbook](runbooks/MusterNoLeader
 While there is no Leader:
 
 - **Bridge** Connections in the `poll` mode and Telegram Connections in the long polling mode receive no button presses and
-  no Text commands. When a Leader returns, a Bridge press or Text command older than `bridge.event_max_age` (1 hour) is
+  no Text commands, and Notification gateways in the `poll` mode no acknowledgements made in a call. When a Leader
+  returns, a Bridge press, Text command or acknowledgement in a call older than `bridge.event_max_age` (1 hour) is
   dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
   `telegram.press_max_age` (1 hour) before it. Connections in the `push` mode of a Bridge and the webhook mode of
   Telegram keep working.

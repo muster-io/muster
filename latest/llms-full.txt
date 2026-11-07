@@ -1110,6 +1110,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       events, the Mention `paged` and the Transport `gateway`; no data is migrated. It is expand only: a 0.1 replica,
       or one of a development image without it, writes none of the new tables and columns, and every row it writes
       satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event `page_not_delivered`.
+    - Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
+      signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
+      image without it, writes neither column and signs each attempt of a call with the active key, as before.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1466,6 +1469,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0035 adds the action data and the key id of calls in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 34, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -6513,6 +6521,25 @@ Alert Group it is about is removed by `retention.alert_group_summaries`.
 `gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
 `gateway_call_failed`, none with the contact or the text.
 
+## Acknowledge from a call
+
+When the person acknowledges in the call — presses 1, for example — the gateway reports `notification_acknowledged` with
+the call's action data. Muster verifies the data, which names the call and its Connection, and acknowledges each Alert
+Group of the call as the person the call was for, never as whoever holds the phone, with the Transport `gateway`: the
+Timeline shows "Ivan from a call through Example Gateway", with the name of the gateway. It acknowledges only while
+nobody owns an Alert Group: an Alert Group someone has already, the same person included, stays theirs, as a resolved
+one stays resolved — a call never takes an Alert Group over. The gateway tells the person, in the language of their
+profile, what happened: "Acknowledged: #12, #13", "Already taken by Alice" or "Already resolved". A Viewer, a disabled
+person, and data that does not verify or belongs to another Connection change nothing and are answered so; the log
+records the latter as `gateway_acknowledge_refused`. An event is handled once, however often the gateway reports it.
+
+An acknowledgement that the gateway reports more than an hour after it happened (`bridge.event_max_age`) is dropped,
+unanswered, and logged as `bridge_acknowledgement_dropped`. An acknowledgement through a gateway counts in
+`muster_commands_total{transport="gateway"}`. The key that signed a call's action data stays needed in the Keyring
+while the call is being sent, and for two hours after it ended — accepted, or not delivered after an attempt — while
+any of its Alert Groups is open: the hour in which an acknowledgement is acted on, and as long again for the call to
+ring or be retried by the gateway after it was accepted.
+
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/account-links.md -->
 # Link your messenger accounts
 
@@ -6878,8 +6905,8 @@ One `POST` per lifecycle event, with the version 1 body as `application/json`:
 
 `actor`
 :   Who made the change: a `user` or `service_account` with `id`, `name` (and the user's `login`, or the `token_name`
-    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`), or `system` with the
-    `reason`, for example `timer`.
+    used) and the `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `cli`), or
+    `system` with the `reason`, for example `timer`.
 
 `alert_group`
 :   The Alert Group as it was when the event was recorded: number, `id`, title, `summary`, status, the `owner` (`id`,
@@ -10651,7 +10678,8 @@ when no replica has led for 2 minutes; see [its runbook](https://muster-io.githu
 While there is no Leader:
 
 - **Bridge** Connections in the `poll` mode and Telegram Connections in the long polling mode receive no button presses and
-  no Text commands. When a Leader returns, a Bridge press or Text command older than `bridge.event_max_age` (1 hour) is
+  no Text commands, and Notification gateways in the `poll` mode no acknowledgements made in a call. When a Leader
+  returns, a Bridge press, Text command or acknowledgement in a call older than `bridge.event_max_age` (1 hour) is
   dropped unanswered; a Telegram press is dropped unanswered when the Connection received no updates for longer than
   `telegram.press_max_age` (1 hour) before it. Connections in the `push` mode of a Bridge and the webhook mode of
   Telegram keep working.
@@ -11448,8 +11476,9 @@ What stops while no replica leads:
 - **Telegram polling**: Connections in the long polling update mode receive no button presses and no messages from
   the discussion group.
 - **Bridge polling**: Bridge Connections in the `poll` event delivery mode receive no events — no button presses, Text
-  commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
-  command that is older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
+  commands, acknowledgements made in a call through a Notification gateway, Account link requests or reports of
+  deleted messages — until a replica leads again. A press, a Text command or an acknowledgement in a call that is
+  older than `bridge.event_max_age` (1 hour) by then is dropped unanswered.
 - **Slack's Socket Mode**: Slack Connections in the `socket` event mode hold no Socket Mode connection, so a button
   press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
   not count on Slack to send such presses again.
@@ -12337,7 +12366,7 @@ counter · labels: `command`, `transport`, `outcome` · C-10 · exported by ever
 Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.
 
 - `command`: `acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it` — the Command
-- `transport`: `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `system` — how the Command reached Muster
+- `transport`: `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `system` — how the Command reached Muster
 - `outcome`: `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found
 
 ### `muster_db_pool_acquire_wait_seconds_total`
@@ -12692,6 +12721,12 @@ WARN · no fields · C-03
 
 The Organization has no Admin and the bootstrap variables are not set, so nobody can sign in to administer Muster: set MUSTER_BOOTSTRAP_ADMIN_EMAIL and MUSTER_BOOTSTRAP_ADMIN_PASSWORD (or _FILE) and restart, or run muster admin reset-password.
 
+### `bridge_acknowledgement_dropped`
+
+INFO · fields: `connection`, `event_id`, `age_seconds` · C-30
+
+A notification_acknowledged event of a Bridge Connection arrived more than bridge.event_max_age after its occurred_at, by Muster's real clock — such as one a gateway sent again after bridge.event_dedup_window — and was dropped without an answer, so that it never makes the person an Owner again: connection is the public_id of the Connection, event_id the event's id and age_seconds how old it was. Nothing changed.
+
 ### `bridge_event_failed`
 
 WARN · fields: `connection`, `event_id`, `type`, `error` · C-22
@@ -12708,7 +12743,7 @@ A Bridge event was refused and changed nothing: connection is the public_id the 
 
 INFO · fields: `connection`, `event_id`, `type` · C-22
 
-A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
+A Bridge event of a type that this Muster reads but no handler of this process takes — notification_acknowledged in a process without the Acknowledge through a Notification gateway, which a running server always has — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
 
 ### `bridge_info_read`
 
@@ -12847,6 +12882,12 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_acknowledge_refused`
+
+INFO · fields: `call`, `connection`, `reason` · C-30
+
+A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
 
 ### `gateway_call_attempted`
 

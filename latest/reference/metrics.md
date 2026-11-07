@@ -135,7 +135,7 @@ counter · labels: `command`, `transport`, `outcome` · C-10 · exported by ever
 Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.
 
 - `command`: `acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it` — the Command
-- `transport`: `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `system` — how the Command reached Muster
+- `transport`: `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `system` — how the Command reached Muster
 - `outcome`: `done`, `unchanged`, `refused`, `skipped`, `failed` — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found
 
 ### `muster_db_pool_acquire_wait_seconds_total`

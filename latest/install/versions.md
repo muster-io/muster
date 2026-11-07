@@ -153,6 +153,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       events, the Mention `paged` and the Transport `gateway`; no data is migrated. It is expand only: a 0.1 replica,
       or one of a development image without it, writes none of the new tables and columns, and every row it writes
       satisfies the widened CHECKs. Outgoing webhooks in events mode may receive the new event `page_not_delivered`.
+    - Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
+      signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
+      image without it, writes neither column and signs each attempt of a call with the active key, as before.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -509,6 +512,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0035 adds the action data and the key id of calls in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 34, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

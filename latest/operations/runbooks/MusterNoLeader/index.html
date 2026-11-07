@@ -3005,8 +3005,9 @@ the problem behind the missing Leader — usually the database — may stop deli
 <li><strong>Telegram polling</strong>: Connections in the long polling update mode receive no button presses and no messages from
   the discussion group.</li>
 <li><strong>Bridge polling</strong>: Bridge Connections in the <code>poll</code> event delivery mode receive no events — no button presses, Text
-  commands, Account link requests or reports of deleted messages — until a replica leads again. A press or a Text
-  command that is older than <code>bridge.event_max_age</code> (1 hour) by then is dropped unanswered.</li>
+  commands, acknowledgements made in a call through a Notification gateway, Account link requests or reports of
+  deleted messages — until a replica leads again. A press, a Text command or an acknowledgement in a call that is
+  older than <code>bridge.event_max_age</code> (1 hour) by then is dropped unanswered.</li>
 <li><strong>Slack's Socket Mode</strong>: Slack Connections in the <code>socket</code> event mode hold no Socket Mode connection, so a button
   press made meanwhile is lost — the person sees Slack's error — until a replica leads again and connects. Muster does
   not count on Slack to send such presses again.</li>

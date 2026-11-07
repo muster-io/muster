@@ -4032,7 +4032,7 @@ only by the replica that is the Leader. The capability is the one that exports t
 <p>Commands run on Alert Groups, one per Alert Group, by command, Transport and outcome.</p>
 <ul>
 <li><code>command</code>: <code>acknowledge</code>, <code>unacknowledge</code>, <code>resolve</code>, <code>unresolve</code>, <code>snooze</code>, <code>unsnooze</code>, <code>add_note</code>, <code>still_on_it</code> — the Command</li>
-<li><code>transport</code>: <code>ui</code>, <code>api</code>, <code>mattermost</code>, <code>telegram</code>, <code>bridge</code>, <code>slack</code>, <code>system</code> — how the Command reached Muster</li>
+<li><code>transport</code>: <code>ui</code>, <code>api</code>, <code>mattermost</code>, <code>telegram</code>, <code>bridge</code>, <code>slack</code>, <code>gateway</code>, <code>system</code> — how the Command reached Muster</li>
 <li><code>outcome</code>: <code>done</code>, <code>unchanged</code>, <code>refused</code>, <code>skipped</code>, <code>failed</code> — done changed the Alert Group, unchanged was an idempotent repeat, refused a refusal or a missing Permission, skipped an Alert Group a bulk Acknowledge left to its Owner, failed an Alert Group that was not found</li>
 </ul>
 <h3 id="muster_db_pool_acquire_wait_seconds_total"><code>muster_db_pool_acquire_wait_seconds_total</code><a class="headerlink" href="#muster_db_pool_acquire_wait_seconds_total" title="Permanent link">&para;</a></h3>
