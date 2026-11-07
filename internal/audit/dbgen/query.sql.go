@@ -108,7 +108,7 @@ func (q *Queries) InsertAuditEntry(ctx context.Context, arg InsertAuditEntryPara
 const listAuditEntries = `-- name: ListAuditEntries :many
 SELECT a.id, a.public_id, a.at, a.actor_kind, a.actor_name, a.token_name, a.transport, a.action, a.resource_type,
        a.resource_public_id, a.resource_name, ru.name AS resource_user_name, ru.status AS resource_user_status,
-       a.diff, a.details,
+       cu.status AS contact_user_status, a.diff, a.details,
        u.public_id AS actor_user_public_id, u.name AS actor_user_name,
        sa.public_id AS actor_service_account_public_id, sa.name AS actor_service_account_name,
        t.public_id AS token_public_id
@@ -117,6 +117,8 @@ LEFT JOIN users u ON u.org_id = $1 AND u.id = a.actor_user_id
 LEFT JOIN service_accounts sa ON sa.org_id = $1 AND sa.id = a.actor_service_account_id
 LEFT JOIN api_tokens t ON t.org_id = $1 AND t.id = a.api_token_id
 LEFT JOIN users ru ON ru.org_id = $1 AND a.resource_type = 'user' AND ru.public_id = a.resource_public_id
+LEFT JOIN users cu ON cu.org_id = $1 AND a.resource_type = 'gateway_contact'
+    AND cu.public_id = a.details->>'user'
 WHERE a.org_id = $1
   AND ($2::timestamptz IS NULL OR a.at >= $2::timestamptz)
   AND ($3::timestamptz IS NULL OR a.at < $3::timestamptz)
@@ -160,6 +162,7 @@ type ListAuditEntriesRow struct {
 	ResourceName                pgtype.Text
 	ResourceUserName            pgtype.Text
 	ResourceUserStatus          pgtype.Text
+	ContactUserStatus           pgtype.Text
 	Diff                        []byte
 	Details                     []byte
 	ActorUserPublicID           pgtype.Text
@@ -172,7 +175,8 @@ type ListAuditEntriesRow struct {
 // ListAuditEntries is a page of entries, newest first by time and id, after the cursor (before_at, before_id) when
 // one is given, with the filters that are set. The actor, and a user as the resource, show their current name, so
 // that a deleted user appears as deleted-user-<id> (C-03.FR-13); rows are never rewritten. The status of a user
-// resource lets the reader mask what deleting the user erased, for the whole page at once.
+// resource lets the reader mask what deleting the user erased, for the whole page at once, and so does the status of
+// the User whose contact at a Notification gateway an entry is about, whom its details name (C-30.FR-3).
 func (q *Queries) ListAuditEntries(ctx context.Context, arg ListAuditEntriesParams) ([]ListAuditEntriesRow, error) {
 	rows, err := q.db.Query(ctx, listAuditEntries,
 		arg.OrgID,
@@ -208,6 +212,7 @@ func (q *Queries) ListAuditEntries(ctx context.Context, arg ListAuditEntriesPara
 			&i.ResourceName,
 			&i.ResourceUserName,
 			&i.ResourceUserStatus,
+			&i.ContactUserStatus,
 			&i.Diff,
 			&i.Details,
 			&i.ActorUserPublicID,

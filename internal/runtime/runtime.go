@@ -34,6 +34,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	destinationsdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
@@ -575,6 +576,9 @@ type process struct {
 	roles       auth.Roles
 	// links are the Account links, which map the presses of both messengers to their Users.
 	links *accountlinks.Service
+	// gatewayContacts are the contacts of people at the Notification gateways, whose codes go through the gateway on
+	// the interactive path (C-30.FR-3).
+	gatewayContacts *gateways.Service
 	// mattermost, telegram, bridge and slack are the adapters of the messenger Destinations, which the delivery worker
 	// and the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by
 	// the callback of any replica, with the test that waits for it.
@@ -1033,6 +1037,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Bridge:     bridge.LinkBots{Conns: conns, Path: interactive},
 		Slack:      slack.LinkBots{Conns: conns, Path: interactive}})
 	p.messengerAdapters()
+	// The contacts at Notification gateways are kept in the main pool, as the Account links are (C-30.FR-3).
+	p.gatewayContacts = gateways.New(gateways.Config{OrgID: orgID, Store: gateways.NewStore(p.db.AccountLinksDB()),
+		Audit: w, Business: p.clocks.Business, Log: p.log, Gateway: p.bridge, Path: interactive})
 	pool := p.db.MessagesDB()
 	p.testPresses = &mattermost.PressWaits{Notify: func(ctx context.Context, channel, payload string) error {
 		_, err := pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload)
@@ -1129,6 +1136,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	admin.SetLinkRemover(p.links)
 	admin.SetTeamRemover(p.teams)
 	admin.SetFeedRemover(p.icalFeeds)
+	admin.SetContactRemover(p.gatewayContacts)
 	// A change of the outbound address policy applies on this replica as soon as it commits.
 	settings := organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring).
 		WithLog(p.log).WithOutboundPolicyChanged(p.policies.Invalidate)
@@ -1145,20 +1153,21 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		OIDC:         signIn,
 		Tokens: tokens.New(orgID, p.db.TokensStore(), w, p.clocks.Business, roles,
 			tokens.NewLimiter(p.clocks.Real)),
-		Integrations: p.integrations,
-		Snapshots:    p.snapshots,
-		Alerts:       alerts,
-		Routes:       p.routes,
-		AlertGroups:  p.groups,
-		Commands:     p.groups,
-		Directory:    users.NewDirectory(orgID, p.db.AdminStore()),
-		Connections:  conns,
-		Destinations: p.destinations,
-		Webhooks:     p.webhooks,
-		Deliveries:   p.delivery,
-		Templates:    p.renderer,
-		Links:        linkService,
-		AccountLinks: p.links,
+		Integrations:    p.integrations,
+		Snapshots:       p.snapshots,
+		Alerts:          alerts,
+		Routes:          p.routes,
+		AlertGroups:     p.groups,
+		Commands:        p.groups,
+		Directory:       users.NewDirectory(orgID, p.db.AdminStore()),
+		Connections:     conns,
+		Destinations:    p.destinations,
+		Webhooks:        p.webhooks,
+		Deliveries:      p.delivery,
+		Templates:       p.renderer,
+		Links:           linkService,
+		AccountLinks:    p.links,
+		GatewayContacts: p.gatewayContacts,
 		SystemStatus: systemstatus.New(systemstatus.Config{OrgID: orgID, Queries: p.db.SystemStatusQueries(),
 			Replicas: func(ctx context.Context) ([]keyring.Replica, error) {
 				return keyring.LiveReplicas(ctx, p.db.KeyringStore(), p.clocks.Real.Now())
@@ -1278,6 +1287,7 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		PruneAccountLinks: []leader.PruneTable{
 			{Name: "account_link_requests", Delete: accountlinks.NewPruner(p.db.AccountLinksDB()).Requests},
+			{Name: "gateway_contact_codes", Delete: gateways.NewPruner(p.db.AccountLinksDB()).Codes},
 		},
 		PruneConnections: []leader.PruneTable{
 			{Name: "bridge_events_seen", Delete: p.pruneBridgeEvents},

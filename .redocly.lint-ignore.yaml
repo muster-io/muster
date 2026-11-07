@@ -9,6 +9,7 @@ api/openapi.yaml:
     - '#/paths/~1sessions~1oidc~1start/get/responses'
     - '#/paths/~1sessions~1oidc~1callback/get/responses'
     - '#/paths/~1me~1oidc-identity~1callback/get/responses'
+    - '#/paths/~1users~1{user_id}~1gateway-contacts/post/responses'
   operation-4xx-response:
     - '#/paths/~1callbacks~1mattermost~1{connection_id}/post/responses'
     - '#/paths/~1openapi.yaml/get/responses'

@@ -188,7 +188,8 @@ func (w *Writer) RecordInbound(ctx context.Context, r InboundRecord) {
 
 // paramsOf is the row of r: masked, cut, and linked to its owner, its Destination, its Alert Group and its check run.
 func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecordParams {
-	body, size, cut := textOf(r.RequestBody)
+	notify := notification(r.Operation, r.URL)
+	body, size, cut := maskedTextOf(r.RequestBody, notify)
 	p := dbgen.InsertRecordParams{
 		OrgID: w.orgID, PublicID: publicid.New(publicid.RequestRecord), At: w.business.Now(), Direction: direction,
 		Operation: r.Operation, Method: cmp.Or(r.Method, http.MethodGet), Url: bounded(clean(r.URL), urlMax),
@@ -199,7 +200,7 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 		CheckKind: text(r.Links.Check), CheckRun: text(r.Links.Run),
 	}
 	if r.Status != 0 {
-		body, size, cut := textOf(r.ResponseBody)
+		body, size, cut := maskedTextOf(r.ResponseBody, notify)
 		p.Status = pgtype.Int4{Int32: clamp32(int64(r.Status)), Valid: true}
 		p.ResponseHeaders = headersOf(r.ResponseHeader)
 		p.ResponseBody = pgtype.Text{String: body, Valid: true}
@@ -213,7 +214,7 @@ func (w *Writer) paramsOf(direction string, r outbound.Record) dbgen.InsertRecor
 		}
 	}
 	if r.Error != "" {
-		text, _, _ := textOf([]byte(r.Error))
+		text, _, _ := maskedTextOf([]byte(r.Error), notify)
 		p.Error = pgtype.Text{String: text, Valid: true}
 	}
 	return p

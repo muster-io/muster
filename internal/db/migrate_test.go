@@ -2737,18 +2737,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (32)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (33)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":32`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":33`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":32`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":33`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2764,10 +2764,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (32)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (33)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":32`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":33`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3146,6 +3146,95 @@ func TestIntegrationDestinationEntriesAndTeams(t *testing.T) {
 		}
 		if n := e.count(t, `SELECT count(*) FROM route_destinations WHERE severity_condition = 'any'`); n != 1 {
 			t.Error("up again: the Route Destination is not any")
+		}
+	})
+}
+
+// TestIntegrationGatewayContacts runs 0033 over a database at 32 with a User, a web session and a Bridge Connection:
+// the tables take a contact of 1 to 200 characters with its GC public_id, at most one confirmed contact per User and
+// gateway, and a code tied to the session with the 32-byte hashes of its code and its contact; a code outlives its
+// contact, without it, and goes with its session. Down drops both tables and keeps the rest; up again works. The
+// versions are reached by number.
+func TestIntegrationGatewayContacts(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 32)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PA', 'petr', 'petr', 'responder', 'local', 'active', now(), now()
+			FROM organizations`)
+		e.exec(t, `INSERT INTO sessions (org_id, public_id, user_id, token_hash, state, method, created_at, last_used_at,
+			idle_expires_at, expires_at)
+			SELECT org_id, 'SN0000000000PA', id, sha256('s'::bytea), 'active', 'local', now(), now(), now(), now()
+			FROM users WHERE login = 'petr'`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CN0000000000G1', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', now(), 1, 1, now(), now()
+			FROM organizations`)
+		if err := e.mm.Migrate(33); err != nil {
+			t.Fatalf("up to 33: %v", err)
+		}
+		refusedBy := func(t *testing.T, err error, constraint string) {
+			t.Helper()
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.ConstraintName != constraint {
+				t.Errorf("refused by %v, want %s", err, constraint)
+			}
+		}
+		contact := func(id, text string, confirmed bool) error {
+			at := "NULL"
+			if confirmed {
+				at = "now()"
+			}
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO gateway_contacts (org_id, public_id, user_id,
+				connection_id, contact, confirmed_at, created_at)
+				SELECT u.org_id, $1, u.id, c.id, $2, `+at+`, now() FROM users u, connections c
+				WHERE u.login = 'petr' AND c.public_id = 'CN0000000000G1'`, id, text)
+			return err
+		}
+		if err := contact("GC0000000000A1", "+10000000001", true); err != nil {
+			t.Fatal(err)
+		}
+		if err := contact("GC0000000000A2", "+10000000002", false); err != nil {
+			t.Errorf("an unconfirmed contact next to the confirmed one: %v", err)
+		}
+		refusedBy(t, contact("GC0000000000A3", "+10000000003", true), "gateway_contacts_confirmed_key")
+		refusedBy(t, contact("GC0000000000A4", "", false), "gateway_contacts_contact_check")
+		refusedBy(t, contact("GC0000000000A5", strings.Repeat("1", 201), false), "gateway_contacts_contact_check")
+		refusedBy(t, contact("XX0000000000A6", "+10000000006", false), "gateway_contacts_public_id_check")
+		if err := contact("GC0000000000A7", strings.Repeat("я", 200), false); err != nil {
+			t.Errorf("a contact of 200 characters: %v", err)
+		}
+		code := func(contactID string) error {
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO gateway_contact_codes (org_id, user_id, contact_id,
+				contact_hash, session_id, code_hash, created_at, expires_at)
+				SELECT g.org_id, g.user_id, g.id, sha256(g.contact::bytea), s.id, sha256('123456'::bytea), now(),
+				       now() + interval '10 minutes'
+				FROM gateway_contacts g, sessions s WHERE g.public_id = $1 AND s.public_id = 'SN0000000000PA'`,
+				contactID)
+			return err
+		}
+		if err := code("GC0000000000A2"); err != nil {
+			t.Fatal(err)
+		}
+		e.exec(t, `DELETE FROM gateway_contacts WHERE public_id = 'GC0000000000A2'`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_contact_codes WHERE contact_id IS NULL`); got != 1 {
+			t.Errorf("the code of a removed contact: %d", got)
+		}
+		e.exec(t, `DELETE FROM sessions WHERE public_id = 'SN0000000000PA'`)
+		if got := e.count(t, `SELECT count(*) FROM gateway_contact_codes`); got != 0 {
+			t.Errorf("codes after the session went: %d", got)
+		}
+
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM pg_class WHERE relname IN ('gateway_contacts',
+			'gateway_contact_codes')`); got != 0 {
+			t.Errorf("after down: %d tables left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM users WHERE login = 'petr'`); got != 1 {
+			t.Errorf("after down: %d users", got)
+		}
+		if err := e.mm.Migrate(33); err != nil {
+			t.Errorf("up again: %v", err)
 		}
 	})
 }

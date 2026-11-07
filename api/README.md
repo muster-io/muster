@@ -56,7 +56,7 @@ here, so a change of `bridge.yaml` reaches each library as a pull request there 
 | Identifiers | Plural kebab-case nouns; URLs use the opaque `public_id`, never internal ids or `#N`. |
 | Public ids | A type prefix of one or two letters and 12 random characters of Crockford base32 (60 bits), such as `AGK7M3QX9P2RTA`; see [`public_id` format](#public_id-format). Responses use the canonical upper case; input is case-insensitive and normalized. |
 | Actions | A state change of an existing resource is a verb sub-path (`/acknowledge`, `/disable`, `/accept`, `/reset-totp`); a result the server computes or creates is a plural noun (`/checks`, `/tests`, `/previews`, `/confirmation`). |
-| Pagination | `cursor` and `limit` (default 50, maximum 500); responses carry `next_cursor`. No offsets. Short lists that a page always shows whole are complete and not paginated: `listMySessions`, `listSystemNotices`, `listRoles`, `listPersonalAccessTokens`, `listServiceAccountTokens`, `listSeverityValues`, `listIntegrationTokens`, `listAlertmanagerRoutes`, `listRoutes`, `listRouteProfiles`, `listRouteSuggestions`, `listRouteLabelSuggestions` (at most 50), `listTeamUsers`, `listAlertGroupDeliveries`, `listSnoozePresets`, `listConnectionChannels`, `listDestinationSecrets`, `listMyAccountLinks`, `listLinkableConnections`, `listUserAccountLinks` and `getOnCallNow`, one entry per Team. |
+| Pagination | `cursor` and `limit` (default 50, maximum 500); responses carry `next_cursor`. No offsets. Short lists that a page always shows whole are complete and not paginated: `listMySessions`, `listSystemNotices`, `listRoles`, `listPersonalAccessTokens`, `listServiceAccountTokens`, `listSeverityValues`, `listIntegrationTokens`, `listAlertmanagerRoutes`, `listRoutes`, `listRouteProfiles`, `listRouteSuggestions`, `listRouteLabelSuggestions` (at most 50), `listTeamUsers`, `listAlertGroupDeliveries`, `listSnoozePresets`, `listConnectionChannels`, `listDestinationSecrets`, `listMyAccountLinks`, `listLinkableConnections`, `listUserAccountLinks`, `listMyGatewayContacts`, `listUserGatewayContacts` and `getOnCallNow`, one entry per Team. |
 | Filters and sorting | Query parameters: `status`, `route`, `from`, `to`, `q`, `number`, `label`, `sort` with an allowed list (`-` sorts descending). `label` is a whole Alertmanager-syntax Matcher, repeated and combined with AND: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22`. There is no per-label shorthand. Alert Group queries default to the last 7 days; `number` ignores the range. `team` takes a Team's `public_id` or `mine`: on `listRoutes` and `listDestinations` a Team that does not exist matches nothing, while on `listAlertGroups` and `getAlertGroupCounts` it is `422` `unknown_id`, as `route` and `integration` are there, and a deleted Team still matches the Alert Groups that keep it. |
 | Errors | RFC 9457 `application/problem+json` (`Problem`) with a stable `type` URI, a stable `code` where a refusal needs one, and `errors[]` items with a JSON `pointer` and a stable `code`. `x-problem-types` lists the types; `x-problem-codes` lists every code per type. An operation that this build does not implement yet answers `501` (`not-implemented`). |
 | Concurrency | Configuration resources return `ETag` and the same value as `etag` in the body; updates are `PUT` with `If-Match`; `412` on a mismatch, `428` without the header. The Routes list ETag covers the order for `PUT /route-order`. Deletes and `setDestinationSecret` take an optional `If-Match`. |
@@ -88,6 +88,7 @@ The `PublicId` schema carries the pattern, and the database pins each table's pr
 | `CR` | Check run: the requests of one check or test share it (from S-089) | — (no table of its own) |
 | `DE` | Delivery event (a Timeline entry of the kind `delivery`) | `delivery_events` |
 | `DS` | Destination | `destinations` |
+| `GC` | Contact at a Notification gateway (from S-167) | `gateway_contacts` |
 | `KR` | Link rule | `link_rules` |
 | `NE` | Note (also the id of its Timeline entry) | `notes` |
 | `NK` | Integration token | `integration_tokens` |
@@ -167,8 +168,9 @@ output-options:
 
 Run against this file, in a scratch module that is not part of the repository.
 
-- **Redocly CLI, recommended ruleset:** valid, no errors, 9 warnings: `operation-2xx-response` on the three OIDC
-  redirect operations (they answer `302` only), `operation-4xx-response` on `/health/live`, `/health/ready`, `/metrics`
+- **Redocly CLI, recommended ruleset:** valid, no errors, 10 warnings: `operation-2xx-response` on the three OIDC
+  redirect operations (they answer `302` only) — and, from S-167, on `createUserGatewayContact`, which answers `403`
+  only, since no Admin sets the contact of another User — `operation-4xx-response` on `/health/live`, `/health/ready`, `/metrics`
   and `/openapi.yaml`, which have no error answers, and on `mattermostAction`, which answers `200` to every request,
   and `no-unused-components` for `AlertmanagerWebhook` (documentation of the raw ingestion body).
 - **oapi-codegen v2.8.0:** `std-http-server` + `strict-server` + `models` (about 33,000 lines) and, separately, `client` +

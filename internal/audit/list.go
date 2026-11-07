@@ -196,6 +196,9 @@ func listed(row dbgen.ListAuditEntriesRow) (Listed, error) {
 	if erased {
 		e.Diff = maskErased(e.Diff, e.ResourceName)
 	}
+	if row.ContactUserStatus.String == deletedStatus {
+		e.Diff = maskContact(e.Diff)
+	}
 	if e.Details == nil {
 		e.Details = map[string]any{}
 	}
@@ -219,6 +222,23 @@ func maskErased(diff []Change, pseudonym string) []Change {
 	for i, c := range diff {
 		if erasedPointers[c.Pointer] {
 			c.Before, c.After = erase(c.Before, pseudonym), erase(c.After, pseudonym)
+		}
+		out[i] = c
+	}
+	return out
+}
+
+// ContactPointer is the contact of an entry about a contact at a Notification gateway, which deleting its User erases
+// (C-30.FR-3, C-03.FR-13 revised for L2).
+const ContactPointer = "/contact"
+
+// maskContact returns diff with every value of ContactPointer replaced by Erased, before and after, except an absent
+// value; the rows of the table are never changed.
+func maskContact(diff []Change) []Change {
+	out := make([]Change, len(diff))
+	for i, c := range diff {
+		if c.Pointer == ContactPointer {
+			c.Before, c.After = erase(c.Before, ""), erase(c.After, "")
 		}
 		out[i] = c
 	}

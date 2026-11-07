@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/buttons"
+	"github.com/muster-io/muster/internal/outbound"
 )
 
 // redacted stands for what the masking removed, as the outbound package writes it.
@@ -56,6 +57,11 @@ var (
 	// member token of a Slack payload: in JSON, and in JSON that a form carries percent-encoded.
 	responseURLRes = memberRes("response_url")
 	slackTokenRes  = memberRes("token")
+	// notificationRes and notificationMembers find the values of the members contact and text of a notification
+	// through a Notification gateway (C-23.FR-3 revised for L2, C-30.FR-10): in JSON and in a form, and in JSON inside
+	// a JSON string, as a bridge's problem may quote the request.
+	notificationRes     = slices.Concat(memberRes("contact"), memberRes("text"))
+	notificationMembers = outbound.NewMemberMasker("contact", "text")
 	// ticketRe finds the single-use ticket of a Socket Mode address (F-100): the value of the query parameter ticket of
 	// a ws or wss address whose scheme follows no letter — plain, with JSON-escaped or percent-encoded slashes, its ?
 	// and = percent-encoded too, the & before it JSON-escaped or percent-encoded too. The first group ends right before
@@ -286,11 +292,47 @@ func sanitize(s string) string {
 // clean is s as a record stores a URL, a header or an error: shape-masked and sanitized.
 func clean(s string) string { return sanitize(maskShape(s)) }
 
+// NotificationOperation and NotificationPath are sendNotification of the Bridge protocol (C-30.FR-2), whose records
+// mask the contact and the text of every notification, the code of a contact included, whatever the request's
+// Secrets held: the contact is personal data and the text names Alert Groups or carries a code (C-23.FR-3 revised
+// for L2).
+const (
+	NotificationOperation = "sendNotification"
+	NotificationPath      = "/v1/notifications"
+)
+
+// notification reports whether the record of operation to rawURL is one of sendNotification.
+func notification(operation, rawURL string) bool {
+	if operation == NotificationOperation {
+		return true
+	}
+	path, _, _ := strings.Cut(rawURL, "?")
+	return strings.HasSuffix(path, NotificationPath)
+}
+
+// maskNotification replaces the values of the members contact and text in s with [redacted], in JSON, in JSON a form
+// carries and in JSON inside a JSON string. A contact in free text outside a JSON member is masked only when it has
+// bridge.MinMaskedLength characters or more, as a secret of its request (docs/operations/request-log.md).
+func maskNotification(s string) string {
+	if !strings.Contains(s, "contact") && !strings.Contains(s, "text") {
+		return s
+	}
+	return notificationMembers.Mask(maskMembers(s, notificationRes))
+}
+
 // textOf is body as a record stores it (C-23.FR-2, FR-3): shape-masked, sanitized and cut to at most BodyMax bytes at
 // a character boundary, the masking first so that no part of a secret survives the cut; full is the size of body and
 // cut whether the text was cut.
 func textOf(body []byte) (text string, full int64, cut bool) {
+	return maskedTextOf(body, false)
+}
+
+// maskedTextOf is textOf, with the members of a notification masked too when notification is set.
+func maskedTextOf(body []byte, notification bool) (text string, full int64, cut bool) {
 	text = clean(string(body))
+	if notification {
+		text = maskNotification(text)
+	}
 	full = int64(len(body))
 	if len(text) <= BodyMax {
 		return text, full, false

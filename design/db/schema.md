@@ -74,7 +74,9 @@
   [`0032_destination_entries_and_teams`](../../internal/db/migrations/0032_destination_entries_and_teams.up.sql)
   (the Severity conditions of the Destinations of Routes and Teams, `routes.deliver_to_teams` and
   `routes.run_team_chains`, `team_destinations`, `deliveries.entries`, the lifecycle event `destination_joined` and the
-  kind `team_destinations` of `open_group_updates`, C-26.FR-1 to FR-5, S-121), in
+  kind `team_destinations` of `open_group_updates`, C-26.FR-1 to FR-5, S-121) and
+  [`0033_gateway_contacts`](../../internal/db/migrations/0033_gateway_contacts.up.sql)
+  (the contacts of people at Notification gateways and their confirmation codes, C-30.FR-3, S-167), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -173,8 +175,9 @@ indexes, one short-lived table, `bridge_events_seen` (0011), the Request log, `r
 changes of configuration that reach the open Alert Groups, `open_group_updates` (0021), the Teams, `teams` and
 `team_users` (0022), the Team matchers and the Teams of Alerts and Alert Groups, `team_matchers`, `alert_teams` and
 `alert_group_teams` (0024), the Schedules, `schedules`, `rotation_layers`, `rotation_layer_users` and
-`schedule_overrides` (0025), the personal iCal feeds, `ical_feeds` (0026), and the identity provider entries
-of the Teams, `team_idp_entries` (0030), which makes 71 tables.
+`schedule_overrides` (0025), the personal iCal feeds, `ical_feeds` (0026), the identity provider entries
+of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_destinations` (0032), and the contacts at
+Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), which makes 74 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -189,6 +192,7 @@ of the Teams, `team_idp_entries` (0030), which makes 71 tables.
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
+| Notification gateways | `gateway_contacts`, `gateway_contact_codes` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
@@ -1575,6 +1579,42 @@ Schedule of a Team is its main one and a Team with Schedules is never deleted.
 
 The Permissions `schedules:read`, `schedules:write` and `schedule-overrides:write` and their allocation are reference
 data of migration 0025, as in 0001 and 0022.
+
+### 4.17 Notification gateways
+
+Serves C-30.FR-3 (from 0.2.0, migration 0033); [ADR-0013](../adr/0013-account-links-from-web-session-only.md),
+[ADR-0017](../adr/0017-bridge-protocol-for-messengers-without-native-support.md). A Notification gateway is a Bridge Connection whose
+stored `info` declares the role `gateway`; it has no table of its own.
+
+- **`gateway_contacts`** — a person's contact at a gateway (`user_id`, `connection_id`): the text the gateway
+  understands, 1 to 200 characters (`gateway_contacts_contact_check`), stored in plain text since a contact is personal
+  data, not a Secret — its person, Admins and the gateway read it, and the Request log masks it. `confirmed_at` is set
+  by the right code; the partial unique index `gateway_contacts_confirmed_key` on `(user_id, connection_id) WHERE
+  confirmed_at IS NOT NULL` keeps one confirmed contact per person and gateway, which a new contact replaces — deleted in
+  the transaction that confirms the new one — so that changing a number never leaves a person unreachable. A new
+  contact deletes the person's earlier unconfirmed one for the gateway. `gateway_contacts_connection_idx` on `(org_id,
+  connection_id)` finds the contacts of a gateway, `gateway_contacts_user_idx` on `(org_id, user_id)` those of a
+  person. Removing a contact, and deleting its User (C-03.FR-13), is a `DELETE`; the Audit log keeps its entries and
+  shows `/contact` as `[erased]` once the User is deleted. The codes of a removed contact stay, for the limits.
+- **`gateway_contact_codes`** — the codes of `gateway.contact_code`: the SHA-256 of the code bound to its contact's
+  `public_id` (`code_hash`), the web session that asked for it (`session_id`, `ON DELETE CASCADE`: the code is checked
+  only in that session, ADR-0013), `attempts`, `expires_at` on the business clock, `sent_at` once the gateway accepted
+  its notification — only the newest sent code of a contact is checked, so that a code still being sent, or one whose
+  sending failed, never hides an earlier valid one — `used_at` once it confirmed its contact and `voided_at` once the
+  last attempt was wrong, a newer code of the contact was sent or its own sending failed. `user_id` and `contact_hash`,
+  the SHA-256 of the trimmed contact text, count the requests of `gateway.contact_code_requests` per User
+  (`gateway_contact_codes_user_idx`) and per contact whoever asked (`gateway_contact_codes_hash_idx`), each on `(org_id,
+  …, created_at)`; `contact_id` turns null when the contact is removed (`ON DELETE SET NULL`), so that removing and
+  adding a contact again does not reset the limits. `gateway_contact_codes_contact_idx` on `(org_id, contact_id,
+  created_at)` finds the codes of a contact, of which the newest sent one by id is checked, since `created_at` comes
+  from the clocks of several replicas. `gateway_contact_codes_session_idx` on `(session_id)` and
+  `gateway_contact_codes_contact_fk_idx` on `(contact_id)` serve the foreign key actions: the pruning of sessions
+  deletes their codes, and removing a contact sets the contact of its codes to null. The Leader's short-lived pruning
+  deletes the codes that expired a day ago (`gateway_contact_codes_expires_idx` on `(org_id, expires_at)`) with the
+  expired Account link requests; deleting a User deletes theirs. Codes of one contact are counted, marked sent, voided
+  and checked under the lock of its User (`FOR NO KEY UPDATE`) and of the code's row, so that parallel wrong codes never
+  pass the attempts of `gateway.contact_code`; the requests for one contact text of several Users serialize on the
+  transaction advisory lock of class `GatewayContactLockClass`.
 
 ## 5. Queues and claims
 

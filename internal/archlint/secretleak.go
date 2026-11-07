@@ -57,6 +57,8 @@ import (
 	"github.com/muster-io/muster/internal/doctor"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
 	"github.com/muster-io/muster/internal/fakes/fakeslack"
+	"github.com/muster-io/muster/internal/gateways"
+	gwdb "github.com/muster-io/muster/internal/gateways/dbgen"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/heartbeat"
 	"github.com/muster-io/muster/internal/ingest"
@@ -130,6 +132,7 @@ var registry = []Probe{
 	{Name: "bridge_links", Run: probeBridgeLinks},
 	{Name: "bridge_check", Run: probeBridgeCheck},
 	{Name: "gateway_notifications", Run: probeGatewayNotifications},
+	{Name: "gateway_contacts", Run: probeGatewayContacts},
 	{Name: "slack_connections", Run: probeSlack},
 	{Name: "slack_presses", Run: probeSlackPresses},
 	{Name: "slack_socket", Run: probeSlackSocket},
@@ -2161,6 +2164,274 @@ func (g *gatewayRecords) texts() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.all)
+}
+
+// probeGatewayContacts pushes a contact and the codes Muster makes through the contacts at a Notification gateway
+// (C-30.FR-3, FR-10, C-23.FR-3 revised for L2): the first secret is the bridge's token, the second the contact. Through
+// the API of the web session it adds the contact, whose code the stand-in gateway answers by echoing the request; types
+// two wrong codes, the third secret among them, and the right one; asks for new codes, which the stand-in refuses with
+// a problem and a text that echo the request; and removes the contact. Neither the log lines — the Audit log's copies
+// included — nor the problems the API answers, nor the records of the Request log, may carry the contact or a code; as
+// in probeBridgeLinks, the probe looks for the codes it saw itself.
+func probeGatewayContacts(ctx context.Context, secrets []string, log io.Writer) error {
+	var seen bytes.Buffer
+	logger := logging.New(io.MultiWriter(log, &seen), logging.LevelInfo)
+	now := time.Now().UTC()
+	business := clock.NewManual(now)
+	clocks := clock.Clocks{Business: business, Real: clock.Real{}}
+	var (
+		mu     sync.Mutex
+		bodies []string
+		answer atomic.Int32
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/info" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+				`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":500,`+
+				`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll"],"roles":["gateway"]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		echo := "request " + string(body) + " " + r.Header.Get("Authorization")
+		switch answer.Add(1) {
+		case 1, 2:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"notification_id": "n1", "replayed": false, "echo": echo})
+		case 3:
+			w.Header().Set("Content-Type", "application/problem+json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"title": echo, "detail": echo, "status": 400,
+				"class": "invalid"})
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, echo) //nolint:gosec // G705: the stand-in echoes the request on purpose
+		}
+	}))
+	defer srv.Close()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	records := &gatewayRecords{}
+	c, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{},
+		Recorder: records},
+		bridge.Settings{BaseURL: srv.URL, Token: logging.Secret(secrets[0]),
+			Owner: outbound.Owner{Connection: 1, PublicID: "CNAAAAAAAAAAG1"}})
+	if err != nil {
+		return err
+	}
+	store := &probeContactStore{}
+	svc := gateways.New(gateways.Config{OrgID: 1, Store: store, Audit: audit.NewWriter(logger, business),
+		Business: business, Log: logger, Path: deliverytest.Unlimited(1, clocks),
+		Gateway: &bridge.Adapter{Targets: gatewayTargets{conn: bridge.Conn{ID: 1, PublicID: "CNAAAAAAAAAAG1",
+			Version: 1, Client: c}}, Log: logger}})
+	sess := auth.Session{ID: 1, PublicID: "SNAAAAAAAAAAA1", State: auth.StateActive,
+		User: auth.Principal{ID: 1, PublicID: "SRAAAAAAAAAAA1", Name: "Bob", Role: auth.RoleResponder}}
+	h, err := api.New(api.Config{Sessions: probeSessions{sess: sess}, GatewayContacts: svc, Log: logger,
+		Real: clock.Real{}})
+	if err != nil {
+		return err
+	}
+	var problems []string
+	send := func(method, path, body string) map[string]any {
+		r, err := http.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		if err != nil {
+			problems = append(problems, err.Error())
+			return nil
+		}
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cookie", auth.CookieName+"=probe")
+		r.Header.Set(auth.CSRFHeader, "probe")
+		rec := &probeRecorder{header: http.Header{}}
+		h.ServeHTTP(rec, r)
+		var out map[string]any
+		_ = json.Unmarshal(rec.body.Bytes(), &out)
+		// A contact the person added comes back to them; a problem must not carry it.
+		if _, problem := out["type"]; problem {
+			problems = append(problems, rec.body.String())
+		}
+		return out
+	}
+	const mine = "/api/v1/me/gateway-contacts"
+	created := send(http.MethodPost, mine, `{"connection_id":"CNAAAAAAAAAAG1","contact":"`+secrets[1]+`"}`)
+	id, _ := created["id"].(string)
+	for _, code := range []string{"000000", secrets[2]} {
+		send(http.MethodPost, mine+"/"+id+"/confirmation", `{"code":"`+code+`"}`)
+	}
+	codes := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var out []string
+		for _, b := range bodies {
+			if m := regexp.MustCompile(`\b[0-9]{6}\b`).FindString(b); m != "" {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	if got := codes(); len(got) > 0 {
+		send(http.MethodPost, mine+"/"+id+"/confirmation", `{"code":"`+got[len(got)-1]+`"}`)
+	}
+	for range 3 {
+		send(http.MethodPost, mine+"/"+id+"/code", "")
+	}
+	send(http.MethodGet, mine, "")
+	send(http.MethodDelete, mine+"/"+id, "")
+	errs := []error{fmt.Errorf("problems: %s", strings.Join(problems, " | "))}
+	for _, t := range records.texts() {
+		errs = append(errs, errors.New(t))
+	}
+	all := codes()
+	if id == "" || len(all) < 4 || !store.confirmed || len(records.texts()) < 4 ||
+		strings.Count(seen.String(), `"action":"gateway_contact.`) < 3 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("contact %q, %d codes sent, confirmed %v, %d records",
+			id, len(all), store.confirmed, len(records.texts()))})
+	}
+	text := seen.String() + errors.Join(errs...).Error()
+	for _, code := range all {
+		if regexp.MustCompile(`(^|[^0-9])` + code + `([^0-9]|$)`).MatchString(text) {
+			errs = append(errs, errors.New("a contact code leaked: "+secrets[0]))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// probeContactStore is the contacts of probeGatewayContacts in memory: the User 1, the Notification gateway 1, one
+// contact at most and its codes. It counts no limits.
+type probeContactStore struct {
+	gateways.Queries
+	contact   *gwdb.LockContactOfUserRow
+	codes     []gwdb.LockNewestCodeRow
+	confirmed bool
+}
+
+func (s *probeContactStore) InTx(_ context.Context, f func(gateways.Queries) error) error {
+	return f(s)
+}
+
+func (s *probeContactStore) GetGateway(context.Context, gwdb.GetGatewayParams) (gwdb.GetGatewayRow, error) {
+	return gwdb.GetGatewayRow{ID: 1, PublicID: "CNAAAAAAAAAAG1", Name: "probe"}, nil
+}
+
+func (s *probeContactStore) LockContactUser(context.Context, gwdb.LockContactUserParams) (gwdb.LockContactUserRow,
+	error) {
+	return gwdb.LockContactUserRow{ID: 1, PublicID: "SRAAAAAAAAAAA1", Status: "active"}, nil
+}
+
+func (s *probeContactStore) LockContactText(context.Context, gwdb.LockContactTextParams) error {
+	return nil
+}
+
+func (s *probeContactStore) CountUserCodes(_ context.Context, a gwdb.CountUserCodesParams) (gwdb.CountUserCodesRow,
+	error) {
+	return gwdb.CountUserCodesRow{Oldest: a.Since}, nil
+}
+
+func (s *probeContactStore) CountContactCodes(_ context.Context, a gwdb.CountContactCodesParams) (
+	gwdb.CountContactCodesRow, error) {
+	return gwdb.CountContactCodesRow{Oldest: a.Since}, nil
+}
+
+func (s *probeContactStore) DeleteUnconfirmedContacts(context.Context, gwdb.DeleteUnconfirmedContactsParams) (
+	[]gwdb.DeleteUnconfirmedContactsRow, error) {
+	return nil, nil
+}
+
+func (s *probeContactStore) DeleteReplacedContacts(context.Context, gwdb.DeleteReplacedContactsParams) (
+	[]gwdb.DeleteReplacedContactsRow, error) {
+	return nil, nil
+}
+
+func (s *probeContactStore) InsertContact(_ context.Context, a gwdb.InsertContactParams) (int64, error) {
+	s.contact = &gwdb.LockContactOfUserRow{ID: 1, PublicID: a.PublicID, ConnectionID: 1, Contact: a.Contact,
+		CreatedAt: a.CreatedAt, ConnectionPublicID: "CNAAAAAAAAAAG1", ConnectionName: "probe", Gateway: true}
+	return 1, nil
+}
+
+func (s *probeContactStore) LockContactOfUser(_ context.Context, a gwdb.LockContactOfUserParams) (
+	gwdb.LockContactOfUserRow, error) {
+	if s.contact == nil || s.contact.PublicID != a.PublicID {
+		return gwdb.LockContactOfUserRow{}, pgx.ErrNoRows
+	}
+	return *s.contact, nil
+}
+
+func (s *probeContactStore) ListContactsOfUser(context.Context, gwdb.ListContactsOfUserParams) (
+	[]gwdb.ListContactsOfUserRow, error) {
+	if s.contact == nil {
+		return nil, nil
+	}
+	c := s.contact
+	return []gwdb.ListContactsOfUserRow{{ID: c.ID, PublicID: c.PublicID, Contact: c.Contact,
+		ConfirmedAt: c.ConfirmedAt, CreatedAt: c.CreatedAt, ConnectionPublicID: c.ConnectionPublicID,
+		ConnectionName: c.ConnectionName}}, nil
+}
+
+func (s *probeContactStore) ConfirmContact(_ context.Context, a gwdb.ConfirmContactParams) error {
+	s.contact.ConfirmedAt, s.confirmed = pgtype.Timestamptz{Time: a.Now, Valid: true}, true
+	return nil
+}
+
+func (s *probeContactStore) DeleteContact(context.Context, gwdb.DeleteContactParams) (int64, error) {
+	s.contact = nil
+	return 1, nil
+}
+
+func (s *probeContactStore) InsertCode(_ context.Context, a gwdb.InsertCodeParams) (int64, error) {
+	s.codes = append(s.codes, gwdb.LockNewestCodeRow{ID: int64(len(s.codes) + 1), SessionID: a.SessionID,
+		CodeHash: a.CodeHash, ExpiresAt: a.ExpiresAt})
+	return int64(len(s.codes)), nil
+}
+
+func (s *probeContactStore) code(id int64) *gwdb.LockNewestCodeRow {
+	if id < 1 || int(id) > len(s.codes) {
+		return &gwdb.LockNewestCodeRow{}
+	}
+	return &s.codes[id-1]
+}
+
+func (s *probeContactStore) LockNewestCode(context.Context, gwdb.LockNewestCodeParams) (gwdb.LockNewestCodeRow,
+	error) {
+	if len(s.codes) == 0 {
+		return gwdb.LockNewestCodeRow{}, pgx.ErrNoRows
+	}
+	return s.codes[len(s.codes)-1], nil
+}
+
+func (s *probeContactStore) RecordWrongCode(_ context.Context, a gwdb.RecordWrongCodeParams) (int64, error) {
+	k := s.code(a.ID)
+	k.Attempts++
+	return k.Attempts, nil
+}
+
+func (s *probeContactStore) UseCode(_ context.Context, a gwdb.UseCodeParams) (int64, error) {
+	s.code(a.ID).UsedAt = pgtype.Timestamptz{Time: a.Now, Valid: true}
+	return 1, nil
+}
+
+func (s *probeContactStore) MarkCodeSent(context.Context, gwdb.MarkCodeSentParams) error { return nil }
+
+func (s *probeContactStore) VoidEarlierCodes(_ context.Context, a gwdb.VoidEarlierCodesParams) (int64, error) {
+	for i := range s.codes[:max(int(a.Keep)-1, 0)] {
+		s.codes[i].VoidedAt = pgtype.Timestamptz{Time: a.Now, Valid: true}
+	}
+	return a.Keep - 1, nil
+}
+
+func (s *probeContactStore) VoidCode(_ context.Context, a gwdb.VoidCodeParams) error {
+	s.code(a.ID).VoidedAt = pgtype.Timestamptz{Time: a.Now, Valid: true}
+	return nil
+}
+
+func (s *probeContactStore) DeleteCode(context.Context, gwdb.DeleteCodeParams) error { return nil }
+
+func (s *probeContactStore) InsertAuditEntry(context.Context, adb.InsertAuditEntryParams) error {
+	return nil
 }
 
 // probeBridgeEvents pushes the secrets through the event paths of a Bridge Connection (C-22.AC-3): the token, the push

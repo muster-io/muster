@@ -398,3 +398,59 @@ func TestMaskErased(t *testing.T) {
 		t.Error("the row was changed")
 	}
 }
+
+// TestRecordPersonal is C-30.FR-3 and FR-10: the values at the Personal pointers of an entry — a contact at a
+// Notification gateway — are stored for the readers of the Audit log and shown as [redacted] in its copy on the log,
+// before and after, an absent value kept; the other changes are copied as they are.
+func TestRecordPersonal(t *testing.T) {
+	w, log := newWriter()
+	s := &fakeStore{}
+	diff := []Change{{Pointer: ContactPointer, Before: "+10000000001", After: "+10000000002"},
+		{Pointer: "/connection", After: "CN0000000000G1"}}
+	if err := w.Record(t.Context(), s, Entry{OrgID: 7, Actor: User(3, "SRAAAAAAAAAAAA"), Transport: TransportUI,
+		Action: "gateway_contact.created", Resource: Resource{Type: "gateway_contact", PublicID: "GC0000000000A1"},
+		Diff: diff, Personal: []string{ContactPointer}}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(s.rows[0].Diff), `"before":"+10000000001","after":"+10000000002"`) {
+		t.Errorf("stored diff %s", s.rows[0].Diff)
+	}
+	if strings.Contains(log.String(), "+1000000000") ||
+		!strings.Contains(log.String(), `{"pointer":"/contact","before":"[redacted]","after":"[redacted]"}`) ||
+		!strings.Contains(log.String(), `{"pointer":"/connection","after":"CN0000000000G1"}`) {
+		t.Errorf("log %s", log)
+	}
+	if diff[0].Before != "+10000000001" {
+		t.Error("the caller's diff was changed")
+	}
+	if got := redactPersonal([]Change{{Pointer: ContactPointer, After: "x"}}, []string{ContactPointer}); got[0].
+		Before != nil || got[0].After != "[redacted]" {
+		t.Errorf("redactPersonal = %+v", got)
+	}
+}
+
+// TestMaskContact is C-03.FR-13 revised for L2 at read time: the entries about a contact at a Notification gateway of
+// a deleted user show its /contact as [erased], before and after, and the other changes as written; the contact of a
+// user who is not deleted is shown.
+func TestMaskContact(t *testing.T) {
+	diff := `[{"pointer":"/connection","before":"CN0000000000G1"},{"pointer":"/contact","before":"+10000000001"}]`
+	row := func(id int64, status string) dbgen.ListAuditEntriesRow {
+		r := entryRow(id, "user", "gateway_contact.deleted")
+		r.ResourceType, r.ResourcePublicID, r.Diff = txt("gateway_contact"), txt("GC0000000000A1"), []byte(diff)
+		r.ContactUserStatus = txt(status)
+		return r
+	}
+	page, err := NewReader(7, &fakeList{rows: []dbgen.ListAuditEntriesRow{row(1, "deleted"), row(2, "active")}}).
+		List(t.Context(), Filter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(page.Entries[0].Diff)
+	if want := `[{"pointer":"/connection","before":"CN0000000000G1"},{"pointer":"/contact","before":"[erased]"}]`; string(
+		b) != want {
+		t.Errorf("a deleted user's contact = %s", b)
+	}
+	if b, _ := json.Marshal(page.Entries[1].Diff); string(b) != diff {
+		t.Errorf("an active user's contact = %s", b)
+	}
+}

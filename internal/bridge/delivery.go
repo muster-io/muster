@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/delivery"
@@ -106,13 +107,35 @@ func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notifi
 	return o
 }
 
+// MinMaskedLength is the shortest contact or text of a notification that is masked wherever it stands in a record or
+// an answer. A shorter one, such as a contact "+1" or an extension "1234", would mask every occurrence of its
+// characters in the record, in its times and ids too; it is masked by its place instead, as the value of a JSON member
+// contact or text — in the Request log (internal/requestlog) and in the error of an Outcome (maskNotification).
+const MinMaskedLength = 6
+
+// notificationMembers mask the members contact and text of a notification by their place, plain or JSON-escaped,
+// whatever their length.
+var notificationMembers = outbound.NewMemberMasker("contact", "text")
+
 // notificationSecrets are the contact and the text of n, also as the client cuts the text, which the record of the
-// request masks like a Secret, though they are personal data rather than Secrets.
+// request masks like a Secret, though they are personal data rather than Secrets; those shorter than MinMaskedLength
+// are left to the Request log.
 func notificationSecrets(n delivery.Notification) []logging.Secret {
 	var out []logging.Secret
+	for _, v := range notificationForms(n) {
+		out = append(out, logging.Secret(v))
+	}
+	return out
+}
+
+// notificationForms are the contact and the text of n, as they are and as the client cuts the text, without those
+// shorter than MinMaskedLength characters.
+func notificationForms(n delivery.Notification) []string {
+	var out []string
+	// The client sends the text cut to MaxNotificationText characters, which is what a bridge may echo.
 	for _, v := range []string{n.Contact, n.Text, cutText(n.Text, MaxNotificationText)} {
-		if v != "" && !slices.Contains(out, logging.Secret(v)) {
-			out = append(out, logging.Secret(v))
+		if utf8.RuneCountInString(v) >= MinMaskedLength && !slices.Contains(out, v) {
+			out = append(out, v)
 		}
 	}
 	return out
@@ -120,21 +143,18 @@ func notificationSecrets(n delivery.Notification) []logging.Secret {
 
 // maskNotification is the text of a bridge's answer to n with its contact and its text replaced, as they are and as a
 // JSON string carries them, the longer first, so that an answer that echoes them, or the request's body, carries
-// neither.
+// neither; and with the value of every JSON member contact and text replaced by its place, which masks a contact or a
+// text shorter than MinMaskedLength where a JSON document carries it. A short one in free text is kept.
 func maskNotification(text outbound.Untrusted, n delivery.Notification) outbound.Untrusted {
 	var forms []string
-	// The client sends the text cut to MaxNotificationText characters, which is what a bridge may echo.
-	for _, v := range []string{n.Contact, n.Text, cutText(n.Text, MaxNotificationText)} {
-		if v == "" || slices.Contains(forms, v) {
-			continue
-		}
+	for _, v := range notificationForms(n) {
 		forms = append(forms, v)
 		if b, err := json.Marshal(v); err == nil {
 			forms = append(forms, string(b[1:len(b)-1]))
 		}
 	}
 	slices.SortFunc(forms, func(a, b string) int { return len(b) - len(a) })
-	s := string(text)
+	s := notificationMembers.Mask(string(text))
 	for _, f := range forms {
 		s = strings.ReplaceAll(s, f, "[redacted]")
 	}

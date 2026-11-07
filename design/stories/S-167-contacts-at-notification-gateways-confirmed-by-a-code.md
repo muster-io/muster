@@ -9,15 +9,20 @@ covers: [C-30.FR-3, C-30.FR-9, C-30.FR-10, C-30.AC-2, C-03.FR-13, C-18.FR-6, C-2
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0036_gateway_contacts.up.sql
-  - internal/db/migrations/0036_gateway_contacts.down.sql
+  - internal/db/migrations/0033_gateway_contacts.up.sql
+  - internal/db/migrations/0033_gateway_contacts.down.sql
   - design/db/schema.md
+  - docs/install/versions.md
+  - .redocly.lint-ignore.yaml
   - internal/db/db_test.go
   - internal/db/migrate_test.go
+  - internal/db/checks.go
+  - sqlc.yaml
   - internal/publicid/publicid.go
   - internal/gateways/gateways.go
   - internal/gateways/contacts.go
   - internal/gateways/contacts_test.go
+  - internal/gateways/fake_test.go
   - internal/gateways/contacts_integration_test.go
   - internal/gateways/query.sql
   - internal/api/gatewaycontacts.go
@@ -27,16 +32,25 @@ files_touched:
   - internal/runtime/runtime.go
   - internal/users/admin.go
   - internal/users/admin_integration_test.go
+  - internal/audit/audit.go
   - internal/audit/list.go
+  - internal/audit/query.sql
   - internal/audit/audit_test.go
   - internal/requestlog/mask.go
+  - internal/requestlog/requestlog.go
   - internal/requestlog/mask_test.go
+  - internal/bridge/delivery.go
+  - internal/bridge/delivery_test.go
+  - internal/outbound/members.go
+  - internal/outbound/members_test.go
+  - internal/metrics/catalogue.go
   - internal/archlint/secretleak.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/logging/events.go
   - test/e2e/gateway_contacts_test.go
   - docs/messengers/notification-gateways.md
+  - docs/operations/request-log.md
   - mkdocs.yml
 acceptance:
   - "[C-30.FR-3, C-30.AC-2] `createMyGatewayContact` with a Notification gateway's `connection_id` and a contact creates an unconfirmed contact of the caller and sends a code of `gateway.contact_code` through that gateway with `sendNotification` on the interactive path, without action data, in the language of the caller's profile; `confirmMyGatewayContact` with the code the fake gateway received confirms it; a wrong code answers `422` `contact_code_invalid` at `/code` with `attempts_remaining`, and after the last attempt, or once the code expired, the code is void (`contacts_test.go`, `gateway_contacts_test.go`)."
@@ -44,7 +58,7 @@ acceptance:
   - "[C-30.FR-3] Code requests — creating a contact and `sendMyGatewayContactCode` — are limited by `gateway.contact_code_requests`: the sixth within an hour of one User, or the fourth within an hour for one contact, answers `429` `contact_code_requests_exceeded` with `Retry-After`; a `connection_id` that names no Connection in the role `gateway` answers `422` `unknown_id`; a contact that is empty or longer than 200 characters answers `422` `invalid_format` at `/contact` (`contacts_test.go`)."
   - "[C-30.FR-3, C-18.FR-6, C-30.AC-2] The operations that change `me/gateway-contacts` take only the web session: a Personal access token gets `403` `session_required`; `createUserGatewayContact` — an Admin's attempt to set a contact for another User — always answers `403` `forbidden` with the detail that only the person sets their contact, and changes nothing; `listUserGatewayContacts` (`users:read`) lists a User's contacts with their state and `deleteUserGatewayContact` (`users:write`) removes one; adding, confirming and removing are Audit log entries `gateway_contact.created`, `gateway_contact.confirmed` and `gateway_contact.deleted` (`gatewaycontacts_test.go`)."
   - "[C-30.FR-3] A new contact for a gateway at which the User has a confirmed one replaces it only when it is confirmed; until then the confirmed contact stays the one called, and both are listed (`contacts_integration_test.go`)."
-  - "[C-30.FR-10, C-23.FR-3, C-30.AC-2] The Request log shows the `contact` of every request to `sendNotification` as `[redacted]`, and the `text` of one without `action` — a confirmation code — as `[redacted]` too; the secret-leak probe `gateway_contacts` finds neither the contact nor the code in a log line or a returned error (`mask_test.go`, `secretleak.go`)."
+  - "[C-30.FR-10, C-23.FR-3, C-30.AC-2] The Request log shows the `contact` and the `text` of every request to `sendNotification` as `[redacted]`, with or without `action` — the text of a call names Alert Groups and that of a code carries the code — in the request, its answer and its error, a contact shorter than six characters by its place only; the secret-leak probe `gateway_contacts` finds neither the contact nor the code in a log line, the Audit log's copies included, or a returned error (`mask_test.go`, `delivery_test.go`, `secretleak.go`)."
   - "[C-03.FR-13, C-30.AC-2] Deleting a User erases their contacts in the same transaction; the Audit log keeps the entries and shows their `/contact` as `[erased]` when it is read (`admin_integration_test.go`, `audit_test.go`)."
   - "[C-30.FR-3, C-30.FR-9] The documentation has the page Messengers → Notification gateways with \"Connect a Notification gateway\" and \"Contact for calls and SMS\" — what a gateway is, that Muster ships none, the code and its limits, that an Admin sees and removes contacts but never sets one — in the navigation; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -93,20 +107,25 @@ issue: 456
     replace, or null), `created_at`}; `GatewayContactList`; `GatewayContactConfirm` {`code`}; the path parameter
     `GatewayContactId`.
   - Problem codes: `contact_code_invalid` (`validation-failed`, with `attempts_remaining`),
-    `contact_code_requests_exceeded` (`429`), `gateway_refused` (`502`), `unknown_id` at `/connection_id`,
-    `invalid_format` at `/contact`. `internal/api/problem.go` maps the errors of `gateways` to them,
-    `attempts_remaining` on the error item as the L1 `AttemptsRemaining` of `link_code_invalid` is, `Retry-After` on the
+    `contact_code_requests_exceeded` (`429`), `gateway_refused` (`502`, of a new problem type `gateway-refused`, with
+    the member `gateway_class`: `transient`, `rate_limited`, `gone`, `forbidden` or `invalid`), `unknown_id` at
+    `/connection_id`, `invalid_format` at `/contact`. `internal/api/problem.go` maps the errors of `gateways` to them,
+    `attempts_remaining` on the problem as the L1 `AttemptsRemaining` of `link_code_invalid` is, `Retry-After` on the
     `429`, and `session_required`.
   - `PublicId` and `api/README.md` gain the prefix `GC` (gateway contact).
-- **Schema** (migration `0036_gateway_contacts`, expand only; `schema.md` §2 and a new §4.17 Notification gateways):
+- **Schema** (migration `0033_gateway_contacts`, expand only; `schema.md` §2 and a new §4.17 Notification gateways):
   - `gateway_contacts`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^GC[0-9A-HJKMNP-TV-Z]{12}$')`), `user_id`
     (FK `users`), `connection_id` (FK `connections`), `contact text NOT NULL` (1–200 characters), `confirmed_at`,
     `created_at`; unique partial index `(user_id, connection_id) WHERE confirmed_at IS NOT NULL` — one confirmed contact
     per person and gateway — and index `(org_id, connection_id)`.
-  - `gateway_contact_codes`: `id`, `org_id`, `contact_id` (FK, `ON DELETE CASCADE`), `code_hash bytea NOT NULL`,
-    `session_id` (FK `sessions`, `ON DELETE CASCADE` — the web session that asked for the code), `attempts`,
-    `expires_at`, `used_at`, `created_at`; index `(org_id, contact_id, created_at)` and a partial index of
-    the requests per User through `contact_id` for the hourly limits. Pruned with the expired Account link requests.
+  - `gateway_contact_codes`: `id`, `org_id`, `user_id` (FK `users`), `contact_id` (FK, `ON DELETE SET NULL`),
+    `contact_hash bytea NOT NULL` (the SHA-256 of the trimmed contact text), `code_hash bytea NOT NULL`, `session_id`
+    (FK `sessions`, `ON DELETE CASCADE` — the web session that asked for the code), `attempts`, `expires_at`,
+    `sent_at` (the gateway accepted it; only the newest sent code is checked, so that a failed sending never hides an
+    earlier valid code), `used_at`, `voided_at`, `created_at`; indexes `(org_id, contact_id, created_at)`, `(org_id, user_id, created_at)`
+    and `(org_id, contact_hash, created_at)` for the hourly limits, and `(org_id, expires_at)` for the pruning. The
+    codes keep `user_id` and `contact_hash` and outlive their contact, so that removing a contact and adding it again
+    does not reset the limits. Pruned with the expired Account link requests; deleting the User deletes them.
   - The down migration drops both.
 - **Gateways** (`internal/gateways`, a new flat domain package, ADR-0016): `gateways.go` — the Notification gateways of
   the Organization (Bridge Connections whose stored `info` has `gateway`, not deleted) and `ConfirmedContact(user,
@@ -121,9 +140,13 @@ issue: 456
 - **Users** (`internal/users/admin.go`): `Delete` erases the User's contacts and codes in its transaction (C-03.FR-13).
 - **Audit** (`internal/audit/list.go`): the entries about a gateway contact of a deleted User show `/contact` as
   `[erased]` when read, as the erased fields of a User are.
-- **Request log** (`internal/requestlog/mask.go`): in requests to `/v1/notifications`, the member `contact`, and `text`
-  when the request has no `action`, are `[redacted]`, in the record and its answer; a probe `gateway_contacts` joins the
-  secret-leak lint (`internal/archlint/secretleak.go`).
+- **Request log** (`internal/requestlog/mask.go`): in the records of `sendNotification` (`/v1/notifications`), the
+  members `contact` and `text` of every notification, with or without `action`, are `[redacted]`, in the request, its
+  answer and its error — stricter than the text of a code alone, since the text of a call names Alert Groups and S-145
+  already masks the contact and the text as secrets of the request. `bridge.Adapter.Notify` masks a contact or a text
+  as a substring only from six characters on, so that a short contact does not mask its characters everywhere in the
+  record; the code itself is a secret of its request. A probe `gateway_contacts` joins the secret-leak lint
+  (`internal/archlint/secretleak.go`).
 - **Log events** (`internal/logging/events.go`): `gateway_contact_code_sent` (info; the User, the Connection, the
   outcome; never the contact or the code), `gateway_contact_code_rejected` (warn; the reason), C-30.
 - **Settings**: `gateway.contact_code` and `gateway.contact_code_requests` (both P-86, which stays provisional until
@@ -153,7 +176,7 @@ C=$(curl -s "${S[@]}" $API/me/gateway-contacts -d "{\"connection_id\":\"$GW\",\"
 curl -s $FB/notifications | jq -c 'last | {contact, action, code: (.text | test("[0-9]{6}"))}'
 # {"contact":"+10000000002","action":null,"code":true}
 CODE=$(curl -s $FB/notifications | jq -r 'last.text' | grep -o '[0-9]\{6\}')
-curl -s "${S[@]}" $API/me/gateway-contacts/$C/confirmation -d '{"code":"000000"}' | jq -c '{status, code: .errors[0].code, left: .errors[0].attempts_remaining}'
+curl -s "${S[@]}" $API/me/gateway-contacts/$C/confirmation -d '{"code":"000000"}' | jq -c '{status, code: .errors[0].code, left: .attempts_remaining}'
 # {"status":422,"code":"contact_code_invalid","left":4}
 curl -s "${S[@]}" $API/me/gateway-contacts/$C/confirmation -d "{\"code\":\"$CODE\"}" | jq -c '{confirmed, contact}'
 # {"confirmed":true,"contact":"+10000000002"}
@@ -196,9 +219,11 @@ confirmed, and `deleteMyGatewayContact`.
 - A contact is personal data, not a Secret (C-30.FR-3): it is stored in plain text, read by its person, Admins and the
   gateway, and masked only where it would be logged. A confirmation code is masked like a Secret.
 - P-86 stays provisional; the test environment confirms it, not this story.
-- Migration numbers follow the story map: `0036` here, then `0037` to `0044` for S-148, S-149, S-152, S-154, S-169,
-  S-155, S-168 and S-157. A story merged out of that order renumbers its migration to the next free number in its own
-  pull request, with its tests and `schema.md`.
+- Renumbered to `0033`: this story merged out of the story-map order, after `0032`, so its migration takes the next
+  free number, with its tests and `schema.md`.
+- The story map numbered the migrations `0036` to `0044` for this story, S-148, S-149, S-152, S-154, S-169, S-155,
+  S-168 and S-157; this one is `0033`, and a story merged out of that order renumbers its migration to the next free
+  number in its own pull request, with its tests and `schema.md`.
 - `gateway_reaches` on the warnings of Schedules moved to S-150 in the plan review (M12): with it this story depended
   on S-164 and so on the spike S-132, which held up this story and S-148, S-149, S-152, S-154, S-156, S-169 and S-173
   after it; S-150, S-155 and the stories after them still follow S-164.
