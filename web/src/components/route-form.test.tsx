@@ -349,6 +349,7 @@ describe("the Route editor's Destinations and Teams option", () => {
     const { save } = await renderForm(routeOf({ deliver_to_teams: true }));
     await expect.element(page.getByTestId("shared-key-hint")).toBeVisible();
     await page.getByRole("button", { name: "Add team to the key" }).click();
+    expect(document.activeElement?.id).toBe("route-group-key");
     expect(page.getByTestId("shared-key-hint").elements()).toHaveLength(0);
     expect(
       page

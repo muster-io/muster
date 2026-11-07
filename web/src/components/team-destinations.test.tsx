@@ -358,6 +358,33 @@ describe("the Destinations of a Team", () => {
     expect(cells(0)[0]).toBe("DS0000000PAYCR");
   });
 
+  test("names a Destination the list lacks by the Team's own names, and keeps the row order after a save", async () => {
+    const withNames = team({
+      id: PAYMENTS.id,
+      destination_entries: [
+        { destination_id: "DS0000000GONE1", severity_condition: "any" },
+        { destination_id: NOTICE.id, severity_condition: "any" },
+      ],
+      destinations: [
+        {
+          id: "DS0000000GONE1",
+          name: "gone-one",
+          type: "mattermost",
+          health: { state: "healthy" },
+        },
+      ],
+    });
+    const { save } = await renderSection({ team: withNames });
+    await expect.element(rows().first()).toBeVisible();
+    expect(cells(0)[0]).toBe("gone-one");
+    await page.getByTestId(`team-destination-condition-${NOTICE.id}`).selectOptions("critical");
+    await page.getByRole("button", { name: "Save" }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    await expect.element(page.getByTestId("team-destinations-status")).toHaveTextContent("Saved.");
+    expect(cells(0)[0]).toBe("gone-one");
+    expect(cells(1)[0]).toBe("payments-notice");
+  });
+
   test("reads in Russian", async () => {
     await i18n.changeLanguage("ru");
     await renderSection();

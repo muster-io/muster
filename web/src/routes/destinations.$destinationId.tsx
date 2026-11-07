@@ -247,7 +247,7 @@ function RoutesOf({ destination }: { destination: Destination }) {
 }
 
 /** The Teams that name the Destination among their Destinations (C-26.FR-1). */
-function TeamsOf({ destination }: { destination: Destination }) {
+export function TeamsOf({ destination }: { destination: Destination }) {
   const { t } = useTranslation();
   const canTeams = useCan("teams:read");
   return (

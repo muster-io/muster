@@ -2156,7 +2156,7 @@
       "alerts_other": "{{count}} alerts",
       "countOf": "reached by {{reaching}} of {{total}}",
       "counts": "Alert Groups per Destination",
-      "grow": "Alert Groups only gain Destinations: the list includes those a group reaches as its Severity level rises.",
+      "grow": "Alert Groups only gain Destinations: the list includes the Destinations a group reaches and those it may reach as its Severity level rises.",
       "hint": "Checked against recent Alerts; it follows the settings above.",
       "level": {
         "critical": "critical",
@@ -2170,6 +2170,7 @@
       "noTeams": "no Team",
       "reaches": "Destinations this Alert Group reaches",
       "routeAnd": "Route, {{via}}",
+      "stale": "Showing the last result, for earlier settings",
       "teams": "Teams",
       "title": "Where alerts go",
       "updating": "Updating…",

@@ -25,6 +25,7 @@ files_touched:
   - web/src/components/team-view.test.tsx
   - web/src/routes/teams.$teamId.tsx
   - web/src/routes/destinations.$destinationId.tsx
+  - web/src/components/destination-teams.test.tsx
   - web/src/components/alert-group-deliveries.tsx
   - web/src/components/alert-group-deliveries.test.tsx
   - web/src/components/timeline.tsx
@@ -154,7 +155,7 @@ None.
   the order of the `destination_entries`, which the API gives by Destination id; the Routes list text does not depend on
   the order either. The preview "Where alerts go" asks 400 ms after the last change of the form, once for a burst, with the
   default period; the API has no field that tells a "may reach" result, so the preview says in a note that the list
-  includes the Destinations a group reaches as its Severity level rises.
+  includes the Destinations a group reaches and those it may reach as its Severity level rises.
 - The `e2e` specs name every Destination, Team, Integration and category by the prefix of their spec, and the category
   by the run as well, so that the Stored Snapshots of an earlier run are not previewed again.
 - Suggested commit: `feat(web): route to the teams from the label with severity conditions and a delivery preview`.

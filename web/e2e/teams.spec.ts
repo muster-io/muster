@@ -831,9 +831,9 @@ test("the Team page has Destinations of the Team with their conditions, and a De
     await expect(destinations.getByTestId("team-destinations-empty")).toHaveText(
       "The Team has no Destinations.",
     );
-    await expect(destinations.getByTestId("team-destinations-routes")).toHaveText(
-      "No Route delivers to the Teams from the label yet.",
-    );
+    // Whether other Routes deliver to Teams depends on the run, so only the line's shape is asserted here; the text
+    // for none is checked in team-destinations.test.tsx against a stubbed list.
+    await expect(destinations.getByTestId("team-destinations-routes")).not.toContainText(route);
     await expect(
       destinations.getByRole("link", {
         name: "Learn more: Severity conditions (opens in a new tab)",
@@ -849,8 +849,9 @@ test("the Team page has Destinations of the Team with their conditions, and a De
       deliverToTeams: true,
     });
     await page.reload();
-    await expect(destinations.getByTestId("team-destinations-routes")).toHaveText(
-      `The Alert Groups of ${seed.slugs.pay} arrive here from the Routes that deliver to the Teams from the label: ${route}.`,
+    await expect(destinations.getByTestId("team-destinations-routes")).toContainText(route);
+    await expect(destinations.getByTestId("team-destinations-routes")).toContainText(
+      `The Alert Groups of ${seed.slugs.pay} arrive here from the Routes that deliver to the Teams from the label:`,
     );
 
     // "Add Destination" with a condition for each; Save.
@@ -983,9 +984,10 @@ test("the Team page has Destinations of the Team with their conditions, and a De
     await expect(ruSection.getByTestId(`team-destination-condition-${critical.id}`)).toHaveValue(
       "critical",
     );
-    await expect(ruSection.getByTestId("team-destinations-routes")).toHaveText(
-      `Сюда приходят группы команды ${seed.slugs.pay} из маршрутов, где отмечено «ещё командам из метки»: ${route}.`,
+    await expect(ruSection.getByTestId("team-destinations-routes")).toContainText(
+      `Сюда приходят группы команды ${seed.slugs.pay} из маршрутов, где отмечено «ещё командам из метки»:`,
     );
+    await expect(ruSection.getByTestId("team-destinations-routes")).toContainText(route);
     await expect(ruSection.getByLabel("Добавить место доставки")).toBeVisible();
     await expectNoHorizontalScroll(ru);
     await shot(ru, "team-destinations-ru-360");

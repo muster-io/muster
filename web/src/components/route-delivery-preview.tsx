@@ -200,6 +200,8 @@ export function RouteDeliveryPreview({
   }
   const data = result.data ?? lastRead;
   const delivery = data?.delivery;
+  // The failure of a refresh leaves the list of earlier settings, which says so.
+  const stale = result.isError && result.data === undefined && lastRead !== undefined;
   const updating = enabled && (request !== current || result.isFetching);
   return (
     <section
@@ -237,46 +239,64 @@ export function RouteDeliveryPreview({
               {t("routes.deliveryPreview.updating")}
             </p>
           )}
-          {delivery === undefined ? (
-            <p className="text-sm text-muted-foreground" data-testid="delivery-preview-none">
-              {t("routes.deliveryPreview.noEntries")}
+          {stale && (
+            <p
+              id="route-delivery-preview-stale"
+              className="text-sm text-muted-foreground"
+              data-testid="delivery-preview-stale"
+            >
+              {t("routes.deliveryPreview.stale")}
             </p>
-          ) : (
-            <>
-              {delivery.shared_key_warning && teamLabel !== undefined && (
-                <p
-                  className="rounded-md border border-warning/60 bg-warning-surface px-2.5 py-1.5 text-sm"
-                  data-testid="preview-shared-key-warning"
-                >
-                  {t("routes.teams.sharedKey", { label: teamLabel })}
-                </p>
-              )}
-              {delivery.alert_groups.length === 0 ? (
-                <p className="text-sm text-muted-foreground" data-testid="delivery-preview-empty">
-                  {t("routes.deliveryPreview.noAlerts")}
-                </p>
-              ) : (
-                <>
-                  <ul
-                    className="flex flex-col gap-2"
-                    aria-label={t("routes.deliveryPreview.title")}
-                    data-testid="delivery-groups"
-                  >
-                    {delivery.alert_groups.map((group) => (
-                      <Group
-                        key={JSON.stringify(Object.entries(group.group_key_values))}
-                        group={group}
-                      />
-                    ))}
-                  </ul>
-                  <Counts delivery={delivery} total={data.proposed.alert_group_count} />
-                  <p className="text-xs text-muted-foreground">
-                    {t("routes.deliveryPreview.grow")}
-                  </p>
-                </>
-              )}
-            </>
           )}
+          <div
+            className={
+              stale ? "flex min-w-0 flex-col gap-3 opacity-60" : "flex min-w-0 flex-col gap-3"
+            }
+            aria-describedby={stale ? "route-delivery-preview-stale" : undefined}
+            role="group"
+            aria-label={t("routes.deliveryPreview.title")}
+          >
+            {delivery === undefined ? (
+              <p className="text-sm text-muted-foreground" data-testid="delivery-preview-none">
+                {t("routes.deliveryPreview.noEntries")}
+              </p>
+            ) : (
+              <>
+                {delivery.shared_key_warning && teamLabel !== undefined && (
+                  <p
+                    className="rounded-md border border-warning/60 bg-warning-surface px-2.5 py-1.5 text-sm"
+                    data-testid="preview-shared-key-warning"
+                  >
+                    {t("routes.teams.sharedKey", { label: teamLabel })}
+                  </p>
+                )}
+                {delivery.alert_groups.length === 0 ? (
+                  <p className="text-sm text-muted-foreground" data-testid="delivery-preview-empty">
+                    {t("routes.deliveryPreview.noAlerts")}
+                  </p>
+                ) : (
+                  <>
+                    <ul
+                      className="flex flex-col gap-2"
+                      aria-label={t("routes.deliveryPreview.title")}
+                      data-testid="delivery-groups"
+                    >
+                      {delivery.alert_groups.map((group) => (
+                        <Group
+                          key={JSON.stringify(Object.entries(group.group_key_values))}
+                          group={group}
+                        />
+                      ))}
+                    </ul>
+                    <Counts delivery={delivery} total={data.proposed.alert_group_count} />
+                    <p className="text-xs text-muted-foreground">
+                      {t("routes.deliveryPreview.grow")}
+                    </p>
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </section>

@@ -345,6 +345,16 @@ describe("the preview Where alerts go", () => {
     await page.getByRole("button", { name: "warning" }).click();
     await expect.element(page.getByRole("alert")).toBeVisible();
     expect(groups().elements()).toHaveLength(2);
+    await expect
+      .element(page.getByTestId("delivery-preview-stale"))
+      .toHaveTextContent("Showing the last result, for earlier settings");
+    const list = page.getByRole("group", { name: "Where alerts go" });
+    await expect.element(list).toHaveAttribute("aria-describedby", "route-delivery-preview-stale");
+    expect(list.element().className).toContain("opacity-60");
+    // A refresh that works ends the note.
+    server.answer = () => Promise.resolve(reply(200, previewOf(deliveryOf())));
+    await page.getByRole("button", { name: "critical" }).click();
+    await expect.element(page.getByTestId("delivery-preview-stale")).not.toBeInTheDocument();
   });
 
   test("reads in Russian", async () => {

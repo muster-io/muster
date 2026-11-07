@@ -158,7 +158,10 @@ export function TeamDestinations({ team, canWrite, save }: TeamDestinationsProps
             <tbody>
               {rows.map((entry, index) => {
                 const destination = choices.items.find((d) => d.id === entry.destination_id);
-                const name = destination?.name ?? entry.destination_id;
+                const name =
+                  destination?.name ??
+                  team.destinations.find((d) => d.id === entry.destination_id)?.name ??
+                  entry.destination_id;
                 const code = refused.get(index) ?? (index === duplicate ? "duplicate" : undefined);
                 return (
                   <tr
@@ -275,9 +278,10 @@ export function TeamDestinations({ team, canWrite, save }: TeamDestinationsProps
         }
         submit.mutate(rows, {
           onSuccess: (updated) => {
-            const next = entriesOf(updated);
-            setInitial(next);
-            setRows(next);
+            // The rows keep their order: the saved entries are the ones sent, only the API lists them otherwise.
+            setInitial(
+              entriesOf({ ...updated, destinations: rows.map((r) => ({ id: r.destination_id })) }),
+            );
             setSaved(true);
           },
         });

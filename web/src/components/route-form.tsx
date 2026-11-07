@@ -715,7 +715,7 @@ export function RouteForm({
                       onAdd={() => {
                         setServerGroupKeyError(undefined);
                         field.onChange(withDraft(field.value, teamLabel));
-                        form.setFocus("name");
+                        document.getElementById(`${ID}-group-key`)?.focus();
                       }}
                     />
                   )
