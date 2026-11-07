@@ -73,6 +73,9 @@
         <loc>https://muster-io.github.io/muster/messengers/mattermost/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/messengers/notification-gateways/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/messengers/proxies/</loc>
       </url>
       <url>

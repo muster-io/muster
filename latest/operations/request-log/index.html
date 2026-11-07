@@ -742,6 +742,8 @@
       
         
       
+        
+      
     
     
     
@@ -972,6 +974,33 @@
     
   
   Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/notification-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Notification gateways
 
     
   </span>
@@ -3123,6 +3152,14 @@ Every masked value reads <code>[redacted]</code>.</p>
 <li><strong>Values that authenticate a person</strong>: the signed action ids of buttons, which authenticate a Mattermost or a Slack
   press, and the tokens and codes of Account links — <code>/start &lt;token&gt;</code> in a Telegram update, the <code>token</code> of an
   <code>account_link</code> event, the code in a direct message.</li>
+<li><strong>What a Notification gateway is sent</strong>: the <code>contact</code> and the <code>text</code> of every request to <code>sendNotification</code>, in the
+  request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
+  confirms a contact (<a href="../../messengers/notification-gateways/#privacy">Notification gateways</a>). They are masked as the
+  values of the JSON members <code>contact</code> and <code>text</code>, also in a problem that quotes the request as JSON inside a JSON
+  string, one level deep, and, from six characters on, wherever they appear; JSON quoted two levels deep, or member
+  names written with <code>\u</code> escapes, are covered only by the masking from six characters on. A contact shorter than six
+  characters, such as an extension <code>1234</code>, that a gateway repeats in free text outside a JSON member is not masked
+  there, since masking its digits would mask them in every time and id of the record too.</li>
 <li><strong>What Slack sends and answers with</strong>: the bot token and the app-level token, the Slack signing secret, the address
   that <code>apps.connections.open</code> answers with, whose single-use <code>ticket</code> opens a socket, the <code>response_url</code> of a press,
   and the legacy verification <code>token</code> that every Slack payload still carries.</li>

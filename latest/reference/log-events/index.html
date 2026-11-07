@@ -742,6 +742,8 @@
       
         
       
+        
+      
     
     
     
@@ -972,6 +974,33 @@
     
   
   Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/notification-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Notification gateways
 
     
   </span>
@@ -3074,6 +3103,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#gateway_contact_code_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_contact_code_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_contact_code_sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_contact_code_sent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway_notification_sent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4619,6 +4670,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#gateway_contact_code_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_contact_code_rejected</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_contact_code_sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_contact_code_sent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway_notification_sent" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -5695,6 +5768,12 @@ the event.</p>
 <h3 id="fallback_template_used"><code>fallback_template_used</code><a class="headerlink" href="#fallback_template_used" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>route</code>, <code>group</code>, <code>template</code>, <code>error</code> · C-12</p>
 <p>A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.</p>
+<h3 id="gateway_contact_code_rejected"><code>gateway_contact_code_rejected</code><a class="headerlink" href="#gateway_contact_code_rejected" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>user</code>, <code>connection</code>, <code>contact</code>, <code>reason</code>, <code>attempts_remaining</code> · C-30</p>
+<p>A code typed for a contact at a Notification gateway was refused: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and reason wrong_code, other_session for a code asked for in another web session, which counts as an attempt like a wrong one, used, void — after the last wrong attempt, a newer code or a failed sending — expired or no_code; attempts_remaining is how many codes the contact still takes. The contact text and the code are never logged.</p>
+<h3 id="gateway_contact_code_sent"><code>gateway_contact_code_sent</code><a class="headerlink" href="#gateway_contact_code_sent" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>user</code>, <code>connection</code>, <code>contact</code>, <code>outcome</code> · C-30</p>
+<p>A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and outcome ok when the gateway accepted the notification, limited when no limiter token was free within delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. The contact text and the code are never logged.</p>
 <h3 id="gateway_notification_sent"><code>gateway_notification_sent</code><a class="headerlink" href="#gateway_notification_sent" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>key</code>, <code>class</code> · C-30</p>
 <p>Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.</p>

@@ -111,6 +111,14 @@ Every masked value reads `[redacted]`.
 - **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
   press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
   `account_link` event, the code in a direct message.
+- **What a Notification gateway is sent**: the `contact` and the `text` of every request to `sendNotification`, in the
+  request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
+  confirms a contact ([Notification gateways](../messengers/notification-gateways.md#privacy)). They are masked as the
+  values of the JSON members `contact` and `text`, also in a problem that quotes the request as JSON inside a JSON
+  string, one level deep, and, from six characters on, wherever they appear; JSON quoted two levels deep, or member
+  names written with `\u` escapes, are covered only by the masking from six characters on. A contact shorter than six
+  characters, such as an extension `1234`, that a gateway repeats in free text outside a JSON member is not masked
+  there, since masking its digits would mask them in every time and id of the record too.
 - **What Slack sends and answers with**: the bot token and the app-level token, the Slack signing secret, the address
   that `apps.connections.open` answers with, whose single-use `ticket` opens a socket, the `response_url` of a press,
   and the legacy verification `token` that every Slack payload still carries.

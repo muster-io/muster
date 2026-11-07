@@ -72,6 +72,10 @@ tags:
   description: Template preview and dry run.
 - name: Account links
   description: Ties between Users and messenger accounts. Started only from a signed-in web session.
+- name: Notification gateways
+  description: The contacts of people at Notification gateways — Bridge Connections in the role `gateway` that call or
+    text people — added and confirmed with a code only by their person, from the web session, and seen and removed by
+    Admins.
 - name: Request log
   description: The recent HTTP requests Muster sent for a Connection or an outgoing webhook Destination, each attempt with
     its answer and masked, kept for `request_log.max_age` and to the newest `request_log.max_records` of each owner
@@ -7010,6 +7014,290 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /me/gateway-contacts:
+    get:
+      operationId: listMyGatewayContacts
+      tags:
+      - Notification gateways
+      summary: List own contacts at Notification gateways
+      description: The caller's contacts, confirmed and unconfirmed, each with its Notification gateway; a new contact
+        for a gateway at which the caller has a confirmed one names that one in `replaces` until it is confirmed, and
+        until then the confirmed one stays the one called. Service account tokens get `403`
+        (`service_account_not_allowed`).
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      responses:
+        '200':
+          description: The contacts, by gateway and creation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayContactList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createMyGatewayContact
+      tags:
+      - Notification gateways
+      summary: Add an own contact at a Notification gateway
+      description: 'Adds an unconfirmed contact of the caller — a phone number or another address the gateway
+        understands, as text, trimmed, 1 to 200 characters — and sends a code of `gateway.contact_code` through that
+        gateway with `sendNotification`, without action data, in the language of the caller''s profile:
+        "Your Muster code: {code}. It is valid for {minutes} minutes. Do not share it." The code is checked only in
+        the web session that asked for it (`confirmMyGatewayContact`). An earlier unconfirmed contact of the caller for
+        the gateway is replaced; a confirmed one stays the one called until this one is confirmed. Code requests —
+        this operation and `sendMyGatewayContactCode` — are limited by `gateway.contact_code_requests` per User and
+        per contact text, whoever asked (`429` `contact_code_requests_exceeded` with `Retry-After`); a request whose
+        sending failed still counts. Runs on the interactive path: when no limiter token is free within
+        `delivery.interactive_budget`, the answer is `503` with `Retry-After`; a refusal of the gateway answers `502`
+        `gateway_refused` with its `gateway_class`. In both cases the contact stays, unconfirmed, and
+        `sendMyGatewayContactCode` sends a new code. A `connection_id` that names no Connection in the role
+        `gateway` answers `422` `unknown_id` at `/connection_id`; a contact that is empty or longer than 200
+        characters `422` `invalid_format` at `/contact`. Recorded in the Audit log as `gateway_contact.created`.
+        Web session only: a token gets `403` (`session_required`). No operation sets a contact for another User.'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GatewayContactInput'
+      responses:
+        '202':
+          description: The contact, unconfirmed; the code was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayContact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/GatewayRefused'
+        '503':
+          $ref: '#/components/responses/Limited'
+  /me/gateway-contacts/{gateway_contact_id}:
+    delete:
+      operationId: deleteMyGatewayContact
+      tags:
+      - Notification gateways
+      summary: Remove an own contact at a Notification gateway
+      description: 'Removes one of the caller''s contacts, confirmed or not; a confirmed contact is no longer called.
+        Its codes can no longer confirm anything, but stay, without the contact, and count toward
+        `gateway.contact_code_requests` until they are pruned, so that removing and adding a contact again does not
+        reset the limits. Recorded in the Audit log as `gateway_contact.deleted`. Web session only: a token gets `403`
+        (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      parameters:
+      - $ref: '#/components/parameters/GatewayContactId'
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /me/gateway-contacts/{gateway_contact_id}/code:
+    post:
+      operationId: sendMyGatewayContactCode
+      tags:
+      - Notification gateways
+      summary: Send a new code for an own contact
+      description: 'Sends a new code of `gateway.contact_code` for one of the caller''s contacts through its gateway, as
+        `createMyGatewayContact` does; once the gateway accepted it, it voids the earlier codes of the contact, which a
+        failed sending leaves as they were. The new code is checked only in this web session. Limited by `gateway.contact_code_requests` (`429` `contact_code_requests_exceeded` with
+        `Retry-After`). Runs on the interactive path (`503` with `Retry-After`); a refusal of the gateway answers `502`
+        `gateway_refused`. A contact whose gateway is no longer a Notification gateway answers `422` `unknown_id` at
+        `/connection_id`. Web session only: a token gets `403` (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      parameters:
+      - $ref: '#/components/parameters/GatewayContactId'
+      responses:
+        '202':
+          description: The code was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayContact'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '502':
+          $ref: '#/components/responses/GatewayRefused'
+        '503':
+          $ref: '#/components/responses/Limited'
+  /me/gateway-contacts/{gateway_contact_id}/confirmation:
+    post:
+      operationId: confirmMyGatewayContact
+      tags:
+      - Notification gateways
+      summary: Confirm an own contact with the code
+      description: 'Confirms the contact with the code its gateway delivered, in the web session that asked for the
+        code (ADR-0013). At most 5 attempts (`gateway.contact_code`); after that, once the code expired or was used,
+        and once a newer code was sent, the code is void. A wrong code, a code asked for in another session — which
+        counts as an attempt — and a void code answer `422` `contact_code_invalid` at `/code`, never saying which, with
+        `attempts_remaining`: the codes the contact still takes, 0 once it takes none. A confirmed contact replaces
+        the caller''s earlier confirmed contact at the same gateway, in one transaction. Recorded in the Audit log as
+        `gateway_contact.confirmed`. Calls no gateway. Web session only: a token gets `403` (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      parameters:
+      - $ref: '#/components/parameters/GatewayContactId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GatewayContactConfirm'
+      responses:
+        '200':
+          description: The confirmed contact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayContact'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /users/{user_id}/gateway-contacts:
+    get:
+      operationId: listUserGatewayContacts
+      tags:
+      - Notification gateways
+      summary: List a user's contacts at Notification gateways
+      description: The contacts of a User with their state, confirmed or not; a deleted User has none (C-03.FR-13).
+      x-permission: users:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The contacts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayContactList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createUserGatewayContact
+      tags:
+      - Notification gateways
+      summary: Set a user's contact (always refused)
+      description: 'Declared so that the API says it: an Admin never sets a contact for another User, so that nobody can
+        tie a contact to another person''s User (C-30.FR-3, ADR-0013). It always answers `403` `forbidden` with the
+        detail "Only the person sets their contact, from their own web session." and changes nothing, whatever the
+        body.'
+      x-permission: users:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Any body; it is not read.
+      responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /users/{user_id}/gateway-contacts/{gateway_contact_id}:
+    delete:
+      operationId: deleteUserGatewayContact
+      tags:
+      - Notification gateways
+      summary: Remove a user's contact at a Notification gateway
+      description: Admins can remove any contact but never set one. Its codes stay, without the contact, and count
+        toward `gateway.contact_code_requests` until they are pruned, as for `deleteMyGatewayContact`. Recorded in the
+        Audit log as `gateway_contact.deleted`. An Admin's own contact is removed from the web session only; with a
+        token the answer is `403` (`session_required`).
+      x-permission: users:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/GatewayContactId'
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /request-log:
     get:
       operationId: listRequestLog
@@ -8695,6 +8983,13 @@ components:
       description: Account link id.
       schema:
         $ref: '#/components/schemas/PublicId'
+    GatewayContactId:
+      name: gateway_contact_id
+      in: path
+      required: true
+      description: Contact id at a Notification gateway.
+      schema:
+        $ref: '#/components/schemas/PublicId'
     StoredSnapshotId:
       name: stored_snapshot_id
       in: path
@@ -9011,6 +9306,22 @@ components:
                 status: 501
                 detail: This build cannot test or preview Destinations of this type yet.
                 instance: /api/v1/destinations/DS4M1T6RW9KXPA/tests
+    GatewayRefused:
+      description: The Notification gateway refused the notification (`gateway-refused`, `gateway_refused`);
+        `gateway_class` says how, as the Bridge protocol classifies it. Nothing confirms the contact.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            gateway_refused:
+              value:
+                type: https://muster-io.github.io/muster/problems/gateway-refused
+                title: Notification gateway refused
+                status: 502
+                code: gateway_refused
+                detail: The Notification gateway refused the code; check the gateway and try again.
+                gateway_class: invalid
     Limited:
       description: No limiter token was free within `delivery.interactive_budget` (`interactive-budget-exhausted`); retry
         after `Retry-After`.
@@ -9095,7 +9406,18 @@ components:
           minimum: 0
           description: Set on the `link_code_invalid` refusal of `confirmMattermostLink`, `confirmBridgeLink` and
             `confirmSlackLink`; the attempts left for the code of the link request, 0 once it can no longer be used
-            (void, used or expired, or after the last wrong code).
+            (void, used or expired, or after the last wrong code). Set on the `contact_code_invalid` refusal of
+            `confirmMyGatewayContact` too, with the attempts left for the code of the contact, 0 once it is void.
+        gateway_class:
+          type: string
+          enum:
+          - transient
+          - rate_limited
+          - gone
+          - forbidden
+          - invalid
+          description: Set on `gateway-refused`; how the Notification gateway refused the notification, as the Bridge
+            protocol classifies it.
       x-problem-types:
       - type: validation-failed
         status:
@@ -9162,6 +9484,11 @@ components:
         - 503
         description: The call needs the interactive path and no limiter token was free within `delivery.interactive_budget`;
           retry after `Retry-After`.
+      - type: gateway-refused
+        status:
+        - 502
+        description: A Notification gateway refused a notification that a person waits for, such as the code of a
+          contact (`gateway_refused`); `gateway_class` says how.
       - type: internal
         status:
         - 500
@@ -9237,6 +9564,10 @@ components:
           description: The Mattermost, Bridge or Slack link code is wrong, or its request is void, used or expired; never
             says which. The pointer is `/code` (`confirmMattermostLink`, `confirmBridgeLink`, `confirmSlackLink`), and
             `attempts_remaining` says how many codes the request still takes.
+        - code: contact_code_invalid
+          description: The code of a contact at a Notification gateway is wrong, was asked for in another web session,
+            or is void, used or expired; never says which. The pointer is `/code` (`confirmMyGatewayContact`), and
+            `attempts_remaining` says how many codes the contact still takes.
         - code: messenger_user_not_found
           description: The Mattermost server has no user with this username; the pointer is `/username`
             (`startMattermostLink`).
@@ -9377,6 +9708,16 @@ components:
             the target account (`account_link.mattermost_code_requests`, `startMattermostLink`;
             `account_link.bridge_code_requests`, `startBridgeCodeLink`; `account_link.slack_code_requests`,
             `startSlackLink`); `retry_after_seconds` says when the next one is allowed.
+        - code: contact_code_requests_exceeded
+          description: Too many codes for contacts at Notification gateways were requested within an hour, by the User
+            or for the contact text (`gateway.contact_code_requests`, `createMyGatewayContact`,
+            `sendMyGatewayContactCode`); `retry_after_seconds` says when the next one is allowed.
+      - type: gateway-refused
+        in: code
+        codes:
+        - code: gateway_refused
+          description: The Notification gateway refused the notification with the code of a contact
+            (`createMyGatewayContact`, `sendMyGatewayContactCode`); `gateway_class` says how.
       - type: gone
         in: code
         codes:
@@ -12709,7 +13050,7 @@ components:
         characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as
         `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE`
         Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery
-        event, `DS` Destination, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
+        event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
         access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service
         account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup
         table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses
@@ -17151,6 +17492,74 @@ components:
         created_at:
           type: string
           format: date-time
+    GatewayContactInput:
+      type: object
+      required:
+      - connection_id
+      - contact
+      properties:
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+        contact:
+          type: string
+          minLength: 1
+          maxLength: 200
+          x-unprocessable: true
+          description: A phone number or another address the gateway understands, as text; trimmed, 1 to 200
+            characters. Muster does not check phone numbers.
+          example: '+10000000001'
+    GatewayContact:
+      type: object
+      description: A person's contact at a Notification gateway. A contact is personal data, not a Secret — its person,
+        Admins and the gateway read it — and the Request log masks it. Only a confirmed contact is called.
+      required:
+      - id
+      - connection
+      - contact
+      - confirmed
+      - confirmed_at
+      - replaces
+      - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        connection:
+          $ref: '#/components/schemas/EntityRef'
+        contact:
+          type: string
+          example: '+10000000001'
+        confirmed:
+          type: boolean
+        confirmed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        replaces:
+          $ref: '#/components/schemas/NullablePublicId'
+          description: The confirmed contact of the same person and gateway that this one replaces once it is
+            confirmed, until then the one called; null for a confirmed contact and without one.
+        created_at:
+          type: string
+          format: date-time
+    GatewayContactList:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GatewayContact'
+    GatewayContactConfirm:
+      type: object
+      required:
+      - code
+      properties:
+        code:
+          type: string
+          writeOnly: true
+          description: The code the gateway delivered.
     AccountLinkList:
       type: object
       required:

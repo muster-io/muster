@@ -1103,6 +1103,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       read `destination_entries`; `destination_ids` stays, derived from `destination_entries`, until 0.3.0 removes it: a
       request with only `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
       Outgoing webhooks in events mode may receive the new event `destination_joined`.
+    - Migration 0033 adds the [contacts at Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#contact-for-calls-and-sms)
+      and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
+      reads and writes nothing of the new tables.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1418,6 +1421,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
         ```
 
     4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Migration 0033 adds the contacts at Notification gateways in one transaction: a failure leaves nothing of it, but
+    the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 32, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -6325,6 +6333,110 @@ with secrets masked. Open a record for the request with its headers and body, an
 - **Muster** itself is AGPL-3.0-only. A contribution to `api/bridge.yaml` in Muster's repository is a contribution to
   Muster and falls under the CLA that Muster's repository asks for.
 
+<!-- Source: https://muster-io.github.io/muster/latest/messengers/notification-gateways.md -->
+# Notification gateways
+
+A **Notification gateway** reaches people outside messengers — by phone call or SMS, for example — through a provider
+of its own. It is a bridge in the role `gateway`: a service that speaks the [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md)
+with Muster and calls or texts people through your provider. Muster ships no gateway and never calls or texts anyone
+by itself: you run a gateway written for your provider, and Muster sends it the person's contact and a plain text.
+
+A gateway does not depend on a messenger, so it still reaches a person whose messenger is down or silent at night.
+
+In the examples, `MUSTER_PUBLIC_URL` is `https://muster.example.org`, and the contacts are numbers such as
+`+10000000001`, which reach nobody.
+
+## Connect a Notification gateway
+
+A Notification gateway is a [Bridge Connection](https://muster-io.github.io/muster/latest/messengers/bridge.md) whose bridge declares the role `gateway` in its `info`:
+
+1. Run the gateway bridge. To write one for your provider, read [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md): a gateway
+   implements `info`, `sendNotification`, `answerEvent` and events in at least one delivery mode.
+2. Create a Bridge Connection for it, with its base URL and the token of its bot, as
+   [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#create-the-connection) describes.
+3. Check the Connection. The check reads the roles from the bridge's `info` and shows **Notification gateway**; the
+   read of the Connection has `"roles": ["gateway"]`, and `GET /api/v1/connections?role=gateway` lists it.
+
+A Bridge Connection whose only role is `gateway` cannot be a Destination and is not offered for Account links
+([Roles](https://muster-io.github.io/muster/latest/messengers/bridge.md#roles)). A bridge may have both roles, `messenger` and `gateway`.
+
+`muster dev` runs the demo Connection "Example Gateway" on its fake bridge, whose `info` declares only the role
+`gateway`; the fake bridge lists what it was sent at `/_fake/notifications`.
+
+## Contact for calls and SMS
+
+A gateway calls or texts a person at their **contact**: a phone number or another address the gateway understands, as
+text. Muster does not check phone numbers. Each person has at most one confirmed contact per Notification gateway, and
+only a confirmed contact is called.
+
+### Add and confirm a contact
+
+A person adds their own contact from their signed-in web session, and confirms it with a code that the gateway
+delivers:
+
+1. Add the contact for the gateway (`createMyGatewayContact`, `POST /api/v1/me/gateway-contacts`, with
+   `connection_id` and `contact`). The contact is trimmed and holds 1 to 200 characters. Muster stores it
+   unconfirmed and sends a code through the gateway with `sendNotification`, without action data, in the language of
+   the person's profile: "Your Muster code: 123456. It is valid for 10 minutes. Do not share it."
+2. Type the code back, in the same web session (`confirmMyGatewayContact`, `POST
+   /api/v1/me/gateway-contacts/{id}/confirmation`, with `code`). The contact is confirmed.
+3. To get another code, ask for one (`sendMyGatewayContactCode`, `POST /api/v1/me/gateway-contacts/{id}/code`); once
+   the gateway accepted it, it voids the earlier codes of the contact. A code the gateway did not take leaves the
+   earlier one valid.
+
+The code (`gateway.contact_code`):
+
+Length
+:   6 digits.
+
+Validity
+:   10 minutes after it was asked for.
+
+Attempts
+:   At most 5. A wrong code answers `422` `contact_code_invalid` with `attempts_remaining`; after the fifth wrong code,
+    once the code expired or was used, and once a newer code was sent, the code is void.
+
+Session
+:   A code is checked only in the web session that asked for it. The right code typed in another session is refused
+    and counts as an attempt; a session that ends voids its codes.
+
+Code requests — adding a contact and asking for a new code — are limited (`gateway.contact_code_requests`):
+
+Per person
+:   5 within an hour.
+
+Per contact
+:   3 within an hour for one contact, as typed and trimmed, whoever asks.
+
+A request beyond them answers `429` `contact_code_requests_exceeded` with `Retry-After`; a request whose code the
+gateway could not deliver still counts. The code is sent on the interactive path, since the person waits for it: when
+no rate-limit token of the gateway is free within `delivery.interactive_budget`, the answer is `503` with
+`Retry-After`, and when the gateway refuses the notification, `502` `gateway_refused` with its `gateway_class`. The
+contact stays, unconfirmed, and a new code can be asked for.
+
+### Change a contact
+
+Add the new contact for the same gateway. Until it is confirmed, the confirmed contact stays the one called, and both
+are listed, the new one naming the confirmed one in `replaces`; confirming the new contact replaces the old one, so
+that changing a number never leaves a person unreachable. Adding another contact before the new one is confirmed
+replaces the unconfirmed one. A person removes a contact with `deleteMyGatewayContact`.
+
+### Admins
+
+An Admin sees the contacts of any User (`listUserGatewayContacts`, `GET /api/v1/users/{id}/gateway-contacts`) and
+removes one (`deleteUserGatewayContact`), but never sets one: `createUserGatewayContact` always answers `403`, "Only the
+person sets their contact, from their own web session.", so that nobody can tie a contact to another person's User.
+The operations that change a person's own contacts take the web session only; an API token, an Admin's included, gets
+`403` `session_required`.
+
+### Privacy
+
+A contact is personal data, not a secret: the person, Admins and the gateway read it. Muster does not log it, and the
+[Request log](https://muster-io.github.io/muster/latest/operations/request-log.md#masking) shows the contact and the text of every request to
+`sendNotification` as `[redacted]`, the code included. Adding, confirming and removing a contact are recorded in the
+Audit log. Deleting a User erases their contacts and codes, and the Audit log then shows their earlier contacts as
+`[erased]`.
+
 <!-- Source: https://muster-io.github.io/muster/latest/messengers/account-links.md -->
 # Link your messenger accounts
 
@@ -11025,6 +11137,14 @@ Every masked value reads `[redacted]`.
 - **Values that authenticate a person**: the signed action ids of buttons, which authenticate a Mattermost or a Slack
   press, and the tokens and codes of Account links — `/start <token>` in a Telegram update, the `token` of an
   `account_link` event, the code in a direct message.
+- **What a Notification gateway is sent**: the `contact` and the `text` of every request to `sendNotification`, in the
+  request and in its answer, since a contact is personal data and the text names Alert Groups or carries the code that
+  confirms a contact ([Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md#privacy)). They are masked as the
+  values of the JSON members `contact` and `text`, also in a problem that quotes the request as JSON inside a JSON
+  string, one level deep, and, from six characters on, wherever they appear; JSON quoted two levels deep, or member
+  names written with `\u` escapes, are covered only by the masking from six characters on. A contact shorter than six
+  characters, such as an extension `1234`, that a gateway repeats in free text outside a JSON member is not masked
+  there, since masking its digits would mask them in every time and id of the record too.
 - **What Slack sends and answers with**: the bot token and the app-level token, the Slack signing secret, the address
   that `apps.connections.open` answers with, whose single-use `ticket` opens a socket, the `response_url` of a press,
   and the legacy verification `token` that every Slack payload still carries.
@@ -12072,7 +12192,7 @@ Time from the arrival of an API request on the app listener to the end of its an
 
 Buckets (`le`): 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/label-suggestions`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/label-suggestions`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/me/gateway-contacts`, `/me/gateway-contacts/{gateway_contact_id}`, `/me/gateway-contacts/{gateway_contact_id}/code`, `/me/gateway-contacts/{gateway_contact_id}/confirmation`, `/users/{user_id}/gateway-contacts`, `/users/{user_id}/gateway-contacts/{gateway_contact_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 
 ### `muster_api_requests_total`
@@ -12081,7 +12201,7 @@ counter · labels: `route_pattern`, `method`, `code` · C-03 · exported by ever
 
 Requests to the API on the app listener, by the operation's path template, the method and the status code.
 
-- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/label-suggestions`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
+- `route_pattern`: `/sign-in-options`, `/sessions`, `/sessions/current`, `/sessions/current/totp`, `/sessions/oidc/start`, `/sessions/oidc/callback`, `/password-setups`, `/me`, `/me/password`, `/me/oidc-identity`, `/me/oidc-identity/callback`, `/me/sessions`, `/me/totp`, `/me/totp/removal`, `/me/totp/confirmation`, `/me/totp/recovery-codes`, `/me/ical-feed`, `/system-notices`, `/users`, `/users/{user_id}`, `/users/{user_id}/disable`, `/users/{user_id}/enable`, `/users/{user_id}/reset-totp`, `/users/{user_id}/convert-to-local`, `/users/{user_id}/password-setup-links`, `/user-directory`, `/roles`, `/oidc-settings`, `/oidc-settings/checks`, `/audit-log`, `/me/personal-access-tokens`, `/me/personal-access-tokens/{token_id}`, `/service-accounts`, `/service-accounts/{service_account_id}`, `/service-accounts/{service_account_id}/disable`, `/service-accounts/{service_account_id}/enable`, `/service-accounts/{service_account_id}/tokens`, `/service-accounts/{service_account_id}/tokens/{token_id}`, `/organization`, `/organization/outbound-policy`, `/organization/keyring`, `/organization/severity-values`, `/integrations`, `/integrations/{integration_id}`, `/integrations/{integration_id}/tokens`, `/integrations/{integration_id}/tokens/{integration_token_id}`, `/integrations/{integration_id}/alertmanager-routes`, `/integrations/{integration_id}/alerts`, `/stored-snapshots`, `/stored-snapshots/{stored_snapshot_id}`, `/ingest`, `/ingest/{ingest_token}`, `/heartbeat`, `/heartbeat/{ingest_token}`, `/callbacks/mattermost/{connection_id}`, `/callbacks/telegram/{connection_id}`, `/callbacks/bridge/{connection_id}`, `/callbacks/slack/{connection_id}`, `/routes`, `/routes/{route_id}`, `/route-order`, `/routes/{route_id}/label-suggestions`, `/routes/{route_id}/move-open-alert-groups`, `/route-profiles`, `/group-key-previews`, `/route-suggestions`, `/route-suggestions/{suggestion_id}/accept`, `/route-suggestions/{suggestion_id}/dismiss`, `/team-label-values`, `/teams`, `/teams/{team_id}`, `/teams/{team_id}/users`, `/teams/{team_id}/users/{user_id}`, `/schedules`, `/schedules/{schedule_id}`, `/schedules/{schedule_id}/on-call`, `/schedules/{schedule_id}/overrides`, `/schedules/{schedule_id}/overrides/{override_id}`, `/ical/{token}.ics`, `/on-call-now`, `/alert-groups`, `/alert-group-counts`, `/alert-group-statistics`, `/alert-groups/{alert_group_id}`, `/alert-groups/{alert_group_id}/alerts`, `/alert-groups/{alert_group_id}/timeline`, `/alert-groups/{alert_group_id}/related`, `/alert-groups/{alert_group_id}/deliveries`, `/alert-groups/{alert_group_id}/acknowledge`, `/alert-groups/{alert_group_id}/unacknowledge`, `/alert-groups/{alert_group_id}/resolve`, `/alert-groups/{alert_group_id}/unresolve`, `/alert-groups/{alert_group_id}/snooze`, `/alert-groups/{alert_group_id}/unsnooze`, `/alert-groups/{alert_group_id}/notes`, `/alert-groups/{alert_group_id}/still-on-it`, `/alert-groups/bulk-commands`, `/snooze-presets`, `/live-updates`, `/connections`, `/connections/checks`, `/connections/{connection_id}`, `/connections/{connection_id}/checks`, `/connections/{connection_id}/channels`, `/destinations`, `/destinations/{destination_id}`, `/destinations/{destination_id}/checks`, `/destinations/{destination_id}/tests`, `/destinations/{destination_id}/previews`, `/destinations/{destination_id}/secrets`, `/destinations/{destination_id}/secrets/{secret_name}`, `/destinations/{destination_id}/signing-secret`, `/destinations/{destination_id}/signing-secret/previous`, `/lookup-tables`, `/lookup-tables/{lookup_table_id}`, `/link-rules`, `/link-rules/{link_rule_id}`, `/template-previews`, `/me/account-links`, `/me/account-links/connections`, `/me/account-links/{account_link_id}`, `/me/account-links/telegram`, `/me/account-links/mattermost`, `/me/account-links/mattermost/confirmation`, `/me/account-links/bridge`, `/me/account-links/bridge/codes`, `/me/account-links/bridge/confirmation`, `/me/account-links/slack`, `/me/account-links/slack/confirmation`, `/users/{user_id}/account-links`, `/users/{user_id}/account-links/{account_link_id}`, `/me/gateway-contacts`, `/me/gateway-contacts/{gateway_contact_id}`, `/me/gateway-contacts/{gateway_contact_id}/code`, `/me/gateway-contacts/{gateway_contact_id}/confirmation`, `/users/{user_id}/gateway-contacts`, `/users/{user_id}/gateway-contacts/{gateway_contact_id}`, `/request-log`, `/request-log/{request_record_id}`, `/system-status`, `/openapi.yaml`, `/health/live`, `/health/ready`, `/metrics`, `unmatched` — the path template of the operation in the API specification, such as /alert-groups/{alert_group_id}, or unmatched for a path no operation has
 - `method`: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `OTHER` — the HTTP method of the request
 - `code`: `200`, `201`, `202`, `204`, `302`, `304`, `400`, `401`, `403`, `404`, `405`, `409`, `410`, `412`, `413`, `415`, `422`, `428`, `429`, `500`, `501`, `502`, `503`, `504` — the HTTP status code of the answer
 
@@ -12351,7 +12471,7 @@ counter · labels: `table` · C-02 · exported by every replica
 
 Short-lived rows that could no longer be used and that the Leader deleted, by table.
 
-- `table`: `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `telegram_post_copies`, `account_link_requests`, `bridge_events_seen` — the short-lived table the rows were deleted from
+- `table`: `sessions`, `sign_in_throttles`, `password_setups`, `oidc_auth_requests`, `telegram_post_copies`, `account_link_requests`, `gateway_contact_codes`, `bridge_events_seen` — the short-lived table the rows were deleted from
 
 ### `muster_storm_active`
 
@@ -12628,6 +12748,18 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_contact_code_rejected`
+
+WARN · fields: `user`, `connection`, `contact`, `reason`, `attempts_remaining` · C-30
+
+A code typed for a contact at a Notification gateway was refused: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and reason wrong_code, other_session for a code asked for in another web session, which counts as an attempt like a wrong one, used, void — after the last wrong attempt, a newer code or a failed sending — expired or no_code; attempts_remaining is how many codes the contact still takes. The contact text and the code are never logged.
+
+### `gateway_contact_code_sent`
+
+INFO · fields: `user`, `connection`, `contact`, `outcome` · C-30
+
+A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and outcome ok when the gateway accepted the notification, limited when no limiter token was free within delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. The contact text and the code are never logged.
 
 ### `gateway_notification_sent`
 

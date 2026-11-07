@@ -857,6 +857,8 @@
       
         
       
+        
+      
     
     
     
@@ -1087,6 +1089,33 @@
     
   
   Write a bridge
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../messengers/notification-gateways/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Notification gateways
 
     
   </span>
@@ -3139,6 +3168,9 @@ critical, and a Route raises the level of its Alert Groups with its
   read <code>destination_entries</code>; <code>destination_ids</code> stays, derived from <code>destination_entries</code>, until 0.3.0 removes it: a
   request with only <code>destination_ids</code> keeps the condition of each Destination it keeps and gives a new one <code>any</code>.
   Outgoing webhooks in events mode may receive the new event <code>destination_joined</code>.</li>
+<li>Migration 0033 adds the <a href="../../messengers/notification-gateways/#contact-for-calls-and-sms">contacts at Notification gateways</a>
+  and their confirmation codes; no data is migrated. It is expand only: a 0.1 replica, or one of a development image without it,
+  reads and writes nothing of the new tables.</li>
 </ul>
 <p><strong>The Route for Muster's own alerts groups by more labels.</strong> An installation that accepted the suggestion "Send
 Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is <code>alertname</code>,
@@ -3464,6 +3496,10 @@ database role as Muster:</p>
 <p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
 </li>
 </ol>
+<p>Migration 0033 adds the contacts at Notification gateways in one transaction: a failure leaves nothing of it, but
+the schema recorded as dirty at version 33. To recover, with the same database role as Muster, run
+<code>UPDATE schema_migrations SET version = 32, dirty = false;</code> and start the 0.2.0 replica again, or run
+<code>muster migrate</code>.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that

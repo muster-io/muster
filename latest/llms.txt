@@ -99,6 +99,7 @@
 - [Proxies](https://muster-io.github.io/muster/latest/messengers/proxies.md): Muster has no proxy for the whole installation.
 - [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): A **bridge** connects Muster to a messenger that Muster does not support natively.
 - [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md): A **bridge** connects Muster to a messenger that Muster does not support natively.
+- [Notification gateways](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md): A **Notification gateway** reaches people outside messengers — by phone call or SMS, for example — through a provider of its own.
 - [Link your messenger accounts](https://muster-io.github.io/muster/latest/messengers/account-links.md): An **Account link** ties your Telegram account, your account on a Mattermost server, your account in a Slack workspace, or your account on a messenger that Muster reaches through a Bridge, to your Muster User.
 
 ### Outgoing webhooks
@@ -170,4 +171,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 839198 bytes, about 209799 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 849073 bytes, about 212268 tokens.

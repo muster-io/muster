@@ -236,6 +236,18 @@ WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
 
+### `gateway_contact_code_rejected`
+
+WARN · fields: `user`, `connection`, `contact`, `reason`, `attempts_remaining` · C-30
+
+A code typed for a contact at a Notification gateway was refused: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and reason wrong_code, other_session for a code asked for in another web session, which counts as an attempt like a wrong one, used, void — after the last wrong attempt, a newer code or a failed sending — expired or no_code; attempts_remaining is how many codes the contact still takes. The contact text and the code are never logged.
+
+### `gateway_contact_code_sent`
+
+INFO · fields: `user`, `connection`, `contact`, `outcome` · C-30
+
+A person asked for the confirmation code of their contact at a Notification gateway: user is the public_id of the User, connection the public_id of the gateway's Connection, contact the public_id of the contact, and outcome ok when the gateway accepted the notification, limited when no limiter token was free within delivery.interactive_budget and nothing was sent, the error class of the Bridge protocol — transient, rate_limited, gone, forbidden or invalid — when the gateway refused it, or error when it failed otherwise. The contact text and the code are never logged.
+
 ### `gateway_notification_sent`
 
 INFO · fields: `connection`, `key`, `class` · C-30
