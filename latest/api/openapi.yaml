@@ -5195,6 +5195,13 @@ paths:
         description: Filter by type.
         schema:
           $ref: '#/components/schemas/ConnectionType'
+      - name: role
+        in: query
+        description: 'Filter by role: `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge
+          Connections whose stored `info` has the role `messenger`, which a bridge that declares no roles has;
+          `gateway` only the Bridge Connections whose stored `info` has the role `gateway`.'
+        schema:
+          $ref: '#/components/schemas/BridgeInfoRole'
       responses:
         '200':
           description: A page of Connections.
@@ -5581,7 +5588,8 @@ paths:
         Telegram, Bridge or Slack Destination runs the Destination check through the interactive path and refuses one
         that fails it with `422` `validation-failed` and `destination_check_failed`. Creating an outgoing webhook Destination also
         generates its Signing secret, returned once in `signing_secret` (`null` for the other types). Routes and Teams
-        attach Destinations through their `destination_entries`.'
+        attach Destinations through their `destination_entries`. A Bridge Connection whose stored `info` declares only
+        the role `gateway` is refused with `422` `gateway_only` at `/connection_id`, before any check.'
       x-permission: destinations:write
       x-listener: app
       security:
@@ -5659,7 +5667,11 @@ paths:
       description: Replaces the writable fields. Requires `If-Match`; a stale ETag gets `412`. An omitted optional field keeps
         its stored value; an explicit `null` clears a nullable one. An omitted Secret field keeps the stored Secret. `null`
         on a proxy `password` clears it. Saving a Mattermost, Telegram, Bridge or Slack Destination runs the Destination
-        check as `createDestination` does and refuses a failing one with `destination_check_failed`.
+        check as `createDestination` does and refuses a failing one with `destination_check_failed`; an update that
+        moves a Bridge Destination to a Connection whose stored `info` declares only the role `gateway` is refused with
+        `gateway_only`. One that keeps a Connection that became a gateway alone after the Destination was saved is not,
+        but its Destination check fails as that bridge answers it, so such a Destination can only be deleted or moved to
+        another Connection.
       x-permission: destinations:write
       x-listener: app
       security:
@@ -9190,6 +9202,9 @@ components:
         - code: unsupported
           description: The value is valid but not supported here, such as `owner=me` for a Service account token, or a
             Snooze's `time_zone` without `preset`.
+        - code: gateway_only
+          description: The Bridge Connection at `/connection_id` of a Destination is a Notification gateway, whose
+            stored `info` declares only the role `gateway`, and cannot be a Destination.
         - code: not_pageable
           description: The person may not be Paged — a Viewer, a disabled User or a User who is not in the Team, as
             `reason` says — where a Rotation layer adds them (`/rotation_layers/{i}/user_ids/{j}`) or an Override makes
@@ -14758,6 +14773,7 @@ components:
         - callback_url
         - info
         - info_read_at
+        - roles
         - proxy
         - destination_count
         - created_at
@@ -14790,6 +14806,16 @@ components:
             format: date-time
             readOnly: true
             description: When Muster read `info`; null while `info` is null.
+          roles:
+            type: array
+            readOnly: true
+            description: The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or
+              declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a
+              Destination.
+            minItems: 1
+            uniqueItems: true
+            items:
+              $ref: '#/components/schemas/BridgeInfoRole'
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:
@@ -15056,6 +15082,24 @@ components:
             `{token}` where the token goes.
           pattern: ^https?://\S*\{token\}\S*$
           maxLength: 1024
+        roles:
+          type: array
+          description: What the bridge is; `messenger` when it is missing.
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/BridgeInfoRole'
+    BridgeInfoRole:
+      x-bridge-schema: InfoRole
+      type: string
+      description: '`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification
+        gateway, which reaches people outside messengers.'
+      enum:
+      - messenger
+      - gateway
+      x-enum-varnames:
+      - BridgeInfoRoleMessenger
+      - BridgeInfoRoleGateway
     BridgeCapabilities:
       x-bridge-schema: Capabilities
       type: object
@@ -15183,6 +15227,7 @@ components:
       - $ref: '#/components/schemas/BridgeThreadMessageEvent'
       - $ref: '#/components/schemas/BridgeAccountLinkEvent'
       - $ref: '#/components/schemas/BridgeMessageDeletedEvent'
+      - $ref: '#/components/schemas/BridgeNotificationAcknowledgedEvent'
       discriminator:
         propertyName: type
         mapping:
@@ -15190,6 +15235,7 @@ components:
           thread_message: '#/components/schemas/BridgeThreadMessageEvent'
           account_link: '#/components/schemas/BridgeAccountLinkEvent'
           message_deleted: '#/components/schemas/BridgeMessageDeletedEvent'
+          notification_acknowledged: '#/components/schemas/BridgeNotificationAcknowledgedEvent'
     BridgeEventBase:
       x-bridge-schema: EventBase
       type: object
@@ -15291,6 +15337,26 @@ components:
             const: message_deleted
           message_id:
             type: string
+    BridgeNotificationAcknowledgedEvent:
+      x-bridge-schema: NotificationAcknowledgedEvent
+      allOf:
+      - $ref: '#/components/schemas/BridgeEventBase'
+      - type: object
+        description: The person acknowledged a notification of a Notification gateway; sent only by a bridge in the role
+          `gateway`.
+        required:
+        - notification_id
+        - data
+        properties:
+          type:
+            const: notification_acknowledged
+          notification_id:
+            type: string
+            minLength: 1
+            maxLength: 512
+          data:
+            type: string
+            pattern: ^[!-~]{1,64}$
     BridgePerson:
       x-bridge-schema: Person
       type: object

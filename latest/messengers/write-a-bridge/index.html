@@ -3927,6 +3927,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>-H<span class="w"> </span>
 <span class="w">  </span>--no-interactive
 </code></pre></div>
 <div class="highlight"><pre><span></span><code>PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -3942,6 +3943,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 </code></pre></div>
 <p>The package documentation on pkg.go.dev describes what the library does for every operation.</p>
 <h3 id="the-python-library">The Python library<a class="headerlink" href="#the-python-library" title="Permanent link">&para;</a></h3>
@@ -5111,11 +5114,15 @@ channel of <code>--channel</code>, delete its own message there when the bridge 
 <dt><code>--token-file &lt;file&gt;</code></dt>
 <dd>The bridge's token, alone in the file (required).</dd>
 <dt><code>--channel &lt;id&gt;</code></dt>
-<dd>A channel the bot can post to (required).</dd>
+<dd>A channel the bot can post to; a bridge in the role <code>messenger</code> needs it, and without it the check stops after
+<code>info</code> with exit status <code>2</code>. A bridge whose only role is <code>gateway</code> needs none.</dd>
 <dt><code>--forbidden-channel &lt;id&gt;</code></dt>
 <dd>A channel the bot cannot use, which must answer <code>forbidden</code>; without it the step <code>forbidden_channel</code> is skipped.</dd>
 <dt><code>--handle &lt;handle&gt;</code></dt>
 <dd>A person to look up and write to; without it <code>user_lookup</code> and <code>direct_message</code> are skipped.</dd>
+<dt><code>--contact &lt;contact&gt;</code></dt>
+<dd>Where a bridge in the role <code>gateway</code> reaches you, such as your phone number; without it <code>notification</code> and
+<code>notification_acknowledged</code> are skipped.</dd>
 <dt><code>--push-listen &lt;addr&gt;</code></dt>
 <dd>Where the push listener listens, <code>127.0.0.1:0</code> by default.</dd>
 <dt><code>--push-url &lt;url&gt;</code></dt>
@@ -5123,14 +5130,20 @@ channel of <code>--channel</code>, delete its own message there when the bridge 
 <dt><code>--push-secret-file &lt;file&gt;</code></dt>
 <dd>The push secret, <code>whsec_</code> and base64, instead of a generated one.</dd>
 <dt><code>--no-interactive</code></dt>
-<dd>Skip <code>press</code> and <code>push</code>, which need a person.</dd>
+<dd>Skip <code>press</code>, <code>push</code> and <code>notification_acknowledged</code>, which need a person.</dd>
 </dl>
 <p>Flags may come before or after the URL. The check prints one line per step as it ends: <code>PASS &lt;step&gt;</code>,
 <code>FAIL &lt;step&gt;: &lt;reason&gt;</code> or <code>SKIP &lt;step&gt;: &lt;why&gt;</code>. The steps run in this order: <code>info</code>, <code>channel_check</code>, <code>post</code>,
 <code>replayed_key</code>, <code>buttons</code>, <code>edit</code>, <code>thread_reply</code>, <code>thread_ref</code>, <code>forbidden_channel</code>, <code>user_lookup</code>, <code>direct_message</code>,
-<code>delete</code>, <code>poll</code>, <code>press</code>, <code>push</code> and <code>answer</code>. A failed <code>info</code> ends the run. <code>replayed_key</code> posts the same request
-again with its <code>Idempotency-Key</code>, which must return the same <code>message_id</code> with <code>replayed</code>.</p>
+<code>delete</code>, <code>poll</code>, <code>press</code>, <code>push</code>, <code>answer</code>, <code>notification</code> and <code>notification_acknowledged</code>. A failed <code>info</code> ends the
+run; after it, <code>ROLES &lt;role&gt;…</code> names the roles the bridge declares, and the steps of a role it lacks are skipped: from
+<code>channel_check</code> to <code>delete</code>, <code>press</code> and <code>push</code> are the role <code>messenger</code>'s, <code>notification</code> and
+<code>notification_acknowledged</code> the role <code>gateway</code>'s. <code>replayed_key</code> posts the same request again with its
+<code>Idempotency-Key</code>, which must return the same <code>message_id</code> with <code>replayed</code>. <code>notification</code> sends a test notification to
+<code>--contact</code>, with 64 bytes of action data, and the same request again, which must answer <code>replayed</code>;
+<code>notification_acknowledged</code> waits for you to acknowledge it and answers the event.</p>
 <div class="highlight"><pre><span></span><code>PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -5146,6 +5159,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 </code></pre></div>
 <p>It exits <code>0</code> when no step failed, <code>1</code> when one did, and <code>2</code> on a usage error. A step for an optional feature that the
 bridge does not declare is skipped.</p>

@@ -2810,6 +2810,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_event_unhandled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_unhandled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_info_read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2975,6 +2986,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#demo_check_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>demo_check_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#destination_broken" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3045,6 +3067,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>fallback_template_used</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_notification_sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_notification_sent</code>
       </span>
     </span>
   </a>
@@ -4322,6 +4355,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#bridge_event_unhandled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>bridge_event_unhandled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#bridge_info_read" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4487,6 +4531,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#demo_check_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>demo_check_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#destination_broken" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4557,6 +4612,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>fallback_template_used</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_notification_sent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_notification_sent</code>
       </span>
     </span>
   </a>
@@ -5557,6 +5623,9 @@ the event.</p>
 <h3 id="bridge_event_rejected"><code>bridge_event_rejected</code><a class="headerlink" href="#bridge_event_rejected" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>reason</code> · C-22</p>
 <p>A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is missing or no signature matches the push secret), timestamp (webhook-timestamp is further than bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the signature, the push secret, the headers or the body.</p>
+<h3 id="bridge_event_unhandled"><code>bridge_event_unhandled</code><a class="headerlink" href="#bridge_event_unhandled" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>event_id</code>, <code>type</code> · C-22</p>
+<p>A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.</p>
 <h3 id="bridge_info_read"><code>bridge_info_read</code><a class="headerlink" href="#bridge_info_read" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>protocol_version</code>, <code>features</code> · C-22</p>
 <p>Muster read the info of a Bridge Connection, on a Connection check or because its copy was older than bridge.info_max_age: connection is the public_id of the Connection, protocol_version the version the bridge speaks, features the names of the optional features it declares.</p>
@@ -5602,6 +5671,9 @@ the event.</p>
 <h3 id="delivery_work_failed"><code>delivery_work_failed</code><a class="headerlink" href="#delivery_work_failed" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>work</code>, <code>error</code> · C-11</p>
 <p>The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group.</p>
+<h3 id="demo_check_failed"><code>demo_check_failed</code><a class="headerlink" href="#demo_check_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>error</code> · C-01</p>
+<p>The check that <code>muster dev</code> runs at start on a demo Connection, the Notification gateway "Example Gateway", failed or could not run, and the start went on: connection is the public_id of the Connection and error what failed — a step with its code and message, or why the check did not run. Its roles stay those of its last stored info until a check passes; check it again from its page or the API.</p>
 <h3 id="destination_broken"><code>destination_broken</code><a class="headerlink" href="#destination_broken" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>destination</code>, <code>cause</code>, <code>reason</code> · C-11</p>
 <p>A Destination became Broken: destination is its public_id, cause fatal after a Fatal error or unavailable after the Transient budget ran out, and reason the masked error the messenger answered. Its deliveries wait, MusterDestinationBroken fires and a probe runs every delivery.broken_probe_interval.</p>
@@ -5623,6 +5695,9 @@ the event.</p>
 <h3 id="fallback_template_used"><code>fallback_template_used</code><a class="headerlink" href="#fallback_template_used" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>route</code>, <code>group</code>, <code>template</code>, <code>error</code> · C-12</p>
 <p>A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.</p>
+<h3 id="gateway_notification_sent"><code>gateway_notification_sent</code><a class="headerlink" href="#gateway_notification_sent" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>key</code>, <code>class</code> · C-30</p>
+<p>Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.</p>
 <h3 id="group_key_previewed"><code>group_key_previewed</code><a class="headerlink" href="#group_key_previewed" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>route</code>, <code>period_seconds</code>, <code>snapshots_read</code>, <code>truncated</code>, <code>duration_ms</code> · C-08</p>
 <p>A Group key preview read the Stored Snapshots of a period: route is the public_id of the saved Route it previewed, empty for a Route that is not saved yet, period_seconds the period, snapshots_read how many distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took.</p>

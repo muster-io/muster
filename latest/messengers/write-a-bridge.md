@@ -320,6 +320,7 @@ docker run --rm --network host -v /tmp/bt:/token:ro ghcr.io/muster-io/muster:lat
 
 ```text
 PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -335,6 +336,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 ```
 
 The package documentation on pkg.go.dev describes what the library does for every operation.
@@ -1696,13 +1699,18 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   The bridge's token, alone in the file (required).
 
 `--channel <id>`
-:   A channel the bot can post to (required).
+:   A channel the bot can post to; a bridge in the role `messenger` needs it, and without it the check stops after
+    `info` with exit status `2`. A bridge whose only role is `gateway` needs none.
 
 `--forbidden-channel <id>`
 :   A channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped.
 
 `--handle <handle>`
 :   A person to look up and write to; without it `user_lookup` and `direct_message` are skipped.
+
+`--contact <contact>`
+:   Where a bridge in the role `gateway` reaches you, such as your phone number; without it `notification` and
+    `notification_acknowledged` are skipped.
 
 `--push-listen <addr>`
 :   Where the push listener listens, `127.0.0.1:0` by default.
@@ -1714,16 +1722,22 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   The push secret, `whsec_` and base64, instead of a generated one.
 
 `--no-interactive`
-:   Skip `press` and `push`, which need a person.
+:   Skip `press`, `push` and `notification_acknowledged`, which need a person.
 
 Flags may come before or after the URL. The check prints one line per step as it ends: `PASS <step>`,
 `FAIL <step>: <reason>` or `SKIP <step>: <why>`. The steps run in this order: `info`, `channel_check`, `post`,
 `replayed_key`, `buttons`, `edit`, `thread_reply`, `thread_ref`, `forbidden_channel`, `user_lookup`, `direct_message`,
-`delete`, `poll`, `press`, `push` and `answer`. A failed `info` ends the run. `replayed_key` posts the same request
-again with its `Idempotency-Key`, which must return the same `message_id` with `replayed`.
+`delete`, `poll`, `press`, `push`, `answer`, `notification` and `notification_acknowledged`. A failed `info` ends the
+run; after it, `ROLES <role>…` names the roles the bridge declares, and the steps of a role it lacks are skipped: from
+`channel_check` to `delete`, `press` and `push` are the role `messenger`'s, `notification` and
+`notification_acknowledged` the role `gateway`'s. `replayed_key` posts the same request again with its
+`Idempotency-Key`, which must return the same `message_id` with `replayed`. `notification` sends a test notification to
+`--contact`, with 64 bytes of action data, and the same request again, which must answer `replayed`;
+`notification_acknowledged` waits for you to acknowledge it and answers the event.
 
 ```text
 PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -1739,6 +1753,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 ```
 
 It exits `0` when no step failed, `1` when one did, and `2` on a usage error. A step for an optional feature that the

@@ -4260,6 +4260,34 @@ A failed step names its cause with a code:
 `request_failed`
 :   The bridge answered with another error; the message names its class and the bridge's text.
 
+## Roles
+
+A bridge declares its roles in its `info`, and the check shows them. A bridge in the role `messenger`, which is every
+bridge that declares no roles, connects a messenger: its channels are Destinations, and people link their accounts
+through it. A bridge in the role `gateway` is a **Notification gateway**: it reaches people outside messengers, by
+phone call or SMS for example, through a provider of its own. A bridge may have both roles.
+
+A Bridge Connection whose only role is `gateway` cannot be a Destination: creating or saving a Destination for it is
+refused with `422` and the code `gateway_only` at `connection_id`. It is not offered for Account links either, since
+it looks nobody up in a messenger. Its read in the API has `roles`, from the `info` of its last check:
+
+```sh
+curl https://muster.example.org/api/v1/connections/CNK7M3QX9P2RTA \
+  -H "Authorization: Bearer $MUSTER_TOKEN"
+```
+
+```json
+{
+  "id": "CNK7M3QX9P2RTA",
+  "type": "bridge",
+  "name": "Phone calls",
+  "roles": ["gateway"]
+}
+```
+
+The Connection list takes `role`: `role=gateway` lists the Notification gateways, `role=messenger` every Connection of
+a messenger, Mattermost, Slack and Telegram ones included.
+
 ## Check before saving
 
 The check above reads a saved Connection. **Check connection** in the form of a new Connection, or on the page of a
@@ -4780,6 +4808,7 @@ docker run --rm --network host -v /tmp/bt:/token:ro ghcr.io/muster-io/muster:lat
 
 ```text
 PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -4795,6 +4824,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 ```
 
 The package documentation on pkg.go.dev describes what the library does for every operation.
@@ -6156,13 +6187,18 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   The bridge's token, alone in the file (required).
 
 `--channel <id>`
-:   A channel the bot can post to (required).
+:   A channel the bot can post to; a bridge in the role `messenger` needs it, and without it the check stops after
+    `info` with exit status `2`. A bridge whose only role is `gateway` needs none.
 
 `--forbidden-channel <id>`
 :   A channel the bot cannot use, which must answer `forbidden`; without it the step `forbidden_channel` is skipped.
 
 `--handle <handle>`
 :   A person to look up and write to; without it `user_lookup` and `direct_message` are skipped.
+
+`--contact <contact>`
+:   Where a bridge in the role `gateway` reaches you, such as your phone number; without it `notification` and
+    `notification_acknowledged` are skipped.
 
 `--push-listen <addr>`
 :   Where the push listener listens, `127.0.0.1:0` by default.
@@ -6174,16 +6210,22 @@ muster bridge check http://127.0.0.1:18095 --token-file ./token --channel alerts
 :   The push secret, `whsec_` and base64, instead of a generated one.
 
 `--no-interactive`
-:   Skip `press` and `push`, which need a person.
+:   Skip `press`, `push` and `notification_acknowledged`, which need a person.
 
 Flags may come before or after the URL. The check prints one line per step as it ends: `PASS <step>`,
 `FAIL <step>: <reason>` or `SKIP <step>: <why>`. The steps run in this order: `info`, `channel_check`, `post`,
 `replayed_key`, `buttons`, `edit`, `thread_reply`, `thread_ref`, `forbidden_channel`, `user_lookup`, `direct_message`,
-`delete`, `poll`, `press`, `push` and `answer`. A failed `info` ends the run. `replayed_key` posts the same request
-again with its `Idempotency-Key`, which must return the same `message_id` with `replayed`.
+`delete`, `poll`, `press`, `push`, `answer`, `notification` and `notification_acknowledged`. A failed `info` ends the
+run; after it, `ROLES <role>…` names the roles the bridge declares, and the steps of a role it lacks are skipped: from
+`channel_check` to `delete`, `press` and `push` are the role `messenger`'s, `notification` and
+`notification_acknowledged` the role `gateway`'s. `replayed_key` posts the same request again with its
+`Idempotency-Key`, which must return the same `message_id` with `replayed`. `notification` sends a test notification to
+`--contact`, with 64 bytes of action data, and the same request again, which must answer `replayed`;
+`notification_acknowledged` waits for you to acknowledge it and answers the event.
 
 ```text
 PASS info
+ROLES messenger
 PASS channel_check
 PASS post
 PASS replayed_key
@@ -6199,6 +6241,8 @@ PASS poll
 SKIP press: --no-interactive
 SKIP push: --no-interactive
 PASS answer
+SKIP notification: the bridge is not in the role gateway
+SKIP notification_acknowledged: the bridge is not in the role gateway
 ```
 
 It exits `0` when no step failed, `1` when one did, and `2` on a usage error. A step for an optional feature that the
@@ -12441,6 +12485,12 @@ INFO · fields: `connection`, `reason` · C-22
 
 A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is missing or no signature matches the push secret), timestamp (webhook-timestamp is further than bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the signature, the push secret, the headers or the body.
 
+### `bridge_event_unhandled`
+
+INFO · fields: `connection`, `event_id`, `type` · C-22
+
+A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
+
 ### `bridge_info_read`
 
 INFO · fields: `connection`, `protocol_version`, `features` · C-22
@@ -12531,6 +12581,12 @@ WARN · fields: `work`, `error` · C-11
 
 The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group.
 
+### `demo_check_failed`
+
+WARN · fields: `connection`, `error` · C-01
+
+The check that `muster dev` runs at start on a demo Connection, the Notification gateway "Example Gateway", failed or could not run, and the start went on: connection is the public_id of the Connection and error what failed — a step with its code and message, or why the check did not run. Its roles stay those of its last stored info until a check passes; check it again from its page or the API.
+
 ### `destination_broken`
 
 WARN · fields: `destination`, `cause`, `reason` · C-11
@@ -12572,6 +12628,12 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_notification_sent`
+
+INFO · fields: `connection`, `key`, `class` · C-30
+
+Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.
 
 ### `group_key_previewed`
 

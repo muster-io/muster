@@ -1020,6 +1020,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Roles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#check-before-saving" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2980,6 +2991,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#roles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Roles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#check-before-saving" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3182,6 +3204,26 @@ proxy:</p>
 <dt><code>request_failed</code></dt>
 <dd>The bridge answered with another error; the message names its class and the bridge's text.</dd>
 </dl>
+<h2 id="roles">Roles<a class="headerlink" href="#roles" title="Permanent link">&para;</a></h2>
+<p>A bridge declares its roles in its <code>info</code>, and the check shows them. A bridge in the role <code>messenger</code>, which is every
+bridge that declares no roles, connects a messenger: its channels are Destinations, and people link their accounts
+through it. A bridge in the role <code>gateway</code> is a <strong>Notification gateway</strong>: it reaches people outside messengers, by
+phone call or SMS for example, through a provider of its own. A bridge may have both roles.</p>
+<p>A Bridge Connection whose only role is <code>gateway</code> cannot be a Destination: creating or saving a Destination for it is
+refused with <code>422</code> and the code <code>gateway_only</code> at <code>connection_id</code>. It is not offered for Account links either, since
+it looks nobody up in a messenger. Its read in the API has <code>roles</code>, from the <code>info</code> of its last check:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>https://muster.example.org/api/v1/connections/CNK7M3QX9P2RTA<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$MUSTER_TOKEN</span><span class="s2">"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CNK7M3QX9P2RTA"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"bridge"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Phone calls"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"roles"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"gateway"</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The Connection list takes <code>role</code>: <code>role=gateway</code> lists the Notification gateways, <code>role=messenger</code> every Connection of
+a messenger, Mattermost, Slack and Telegram ones included.</p>
 <h2 id="check-before-saving">Check before saving<a class="headerlink" href="#check-before-saving" title="Permanent link">&para;</a></h2>
 <p>The check above reads a saved Connection. <strong>Check connection</strong> in the form of a new Connection, or on the page of a
 saved one while the form holds changes, checks the values in the form before anything is saved, with

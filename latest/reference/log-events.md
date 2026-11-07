@@ -92,6 +92,12 @@ INFO · fields: `connection`, `reason` · C-22
 
 A Bridge event was refused and changed nothing: connection is the public_id the request named, empty when it is not a well-formed public_id, and reason why — unknown_connection (no Bridge Connection with this id, or a deleted one), poll_mode (the Connection receives its events by polling), signature (a webhook header is missing or no signature matches the push secret), timestamp (webhook-timestamp is further than bridge.push_tolerance from Muster's real clock), each answered 401; not_an_event (the body is no event of the Bridge protocol), id_mismatch (the event's id is not webhook-id) or too_large, each answered 400. A polled event that is no event is skipped with not_an_event, and the batch goes on. Never carries the signature, the push secret, the headers or the body.
 
+### `bridge_event_unhandled`
+
+INFO · fields: `connection`, `event_id`, `type` · C-22
+
+A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
+
 ### `bridge_info_read`
 
 INFO · fields: `connection`, `protocol_version`, `features` · C-22
@@ -182,6 +188,12 @@ WARN · fields: `work`, `error` · C-11
 
 The delivery worker could not attempt a delivery or a Thread reply, or probe a Broken Destination (work is delivery, thread_reply or probe), or mark the first Publication of an Alert Group once its outcome committed (work is mark_published), because of error, such as a lost database connection. Any replica attempts it again once its lease runs out, or at the next probe; a first Publication is marked again by the next delivered call or event of the Alert Group.
 
+### `demo_check_failed`
+
+WARN · fields: `connection`, `error` · C-01
+
+The check that `muster dev` runs at start on a demo Connection, the Notification gateway "Example Gateway", failed or could not run, and the start went on: connection is the public_id of the Connection and error what failed — a step with its code and message, or why the check did not run. Its roles stay those of its last stored info until a check passes; check it again from its page or the API.
+
 ### `destination_broken`
 
 WARN · fields: `destination`, `cause`, `reason` · C-11
@@ -223,6 +235,12 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_notification_sent`
+
+INFO · fields: `connection`, `key`, `class` · C-30
+
+Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.
 
 ### `group_key_previewed`
 
