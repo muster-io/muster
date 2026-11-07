@@ -12,6 +12,8 @@ files_touched:
   - web/src/components/route-destinations.test.tsx
   - web/src/components/route-teams-option.tsx
   - web/src/components/route-teams-option.test.tsx
+  - web/src/components/route-form.test.tsx
+  - web/src/components/route-editor.test.tsx
   - web/src/components/group-key-editor.tsx
   - web/src/components/route-delivery-preview.tsx
   - web/src/components/route-delivery-preview.test.tsx
@@ -20,13 +22,16 @@ files_touched:
   - web/src/routes/routes.$routeId.tsx
   - web/src/components/team-destinations.tsx
   - web/src/components/team-destinations.test.tsx
+  - web/src/components/team-view.test.tsx
   - web/src/routes/teams.$teamId.tsx
   - web/src/routes/destinations.$destinationId.tsx
+  - web/src/components/destination-teams.test.tsx
   - web/src/components/alert-group-deliveries.tsx
   - web/src/components/alert-group-deliveries.test.tsx
   - web/src/components/timeline.tsx
   - web/src/components/timeline.test.tsx
   - web/src/components/audit-diff.tsx
+  - web/src/components/audit-diff.test.tsx
   - web/src/lib/docs-links.json
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -35,7 +40,9 @@ files_touched:
   - web/e2e/teams.spec.ts
   - web/e2e/delivery-state.spec.ts
   - web/e2e/docs-links-forms.spec.ts
+  - web/e2e/support.ts
   - web/e2e/screenshots/routes-and-templates.spec.ts
+  - docs/concepts/routes-and-group-keys.md
 acceptance:
   - "[C-26.FR-1, C-08.FR-1] The Route form's \"Route Destinations\" reads \"Where the Route sends the messages of its Alert Groups; each Destination may have a Severity condition\" and gives each Destination the choice \"Any severity\", \"Severity = critical\" or \"Severity < critical\", saved as `destination_entries`; the Routes list shows each Route's Destinations with their conditions and \"+ Teams from the label\" where it delivers to Teams (`route-destinations.test.tsx`, `routes.spec.ts`)."
   - "[C-26.FR-2, C-26.FR-12, C-26.AC-9] Under the Destinations, \"Also to the Teams from the label team\" with its hint \"The Alert Group also goes to the Destinations of the Teams whose values are in its Alerts, with their Severity conditions. A new Team adds channels and removes none.\" and, under it, \"Run the Teams' Escalation chains\"; with the option on and no `team` in the Group key, the form shows \"Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add team to the key if each Team needs its own.\" and \"Add team to the key\", which adds it (`route-teams-option.test.tsx`)."
@@ -131,8 +138,9 @@ Playwright at 1280 × 800, in English and in Russian:
    (critical), infra-notice (< critical) + Teams from the label".
 3. Teams → "payments" → "Destinations of the Team" → "Add Destination" `payments-critical` "Severity = critical" and
    `payments-notice` "Severity < critical" → "Save"; the line names the Route.
-4. Fire a new Alert of "payments" → its Alert Group → the delivery state lists `infra-notice` "Route" and
-   `payments-notice` "Team payments"; fire an Alert of "search" into it → the Timeline shows "Joined search-notice".
+4. With a Route whose Group key lacks `team` (the Alerts of two Teams then share an Alert Group), fire a new Alert of
+   "payments" → its Alert Group → the delivery state lists `infra-notice` "Route" and `payments-notice` "Team
+   payments"; fire an Alert of "search" with the same alertname into it → the Timeline shows "Joined search-notice".
 5. "Learn more" next to the option opens Routing to Teams at "Also to the Teams from the label".
 
 `make e2e` runs these steps in `routes.spec.ts`, `route-preview.spec.ts`, `teams.spec.ts` and `delivery-state.spec.ts`.
@@ -143,6 +151,13 @@ None.
 
 ## Notes
 
+- The forms and the Routes list show a Route's or a Team's Destinations by name, as the API lists `destinations`, not in
+  the order of the `destination_entries`, which the API gives by Destination id; the Routes list text does not depend on
+  the order either. The preview "Where alerts go" asks 400 ms after the last change of the form, once for a burst, with the
+  default period; the API has no field that tells a "may reach" result, so the preview says in a note that the list
+  includes the Destinations a group reaches and those it may reach as its Severity level rises.
+- The `e2e` specs name every Destination, Team, Integration and category by the prefix of their spec, and the category
+  by the run as well, so that the Stored Snapshots of an earlier run are not previewed again.
 - Suggested commit: `feat(web): route to the teams from the label with severity conditions and a delivery preview`.
 - The approved Route mockup chooses one Escalation chain; that part is S-158's and follows C-32.FR-2 (L2.md §5.2).
 - "Run the Teams' Escalation chains" is on the form from now on, as the API stores it (S-121); it acts once chains

@@ -94,7 +94,12 @@ function routeField(t: TFunction, pointer: string): string | undefined {
     case "/group_key":
       return t("routes.fields.groupKey");
     case "/destination_ids":
-      return t("routes.destinations.title");
+    case "/destination_entries":
+      return t("audit.fields.destinations");
+    case "/deliver_to_teams":
+      return t("audit.fields.deliverToTeams");
+    case "/run_team_chains":
+      return t("audit.fields.runTeamChains");
     case "/policy/reopen_window_seconds":
       return t("audit.fields.reopenWindowSeconds");
     case "/policy/grace_period_seconds":
@@ -277,6 +282,8 @@ function teamField(t: TFunction, pointer: string): string | undefined {
       return t("teams.hours.title");
     case "/matchers":
       return t("teams.rules.matchersField");
+    case "/destination_entries":
+      return t("teams.destinations.title");
     default:
       return undefined;
   }

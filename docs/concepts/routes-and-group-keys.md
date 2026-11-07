@@ -211,8 +211,8 @@ labels](../integrations/alertmanager.md#static-labels).
 
     ![The form of the new Route payments: the Matcher team = payments, the Group key and its preview of 2 Alert Groups](../assets/screenshots/concepts/routes-and-group-keys/05-new-route.png){ .screenshot }
 
-3. Under **Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
-   health; a Route without Destinations sends no messages.
+3. Under **Route Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
+   health, and a Severity condition you can leave at **Any severity**; a Route without Destinations sends no messages.
 
     ![The Destinations of the Route: the outgoing webhook payments, Healthy](../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
 

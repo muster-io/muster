@@ -13,8 +13,13 @@ import {
   APP,
   type Api,
   adminApi,
+  TEAM_SPEC_PASSWORD,
   alertGroupOf,
   createRoute,
+  createRoutingRoute,
+  dropRouting,
+  ensureLocalUser,
+  seedRouting,
   deleteRoute,
   expectNoHorizontalScroll,
   nextIdpUser,
@@ -770,6 +775,226 @@ test("the Teams page and the Team page with the Team label read in Russian and f
     await removeTeamsBySlug(cleanup, [pay, sea]);
     await cleanup.dispose();
     await context.close();
+  }
+  expect(csp).toEqual([]);
+});
+
+const DEST_PREFIX = "tdt";
+
+test("the Team page has Destinations of the Team with their conditions, and a Destination's page lists its Teams", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const seed = await seedRouting(DEST_PREFIX);
+  const critical = seed.destination("payments-critical");
+  const notice = seed.destination("payments-notice");
+  const infraCritical = seed.destination("infra-critical");
+  const infraNotice = seed.destination("infra-notice");
+  const route = `Infra-${DEST_PREFIX}`;
+  const reader = `${DEST_PREFIX}-reader`;
+  const ruAdmin = `${DEST_PREFIX}-ru`;
+  const entries = async () => {
+    const admin = await adminApi();
+    try {
+      const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+        "GET",
+        "/api/v1/teams?limit=500",
+      );
+      const id = list.items.find((t) => t.slug === seed.slugs.pay)?.id ?? "";
+      return (
+        await admin.call<{
+          destination_entries: { destination_id: string; severity_condition: string }[];
+        }>("GET", `/api/v1/teams/${id}`)
+      ).destination_entries;
+    } finally {
+      await admin.dispose();
+    }
+  };
+  try {
+    const admin = await adminApi();
+    try {
+      await ensureLocalUser(admin, reader, "responder");
+      await ensureLocalUser(admin, ruAdmin, "admin");
+    } finally {
+      await admin.dispose();
+    }
+    await signInAdmin(page);
+    await page.goto("/teams");
+    await page.getByRole("link", { name: seed.slugs.pay, exact: true }).click();
+    const destinations = page.getByTestId("team-destinations-section");
+    await expect(
+      destinations.getByRole("heading", { name: "Destinations of the Team" }),
+    ).toBeVisible();
+
+    // Empty: no Destination, and no Route delivers to the Teams from the label yet.
+    await expect(destinations.getByTestId("team-destinations-empty")).toHaveText(
+      "The Team has no Destinations.",
+    );
+    // Whether other Routes deliver to Teams depends on the run, so only the line's shape is asserted here; the text
+    // for none is checked in team-destinations.test.tsx against a stubbed list.
+    await expect(destinations.getByTestId("team-destinations-routes")).not.toContainText(route);
+    await expect(
+      destinations.getByRole("link", {
+        name: "Learn more: Severity conditions (opens in a new tab)",
+      }),
+    ).toHaveAttribute("href", /\/concepts\/routing-to-teams\/#severity-conditions$/);
+
+    // A Route that delivers to the Teams from the label: the line names it.
+    await createRoutingRoute(seed, route, {
+      entries: [
+        { destination_id: infraCritical.id, severity_condition: "critical" },
+        { destination_id: infraNotice.id, severity_condition: "below_critical" },
+      ],
+      deliverToTeams: true,
+    });
+    await page.reload();
+    await expect(destinations.getByTestId("team-destinations-routes")).toContainText(route);
+    await expect(destinations.getByTestId("team-destinations-routes")).toContainText(
+      `The Alert Groups of ${seed.slugs.pay} arrive here from the Routes that deliver to the Teams from the label:`,
+    );
+
+    // "Add Destination" with a condition for each; Save.
+    const add = destinations.getByLabel("Add Destination");
+    await add.selectOption(critical.id);
+    await add.selectOption(notice.id);
+    await destinations
+      .getByTestId(`team-destination-condition-${critical.id}`)
+      .selectOption("critical");
+    await destinations
+      .getByTestId(`team-destination-condition-${notice.id}`)
+      .selectOption("below_critical");
+    await expect(
+      destinations.getByTestId(`team-destination-condition-${notice.id}`).locator("option"),
+    ).toHaveText(["Any severity", "Severity = critical", "Severity < critical"]);
+    await expect(destinations.getByRole("columnheader")).toHaveText([
+      "Destination",
+      "Connection",
+      "Condition",
+      "Remove",
+    ]);
+    await expect(destinations.getByTestId("team-destination").first()).toContainText(
+      "mm-" + DEST_PREFIX,
+    );
+
+    // A request that names the first Destination twice (the second entry is replaced on its way) is refused by the
+    // server at the entry, which the page shows at that row.
+    await page.route("**/api/v1/teams/*", async (r) => {
+      if (r.request().method() !== "PUT") {
+        await r.continue();
+        return;
+      }
+      const body: { destination_entries: unknown[] } = r.request().postDataJSON();
+      await r.continue({
+        postData: JSON.stringify({
+          ...body,
+          destination_entries: [body.destination_entries[0], body.destination_entries[0]],
+        }),
+      });
+    });
+    await destinations.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(destinations.getByTestId("team-destination").nth(1).getByRole("alert")).toHaveText(
+      "This Destination is listed twice.",
+    );
+    await expect(page.getByRole("alert")).toHaveCount(1);
+    await page.unroute("**/api/v1/teams/*");
+    expect(await entries()).toEqual([]);
+
+    await destinations.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("team-destinations-status")).toHaveText("Saved.");
+    expect(
+      (await entries()).toSorted((a, b) => a.destination_id.localeCompare(b.destination_id)),
+    ).toEqual(
+      [
+        { destination_id: critical.id, severity_condition: "critical" },
+        { destination_id: notice.id, severity_condition: "below_critical" },
+      ].toSorted((a, b) => a.destination_id.localeCompare(b.destination_id)),
+    );
+    await expect(page.getByTestId("team-stale")).toHaveCount(0);
+    await shot(page, "team-destinations");
+
+    // "Remove" and Save take a Destination away; a reload shows what was saved.
+    await destinations.getByRole("button", { name: `Remove ${notice.name}` }).click();
+    await destinations.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("team-destinations-status")).toHaveText("Saved.");
+    expect(await entries()).toEqual([
+      { destination_id: critical.id, severity_condition: "critical" },
+    ]);
+    await page.reload();
+    await expect(destinations.getByTestId("team-destination")).toHaveCount(1);
+    await expect(destinations.getByTestId(`team-destination-condition-${critical.id}`)).toHaveValue(
+      "critical",
+    );
+    await destinations.getByLabel("Add Destination").selectOption(notice.id);
+    await destinations
+      .getByTestId(`team-destination-condition-${notice.id}`)
+      .selectOption("below_critical");
+    await destinations.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByTestId("team-destinations-status")).toHaveText("Saved.");
+
+    // The Destination's page lists the Teams that name it, and says so when none does.
+    await page.goto(`/destinations/${critical.id}`);
+    const teams = page.getByTestId("destination-teams");
+    await expect(teams.getByRole("heading", { name: "Teams" })).toBeVisible();
+    await expect(teams.getByRole("link", { name: seed.slugs.pay, exact: true })).toBeVisible();
+    await page.goto(`/destinations/${infraCritical.id}`);
+    await expect(page.getByTestId("destination-teams")).toContainText(
+      "No Team names this Destination.",
+    );
+    await expect(
+      page.getByTestId("destination-routes").getByRole("link", { name: route }),
+    ).toBeVisible();
+
+    // A Responder sees the table and the line, with no way to change them.
+    const readerContext = await browser.newContext();
+    const readerPage = await readerContext.newPage();
+    await signIn(readerPage, reader, TEAM_SPEC_PASSWORD);
+    await readerPage.goto("/teams");
+    await readerPage.getByRole("link", { name: seed.slugs.pay, exact: true }).click();
+    const readOnly = readerPage.getByTestId("team-destinations-section");
+    await expect(readOnly.getByTestId("team-destination")).toHaveCount(2);
+    await expect(readOnly.getByTestId(`team-destination-condition-${critical.id}`)).toHaveText(
+      "Severity = critical",
+    );
+    await expect(readOnly.getByTestId(`team-destination-condition-${notice.id}`)).toHaveText(
+      "Severity < critical",
+    );
+    await expect(readOnly.getByRole("button")).toHaveCount(0);
+    await expect(readOnly.getByLabel("Add Destination")).toHaveCount(0);
+    await readerContext.close();
+
+    // Russian at 360 px.
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, ruAdmin, TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/teams");
+    await ru.getByRole("link", { name: seed.slugs.pay, exact: true }).click();
+    const ruSection = ru.getByTestId("team-destinations-section");
+    await expect(ruSection.getByRole("heading", { name: "Места доставки команды" })).toBeVisible();
+    await expect(ruSection.getByRole("columnheader")).toHaveText([
+      "Место доставки",
+      "Подключение",
+      "Условие",
+      "Убрать",
+    ]);
+    await expect(ruSection.getByTestId(`team-destination-condition-${critical.id}`)).toHaveValue(
+      "critical",
+    );
+    await expect(ruSection.getByTestId("team-destinations-routes")).toContainText(
+      `Сюда приходят группы команды ${seed.slugs.pay} из маршрутов, где отмечено «ещё командам из метки»:`,
+    );
+    await expect(ruSection.getByTestId("team-destinations-routes")).toContainText(route);
+    await expect(ruSection.getByLabel("Добавить место доставки")).toBeVisible();
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "team-destinations-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    await dropRouting(DEST_PREFIX);
   }
   expect(csp).toEqual([]);
 });

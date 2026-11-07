@@ -2,8 +2,9 @@
 // Copyright The Muster Authors
 
 // The Route editor (C-08.FR-1, FR-2, FR-4, FR-5): the name, the description, the Matchers (none for the Default route),
-// the Group key with its preview, the Destinations with their health and the Storm banner (C-13.FR-11, C-11.FR-9), the
-// section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section
+// the Group key with its preview, the Destinations with their Severity conditions, their health and the Storm banner
+// (C-26.FR-1, C-13.FR-11, C-11.FR-9), "Also to the Teams from the label" with "Run the Teams' Escalation chains"
+// (C-26.FR-2), the preview "Where alerts go" (C-26.FR-12), the section "Severity, Escalation chains and owner" with the Minimum severity (C-26.FR-8), the Lifecycle section
 // (C-09.FR-4, FR-5, FR-9), the Delivery section (the Thread batching window and the Storm threshold of C-11), the Snooze
 // durations (C-10.FR-6), the "Ack timeout and Reminders" section (C-17.FR-2) and
 // the Message section (C-12.FR-2, FR-3, FR-5), with the banner of a template that keeps failing (C-12.FR-6). Every
@@ -18,7 +19,8 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import type { ProblemError, Route, RouteInput } from "../api/gen/model";
+import { useGetOrganization } from "../api/gen/endpoints/organization/organization";
+import type { DestinationEntry, ProblemError, Route, RouteInput } from "../api/gen/model";
 import { fieldErrorText, isApiError, isStale, problemText } from "../lib/api";
 import { DocsLink } from "./docs-link";
 import { GroupKeyEditor } from "./group-key-editor";
@@ -33,7 +35,13 @@ import {
   matchersOf,
   sentRows,
 } from "./matcher-builder";
-import { RouteDestinations } from "./route-destinations";
+import { RouteDeliveryPreview } from "./route-delivery-preview";
+import {
+  ENTRIES_MAX,
+  RouteDestinations,
+  SEVERITY_CONDITIONS,
+  entriesOf,
+} from "./route-destinations";
 import {
   DELIVERY_POINTERS,
   RoutePolicyDelivery,
@@ -74,6 +82,7 @@ import {
   timersValues,
   withTimers,
 } from "./route-policy-timers";
+import { RouteTeamsOption, SharedKeyHint } from "./route-teams-option";
 import {
   RouteSeverityAndOwner,
   minimumSeverityName,
@@ -104,7 +113,16 @@ const formSchema = z
       }),
     ),
     group_key: z.array(z.string()),
-    destination_ids: z.array(z.string()),
+    destination_entries: z
+      .array(
+        z.object({
+          destination_id: z.string(),
+          severity_condition: z.enum(SEVERITY_CONDITIONS),
+        }),
+      )
+      .max(ENTRIES_MAX, "out_of_range"),
+    deliver_to_teams: z.boolean(),
+    run_team_chains: z.boolean(),
     snooze_durations: z.array(z.number().int().min(1)),
     message: z.object({
       language: z.enum(["en", "ru"]),
@@ -120,6 +138,17 @@ const formSchema = z
   })
   .superRefine((v, ctx) => {
     refineTimers(v, ctx);
+    const seen = new Set<string>();
+    v.destination_entries.forEach((entry, index) => {
+      if (seen.has(entry.destination_id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["destination_entries", index, "destination_id"],
+          message: "duplicate",
+        });
+      }
+      seen.add(entry.destination_id);
+    });
     v.matchers.forEach((row, index) => {
       if (!isEmptyRow(row) && row.label.trim() === "") {
         ctx.addIssue({ code: "custom", path: ["matchers", index, "label"], message: "required" });
@@ -137,7 +166,9 @@ export function formValues(base: RouteInput, route?: Route): FormValues {
     owning_team_id: route?.owning_team?.id ?? base.owning_team_id ?? "",
     matchers: matcherRows(base.matchers),
     group_key: [...base.group_key],
-    destination_ids: [...(base.destination_ids ?? [])],
+    destination_entries: entriesOf(base),
+    deliver_to_teams: base.deliver_to_teams ?? false,
+    run_team_chains: base.run_team_chains ?? true,
     snooze_durations: sortedDurations(base.policy.snooze_durations_seconds),
     message: messageValues(base.policy),
     ...lifecycleValues(base.policy),
@@ -166,7 +197,9 @@ export function inputOf(
     owning_team_id: v.owning_team_id === "" ? null : v.owning_team_id,
     matchers: isDefault ? [] : matchersOf(v.matchers),
     group_key: withDraft(v.group_key, draft),
-    destination_ids: [...v.destination_ids],
+    destination_entries: v.destination_entries.map((e) => ({ ...e })),
+    deliver_to_teams: v.deliver_to_teams,
+    run_team_chains: v.run_team_chains,
     policy: withTimers(
       withDelivery(
         withMessage(
@@ -180,10 +213,13 @@ export function inputOf(
   };
 }
 
-/** The errors of a refusal about single Destinations (/destination_ids/N), by the Destination they were sent for. */
+/**
+ * The errors of a refusal about single Destinations (/destination_entries/N/destination_id), by the Destination they
+ * were sent for.
+ */
 function destinationErrors(
   errors: readonly ProblemError[],
-  sent: readonly string[],
+  sent: readonly DestinationEntry[],
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const item of errors) {
@@ -195,10 +231,13 @@ function destinationErrors(
   return out;
 }
 
-/** The Destination a pointer /destination_ids/N names among those sent, or undefined. */
-function destinationOfPointer(pointer: string, sent: readonly string[]): string | undefined {
-  const match = /^\/destination_ids\/(\d+)$/.exec(pointer);
-  return match === null ? undefined : sent[Number(match[1])];
+/** The Destination a pointer /destination_entries/N/destination_id names among those sent, or undefined. */
+function destinationOfPointer(
+  pointer: string,
+  sent: readonly DestinationEntry[],
+): string | undefined {
+  const match = /^\/destination_entries\/(\d+)(?:\/destination_id)?$/.exec(pointer);
+  return match === null ? undefined : sent[Number(match[1])]?.destination_id;
 }
 
 function nameErrorText(t: TFunction, code: string | undefined): string {
@@ -299,6 +338,12 @@ export function RouteForm({
   const rows = useWatch({ control: form.control, name: "matchers" });
   const groupKey = useWatch({ control: form.control, name: "group_key" });
   const owningTeamId = useWatch({ control: form.control, name: "owning_team_id" });
+  const [entries, deliverToTeams, runTeamChains, minimumSeverity] = useWatch({
+    control: form.control,
+    name: ["destination_entries", "deliver_to_teams", "run_team_chains", "minimum_severity"],
+  });
+  const organization = useGetOrganization();
+  const teamLabel = organization.data?.team_label;
   const [
     ackTimeoutEnabled,
     ackTimeoutFirst,
@@ -357,7 +402,7 @@ export function RouteForm({
         return;
       }
       applyFieldProblem(err, sent);
-      const byDestination = destinationErrors(err.errors ?? [], input.destination_ids ?? []);
+      const byDestination = destinationErrors(err.errors ?? [], input.destination_entries ?? []);
       setServerDestinationErrors(byDestination);
       const rest: string[] = [];
       const byTemplate: Partial<Record<MessageTemplate, ProblemError[]>> = {};
@@ -402,9 +447,15 @@ export function RouteForm({
             { type: item.code, message: item.code },
             { shouldFocus: true },
           );
-        } else if (destinationOfPointer(item.pointer, input.destination_ids ?? []) !== undefined) {
+        } else if (
+          destinationOfPointer(item.pointer, input.destination_entries ?? []) !== undefined
+        ) {
           // Shown at the Destination it is about; the focus goes to the section's picker.
           document.getElementById(`${ID}-destinations-add`)?.focus();
+        } else if (item.pointer === "/deliver_to_teams") {
+          form.setError("deliver_to_teams", { type: item.code, message: item.code });
+        } else if (item.pointer === "/run_team_chains") {
+          form.setError("run_team_chains", { type: item.code, message: item.code });
         } else if (item.pointer === "/description") {
           form.setError("description", { type: item.code, message: item.code });
         } else if (item.pointer.startsWith(SNOOZE_POINTER)) {
@@ -453,6 +504,12 @@ export function RouteForm({
     route_id: route?.id,
     matchers: isDefault ? undefined : matchersOf(rows),
     proposed_group_key: withDraft(groupKey, keyDraft),
+  };
+  const deliveryQuery = {
+    ...preview,
+    minimum_severity: minimumSeverity,
+    destination_entries: entries,
+    deliver_to_teams: deliverToTeams,
   };
 
   if (readOnly) {
@@ -507,10 +564,19 @@ export function RouteForm({
         </div>
         <RouteDestinations
           id={`${ID}-destinations`}
-          value={base.destination_ids ?? []}
+          value={entriesOf(base)}
           route={route}
           readOnly
         />
+        {teamLabel !== undefined && (
+          <RouteTeamsOption
+            id={`${ID}-teams`}
+            teamLabel={teamLabel}
+            deliverToTeams={base.deliver_to_teams ?? false}
+            runTeamChains={base.run_team_chains ?? true}
+            readOnly
+          />
+        )}
         <RoutePolicyLifecycleReadOnly policy={base.policy} />
         <RoutePolicyDeliveryReadOnly policy={base.policy} />
         <RoutePolicySnoozeReadOnly durations={base.policy.snooze_durations_seconds} />
@@ -640,6 +706,20 @@ export function RouteForm({
                   setServerGroupKeyError(undefined);
                   field.onChange(next);
                 }}
+                sharedKeyHint={
+                  teamLabel === undefined ? null : (
+                    <SharedKeyHint
+                      teamLabel={teamLabel}
+                      groupKey={withDraft(field.value, keyDraft)}
+                      deliverToTeams={deliverToTeams}
+                      onAdd={() => {
+                        setServerGroupKeyError(undefined);
+                        field.onChange(withDraft(field.value, teamLabel));
+                        document.getElementById(`${ID}-group-key`)?.focus();
+                      }}
+                    />
+                  )
+                }
               />
             )}
           />
@@ -660,22 +740,76 @@ export function RouteForm({
       </div>
       <Controller
         control={form.control}
-        name="destination_ids"
-        render={({ field }) => (
-          <RouteDestinations
-            id={`${ID}-destinations`}
-            value={field.value}
-            route={route}
-            errors={serverDestinationErrors}
-            onChange={(next) => {
-              setServerDestinationErrors((prev) =>
-                Object.fromEntries(Object.entries(prev).filter(([id]) => next.includes(id))),
-              );
-              field.onChange(next);
-            }}
-          />
-        )}
+        name="destination_entries"
+        render={({ field }) => {
+          const own: Record<string, string> = {};
+          field.value.forEach((entry, index) => {
+            const code = errors.destination_entries?.[index]?.destination_id?.message;
+            if (code !== undefined && own[entry.destination_id] === undefined) {
+              own[entry.destination_id] = code;
+            }
+          });
+          return (
+            <div className="flex min-w-0 flex-col gap-3">
+              <RouteDestinations
+                id={`${ID}-destinations`}
+                value={field.value}
+                route={route}
+                errors={{ ...own, ...serverDestinationErrors }}
+                onChange={(next) => {
+                  form.clearErrors("destination_entries");
+                  setServerDestinationErrors((prev) =>
+                    Object.fromEntries(
+                      Object.entries(prev).filter(([id]) =>
+                        next.some((e) => e.destination_id === id),
+                      ),
+                    ),
+                  );
+                  field.onChange(next);
+                }}
+              />
+              {errors.destination_entries?.message !== undefined && (
+                <p className="text-sm text-destructive" role="alert">
+                  {fieldErrorText(t, errors.destination_entries.message)}
+                </p>
+              )}
+            </div>
+          );
+        }}
       />
+      {teamLabel === undefined ? (
+        <p
+          className={
+            organization.isError ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+          }
+          role={organization.isError ? "alert" : "status"}
+        >
+          {organization.isError ? problemText(t, organization.error) : t("common.loading")}
+        </p>
+      ) : (
+        <RouteTeamsOption
+          id={`${ID}-teams`}
+          teamLabel={teamLabel}
+          deliverToTeams={deliverToTeams}
+          runTeamChains={runTeamChains}
+          onDeliverToTeamsChange={(next) =>
+            form.setValue("deliver_to_teams", next, { shouldDirty: true })
+          }
+          onRunTeamChainsChange={(next) =>
+            form.setValue("run_team_chains", next, { shouldDirty: true })
+          }
+          errors={{
+            deliverToTeams:
+              errors.deliver_to_teams?.message === undefined
+                ? undefined
+                : fieldErrorText(t, errors.deliver_to_teams.message),
+            runTeamChains:
+              errors.run_team_chains?.message === undefined
+                ? undefined
+                : fieldErrorText(t, errors.run_team_chains.message),
+          }}
+        />
+      )}
       <RouteSeverityAndOwner
         id={`${ID}-severity`}
         minimumSeverity={form.register("minimum_severity")}
@@ -686,6 +820,11 @@ export function RouteForm({
           error: errors.owning_team_id?.message,
           onChange: (next) => form.setValue("owning_team_id", next, { shouldDirty: true }),
         }}
+      />
+      <RouteDeliveryPreview
+        query={deliveryQuery}
+        enabled={route !== undefined || (deliveryQuery.matchers ?? []).length > 0}
+        teamLabel={teamLabel}
       />
       <RoutePolicyLifecycle
         id={`${ID}-lifecycle`}

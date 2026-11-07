@@ -63,6 +63,9 @@ const AUDITED: Record<string, readonly string[]> = {
     "/minimum_severity",
     "/group_key",
     "/destination_ids",
+    "/destination_entries",
+    "/deliver_to_teams",
+    "/run_team_chains",
     "/policy/reopen_window_seconds",
     "/policy/grace_period_seconds",
     "/policy/urgent_rise_removes_ack",
@@ -191,6 +194,14 @@ describe("fieldLabel", () => {
 
   test("names the Destinations and the delivery fields of a Route", async () => {
     expect(fieldLabel(i18n.t, "route", "/destination_ids")).toBe("Destinations");
+    expect(fieldLabel(i18n.t, "route", "/destination_entries")).toBe("Destinations");
+    expect(fieldLabel(i18n.t, "route", "/deliver_to_teams")).toBe(
+      "Also to the Teams from the label",
+    );
+    expect(fieldLabel(i18n.t, "route", "/run_team_chains")).toBe(
+      "Run the Teams' Escalation chains",
+    );
+    expect(fieldLabel(i18n.t, "team", "/destination_entries")).toBe("Destinations of the Team");
     expect(fieldLabel(i18n.t, "route", "/policy/thread_batching_window_seconds")).toBe(
       "Thread batching window (seconds)",
     );
@@ -199,6 +210,9 @@ describe("fieldLabel", () => {
     );
     await i18n.changeLanguage("ru");
     expect(fieldLabel(i18n.t, "route", "/destination_ids")).toBe("Места доставки");
+    expect(fieldLabel(i18n.t, "route", "/destination_entries")).toBe("Места доставки");
+    expect(fieldLabel(i18n.t, "route", "/deliver_to_teams")).toBe("Ещё командам из метки");
+    expect(fieldLabel(i18n.t, "team", "/destination_entries")).toBe("Места доставки команды");
   });
 
   test("names the Connection, team, channel, Mentions and limiter of a Destination", async () => {

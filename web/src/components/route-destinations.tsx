@@ -17,15 +17,132 @@ import { useTranslation } from "react-i18next";
 
 import { useListDestinations } from "../api/gen/endpoints/destinations/destinations";
 import { useGetRoute } from "../api/gen/endpoints/routes/routes";
-import type { Connection, Destination, DestinationRef, Route } from "../api/gen/model";
+import type {
+  Connection,
+  Destination,
+  DestinationEntry,
+  DestinationRef,
+  Route,
+  SeverityCondition,
+} from "../api/gen/model";
 import { fieldErrorText } from "../lib/api";
 import { useTimeFormat } from "../lib/time";
 import { useCan } from "./app-shell";
+import { DocsLink } from "./docs-link";
 import { BrokenBanner, HealthBadge, destinationTypeName, healthText } from "./destination-health";
 import { duplicateChatGroups, fullLabel, labelParts, useConnections } from "./destination-label";
 import { Button } from "./ui/button";
 import { Label } from "./ui/label";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
+
+/** The Severity conditions of a Destination, in the order the choice offers them (C-26.FR-1). */
+export const SEVERITY_CONDITIONS = [
+  "any",
+  "critical",
+  "below_critical",
+] as const satisfies readonly SeverityCondition[];
+
+/** A Destination of a Route or a Team with its condition, as the forms hold it. */
+export type Entry = Required<DestinationEntry>;
+
+/**
+ * The entries of a stored Route or Team: its `destination_entries` — which the API gives in the order of the
+ * Destinations' ids — in the order of its `destinations`, by name, as the Destinations were listed before there were
+ * conditions; else the Destinations of `destination_ids` with `any`.
+ */
+export function entriesOf(stored: {
+  destination_entries?: readonly DestinationEntry[];
+  destination_ids?: readonly string[];
+  destinations?: readonly { id: string }[];
+}): Entry[] {
+  if (stored.destination_entries !== undefined) {
+    const entries = stored.destination_entries.map((e) => ({
+      destination_id: e.destination_id,
+      severity_condition: e.severity_condition ?? "any",
+    }));
+    const names = (stored.destinations ?? []).map((d) => d.id);
+    const place = (id: string): number => {
+      const at = names.indexOf(id);
+      return at === -1 ? names.length : at;
+    };
+    return entries.toSorted((a, b) => place(a.destination_id) - place(b.destination_id));
+  }
+  return (stored.destination_ids ?? []).map((id) => ({
+    destination_id: id,
+    severity_condition: "any",
+  }));
+}
+
+/** The condition in full: "Any severity", "Severity = critical", "Severity < critical". */
+export function severityConditionText(t: TFunction, condition: SeverityCondition): string {
+  switch (condition) {
+    case "any":
+      return t("routes.destinations.conditions.any");
+    case "critical":
+      return t("routes.destinations.conditions.critical");
+    case "below_critical":
+      return t("routes.destinations.conditions.belowCritical");
+    default:
+      return condition satisfies never;
+  }
+}
+
+/** The condition in short, as the Routes list shows it: "critical", "< critical"; nothing for any severity. */
+export function severityConditionShort(t: TFunction, condition: SeverityCondition): string {
+  switch (condition) {
+    case "any":
+      return "";
+    case "critical":
+      return t("routes.destinations.short.critical");
+    case "below_critical":
+      return t("routes.destinations.short.belowCritical");
+    default:
+      return condition satisfies never;
+  }
+}
+
+/** The choice of a Severity condition; the label is read by screen readers and not shown. */
+export function ConditionSelect({
+  id,
+  testId,
+  label,
+  value,
+  onChange,
+  describedBy,
+}: {
+  id: string;
+  testId: string;
+  label: string;
+  value: SeverityCondition;
+  onChange: (next: SeverityCondition) => void;
+  describedBy?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <NativeSelect
+      id={id}
+      data-testid={testId}
+      aria-label={label}
+      aria-describedby={describedBy}
+      value={value}
+      onChange={(e) => {
+        const next = SEVERITY_CONDITIONS.find((c) => c === e.target.value);
+        if (next !== undefined) {
+          onChange(next);
+        }
+      }}
+    >
+      {SEVERITY_CONDITIONS.map((c) => (
+        <NativeSelectOption key={c} value={c}>
+          {severityConditionText(t, c)}
+        </NativeSelectOption>
+      ))}
+    </NativeSelect>
+  );
+}
+
+/** The most Destinations a Route or a Team names, as the API checks it (`destination_entries`, maxItems). */
+export const ENTRIES_MAX = 100;
 
 /** The text of a refused Destination of a Route. */
 export function routeDestinationErrorText(t: TFunction, code: string): string {
@@ -165,12 +282,12 @@ function DestinationName({ destination }: { destination: Destination | Destinati
 export interface RouteDestinationsProps {
   /** The base of the ids of the inputs, unique on the page. */
   id: string;
-  /** The public_ids of the Route's Destinations, in their order. */
-  value: readonly string[];
-  onChange?: (next: string[]) => void;
+  /** The Route's Destinations with their conditions, in their order. */
+  value: readonly Entry[];
+  onChange?: (next: Entry[]) => void;
   /** The stored Route of an edit: the names of its Destinations and its Storm. */
   route?: Route;
-  /** Error codes of a refused save, by the Destination they are about. */
+  /** Error codes of a refused save or of the form's own checks, by the Destination they are about. */
   errors?: Record<string, string>;
   readOnly?: boolean;
 }
@@ -186,13 +303,15 @@ export function RouteDestinations({
   const { t } = useTranslation();
   const choices = useDestinationChoices();
   // A Destination neither the list nor the Route names, such as one deleted meanwhile, shows its public_id.
-  const chosen = value.map((destinationId) => ({
+  const ids = value.map((e) => e.destination_id);
+  const chosen = value.map(({ destination_id: destinationId, severity_condition }) => ({
     id: destinationId,
+    condition: severity_condition,
     ref:
       choices.items.find((d) => d.id === destinationId) ??
       route?.destinations.find((d) => d.id === destinationId),
   }));
-  const rest = choices.items.filter((d) => !value.includes(d.id));
+  const rest = choices.items.filter((d) => !ids.includes(d.id));
   // The label after the name: from the Destinations list, or the type alone for one only the Route names.
   const restOf = (ref: Destination | DestinationRef): string => {
     const full = choices.items.find((d) => d.id === ref.id);
@@ -201,13 +320,20 @@ export function RouteDestinations({
       : labelParts(t, full, choices.connections).slice(1).join(" · ");
   };
   const duplicates = duplicateChatGroups(
-    value.flatMap((destinationId) => choices.items.filter((d) => d.id === destinationId)),
+    ids.flatMap((destinationId) => choices.items.filter((d) => d.id === destinationId)),
     choices.connections,
   );
   const Heading = readOnly ? "h2" : "legend";
   const body = (
     <>
-      <Heading className="mb-2 text-base font-semibold">{t("routes.destinations.title")}</Heading>
+      <Heading className="mb-2 flex flex-wrap items-baseline gap-x-2 text-base font-semibold">
+        <span id={`${id}-title`}>{t("routes.destinations.title")}</span>
+        <DocsLink
+          to="field.severity_condition"
+          kind="learn_more"
+          about={t("docs.fields.severityCondition")}
+        />
+      </Heading>
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">
         {t("routes.destinations.hint")}
       </p>
@@ -218,7 +344,7 @@ export function RouteDestinations({
         </p>
       ) : (
         <ul className="flex flex-col gap-2" aria-label={t("routes.destinations.list")}>
-          {chosen.map(({ id: destinationId, ref }) => {
+          {chosen.map(({ id: destinationId, ref, condition }, index) => {
             const error = errors[destinationId];
             const name = ref?.name ?? destinationId;
             return (
@@ -253,17 +379,38 @@ export function RouteDestinations({
                       <HealthBadge health={ref.health} />
                     </>
                   )}
-                  {!readOnly && onChange !== undefined && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="ml-auto"
-                      aria-label={t("routes.destinations.remove", { name })}
-                      onClick={() => onChange(value.filter((v) => v !== destinationId))}
+                  {!readOnly && onChange !== undefined ? (
+                    <div className="ml-auto flex min-w-0 items-center gap-1">
+                      <ConditionSelect
+                        id={`${id}-condition-${index}`}
+                        testId={`route-destination-condition-${destinationId}`}
+                        label={t("routes.destinations.conditionFor", { name })}
+                        value={condition}
+                        onChange={(next) =>
+                          onChange(
+                            value.map((e, i) =>
+                              i === index ? { ...e, severity_condition: next } : e,
+                            ),
+                          )
+                        }
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={t("routes.destinations.remove", { name })}
+                        onClick={() => onChange(value.filter((_, i) => i !== index))}
+                      >
+                        <XIcon aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <span
+                      className="ml-auto text-sm text-muted-foreground"
+                      data-testid={`route-destination-condition-${destinationId}`}
                     >
-                      <XIcon aria-hidden="true" />
-                    </Button>
+                      {severityConditionText(t, condition)}
+                    </span>
                   )}
                 </div>
                 {ref !== undefined && <BrokenBanner health={ref.health} />}
@@ -287,11 +434,11 @@ export function RouteDestinations({
             id={`${id}-add`}
             className="w-full"
             value=""
-            disabled={rest.length === 0}
+            disabled={rest.length === 0 || value.length >= ENTRIES_MAX}
             aria-describedby={`${id}-hint`}
             onChange={(e) => {
-              if (e.target.value !== "" && !value.includes(e.target.value)) {
-                onChange([...value, e.target.value]);
+              if (e.target.value !== "" && !ids.includes(e.target.value)) {
+                onChange([...value, { destination_id: e.target.value, severity_condition: "any" }]);
               }
             }}
           >
@@ -311,11 +458,19 @@ export function RouteDestinations({
     </>
   );
   return readOnly ? (
-    <section className="flex min-w-0 flex-col gap-3" data-testid="route-destinations">
+    <section
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="route-destinations"
+    >
       {body}
     </section>
   ) : (
-    <fieldset className="flex min-w-0 flex-col gap-3" data-testid="route-destinations">
+    <fieldset
+      aria-labelledby={`${id}-title`}
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="route-destinations"
+    >
       {body}
     </fieldset>
   );

@@ -265,6 +265,76 @@ describe("the page of a Team", () => {
     expect(server.puts[1]?.body).not.toHaveProperty("matchers");
   });
 
+  test("Destinations of the Team saves the entries with the version the page was read at and the other fields as read", async () => {
+    server.team = team({
+      id: ID,
+      description: "a",
+      etag: '"1"',
+      destination_entries: [{ destination_id: "DS0000000PAYCR", severity_condition: "critical" }],
+    });
+    const { queryClient } = await renderView();
+    await otherTabChanges(queryClient);
+    await hasText(page.getByTestId("team-stale"), "Someone else changed this Team.");
+    const section = page.getByTestId("team-destinations-section");
+    await expect
+      .element(section.getByRole("heading", { name: "Destinations of the Team" }))
+      .toBeVisible();
+    await section
+      .getByTestId("team-destination-condition-DS0000000PAYCR")
+      .selectOptions("below_critical");
+    await section.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+    expect(server.puts[0]?.ifMatch).toBe('"1"');
+    expect(server.puts[0]?.body).toMatchObject({
+      description: "a",
+      destination_entries: [
+        { destination_id: "DS0000000PAYCR", severity_condition: "below_critical" },
+      ],
+    });
+    await hasText(page.getByTestId("team-destinations-status"), "Saved.");
+  });
+
+  test("a conflict on the Destinations of the Team shows the page's banner once, with Reload", async () => {
+    server.team = team({
+      id: ID,
+      description: "a",
+      etag: '"1"',
+      destination_entries: [{ destination_id: "DS0000000PAYCR", severity_condition: "critical" }],
+    });
+    await renderView();
+    server.putStatus = 412;
+    const section = page.getByTestId("team-destinations-section");
+    await section.getByTestId("team-destination-condition-DS0000000PAYCR").selectOptions("any");
+    await section.getByRole("button", { name: "Save", exact: true }).click();
+    await expect.element(page.getByTestId("team-stale")).toBeVisible();
+    expect(page.getByTestId("team-stale").elements()).toHaveLength(1);
+    expect(section.getByRole("alert").elements()).toHaveLength(0);
+    server.team = {
+      ...server.team,
+      destination_entries: [
+        { destination_id: "DS0000000PAYCR", severity_condition: "below_critical" },
+      ],
+      etag: '"2"',
+    };
+    await page.getByTestId("team-stale").getByRole("button", { name: "Reload" }).click();
+    await expect
+      .element(section.getByTestId("team-destination-condition-DS0000000PAYCR"))
+      .toHaveValue("below_critical");
+    await expect.element(page.getByTestId("team-stale")).not.toBeInTheDocument();
+    server.putStatus = 200;
+    await section.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(2));
+    expect(server.puts[1]?.ifMatch).toBe('"2"');
+  });
+
+  test("a save of the Working hours leaves the Destinations of the Team out", async () => {
+    await renderView();
+    await hours().getByRole("checkbox", { name: "Own" }).click();
+    await hours().getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(server.puts).toHaveLength(1));
+    expect(server.puts[0]?.body).not.toHaveProperty("destination_entries");
+  });
+
   test("a save of the Working hours leaves the matchers out", async () => {
     await renderView();
     await hours().getByRole("checkbox", { name: "Own" }).click();

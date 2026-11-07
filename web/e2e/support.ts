@@ -890,3 +890,233 @@ export async function setTeamMatchers(
     { "If-Match": team.etag },
   );
 }
+
+/** The five Destinations of routing to Teams, with the channels the fake Mattermost server has for them. */
+export const ROUTING_DESTINATIONS = {
+  "infra-critical": "ch-infra-critical",
+  "infra-notice": "ch-infra-notice",
+  "payments-critical": "ch-payments-critical",
+  "payments-notice": "ch-payments-notice",
+  "search-notice": "ch-search-notice",
+} as const;
+
+export type RoutingDestination = keyof typeof ROUTING_DESTINATIONS;
+
+const ROUTING_BASES: RoutingDestination[] = [
+  "infra-critical",
+  "infra-notice",
+  "payments-critical",
+  "payments-notice",
+  "search-notice",
+];
+
+/** A Destination entry of a Route or a Team. */
+export interface RoutingEntry {
+  destination_id: string;
+  severity_condition?: "any" | "critical" | "below_critical";
+}
+
+/** One Alert of the fake Alertmanager for the Routes of routing to Teams. */
+export interface RoutingAlert {
+  /** The Alert's name, unique to the call: Alert Groups are looked up by it. */
+  alertname: string;
+  team: string;
+  severity: "warning" | "critical";
+  /** The key of the fake Alert; an Alert sent under the same key again is the same Alert. */
+  id?: string;
+  /** How many minutes ago the Alert started firing; the order of startsAt is the order of the rise of an Alert Group. */
+  startedMinutesAgo?: number;
+}
+
+/** What a spec of routing to Teams works with, all of it named by its prefix so that no spec meets another's. */
+export interface RoutingSeed {
+  prefix: string;
+  integrationId: string;
+  connectionId: string;
+  /** The value of the label `category` that only this run's Route takes, so that no earlier run's Alerts are previewed. */
+  category: string;
+  /** The Teams "payments-<prefix>" and "search-<prefix>" and the slug of a label value that names no Team. */
+  slugs: { pay: string; sea: string; ops: string };
+  /** The Destination, named "<base>-<prefix>". */
+  destination: (base: RoutingDestination) => { id: string; name: string };
+  /** The name of an Alert that is unique to this call. */
+  alertName: (kind: string) => string;
+  /** Sends the Alerts through the fake Alertmanager and waits until Muster processed them. */
+  fire: (alerts: RoutingAlert[]) => Promise<void>;
+}
+
+/** The Route for the category of a seed, with its Destinations, option and Group key. */
+export async function createRoutingRoute(
+  seed: RoutingSeed,
+  name: string,
+  options: {
+    entries: RoutingEntry[];
+    deliverToTeams: boolean;
+    groupKey?: string[];
+  },
+): Promise<string> {
+  const admin = await adminApi();
+  try {
+    const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
+      "GET",
+      "/api/v1/route-profiles",
+    );
+    const route = await admin.call<{ id: string }>("POST", "/api/v1/routes", {
+      name,
+      matchers: [{ label: "category", op: "=", value: seed.category }],
+      group_key: options.groupKey ?? ["alertname", "system", "team"],
+      destination_entries: options.entries,
+      deliver_to_teams: options.deliverToTeams,
+      policy: profiles.items.find((p) => p.id === "paging")?.policy,
+    });
+    return route.id;
+  } finally {
+    await admin.dispose();
+  }
+}
+
+/** Sets the Destinations of the Team with the slug, replacing them as a whole. */
+export async function setTeamDestinations(
+  admin: Api,
+  slug: string,
+  entries: RoutingEntry[],
+): Promise<void> {
+  const list = await admin.call<{ items: { id: string; slug: string }[] }>(
+    "GET",
+    "/api/v1/teams?limit=500",
+  );
+  const id = list.items.find((t) => t.slug === slug)?.id;
+  expect(id, `the Team ${slug}`).toBeDefined();
+  const team = await admin.call<{ name: string; description: string; etag: string }>(
+    "GET",
+    `/api/v1/teams/${id}`,
+  );
+  await admin.call(
+    "PUT",
+    `/api/v1/teams/${id}`,
+    {
+      name: team.name,
+      slug,
+      description: team.description,
+      own_working_hours: false,
+      destination_entries: entries,
+    },
+    { "If-Match": team.etag },
+  );
+}
+
+/**
+ * Seeds routing to Teams for a spec: a Mattermost Connection, the five Destinations "<base>-<prefix>", the Teams
+ * "payments-<prefix>" and "search-<prefix>" and an Integration "<prefix>-routing" with its fake receiver. What an
+ * earlier run of the same prefix left is removed first, so that a rerun starts from the same state.
+ */
+export async function seedRouting(prefix: string): Promise<RoutingSeed> {
+  const key = prefix.toLowerCase();
+  await dropRouting(key);
+  const run = Math.random().toString(36).slice(2, 7);
+  const slugs = { pay: `payments-${key}`, sea: `search-${key}`, ops: `devops-${key}` };
+  const admin = await adminApi();
+  const ids = new Map<RoutingDestination, string>();
+  let connectionId = "";
+  try {
+    const connection = await admin.call<{ id: string }>("POST", "/api/v1/connections", {
+      type: "mattermost",
+      name: `mm-${key}`,
+      server_url: "http://127.0.0.1:18065",
+      bot_token: "mm-dev-token",
+      proxy: { enabled: false },
+      limiter: { limit: 50, per_seconds: 1 },
+    });
+    connectionId = connection.id;
+    const nobody = { everyone: "none", user_ids: [], groups: [] };
+    const mentions = Object.fromEntries(
+      [
+        "new_alert_group",
+        "new_alerts",
+        "reopen",
+        "ack_timeout",
+        "snooze_ended",
+        "rise_to_urgent",
+      ].map((k) => [k, nobody]),
+    );
+    for (const base of ROUTING_BASES) {
+      const channel = ROUTING_DESTINATIONS[base];
+      const created = await admin.call<{ destination: { id: string } }>(
+        "POST",
+        "/api/v1/destinations",
+        {
+          type: "mattermost",
+          name: `${base}-${key}`,
+          connection_id: connectionId,
+          team_id: "team-dev",
+          channel_id: channel,
+          mentions,
+          limiter: { limit: 50, per_seconds: 1 },
+        },
+      );
+      ids.set(base, created.destination.id);
+    }
+    await ensureTeam(admin, slugs.pay);
+    await ensureTeam(admin, slugs.sea);
+  } finally {
+    await admin.dispose();
+  }
+  const name = `${key}-routing`;
+  const integrationId = await fakeIntegration(name);
+  const group = `${key}-routing`;
+  await fam("PUT", `/groups/${group}`, { receiver: name, route: "{}", labels: { job: key } });
+  const category = `infra-${key}-${run}`;
+  return {
+    prefix: key,
+    integrationId,
+    connectionId,
+    category,
+    slugs,
+    destination: (base) => ({ id: ids.get(base) ?? "", name: `${base}-${key}` }),
+    alertName: (kind) => `${kind}${run}`,
+    fire: async (alerts) => {
+      for (const alert of alerts) {
+        const labels = {
+          alertname: alert.alertname,
+          category,
+          team: alert.team,
+          system: "k8s",
+          severity: alert.severity,
+        };
+        await fam("PUT", `/groups/${group}/alerts/${alert.id ?? alert.alertname}`, {
+          labels,
+          annotations: { summary: `${alert.alertname} is firing` },
+          ...(alert.startedMinutesAgo === undefined
+            ? {}
+            : { starts_at: new Date(Date.now() - alert.startedMinutesAgo * 60_000).toISOString() }),
+        });
+      }
+      await notify(integrationId, group, { reason: "first notification" });
+    },
+  };
+}
+
+/** Removes what seedRouting created for the prefix, in the order the references allow; it is safe to call twice. */
+export async function dropRouting(prefix: string): Promise<void> {
+  const key = prefix.toLowerCase();
+  const admin = await adminApi();
+  try {
+    const routes = await admin.call<{
+      items: { id: string; name: string; matchers: { value: string }[] }[];
+    }>("GET", "/api/v1/routes");
+    for (const r of routes.items.filter((x) =>
+      x.matchers.some((m) => m.value.startsWith(`infra-${key}-`)),
+    )) {
+      await admin.call("POST", `/api/v1/routes/${r.id}/move-open-alert-groups`);
+      await admin.call("DELETE", `/api/v1/routes/${r.id}`);
+    }
+    await removeTeamsBySlug(admin, [`payments-${key}`, `search-${key}`, `devops-${key}`]);
+    for (const base of ROUTING_BASES) {
+      await removeNamed(admin, "/api/v1/destinations", `${base}-${key}`, "?limit=500");
+    }
+    await removeNamed(admin, "/api/v1/connections", `mm-${key}`, "?limit=500");
+    await removeIntegration(admin, `${key}-routing`);
+  } finally {
+    await admin.dispose();
+  }
+}

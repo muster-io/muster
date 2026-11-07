@@ -11,6 +11,7 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, TriangleAlertIcon } from "lucide-react";
+import type { TFunction } from "i18next";
 import { type DragEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -22,6 +23,7 @@ import {
 import type { Route, RouteList as RouteListModel, RouteOrder } from "../api/gen/model";
 import { type Tagged, apiFetchTagged, isApiError, isStale, problemText } from "../lib/api";
 import { matcherText } from "./matcher-builder";
+import { entriesOf, severityConditionShort } from "./route-destinations";
 import { minimumSeverityName } from "./route-severity-and-owner";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button } from "./ui/button";
@@ -87,6 +89,26 @@ function sameOrder(a: readonly string[], b: readonly string[]): boolean {
 interface DropTarget {
   id: string;
   before: boolean;
+}
+
+/**
+ * A Route's Destinations by name with their conditions, "infra-critical (critical), infra-notice (< critical) + Teams
+ * from the label": no condition is shown for any severity; a Route that sends nowhere says so.
+ */
+export function destinationsText(t: TFunction, route: Route): string {
+  const names = new Map(route.destinations.map((d) => [d.id, d.name]));
+  const parts = entriesOf(route)
+    .map((entry) => ({
+      name: names.get(entry.destination_id) ?? entry.destination_id,
+      condition: severityConditionShort(t, entry.severity_condition),
+    }))
+    .toSorted((a, b) => a.name.localeCompare(b.name))
+    .map(({ name, condition }) => (condition === "" ? name : `${name} (${condition})`));
+  const teams = route.deliver_to_teams ? t("routes.list.teamsPlus") : "";
+  if (parts.length === 0) {
+    return teams === "" ? t("routes.list.noDestinations") : teams;
+  }
+  return teams === "" ? parts.join(", ") : `${parts.join(", ")} ${teams}`;
 }
 
 function RouteRow({
@@ -225,6 +247,10 @@ function RouteRow({
               {route.group_key.join(", ")}
             </span>
           )}
+        </p>
+        <p className="text-sm text-muted-foreground" data-testid="route-destinations-summary">
+          <span>{t("routes.list.destinations")}: </span>
+          <span className="text-foreground">{destinationsText(t, route)}</span>
         </p>
         <p className="text-sm text-muted-foreground" data-testid="route-open-count">
           {t("routes.list.openAlertGroups", { count: route.open_alert_group_count })}

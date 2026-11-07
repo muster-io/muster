@@ -3,10 +3,11 @@
 
 // The Group key of a Route (C-08.FR-4): the label names whose values split the Route's Alerts into Alert Groups, a
 // missing label counting as an empty value. Each name is a chip with a remove button; a name is added from the field.
-// The Group key preview sits beside it.
+// The Group key preview sits beside it. With the option "Also to the Teams from the label" on and no Team label in the
+// key, the form puts its hint under the key.
 
 import { XIcon } from "lucide-react";
-import { type KeyboardEvent, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "./ui/button";
@@ -21,6 +22,7 @@ export function GroupKeyEditor({
   labelledBy,
   draft = "",
   onDraftChange = () => {},
+  sharedKeyHint = null,
 }: {
   /** The id of the name field; the hint and the errors hang off it. */
   id: string;
@@ -34,6 +36,8 @@ export function GroupKeyEditor({
   /** The label name typed in the field and not added yet; the form owns it, so that a save can take it. */
   draft?: string;
   onDraftChange?: (draft: string) => void;
+  /** The hint that Alerts of different Teams share an Alert Group (C-26.FR-12), shown under the key. */
+  sharedKeyHint?: ReactNode;
 }) {
   const { t } = useTranslation();
   const setDraft = onDraftChange;
@@ -120,6 +124,7 @@ export function GroupKeyEditor({
           {message}
         </p>
       )}
+      {sharedKeyHint}
     </div>
   );
 }

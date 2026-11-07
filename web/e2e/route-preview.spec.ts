@@ -12,9 +12,14 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   INGEST_URL,
   adminApi,
+  TEAM_SPEC_PASSWORD,
+  dropRouting,
+  ensureLocalUser,
   expectNoHorizontalScroll,
   fam,
   notify,
+  seedRouting,
+  setTeamDestinations,
   shot,
   signIn,
   signInAdmin,
@@ -293,4 +298,210 @@ test("the editor and the preview in Russian, 360 px wide", async ({ browser }) =
   await shot(page, "routes-create-ru-360");
   expect(csp).toEqual([]);
   await context.close();
+});
+
+const PREFIX = "rpv";
+
+/** The text of the Destinations a preview group lists, sorted. */
+async function reached(group: Locator): Promise<string[]> {
+  const texts = await group.getByTestId("delivery-preview-destination").allInnerTexts();
+  return texts.map((t) => t.replace(/\s+/g, " ").trim()).toSorted();
+}
+
+test("the preview Where alerts go lists the Alert Groups with their Teams and Destinations, and follows the unsaved settings", async ({
+  page,
+  browser,
+}) => {
+  const csp = watchCsp(page);
+  const seed = await seedRouting(PREFIX);
+  const critical = seed.destination("infra-critical");
+  const notice = seed.destination("infra-notice");
+  const paymentsNotice = seed.destination("payments-notice");
+  const searchNotice = seed.destination("search-notice");
+  const paying = seed.alertName("Pay");
+  const ops = seed.alertName("Ops");
+  const rise = seed.alertName("Rise");
+  const shared = seed.alertName("Shared");
+  try {
+    const admin = await adminApi();
+    try {
+      await ensureLocalUser(admin, "rpv-ru", "admin");
+      await setTeamDestinations(admin, seed.slugs.pay, [
+        { destination_id: paymentsNotice.id, severity_condition: "below_critical" },
+      ]);
+      await setTeamDestinations(admin, seed.slugs.sea, [
+        { destination_id: searchNotice.id, severity_condition: "any" },
+      ]);
+    } finally {
+      await admin.dispose();
+    }
+    // payments warns; devops (a value of the Team label that names no Team) is critical; one payments Alert Group rises
+    // from warning to critical; one Alert Group has the Alerts of two Teams.
+    await seed.fire([
+      { alertname: paying, team: seed.slugs.pay, severity: "warning" },
+      { alertname: ops, team: seed.slugs.ops, severity: "critical" },
+      {
+        alertname: rise,
+        id: "rise-w",
+        team: seed.slugs.pay,
+        severity: "warning",
+        startedMinutesAgo: 30,
+      },
+      {
+        alertname: rise,
+        id: "rise-c",
+        team: seed.slugs.pay,
+        severity: "critical",
+        startedMinutesAgo: 10,
+      },
+      { alertname: shared, id: "shared-p", team: seed.slugs.pay, severity: "warning" },
+      { alertname: shared, id: "shared-s", team: seed.slugs.sea, severity: "warning" },
+    ]);
+
+    await signInAdmin(page);
+    await page.goto("/routes/new");
+    await page.getByTestId("route-profile-paging").click();
+    const preview = page.getByTestId("route-delivery-preview");
+    await expect(preview.getByRole("heading", { name: "Where alerts go" })).toBeVisible();
+    // A new Route without a Matcher asks for one and asks the API nothing.
+    await expect(preview.getByTestId("delivery-preview-needs-matchers")).toHaveText(
+      "Add a Matcher to see where alerts go.",
+    );
+    await page.getByRole("textbox", { name: "Name" }).fill(`Preview-${PREFIX}`);
+    await page.getByRole("button", { name: "Add matcher" }).click();
+    await page.getByRole("textbox", { name: "Label of matcher 1" }).fill("category");
+    await page.getByRole("textbox", { name: "Value of matcher 1" }).fill(seed.category);
+    // The key is alertname and system, as the Verification has it; the Destinations are not chosen yet.
+    while ((await page.getByTestId("group-key-label").count()) > 0) {
+      await page.getByTestId("group-key-label").first().getByRole("button").click();
+    }
+    await addGroupKeyLabel(page, "alertname");
+    await addGroupKeyLabel(page, "system");
+    // Without a Destination and without the option every Alert Group reaches nobody, which the preview says.
+    await expect(
+      preview
+        .getByTestId("delivery-group")
+        .filter({ hasText: paying })
+        .getByText("No Destinations: no messages for this Alert Group."),
+    ).toBeVisible();
+
+    await page.getByLabel("Add a Destination").selectOption(critical.id);
+    await page.getByLabel("Add a Destination").selectOption(notice.id);
+    await page.getByTestId(`route-destination-condition-${critical.id}`).selectOption("critical");
+    await page
+      .getByTestId(`route-destination-condition-${notice.id}`)
+      .selectOption("below_critical");
+    await page.getByTestId("route-deliver-to-teams").check();
+
+    const group = (name: string) => preview.getByTestId("delivery-group").filter({ hasText: name });
+    // Alert Groups: payments warns, devops is critical.
+    await expect(group(paying)).toHaveCount(1);
+    await expect(group(paying).getByTestId("delivery-group-teams")).toHaveText(
+      `Teams: ${seed.slugs.pay}`,
+    );
+    await expect
+      .poll(() => reached(group(paying)))
+      .toEqual([notice.name, `${paymentsNotice.name} via ${seed.slugs.pay}`]);
+    await expect(group(ops).getByTestId("delivery-group-teams")).toHaveText("Teams: no Team");
+    await expect.poll(() => reached(group(ops))).toEqual([critical.name]);
+    // The rise: warning, then critical, reaches all three.
+    await expect
+      .poll(() => reached(group(rise)))
+      .toEqual(
+        [critical.name, notice.name, `${paymentsNotice.name} via ${seed.slugs.pay}`].toSorted(),
+      );
+    await expect(group(rise)).toContainText("2 alerts · critical");
+    // The Alerts of two Teams share an Alert Group while the key lacks the label: both Teams' Destinations.
+    await expect(group(shared).getByTestId("delivery-group-teams")).toContainText(seed.slugs.pay);
+    await expect(group(shared).getByTestId("delivery-group-teams")).toContainText(seed.slugs.sea);
+    await expect
+      .poll(() => reached(group(shared)))
+      .toEqual(
+        [
+          notice.name,
+          `${paymentsNotice.name} via ${seed.slugs.pay}`,
+          `${searchNotice.name} via ${seed.slugs.sea}`,
+        ].toSorted(),
+      );
+    // How many Alert Groups reach each Destination.
+    const count = (name: string) => preview.getByTestId("delivery-count").filter({ hasText: name });
+    await expect(count(critical.name)).toHaveText(/reached by 2 of 4$/);
+    await expect(count(notice.name)).toHaveText(/reached by 3 of 4$/);
+    await expect(count(paymentsNotice.name)).toHaveText(/reached by 3 of 4$/);
+    await expect(count(searchNotice.name)).toHaveText(/reached by 1 of 4$/);
+    // The hint of the API that Teams share an Alert Group, and the one under the key.
+    await expect(preview.getByTestId("preview-shared-key-warning")).toContainText(
+      "Alerts of different Teams with the same key share one Alert Group",
+    );
+    await expect(page.getByTestId("shared-key-hint")).toBeVisible();
+    await shot(page, "route-delivery-preview");
+
+    // "Add team to the key" splits the shared group by Team and ends both hints.
+    await page.getByRole("button", { name: "Add team to the key" }).click();
+    await expect(preview.getByTestId("preview-shared-key-warning")).toHaveCount(0);
+    await expect(page.getByTestId("shared-key-hint")).toHaveCount(0);
+    await expect(group(shared)).toHaveCount(2);
+    await expect(
+      group(shared).filter({ hasText: seed.slugs.sea }).getByTestId("delivery-group-teams"),
+    ).toHaveText(`Teams: ${seed.slugs.sea}`);
+    await expect
+      .poll(() => reached(group(shared).filter({ hasText: seed.slugs.sea })))
+      .toEqual([notice.name, `${searchNotice.name} via ${seed.slugs.sea}`]);
+
+    // The unsaved option turned off: no Team Destination is listed or counted.
+    await page.getByTestId("route-deliver-to-teams").uncheck();
+    await expect(
+      preview.getByTestId("delivery-count").filter({ hasText: paymentsNotice.name }),
+    ).toHaveCount(0);
+    await expect.poll(() => reached(group(paying))).toEqual([notice.name]);
+    await expect(group(paying).getByTestId("delivery-group-teams")).toHaveText(
+      `Teams: ${seed.slugs.pay}`,
+    );
+    // A condition changed in the form changes the list: infra-notice for any severity reaches the critical groups too.
+    await page.getByTestId(`route-destination-condition-${notice.id}`).selectOption("any");
+    await expect.poll(() => reached(group(ops))).toEqual([critical.name, notice.name].toSorted());
+
+    // A Matcher no Alert meets: no Alert Group, said in words.
+    await page.getByRole("textbox", { name: "Value of matcher 1" }).fill(`${seed.category}-none`);
+    await expect(preview.getByTestId("delivery-preview-empty")).toHaveText(
+      "No recent Alerts would reach this Route.",
+    );
+    await page.getByRole("textbox", { name: "Value of matcher 1" }).fill(seed.category);
+    await expect(group(paying)).toHaveCount(1);
+
+    // Russian at 360 px.
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    const ru = await context.newPage();
+    const ruCsp = watchCsp(ru);
+    await signIn(ru, "rpv-ru", TEAM_SPEC_PASSWORD);
+    await ru.goto("/profile");
+    await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+    await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+    await ru.goto("/routes/new");
+    await ru.getByRole("button", { name: "С призывом" }).click();
+    await ru.getByRole("button", { name: "Добавить матчер" }).click();
+    await ru.getByRole("textbox", { name: "Метка матчера 1" }).fill("category");
+    await ru.getByRole("textbox", { name: "Значение матчера 1" }).fill(seed.category);
+    await ru.getByLabel("Добавить место доставки").selectOption(notice.id);
+    await ru.getByLabel("Добавить место доставки").selectOption(critical.id);
+    await ru.getByTestId("route-deliver-to-teams").check();
+    const ruPreview = ru.getByTestId("route-delivery-preview");
+    await expect(ruPreview.getByRole("heading", { name: "Куда придут алерты" })).toBeVisible();
+    const ruGroup = ruPreview.getByTestId("delivery-group").filter({ hasText: paying });
+    await expect(ruGroup.getByTestId("delivery-group-teams")).toHaveText(
+      `Команды: ${seed.slugs.pay}`,
+    );
+    await expect(ruGroup.getByTestId("delivery-preview-via")).toHaveText(`через ${seed.slugs.pay}`);
+    await expect(ruPreview.getByTestId("delivery-count").first()).toContainText("доходит");
+    await expect(ru.getByTestId("preview-shared-key-warning").first()).toContainText(
+      "Алерты разных команд",
+    );
+    await expectNoHorizontalScroll(ru);
+    await shot(ru, "route-delivery-preview-ru-360");
+    expect(ruCsp).toEqual([]);
+    await context.close();
+  } finally {
+    await dropRouting(PREFIX);
+  }
+  expect(csp).toEqual([]);
 });

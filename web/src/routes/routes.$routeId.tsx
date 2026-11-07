@@ -5,7 +5,7 @@
 // The form keeps the version it was read at and sends it as If-Match. When the Route changes elsewhere (a live hint
 // reads it again) an untouched form takes the new version and says so; a form with changes keeps them, says that the
 // Route was changed elsewhere, and its save is refused (412) with "Someone else changed this route. Reload to see the
-// changes."
+// changes." A read of the Route that fails while the editor shows what was read keeps the editor and says why.
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -99,7 +99,7 @@ function EditForm({ current }: { current: RouteModel }) {
   );
 }
 
-function RouteEditor({ routeId }: { routeId: string }) {
+export function RouteEditor({ routeId }: { routeId: string }) {
   const { t } = useTranslation();
   const canWrite = useCan("routes:write");
   const query = useGetRoute(routeId);
@@ -122,6 +122,13 @@ function RouteEditor({ routeId }: { routeId: string }) {
           <p className="text-sm text-muted-foreground">{t("routes.list.defaultHint")}</p>
         )}
       </div>
+      {query.isError && route !== undefined && (
+        <Alert variant="destructive" data-testid="route-read-error">
+          <AlertDescription className="text-current">
+            {problemText(t, query.error)}
+          </AlertDescription>
+        </Alert>
+      )}
       {route === undefined ? (
         <p className="text-sm text-muted-foreground" role="status">
           {query.isError ? problemText(t, query.error) : t("common.loading")}

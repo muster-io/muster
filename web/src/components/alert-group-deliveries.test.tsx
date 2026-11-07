@@ -346,6 +346,123 @@ describe("the Delivery section", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  test("lists by which entries each Destination was reached, with the condition", async () => {
+    const payments = { id: "TM0000000000PA", name: "payments", slug: "payments", deleted: false };
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            delivery({
+              destination: {
+                id: "DS0000000000IN",
+                name: "infra-notice",
+                type: "mattermost",
+                health: { state: "healthy" },
+              },
+              entries: [{ kind: "route", team: null, severity_condition: "below_critical" }],
+            }),
+            delivery({
+              destination: {
+                id: "DS0000000000PN",
+                name: "payments-notice",
+                type: "mattermost",
+                health: { state: "healthy" },
+              },
+              entries: [
+                { kind: "team", team: payments, severity_condition: "below_critical" },
+                {
+                  kind: "team",
+                  team: { ...payments, id: "TM0000000000SE", name: "search", slug: "search" },
+                  severity_condition: "any",
+                },
+              ],
+            }),
+            delivery({
+              destination: {
+                id: "DS0000000000OL",
+                name: "old",
+                type: "mattermost",
+                health: { state: "healthy" },
+              },
+              entries: [
+                {
+                  kind: "team",
+                  team: { ...payments, deleted: true },
+                  severity_condition: "critical",
+                },
+              ],
+            }),
+            delivery({
+              destination: {
+                id: "DS0000000000NO",
+                name: "none",
+                type: "mattermost",
+                health: { state: "healthy" },
+              },
+              entries: [],
+            }),
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />));
+    const rows = page.getByTestId("delivery-row");
+    await expect.element(rows.first()).toBeVisible();
+    const entries = (row: number) =>
+      rows
+        .nth(row)
+        .getByTestId("delivery-entry")
+        .elements()
+        .map((e) => e.textContent?.trim());
+    expect(entries(0)).toEqual(["Route · Severity < critical"]);
+    expect(entries(1)).toEqual([
+      "Team payments · Severity < critical",
+      "Team search · Any severity",
+    ]);
+    expect(entries(2)).toEqual(["Team payments (deleted) · Severity = critical"]);
+    await expect
+      .element(rows.nth(0).getByTestId("delivery-entries"))
+      .toHaveTextContent("Reached by:Route · Severity < critical");
+    // A delivery without entries says nothing about them.
+    expect(rows.nth(3).getByTestId("delivery-entries").elements()).toHaveLength(0);
+  });
+
+  test("lists the entries in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            delivery({
+              entries: [
+                { kind: "route", team: null, severity_condition: "critical" },
+                {
+                  kind: "team",
+                  team: {
+                    id: "TM0000000000PA",
+                    name: "payments",
+                    slug: "payments",
+                    deleted: false,
+                  },
+                  severity_condition: "below_critical",
+                },
+              ],
+            }),
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await render(providers(<AlertGroupDeliveries alertGroupId="AG0000000000AA" />));
+    const entries = page.getByTestId("delivery-entry");
+    await expect.element(entries.first()).toBeVisible();
+    expect(entries.elements().map((e) => e.textContent?.trim())).toEqual([
+      "Маршрут · важность = critical",
+      "Команда payments · важность < critical",
+    ]);
+  });
+
   test("reads in Russian", async () => {
     await i18n.changeLanguage("ru");
     expect(deliveryStateText(i18n.t, delivery({ state: "waiting_for_broken_destination" }))).toBe(

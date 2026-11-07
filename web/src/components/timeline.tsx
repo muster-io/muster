@@ -309,6 +309,10 @@ export function entryText(
           return t("timeline.system.templateValueMissing");
         case "unknown_team_value":
           return t("timeline.system.unknownTeamValue", { value: entry.team_value ?? "" });
+        case "destination_joined":
+          return entry.destination === undefined
+            ? t("timeline.events.other")
+            : t("timeline.system.destinationJoined", { destination: entry.destination.name });
         default:
           return t("timeline.events.other");
       }

@@ -405,6 +405,8 @@
       "autoUnacknowledge": "Auto-unacknowledge",
       "buttons": "Buttons",
       "deletedAt": "Deleted at",
+      "deliverToTeams": "Also to the Teams from the label",
+      "destinations": "Destinations",
       "duplicateWindowSeconds": "Duplicate window (seconds)",
       "email": "Email",
       "gracePeriodSeconds": "Grace period (seconds)",
@@ -430,6 +432,7 @@
       "role": "Role",
       "rootMessageTemplate": "Root message template",
       "routeOrder": "Order of the routes",
+      "runTeamChains": "Run the Teams' Escalation chains",
       "signInMethod": "Sign-in method",
       "snoozeDurationsSeconds": "Snooze durations (seconds)",
       "status": "Status",
@@ -857,6 +860,11 @@
     }
   },
   "deliveries": {
+    "entries": {
+      "label": "Reached by",
+      "route": "Route",
+      "team": "Team {{team}}"
+    },
     "newTab": "(opens in a new tab)",
     "none": "No deliveries.",
     "pastEditWindow": "Past the edit window: updated on the next change of status",
@@ -946,6 +954,7 @@
       "name": "Name",
       "place": "Connection · channel",
       "routes": "Routes",
+      "teams": "Teams",
       "type": "Type"
     },
     "form": {
@@ -988,7 +997,8 @@
       "team": "Team"
     },
     "page": {
-      "noRoutes": "No Route sends here yet."
+      "noRoutes": "No Route sends here yet.",
+      "noTeams": "No Team names this Destination."
     },
     "secrets": {
       "add": "Add secret",
@@ -1203,6 +1213,7 @@
     "fields": {
       "bridgeEvents": "Bridge event delivery",
       "buttons": "Button sets",
+      "deliverToTeams": "Routing to Teams",
       "groupKey": "Group key",
       "heartbeat": "Heartbeat",
       "integrationSnippet": "Alertmanager configuration",
@@ -1219,6 +1230,7 @@
       "permissions": "Service account Permissions",
       "proxy": "Proxy",
       "routeProfile": "Route profiles",
+      "severityCondition": "Severity conditions",
       "slackAppToken": "Slack app-level token",
       "slackBotToken": "Slack bot token",
       "slackEventMode": "Slack event mode",
@@ -2139,11 +2151,42 @@
       "windowHint": "New alerts that arrive within this time after a Thread reply are collected into one reply.",
       "windowInvalid": "Enter a whole number of seconds, 0 or more."
     },
+    "deliveryPreview": {
+      "alerts_one": "{{count}} alert",
+      "alerts_other": "{{count}} alerts",
+      "countOf": "reached by {{reaching}} of {{total}}",
+      "counts": "Alert Groups per Destination",
+      "grow": "Alert Groups only gain Destinations: the list includes the Destinations a group reaches and those it may reach as its Severity level rises.",
+      "hint": "Checked against recent Alerts; it follows the settings above.",
+      "level": {
+        "critical": "critical",
+        "info": "info",
+        "warning": "warning"
+      },
+      "needMatchers": "Add a Matcher to see where alerts go.",
+      "noAlerts": "No recent Alerts would reach this Route.",
+      "noDestinations": "No Destinations: no messages for this Alert Group.",
+      "noEntries": "Add a Destination, or turn on delivery to the Teams from the label, to see where alerts go.",
+      "noTeams": "no Team",
+      "reaches": "Destinations this Alert Group reaches",
+      "routeAnd": "Route, {{via}}",
+      "stale": "Showing the last result, for earlier settings",
+      "teams": "Teams",
+      "title": "Where alerts go",
+      "updating": "Updating…",
+      "via": "via {{teams}}"
+    },
     "destinations": {
       "add": "Add a Destination",
       "choose": "Choose a Destination…",
+      "conditionFor": "Severity condition for {{name}}",
+      "conditions": {
+        "any": "Any severity",
+        "belowCritical": "Severity < critical",
+        "critical": "Severity = critical"
+      },
       "duplicate": "This Destination is listed twice.",
-      "hint": "Where the route sends the messages of its Alert Groups.",
+      "hint": "Where the Route sends the messages of its Alert Groups; each Destination may have a Severity condition",
       "list": "Destinations of the route",
       "none": "No Destinations: Muster sends no messages for this route.",
       "noneExist": "No Destinations yet",
@@ -2152,9 +2195,13 @@
       "sameChat_one": "{{count}} Destination delivers to the same chat: {{names}}. Each message will appear there {{count}} time.",
       "sameChat_other": "{{count}} Destinations deliver to the same chat: {{names}}. Each message will appear there {{count}} times.",
       "sameChatTwo": "Two Destinations deliver to the same chat: {{names}}. Each message will appear there twice.",
+      "short": {
+        "belowCritical": "< critical",
+        "critical": "critical"
+      },
       "storm_one": "Storm since {{time}}: {{count}} new Alert Group. Destinations receive a Storm summary.",
       "storm_other": "Storm since {{time}}: {{count}} new Alert Groups. Destinations receive a Storm summary.",
-      "title": "Destinations",
+      "title": "Route Destinations",
       "unknown": "This Destination no longer exists. Remove it and save again."
     },
     "edit": {
@@ -2202,6 +2249,7 @@
     },
     "list": {
       "defaultHint": "Takes every alert no other route took. Always last.",
+      "destinations": "Destinations",
       "dragHint": "Drag to change the order",
       "emptyFiltered": "No Routes of this Team.",
       "label": "Routes in evaluation order",
@@ -2209,12 +2257,14 @@
       "moved": "{{name}} moved to position {{position}} of {{total}}.",
       "moveDown": "Move {{name}} down",
       "moveUp": "Move {{name}} up",
+      "noDestinations": "No Destinations",
       "noGroupKey": "none",
       "noMatchers": "No Matchers: takes every alert",
       "openAlertGroups_one": "{{count}} open Alert Group",
       "openAlertGroups_other": "{{count}} open Alert Groups",
       "owningTeam": "Owning Team: {{name}}",
       "stale": "Someone else changed the order. Reload to see it.",
+      "teamsPlus": "+ Teams from the label",
       "templateError": "Template error"
     },
     "matchers": {
@@ -2308,6 +2358,13 @@
       "internalAlerts": "Send Muster's own alerts to a Destination",
       "internalAlertsHint": "Muster raises Internal alerts such as MusterDestinationBroken, and only the Default route takes them now. The new route sends them to the Destination you choose.",
       "title": "Suggestions"
+    },
+    "teams": {
+      "addToKey": "Add {{label}} to the key",
+      "deliver": "Also to the Teams from the label {{label}}",
+      "hint": "The Alert Group also goes to the Destinations of the Teams whose values are in its Alerts, with their Severity conditions. A new Team adds channels and removes none.",
+      "runChains": "Run the Teams' Escalation chains",
+      "sharedKey": "Alerts of different Teams with the same key share one Alert Group, shown in the channels of all of them. Add {{label}} to the key if each Team needs its own."
     },
     "templateError": {
       "fallback": "Messages use the fallback template.",
@@ -2631,6 +2688,21 @@
       "title": "Delete Team {{name}}?"
     },
     "deletedName": "{{name}} (deleted)",
+    "destinations": {
+      "add": "Add Destination",
+      "choose": "Choose a Destination…",
+      "condition": "Condition",
+      "connection": "Connection",
+      "destination": "Destination",
+      "empty": "The Team has no Destinations.",
+      "list": "Destinations of the Team",
+      "noneExist": "No Destinations yet",
+      "noRoutes": "No Route delivers to the Teams from the label yet.",
+      "remove": "Remove",
+      "removeNamed": "Remove {{name}}",
+      "routes": "The Alert Groups of {{team}} arrive here from the Routes that deliver to the Teams from the label: {{routes}}.",
+      "title": "Destinations of the Team"
+    },
     "details": {
       "title": "Details"
     },
@@ -2875,6 +2947,7 @@
       "ownerDisabled": "the owner was disabled"
     },
     "system": {
+      "destinationJoined": "Joined {{destination}}",
       "fallbackTemplateFailed": "Fallback template used: {{template}} failed — {{error}}",
       "fallbackTemplateUsed": "Messages used the fallback template",
       "musterUnavailable": "Muster was unavailable from {{from}} to {{to}}",

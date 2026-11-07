@@ -27,6 +27,7 @@ import type {
   MattermostConnection,
   MattermostDestination,
   Permission,
+  Route,
   Session,
   TelegramConnection,
   TelegramDestination,
@@ -40,7 +41,8 @@ import {
   telegramDestination,
   webhookDestination,
 } from "../test/fixtures/destinations";
-import { RouteDestinations } from "./route-destinations";
+import { type Entry, RouteDestinations } from "./route-destinations";
+import { destinationsText } from "./route-list";
 
 function mmConnection(id: string, name: string, serverUrl: string): MattermostConnection {
   return mattermostConnection({ id, name, server_url: serverUrl });
@@ -128,7 +130,12 @@ function mockReads(destinations: Destination[]) {
 
 const PERMISSIONS: Permission[] = ["destinations:read", "connections:read", "routes:write"];
 
-function Editor({ initial, onChange }: { initial: string[]; onChange: (next: string[]) => void }) {
+/** Entries with any severity for these Destinations. */
+function anyOf(...ids: string[]): Entry[] {
+  return ids.map((id) => ({ destination_id: id, severity_condition: "any" }));
+}
+
+function Editor({ initial, onChange }: { initial: Entry[]; onChange: (next: Entry[]) => void }) {
   const [value, setValue] = useState(initial);
   return (
     <RouteDestinations
@@ -142,7 +149,7 @@ function Editor({ initial, onChange }: { initial: string[]; onChange: (next: str
   );
 }
 
-async function renderEditor(initial: string[], onChange: (next: string[]) => void = () => {}) {
+async function renderEditor(initial: Entry[], onChange: (next: Entry[]) => void = () => {}) {
   const rootRoute = createRootRoute({
     component: () => <Editor initial={initial} onChange={onChange} />,
   });
@@ -190,7 +197,7 @@ afterEach(async () => {
 describe("the Destinations of the Route editor", () => {
   test("label each row with its messenger, Connection and channel and keep its Health", async () => {
     mockReads(ALL);
-    await renderEditor([TG_A.id, HOOK.id]);
+    await renderEditor(anyOf(TG_A.id, HOOK.id));
     await expect
       .element(rows().nth(0).getByTestId("route-destination-label"))
       .toHaveTextContent("tg-a-alerts · Telegram · via Example Telegram · Muster alerts");
@@ -229,7 +236,7 @@ describe("the Destinations of the Route editor", () => {
     });
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     try {
-      await renderEditor([TG_A.id]);
+      await renderEditor(anyOf(TG_A.id));
       await expect
         .element(rows().nth(0).getByRole("link", { name: "tg-a-alerts", exact: true }))
         .toBeVisible();
@@ -256,7 +263,7 @@ describe("the Destinations of the Route editor", () => {
 
   test("offer every other Destination by its full label, a Broken one with its health", async () => {
     mockReads(ALL);
-    await renderEditor([TG_A.id]);
+    await renderEditor(anyOf(TG_A.id));
     const picker = page.getByLabelText("Add a Destination");
     await expect
       .element(
@@ -283,7 +290,7 @@ describe("the Destinations of the Route editor", () => {
   test("warn once per chat, not for one channel id on another server, without blocking a change", async () => {
     mockReads(ALL);
     const onChange = vi.fn();
-    await renderEditor([MM_A.id, MM_B.id, MM_2.id, TG_A.id, HOOK.id], onChange);
+    await renderEditor(anyOf(MM_A.id, MM_B.id, MM_2.id, TG_A.id, HOOK.id), onChange);
     await expect
       .element(warnings())
       .toHaveTextContent(
@@ -296,14 +303,9 @@ describe("the Destinations of the Route editor", () => {
     const picker = page.getByLabelText("Add a Destination");
     await expect.element(picker).toBeEnabled();
     await picker.selectOptions(TG_B.id);
-    expect(onChange).toHaveBeenLastCalledWith([
-      MM_A.id,
-      MM_B.id,
-      MM_2.id,
-      TG_A.id,
-      HOOK.id,
-      TG_B.id,
-    ]);
+    expect(onChange).toHaveBeenLastCalledWith(
+      anyOf(MM_A.id, MM_B.id, MM_2.id, TG_A.id, HOOK.id, TG_B.id),
+    );
     await expect
       .element(warnings().nth(1))
       .toHaveTextContent(
@@ -328,7 +330,7 @@ describe("the Destinations of the Route editor", () => {
     const third = mm("DS0000000000M3", "mm-c-alerts", "CN000000000MMA");
     mockReads([...ALL, third]);
     await i18n.changeLanguage("ru");
-    await renderEditor([MM_A.id, MM_B.id, third.id]);
+    await renderEditor(anyOf(MM_A.id, MM_B.id, third.id));
     await expect
       .element(warnings())
       .toHaveTextContent(
@@ -345,6 +347,136 @@ describe("the Destinations of the Route editor", () => {
     );
     expect(i18n.t("routes.destinations.sameChatTwo", { names: "a и b" })).toBe(
       "Два места доставки отправляют сообщения в один чат: a и b. Каждое сообщение появится в нём дважды.",
+    );
+  });
+
+  test("give each Destination a Severity condition with its hint, and report the choice", async () => {
+    mockReads(ALL);
+    const onChange = vi.fn();
+    await renderEditor(anyOf(MM_A.id, TG_A.id), onChange);
+    await expect
+      .element(page.getByRole("group", { name: "Route Destinations", exact: true }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText(
+          "Where the Route sends the messages of its Alert Groups; each Destination may have a Severity condition",
+        ),
+      )
+      .toBeVisible();
+    const condition = page.getByTestId(`route-destination-condition-${MM_A.id}`);
+    await expect.element(condition).toHaveValue("any");
+    for (const name of ["Any severity", "Severity = critical", "Severity < critical"]) {
+      await expect.element(condition.getByRole("option", { name })).toBeInTheDocument();
+    }
+    await condition.selectOptions("critical");
+    expect(onChange).toHaveBeenLastCalledWith([
+      { destination_id: MM_A.id, severity_condition: "critical" },
+      { destination_id: TG_A.id, severity_condition: "any" },
+    ]);
+    // Only the changed row's condition changes; a Destination added later starts with any severity.
+    await expect
+      .element(page.getByTestId(`route-destination-condition-${TG_A.id}`))
+      .toHaveValue("any");
+    await page.getByLabelText("Add a Destination").selectOptions(HOOK.id);
+    expect(onChange).toHaveBeenLastCalledWith([
+      { destination_id: MM_A.id, severity_condition: "critical" },
+      { destination_id: TG_A.id, severity_condition: "any" },
+      { destination_id: HOOK.id, severity_condition: "any" },
+    ]);
+    // Removing the first row keeps the condition of the second.
+    await page.getByRole("button", { name: "Remove mm-a-alerts" }).click();
+    expect(onChange).toHaveBeenLastCalledWith([
+      { destination_id: TG_A.id, severity_condition: "any" },
+      { destination_id: HOOK.id, severity_condition: "any" },
+    ]);
+  });
+
+  test("shows the refusal of a Destination at its row, and reads in Russian", async () => {
+    mockReads(ALL);
+    await i18n.changeLanguage("ru");
+    const rootRoute = createRootRoute({
+      component: () => (
+        <RouteDestinations
+          id="route"
+          value={anyOf(MM_A.id)}
+          errors={{ [MM_A.id]: "duplicate" }}
+          onChange={() => {}}
+        />
+      ),
+    });
+    const router = createRouter({
+      routeTree: rootRoute,
+      history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </I18nextProvider>,
+    );
+    await expect
+      .element(rows().nth(0).getByRole("alert"))
+      .toHaveTextContent("Это место доставки указано дважды.");
+    const condition = page.getByTestId(`route-destination-condition-${MM_A.id}`);
+    for (const name of ["любая важность", "важность = critical", "важность < critical"]) {
+      await expect.element(condition.getByRole("option", { name })).toBeInTheDocument();
+    }
+    await expect
+      .element(
+        page.getByText(
+          "Куда маршрут отправляет сообщения своих групп алертов. У каждого места доставки может быть условие по важности.",
+        ),
+      )
+      .toBeVisible();
+  });
+
+  test("lists a Route's Destinations with their conditions and the Teams from the label", async () => {
+    const refs = [MM_A, TG_A, HOOK].map((d) => ({
+      id: d.id,
+      name: d.name,
+      type: d.type,
+      health: d.health,
+    }));
+    const base = {
+      destinations: refs,
+      destination_entries: [
+        { destination_id: MM_A.id, severity_condition: "critical" },
+        { destination_id: TG_A.id, severity_condition: "below_critical" },
+        { destination_id: HOOK.id, severity_condition: "any" },
+      ],
+      deliver_to_teams: true,
+    };
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the text reads only these fields of the Route
+    const route = (extra: Partial<Route> = {}) => ({ ...base, ...extra }) as Route;
+    expect(destinationsText(i18n.t, route())).toBe(
+      "hook, mm-a-alerts (critical), tg-a-alerts (< critical) + Teams from the label",
+    );
+    expect(destinationsText(i18n.t, route({ deliver_to_teams: false }))).toBe(
+      "hook, mm-a-alerts (critical), tg-a-alerts (< critical)",
+    );
+    expect(destinationsText(i18n.t, route({ destination_entries: [], destinations: [] }))).toBe(
+      "+ Teams from the label",
+    );
+    expect(
+      destinationsText(
+        i18n.t,
+        route({ destination_entries: [], destinations: [], deliver_to_teams: false }),
+      ),
+    ).toBe("No Destinations");
+    // A Route read without entries (a 0.1 replica) shows its Destinations with any severity.
+    expect(
+      destinationsText(
+        i18n.t,
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- a read of 0.1
+        { destinations: refs, destination_ids: [MM_A.id], deliver_to_teams: false } as Route,
+      ),
+    ).toBe("mm-a-alerts");
+    await i18n.changeLanguage("ru");
+    expect(destinationsText(i18n.t, route())).toBe(
+      "hook, mm-a-alerts (critical), tg-a-alerts (< critical) + командам из метки",
     );
   });
 });
