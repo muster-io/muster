@@ -13,6 +13,7 @@ files_touched:
   - web/src/components/route-teams-option.tsx
   - web/src/components/route-teams-option.test.tsx
   - web/src/components/route-form.test.tsx
+  - web/src/components/route-editor.test.tsx
   - web/src/components/group-key-editor.tsx
   - web/src/components/route-delivery-preview.tsx
   - web/src/components/route-delivery-preview.test.tsx
@@ -149,8 +150,9 @@ None.
 
 ## Notes
 
-- The Routes list shows a Route's Destinations by name, so that the text does not depend on the order the API returns
-  them in. The preview "Where alerts go" asks 400 ms after the last change of the form, once for a burst, with the
+- The forms and the Routes list show a Route's or a Team's Destinations by name, as the API lists `destinations`, not in
+  the order of the `destination_entries`, which the API gives by Destination id; the Routes list text does not depend on
+  the order either. The preview "Where alerts go" asks 400 ms after the last change of the form, once for a burst, with the
   default period; the API has no field that tells a "may reach" result, so the preview says in a note that the list
   includes the Destinations a group reaches as its Severity level rises.
 - The `e2e` specs name every Destination, Team, Integration and category by the prefix of their spec, and the category

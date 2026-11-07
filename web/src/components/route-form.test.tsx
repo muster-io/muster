@@ -225,6 +225,37 @@ describe("the Route editor's Destinations and Teams option", () => {
     expect(input.name).toBe("Infrastructure");
   });
 
+  test("shows the Destinations by name, as the API lists them, though the entries come in another order", async () => {
+    // The API gives the entries by Destination id and the Destinations by name.
+    const byId = [NOTICE, CRITICAL, OTHER].map((d) => ({
+      destination_id: d.id,
+      severity_condition: "any" as const,
+    }));
+    const route = routeOf({
+      destination_entries: byId,
+      destinations: [CRITICAL, NOTICE, OTHER].map((d) => ({
+        id: d.id,
+        name: d.name,
+        type: d.type,
+        health: d.health,
+      })),
+    });
+    const { save } = await renderForm(route);
+    await expect.element(rows().first()).toBeVisible();
+    expect(
+      rows()
+        .elements()
+        .map((row) => row.querySelector("a")?.textContent),
+    ).toEqual(["infra-critical", "infra-notice", "other"]);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(lastInput(save).destination_entries?.map((e) => e.destination_id)).toEqual([
+      CRITICAL.id,
+      NOTICE.id,
+      OTHER.id,
+    ]);
+  });
+
   test("starts a Route stored with destination_ids alone with any severity", async () => {
     const stored = routeOf();
     Reflect.deleteProperty(stored, "destination_entries");

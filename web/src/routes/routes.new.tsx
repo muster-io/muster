@@ -36,7 +36,9 @@ function fromProfile(profile: RouteProfile): RouteInput {
     matchers: [],
     minimum_severity: profile.minimum_severity,
     group_key: [...profile.group_key],
-    destination_ids: [],
+    destination_entries: [],
+    deliver_to_teams: false,
+    run_team_chains: true,
     policy: profile.policy,
   };
 }

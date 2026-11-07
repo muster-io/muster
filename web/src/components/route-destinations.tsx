@@ -45,16 +45,27 @@ export const SEVERITY_CONDITIONS = [
 /** A Destination of a Route or a Team with its condition, as the forms hold it. */
 export type Entry = Required<DestinationEntry>;
 
-/** The entries of a stored Route or Team: its `destination_entries`, else the Destinations with `any`. */
+/**
+ * The entries of a stored Route or Team: its `destination_entries` — which the API gives in the order of the
+ * Destinations' ids — in the order of its `destinations`, by name, as the Destinations were listed before there were
+ * conditions; else the Destinations of `destination_ids` with `any`.
+ */
 export function entriesOf(stored: {
   destination_entries?: readonly DestinationEntry[];
   destination_ids?: readonly string[];
+  destinations?: readonly { id: string }[];
 }): Entry[] {
   if (stored.destination_entries !== undefined) {
-    return stored.destination_entries.map((e) => ({
+    const entries = stored.destination_entries.map((e) => ({
       destination_id: e.destination_id,
       severity_condition: e.severity_condition ?? "any",
     }));
+    const names = (stored.destinations ?? []).map((d) => d.id);
+    const place = (id: string): number => {
+      const at = names.indexOf(id);
+      return at === -1 ? names.length : at;
+    };
+    return entries.toSorted((a, b) => place(a.destination_id) - place(b.destination_id));
   }
   return (stored.destination_ids ?? []).map((id) => ({
     destination_id: id,
