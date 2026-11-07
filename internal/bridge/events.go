@@ -46,8 +46,8 @@ const EventDedupWindow = 24 * time.Hour
 // the main pool for its claim while its Command takes one more, as telegram.ParallelUpdates bounds Telegram updates.
 const ParallelEvents = 2
 
-// EventMaxAge is bridge.event_max_age: a press or a Text command older than this after its occurred_at, by the real
-// clock, is dropped, unanswered, and logged.
+// EventMaxAge is bridge.event_max_age: a press, a Text command or a notification_acknowledged older than this after
+// its occurred_at, by the real clock, is dropped, unanswered, and logged.
 const EventMaxAge = time.Hour
 
 // The bounds of the members of an event, from api/bridge.yaml.
@@ -370,15 +370,15 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 	return nil
 }
 
-// dispatch handles ev of the Connection c inside its claim and returns what to answer and log once the claim
-// committed; it sends nothing. An event whose context ended fails, so that it is not recorded. A press older than
-// MaxAge by the real clock is dropped, unanswered; a recent one runs its Command (presses.go). A Thread message that is
-// a Text command runs its Command, and any other is ignored (commands.go). A message_deleted event starts the deleted
-// Root message flow at once when it names the current Root message of an open delivery, and changes nothing
-// otherwise; a failed start fails the event (C-22.FR-10). An account_link event links the sender's account through
-// the Linker, whatever its age (links.go). A notification_acknowledged event goes to the Acknowledgements, whose
-// answer is made like any other; without them it is recorded as handled, logged as bridge_event_unhandled and so
-// acknowledged (C-22.FR-11), whatever the Connection's roles.
+// dispatch handles ev of the Connection c inside its claim and returns what to answer and log once the claim committed;
+// it sends nothing. An event whose context ended fails, so that it is not recorded. A press older than MaxAge by the
+// real clock is dropped, unanswered; a recent one runs its Command (presses.go). A Thread message that is a Text
+// command runs its Command, and any other is ignored (commands.go). A message_deleted event starts the deleted Root
+// message flow at once when it names the current Root message of an open delivery, and changes nothing otherwise; a
+// failed start fails the event (C-22.FR-10). An account_link event links the sender's account through the Linker,
+// whatever its age (links.go). A notification_acknowledged event older than MaxAge is dropped, unanswered; a recent one
+// goes to the Acknowledgements, whose answer is made like any other; without them it is recorded as handled, logged as
+// bridge_event_unhandled and so acknowledged (C-22.FR-11), whatever the Connection's roles.
 func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err := ctx.Err(); err != nil {
 		return handled{}, err
@@ -400,6 +400,13 @@ func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error
 			return handled{}, err
 		}
 	case TypeNotificationAcknowledged:
+		// An acknowledgement that comes again after bridge.event_dedup_window, such as from a gateway that restarted
+		// without its cursor, must not make the person the Owner again: an old one is dropped, as a press is.
+		if age, old := e.tooOld(ev); old {
+			return handled{line: logging.BridgeAcknowledgementDropped, fields: []logging.Field{
+				logging.F("connection", c.PublicID), logging.F("event_id", ev.ID),
+				logging.F("age_seconds", int64(age/time.Second))}}, nil
+		}
 		if e.Acknowledgements == nil {
 			return handled{line: logging.BridgeEventUnhandled, fields: []logging.Field{
 				logging.F("connection", c.PublicID), logging.F("event_id", ev.ID), logging.F("type", ev.Type)}}, nil

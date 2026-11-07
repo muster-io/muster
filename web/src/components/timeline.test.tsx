@@ -386,6 +386,22 @@ describe("entryText", () => {
     );
   });
 
+  test("names the gateway of a call, and a Notification gateway without one, in English and Russian", async () => {
+    expect(actorText(i18n.t, { ...ALICE, transport: "gateway" }, "Example Gateway")).toBe(
+      "Alice Smith from a call through Example Gateway",
+    );
+    expect(actorText(i18n.t, { ...ALICE, transport: "gateway" }, null)).toBe(
+      "Alice Smith from a call through a Notification gateway",
+    );
+    await i18n.changeLanguage("ru");
+    expect(actorText(i18n.t, { ...ALICE, transport: "gateway" }, "Example Gateway")).toBe(
+      "Alice Smith из звонка через Example Gateway",
+    );
+    expect(actorText(i18n.t, { ...ALICE, transport: "gateway" })).toBe(
+      "Alice Smith из звонка через шлюз оповещений",
+    );
+  });
+
   test("names the reason minimum_severity in Russian", async () => {
     await i18n.changeLanguage("ru");
     expect(text(status("urgency_raised", { reason: "x", reason_code: "minimum_severity" }))).toBe(
@@ -500,6 +516,19 @@ describe("Timeline", () => {
     expect(document.querySelector("[data-testid=timeline] img")).toBeNull();
     expect(alerted).not.toHaveBeenCalled();
     expect(requests[0]?.searchParams.get("order")).toBe("desc");
+  });
+
+  test("names the gateway of the call an acknowledgement came from", async () => {
+    entries = [
+      status("acknowledged", {
+        actor: { ...ALICE, transport: "gateway" },
+        gateway: { id: "CN00000000GW10", name: "Example Gateway" },
+      }),
+    ];
+    await renderTimeline();
+    await expect
+      .element(page.getByTestId("timeline-actor"))
+      .toHaveTextContent("Alice Smith from a call through Example Gateway");
   });
 
   test("shows the timer entries with their loudness, Mentions and the previous Owner", async () => {

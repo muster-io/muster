@@ -459,7 +459,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_alert_groups_resolved_total` | counter | `route`, `by` (`user`, `system`) | C-09 |
 | `muster_alert_group_time_to_resolve_seconds` | histogram | `route` | C-09 |
 | `muster_alert_group_time_to_ack_seconds` | histogram | `route` | C-10 |
-| `muster_commands_total` | counter | `command` (`acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it`), `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `system`), `outcome` (`done`, `unchanged`, `refused`, `skipped`, `failed`) | C-10 |
+| `muster_commands_total` | counter | `command` (`acknowledge`, `unacknowledge`, `resolve`, `unresolve`, `snooze`, `unsnooze`, `add_note`, `still_on_it`), `transport` (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `system`), `outcome` (`done`, `unchanged`, `refused`, `skipped`, `failed`) | C-10 |
 | `muster_delivery_attempts_total` | counter | `destination`; `kind` (`publication`, `update`, `thread_reply`, `storm_summary`, `final_edit`, `webhook_event`); `outcome` (`delivered`, `markup_rejected`, `retry_after`, `transient`, `fatal`, `unknown`, `template_error`) | C-11 |
 | `muster_delivery_latency_seconds` | histogram | `destination` | C-11 |
 | `muster_delivery_queue` | gauge (Leader) | `destination` | C-11 |
@@ -514,8 +514,7 @@ windows are _provisional_ (P-88), as those of L1 were.
 
 The metrics that the capabilities of L2 add. Each joins the [metrics catalogue](#metrics-catalogue) and the registry,
 with the entity labels it needs in the label policy of ADR-0014, in the story that implements it; until then this table
-holds them, outside the catalogue that the code checks. The value `gateway` joins the `transport` values of
-`muster_commands_total` (C-30.FR-10).
+holds them, outside the catalogue that the code checks.
 
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|

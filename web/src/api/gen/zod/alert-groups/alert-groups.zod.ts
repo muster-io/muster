@@ -429,6 +429,7 @@ export const getAlertGroupTimelineResponseItemsItemOneOneIdRegExp = new RegExp('
 export const getAlertGroupTimelineResponseItemsItemOneOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemOneThreeOwnerIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemOneThreePreviousOwnerIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+export const getAlertGroupTimelineResponseItemsItemOneThreeGatewayOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemTwoOneIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemTwoOneActorIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const getAlertGroupTimelineResponseItemsItemTwoThreeTeamIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -460,7 +461,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemOneOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -487,7 +488,11 @@ export const GetAlertGroupTimelineResponse = zod.object({
 }).optional().describe('The Owner who lost the Alert Group (Takeover, urgency rise, auto-unacknowledge, an Owner disabled or deleted).'),
   "snooze_until": zod.iso.datetime({"offset":true}).nullish(),
   "fingerprints": zod.array(zod.string()).optional().describe('The Alerts that started the Alert Group (`created`), reopened it (`reopened`) or whose resolution resolved it (`resolved`): Alerts of one Snapshot are one entry.'),
-  "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the Alerts of `created` or `reopened` already carried.')
+  "label_conflicts": zod.array(zod.string()).optional().describe('Static labels the Alerts of `created` or `reopened` already carried.'),
+  "gateway": zod.union([zod.object({
+  "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemOneThreeGatewayOneIdRegExp).describe('Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.'),
+  "name": zod.string()
+}),zod.null()]).optional().describe('The Notification gateway of the call that an acknowledgement through the Transport `gateway` came from, as the `gateway` of an entry of the kind `escalation`; null for any other entry, and for one that a version without it recorded.')
 })).and(zod.object({
   "kind": zod.enum(['status'])
 })),zod.object({
@@ -499,7 +504,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemTwoOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -532,7 +537,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemThreeOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -551,7 +556,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "created_at": zod.iso.datetime({"offset":true})
 })
 })).and(zod.object({
@@ -565,7 +570,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemFourOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -587,7 +592,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemFiveOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -611,7 +616,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemSixOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -645,7 +650,7 @@ export const GetAlertGroupTimelineResponse = zod.object({
   "id": zod.string().regex(getAlertGroupTimelineResponseItemsItemSevenOneActorIdRegExp).nullish().describe('A `public_id` in the format of `PublicId`, or null.'),
   "name": zod.string().nullish(),
   "token_name": zod.string().nullish(),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).optional().describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "reason": zod.string().nullish().describe('Reason of an automatic transition, for example `owner_disabled` or `owner_deleted` when disabling or deleting a user released their acknowledgement.')
 }).describe('Who caused the entry. `system` entries carry the reason in `reason`.')
 }).and(zod.object({
@@ -1512,7 +1517,7 @@ export const ListAlertGroupNotesResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "created_at": zod.iso.datetime({"offset":true})
 })),
   "next_cursor": zod.string().nullable()
@@ -1551,7 +1556,7 @@ export const CreateAlertGroupNoteResponse = zod.object({
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
 }).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
-  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
+  "transport": zod.enum(['ui', 'api', 'mattermost', 'telegram', 'bridge', 'slack', 'gateway', 'cli', 'system']).describe('How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.'),
   "created_at": zod.iso.datetime({"offset":true})
 })
 

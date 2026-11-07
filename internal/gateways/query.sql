@@ -297,10 +297,11 @@ RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
 
 -- GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway
 -- and whether it is still a Notification gateway, not deleted, its User and, from its first attempt, its contact while
--- that is still confirmed. No row when the lease ran out or went to another replica, or the call ended.
+-- that is still confirmed and its signed action data, null for a call that a replica of an earlier version started.
+-- No row when the lease ran out or went to another replica, or the call ended.
 -- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
-       g.first_failed_at, c.public_id AS connection_public_id, c.name AS connection_name,
+       g.first_failed_at, g.action_data, c.public_id AS connection_public_id, c.name AS connection_name,
        (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
            AS gateway,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.language AS user_language,
@@ -337,11 +338,13 @@ JOIN connections c ON c.org_id = g.org_id AND c.id = g.connection_id
 WHERE g.org_id = @org_id AND g.user_id = @user_id AND g.connection_id = @connection_id AND g.confirmed_at IS NOT NULL
   AND c.deleted_at IS NULL AND c.bridge_info->'roles' @> '["gateway"]'::jsonb;
 
--- StartCall makes the first attempt of a waiting call: it keeps its contact, its text and its language from now on,
--- takes no more Alert Groups and is due now, its lease renewed for the attempt.
+-- StartCall makes the first attempt of a waiting call: it keeps its contact, its text, its language and its action
+-- data, signed by the key button_key_id, from now on, takes no more Alert Groups and is due now, its lease renewed for
+-- the attempt.
 -- name: StartCall :execrows
 UPDATE gateway_calls
 SET state = 'sending', contact_id = sqlc.narg('contact_id')::bigint, language = @language::text, text = @text::text,
+    action_data = sqlc.narg('action_data')::text, button_key_id = sqlc.narg('button_key_id')::text,
     first_attempt_at = @now::timestamptz, next_attempt_at = @now::timestamptz, not_before = coalesce(not_before, @now),
     lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND state = 'waiting' AND lease_owner = @owner::text;
@@ -372,11 +375,12 @@ SET attempts = attempts + 1, first_failed_at = coalesce(first_failed_at, @now::t
 WHERE org_id = @org_id AND id = @id AND state = 'sending' AND lease_owner = @owner::text;
 
 -- EndCall ends a call — accepted, Not delivered with its reason, or dropped — counting the attempt that ended it, if
--- one did, and clears its text, which names its Alert Groups and is never sent again; the language stays. It returns
--- whether the call went, which starts the combine window of the next one.
+-- one did, and clears its text, which names its Alert Groups, and its action data, which are never sent again; the
+-- language and the id of the key that signed the data stay. It returns whether the call went, which starts the combine
+-- window of the next one.
 -- name: EndCall :one
 UPDATE gateway_calls
-SET state = @state::text, text = NULL, reason = sqlc.narg('reason')::text, notification_id = sqlc.narg('notification_id')::text,
+SET state = @state::text, text = NULL, action_data = NULL, reason = sqlc.narg('reason')::text, notification_id = sqlc.narg('notification_id')::text,
     attempts = attempts + @attempted::bigint, ended_at = @now::timestamptz, next_attempt_at = NULL,
     lease_owner = NULL, lease_until = NULL,
     first_failed_at = CASE WHEN sqlc.narg('error_class')::text IS NULL THEN first_failed_at
@@ -419,3 +423,13 @@ WITH doomed AS MATERIALIZED (
 DELETE FROM gateway_calls g
 USING doomed d
 WHERE g.org_id = @org_id AND g.id = d.id;
+
+-- GetAcknowledgedCall reads the call public_id of a Notification gateway's Connection, whatever its state, with the
+-- User it was for — Role, state, name and profile language — for the Acknowledge of a notification_acknowledged event
+-- (C-30.FR-6). No row for a call of another Connection or Organization, or none.
+-- name: GetAcknowledgedCall :one
+SELECT g.id, g.public_id, g.state, u.id AS user_id, u.public_id AS user_public_id, u.role AS user_role,
+       u.status AS user_status, u.language AS user_language
+FROM gateway_calls g
+JOIN users u ON u.org_id = g.org_id AND u.id = g.user_id
+WHERE g.org_id = @org_id AND g.connection_id = @connection_id AND g.public_id = @public_id;

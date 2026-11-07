@@ -384,3 +384,18 @@ func TestLabelPolicy(t *testing.T) {
 		t.Errorf("the scrape lacks series: labels %v", seen)
 	}
 }
+
+// TestCommandsTransports is C-30.FR-10: the transport values of muster_commands_total are the Transports of Commands,
+// gateway among them from L2, as the row of reference.md lists them (TestCatalogueConstructed).
+func TestCommandsTransports(t *testing.T) {
+	var values []string
+	for _, l := range Commands.def.Labels {
+		if l.Name == "transport" {
+			values = l.Values
+		}
+	}
+	want := []string{"ui", "api", "mattermost", "telegram", "bridge", "slack", "gateway", "system"}
+	if !slices.Equal(values, want) {
+		t.Errorf("transport values %v, want %v", values, want)
+	}
+}

@@ -403,6 +403,22 @@ func TestGetAlertGroupTimelineAPI(t *testing.T) {
 	if _, err := timelineEntryOf(groups.TimelineEntry{Kind: "unknown"}); err != nil {
 		t.Errorf("an unknown kind encodes as a system entry: %v", err)
 	}
+	// C-30.FR-6: an acknowledgement through the Transport gateway names the gateway of its call, as an escalation
+	// entry does; any other status entry has none.
+	for _, c := range []struct {
+		gateway *groups.Ref
+		want    string
+	}{{&groups.Ref{PublicID: "CN00000000GW10", Name: "Example Gateway"},
+		`"gateway":{"id":"CN00000000GW10","name":"Example Gateway"}`}, {nil, `"gateway":null`}} {
+		v, err := timelineEntryOf(groups.TimelineEntry{PublicID: "TEAAAAAAAAAAA9", At: t0, Kind: groups.KindStatus,
+			Event: string(groups.EventAcknowledged), Loudness: groups.Quiet, Mentions: []string{},
+			To: groups.StatusAcknowledged, Gateway: c.gateway,
+			Actor: groups.TimelineActor{Kind: "user", Transport: "gateway"}})
+		raw, _ := json.Marshal(v)
+		if err != nil || !strings.Contains(string(raw), c.want) {
+			t.Errorf("an acknowledgement through the gateway %s, %v", raw, err)
+		}
+	}
 }
 
 // TestMoveAndDeleteRouteAPI is C-09.FR-19 and C-09.AC-9 at the API: deleteRoute refuses a Route with open Alert

@@ -493,6 +493,7 @@
       "api": "API",
       "bridge": "Мост",
       "cli": "CLI",
+      "gateway": "Шлюз оповещений",
       "system": "Muster",
       "ui": "Веб-интерфейс"
     },
@@ -2992,6 +2993,7 @@
     }
   },
   "timeline": {
+    "actorFromCall": "{{actor}} из звонка через {{gateway}}",
     "actorVia": "{{actor}} через {{transport}}",
     "actorWithToken": "{{actor}} через {{transport}}, токен {{token}}",
     "deletedActor": "Удалённая учётная запись",
@@ -3115,6 +3117,7 @@
       "api": "API",
       "bridge": "Мост",
       "cli": "CLI",
+      "gateway": "шлюз оповещений",
       "mattermost": "Mattermost",
       "slack": "Slack",
       "system": "Muster",

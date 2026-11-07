@@ -551,7 +551,8 @@ type TimelineEntry struct {
 	// Destination is the Destination of a destination_joined (C-26.FR-5).
 	Destination *TimelineDestination
 	// PagedUsers are the people a Page names and Gateway the Notification gateway of a call, for an event of the kind
-	// escalation (C-32.FR-19, C-30.FR-7); the reason is Reason.
+	// escalation (C-32.FR-19, C-30.FR-7), the reason being Reason, or of the call an acknowledgement through the
+	// Transport gateway came from (C-30.FR-6).
 	PagedUsers []*ActorRef
 	Gateway    *Ref
 	position   TimelinePosition
@@ -903,7 +904,8 @@ func (s *Service) entryDestinations(ctx context.Context, entries []TimelineEntry
 	return nil
 }
 
-// entryGateways names the Notification gateways of the escalation entries of calls, deleted ones included.
+// entryGateways names the Notification gateways of the entries of calls — escalation entries, and acknowledgements
+// through the Transport gateway — deleted ones included.
 func (s *Service) entryGateways(ctx context.Context, entries []TimelineEntry) error {
 	var ids []int64
 	for _, e := range entries {

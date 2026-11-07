@@ -4,7 +4,7 @@
  */
 
 /**
- * `active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
+ * `active`; else `needed` when a stored Secret, an open Root message or a call through a Notification gateway still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
  */
 export type KeyringKeyState = typeof KeyringKeyState[keyof typeof KeyringKeyState];
 

@@ -602,8 +602,8 @@ func TestMessageDeletedCallsRootDeleted(t *testing.T) {
 	}
 }
 
-// acknowledgements is the handler of notification_acknowledged events that S-173 registers, as a test sets it: what it
-// saw, and the answer it gives.
+// acknowledgements is the handler of notification_acknowledged events, gateways.Acknowledgements in a running server,
+// as a test sets it: what it saw, and the answer it gives.
 type acknowledgements struct {
 	mu     sync.Mutex
 	seen   []Event
@@ -620,8 +620,8 @@ func (a *acknowledgements) Acknowledged(_ context.Context, _ Conn, ev Event) (st
 
 // TestNotificationAcknowledgedUnhandled covers C-22.FR-11 and C-30.FR-2: without a handler a notification_acknowledged
 // event is recorded as handled, unanswered, and logged as bridge_event_unhandled with the Connection, its id and type,
-// once however often it comes; with one, the handler gets it and its answer goes to the person; a failing handler
-// fails the event, which is not recorded.
+// once however often it comes; with one, the handler gets it once however often it comes, its answer goes to the
+// person once, and nothing is logged as unhandled; a failing handler fails the event, which is not recorded.
 func TestNotificationAcknowledgedUnhandled(t *testing.T) {
 	e := newPressEnv(t)
 	ev := e.event(t, TypeNotificationAcknowledged)
@@ -640,11 +640,15 @@ func TestNotificationAcknowledgedUnhandled(t *testing.T) {
 		t.Errorf("answered %v", a)
 	}
 
+	// S-173: with the handler wired, the event is handled once per id under its claim: a replay of the same id runs
+	// nothing and answers nothing more, and nothing is logged as unhandled.
 	e = newPressEnv(t)
 	acks := &acknowledgements{answer: "Done: Acknowledged #7"}
 	e.events.Acknowledgements = acks
-	if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if len(acks.seen) != 1 || acks.seen[0].Data != strings.Repeat("d", 64) || acks.seen[0].NotificationID != "n-1" ||
 		strings.Contains(e.log.String(), "bridge_event_unhandled") {
@@ -662,12 +666,44 @@ func TestNotificationAcknowledgedUnhandled(t *testing.T) {
 	}
 }
 
+// TestNotificationAcknowledgedTooOld covers C-22.FR-11 and C-30.FR-6: a notification_acknowledged older than
+// bridge.event_max_age by the real clock — one a gateway sends again after the dedup window — never reaches the
+// handler, is recorded and logged as bridge_acknowledgement_dropped, unanswered; one exactly that old is handled.
+func TestNotificationAcknowledgedTooOld(t *testing.T) {
+	e := newPressEnv(t)
+	e.real.Set(eventTime.Add(EventMaxAge + 90*time.Second))
+	acks := &acknowledgements{answer: "Acknowledged: #7"}
+	e.events.Acknowledgements = acks
+	ev := e.event(t, TypeNotificationAcknowledged)
+	if err := e.events.Handle(t.Context(), e.conn, ev); err != nil {
+		t.Fatal(err)
+	}
+	want := `"event":"bridge_acknowledgement_dropped","connection":"CN0000000000B3","event_id":"ev-1",` +
+		`"age_seconds":3690`
+	if len(acks.seen) != 0 || !strings.Contains(e.log.String(), want) || !e.store.recorded(e.conn.ID, "ev-1") {
+		t.Errorf("handler saw %+v, logged %s", acks.seen, e.log.String())
+	}
+	if a := e.answers(t); len(a) != 0 {
+		t.Errorf("answered %v", a)
+	}
+	e = newPressEnv(t)
+	e.real.Set(eventTime.Add(EventMaxAge))
+	acks = &acknowledgements{answer: "Acknowledged: #7"}
+	e.events.Acknowledgements = acks
+	if err := e.events.Handle(t.Context(), e.conn, e.event(t, TypeNotificationAcknowledged)); err != nil ||
+		len(acks.seen) != 1 {
+		t.Errorf("an event exactly bridge.event_max_age old: %v, seen %d", err, len(acks.seen))
+	}
+}
+
 // TestPollerTakesTheEventsOfAGateway covers C-30.FR-2: Bridge polling takes the events of a Connection whose only role
 // is gateway like any other's — the poller never reads the roles — and a polled notification_acknowledged is handled
 // once and logged as unhandled.
 func TestPollerTakesTheEventsOfAGateway(t *testing.T) {
 	e := newPollEnv(t)
-	e.bridge.add(eventJSON(t, eventFixture(TypeNotificationAcknowledged, member("id", "ev-ack"))))
+	// Recent by the poller's real clock, so that it is not dropped as too old.
+	e.bridge.add(eventJSON(t, eventFixture(TypeNotificationAcknowledged, member("id", "ev-ack"),
+		member("occurred_at", eventTime.Add(2*EventMaxAge).Format(time.RFC3339)))))
 	stop := runPoller(t, e.poller())
 	eventually(t, "the second poll", func() bool { return len(e.bridge.calls()) == 2 })
 	if err := stop(); err != nil {

@@ -12,7 +12,7 @@ export interface KeyringKey {
   held_by: string[];
   /** Live replicas that do not hold the key; activation is refused while this is not empty. */
   missing_on: string[];
-  /** A stored Secret or an open Root message still depends on the key. */
+  /** A stored Secret, an open Root message or a call through a Notification gateway that its person may still acknowledge still depends on the key. */
   needed: boolean;
   /** The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed. */
   removable: boolean;

@@ -45,9 +45,10 @@
 // both bots with their edits and replies, and DELETE /_fake/messages/{id}, which deletes a message as a person would;
 // the event endpoints above; GET /_fake/events, the events of both bots with their bot; GET /_fake/answers, the answers
 // Muster made; and GET /_fake/direct-messages, the direct messages the bots sent; GET /_fake/notifications, the
-// notifications the bots sent, and POST /_fake/acknowledge {notification_id[, occurred_at]}, which acknowledges one as
-// its person would and queues notification_acknowledged with its action data for its bot (notifications.go). The fake
-// answers what it is configured to, also when that breaks the protocol, so that the checks of Muster can be tried
+// notifications the bots sent, and POST /_fake/acknowledge {notification_id[, occurred_at][, data][, bot]}, which
+// acknowledges one as its person would and queues notification_acknowledged with its action data, or the data given,
+// for its bot, or the bot given, and {event_id} queues that earlier event again under its id (notifications.go). The
+// fake answers what it is configured to, also when that breaks the protocol, so that the checks of Muster can be tried
 // against a broken bridge.
 package fakebridge
 

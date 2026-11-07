@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { AlertGroupStatus } from './alertGroupStatus';
+import type { EntityRef } from './entityRef';
 import type { NullableAlertGroupStatus } from './nullableAlertGroupStatus';
 import type { NullableStatusChangeReason } from './nullableStatusChangeReason';
 import type { TimelineEntryBase } from './timelineEntryBase';
@@ -30,4 +31,6 @@ export type TimelineStatusEntry = TimelineEntryBase & TimelineLifecycleFields & 
   fingerprints?: string[];
   /** Static labels the Alerts of `created` or `reopened` already carried. */
   label_conflicts?: string[];
+  /** The Notification gateway of the call that an acknowledgement through the Transport `gateway` came from, as the `gateway` of an entry of the kind `escalation`; null for any other entry, and for one that a version without it recorded. */
+  gateway?: EntityRef | null;
 });

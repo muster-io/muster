@@ -80,7 +80,9 @@
   [`0034_gateway_calls`](../../internal/db/migrations/0034_gateway_calls.up.sql)
   (the queue of calls through Notification gateways, the Timeline kind `escalation` with its events, the Mention
   `paged`, `timeline_entries.paged_user_ids` and `gateway_connection_id`, and the Transport `gateway`, C-30.FR-4,
-  FR-7, C-32.FR-19, S-148), in
+  FR-7, C-32.FR-19, S-148) and
+  [`0035_gateway_call_signature`](../../internal/db/migrations/0035_gateway_call_signature.up.sql)
+  (`gateway_calls.action_data` and `button_key_id`, the signed action data of a call and its key, C-30.FR-6, S-173), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1471,21 +1473,20 @@ Serves C-12.FR-9.
 Serves C-03.FR-14–15, C-04.FR-6, C-10.FR-12, C-18.FR-9, C-20.FR-8.
 
 **`audit_log`** (partitioned by month on `at`) — every configuration change with a before/after `diff` (Secrets appear
-only as `secret_changed`), security events and every command of people and automation: actor (`user`,
-`service_account`, `system`, `bootstrap`, or `cli` with the `--actor` name), the token used (`api_token_id`,
-`token_name`), the Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `cli`, `system`), a stable
-`action` (`<resource>.<verb>`, checked by pattern), the resource and `details`. Users are referenced by id and shown by
-their current name, so pseudonymization never rewrites a row. Migration 0011 adds `bridge` to the Transport CHECKs of
-`audit_log` and `timeline_entries`: each new CHECK (`..._transport_v2_check`) is added to the partitioned parent
-`NOT VALID`, which adds it to every partition, validated in a second transaction, which recurses to every partition
-on PostgreSQL 14 and 17 alike, and the old one is dropped in a third. Its down migration never deletes or rewrites a
-row with the Transport `bridge` — the Audit log is append-only and the Timeline is history: it restores the old CHECKs
-`NOT VALID`, which hold every new row, and validates them only when no such row exists. Migration 0018 adds `slack`
-the same way, `..._transport_v3_check` replacing `..._transport_v2_check`; its down migration keeps the rows with the
-Transport `slack`, as 0011's keeps those with `bridge`, and restores the `_v2` CHECKs under their names, which 0011's
-own down migration drops. Migration 0034 adds `gateway`, the Transport of an Acknowledge through a Notification gateway
-(C-30.FR-6), as `..._transport_v4_check`, the same way; its down migration keeps the rows with the Transport
-`gateway`.
+only as `secret_changed`), security events and every command of people and automation: actor (`user`, `service_account`,
+`system`, `bootstrap`, or `cli` with the `--actor` name), the token used (`api_token_id`, `token_name`), the Transport
+(`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`, `cli`, `system`), a stable `action`
+(`<resource>.<verb>`, checked by pattern), the resource and `details`. Users are referenced by id and shown by their
+current name, so pseudonymization never rewrites a row. Migration 0011 adds `bridge` to the Transport CHECKs of
+`audit_log` and `timeline_entries`: each new CHECK (`..._transport_v2_check`) is added to the partitioned parent `NOT
+VALID`, which adds it to every partition, validated in a second transaction, which recurses to every partition on
+PostgreSQL 14 and 17 alike, and the old one is dropped in a third. Its down migration never deletes or rewrites a row
+with the Transport `bridge` — the Audit log is append-only and the Timeline is history: it restores the old CHECKs `NOT
+VALID`, which hold every new row, and validates them only when no such row exists. Migration 0018 adds `slack` the same
+way, `..._transport_v3_check` replacing `..._transport_v2_check`; its down migration keeps the rows with the Transport
+`slack`, as 0011's keeps those with `bridge`, and restores the `_v2` CHECKs under their names, which 0011's own down
+migration drops. Migration 0034 adds `gateway`, the Transport of an Acknowledge through a Notification gateway
+(C-30.FR-6), as `..._transport_v4_check`, the same way; its down migration keeps the rows with the Transport `gateway`.
 
 **Append-only** is enforced by triggers, not by privileges: a `BEFORE UPDATE OR DELETE` row trigger and a
 `BEFORE TRUNCATE` statement trigger raise `insufficient_privilege`. Row triggers on a partitioned table are cloned to
@@ -1634,27 +1635,33 @@ stored `info` declares the role `gateway`; it has no table of its own.
   transaction advisory lock of class `GatewayContactLockClass`.
 - **`gateway_calls`** (migration 0034, C-30.FR-4) — a call to a person (`user_id`) through a gateway
   (`connection_id`), with its `CA` `public_id`: its `state` — `waiting` for its first attempt, `sending` from it on,
-  then `accepted`, `not_delivered` with its `reason` (`gateway_calls_reason_check`: a reason exactly when Not
-  delivered) or `dropped` — and `ended_at` exactly once it ended (`gateway_calls_ended_check`); `critical` once a
-  critical Alert Group joined it; from its first attempt (`first_attempt_at`) its `contact_id`, `language` and `text`,
-  which every retry sends again under the `Idempotency-Key` `calls/<public_id>`; the end of a call clears its `text`,
-  which names its Alert Groups, and keeps its `language` (`gateway_calls_text_check`: a language exactly from the
-  first attempt, a text only from it and always while the call is sent), the
-  contact turning null when it is removed (`ON DELETE SET NULL`, `gateway_calls_contact_idx`); `not_before`, the end
-  of the previous call plus `gateway.combine_window`, null while that call is still sent; `next_attempt_at`;
-  the lease (`gateway_calls_lease_check`); `attempts`, `first_failed_at`, `last_error_class` and `last_error` of
-  `delivery.transient_budget`; and the gateway's `notification_id` of an accepted call. The partial unique index
+  then `accepted`, `not_delivered` with its `reason` (`gateway_calls_reason_check`: a reason exactly when Not delivered)
+  or `dropped` — and `ended_at` exactly once it ended (`gateway_calls_ended_check`); `critical` once a critical Alert
+  Group joined it; from its first attempt (`first_attempt_at`) its `contact_id`, `language` and `text`, which every
+  retry sends again under the `Idempotency-Key` `calls/<public_id>`; the end of a call clears its `text`, which names
+  its Alert Groups, and keeps its `language` (`gateway_calls_text_check`: a language exactly from the first attempt, a
+  text only from it and always while the call is sent), the contact turning null when it is removed (`ON DELETE SET
+  NULL`, `gateway_calls_contact_idx`); `not_before`, the end of the previous call plus `gateway.combine_window`, null
+  while that call is still sent; `next_attempt_at`; the lease (`gateway_calls_lease_check`); `attempts`,
+  `first_failed_at`, `last_error_class` and `last_error` of `delivery.transient_budget`; and the gateway's
+  `notification_id` of an accepted call. From the first attempt (migration 0035) `action_data` holds the action data
+  that the active button-signature key signed for the call, which every retry sends again, and `button_key_id` the id of
+  that key; the end of a call clears `action_data` — unless a replica of an earlier version ends it during a rolling
+  update, which leaves it until the call is deleted — and keeps `button_key_id`, which the Keyring page counts while the
+  call is waiting or being sent, or — accepted, or Not delivered after an attempt — for twice `bridge.event_max_age`
+  after it ended (`keyring.CallKeyWindow`, a margin for the call to ring) while any of its Alert Groups is open, so that
+  the key is not removed while the gateway may still report the data. A call that a replica of an earlier version
+  started has neither, and each of its attempts is signed with the active key. The partial unique index
   `gateway_calls_waiting_key` on `(connection_id, user_id) WHERE state = 'waiting'` keeps one waiting call per person
   and gateway, which the later Pages join; `gateway_calls_due_idx` on `(org_id, next_attempt_at) WHERE state IN
   ('waiting', 'sending')` serves the claim, `gateway_calls_person_idx` on `(org_id, connection_id, user_id, id)` the
   previous call whose end starts the window, `gateway_calls_user_idx` on `(org_id, user_id)` the calls of a User.
   `not_before`, `next_attempt_at` and `ended_at` are times of the business clock, `lease_until` of the real clock. A
   Page, the start of a first attempt and the end of a call take the transaction advisory lock of class
-  `GatewayCallLockClass` of their person and gateway first ([5](#5-queues-and-claims)). An ended call, without its
-  text already, is deleted once
-  it has no item left, its Alert Groups deleted by the Alert Group retention ([6](#6-partitions-and-retention)), as
-  its text names them; `gateway_calls_ended_idx` on `(org_id, id) WHERE state IN ('accepted', 'not_delivered',
-  'dropped')` serves that batch. Written only by `gateways`.
+  `GatewayCallLockClass` of their person and gateway first ([5](#5-queues-and-claims)). An ended call, without its text
+  already, is deleted once it has no item left, its Alert Groups deleted by the Alert Group retention
+  ([6](#6-partitions-and-retention)), as its text names them; `gateway_calls_ended_idx` on `(org_id, id) WHERE state IN
+  ('accepted', 'not_delivered', 'dropped')` serves that batch. Written only by `gateways`.
 - **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`

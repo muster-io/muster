@@ -39,7 +39,8 @@ type KeyStatus struct {
 	State     KeyState
 	// EncryptedValues are the rows of encrypted_values the key encrypted, and OpenMessages the Root messages of open
 	// Alert Groups, not deleted in the messenger, retired or withheld, whose buttons it signed, the older ones a
-	// republication past a bridge's edit window replaced included.
+	// republication past a bridge's edit window replaced included, with the calls through Notification gateways whose
+	// action data it signed: waiting or being sent, or accepted while any of their Alert Groups is open.
 	EncryptedValues int64
 	OpenMessages    int64
 }
@@ -66,7 +67,8 @@ type StatusQueries interface {
 	ListLiveReplicas(ctx context.Context, liveSince time.Time) ([]dbgen.Replica, error)
 	ListOrganizationIDs(ctx context.Context) ([]int64, error)
 	CountEncryptedValuesByKey(ctx context.Context, orgID int64) ([]dbgen.CountEncryptedValuesByKeyRow, error)
-	CountOpenButtonKeys(ctx context.Context, orgID int64) ([]dbgen.CountOpenButtonKeysRow, error)
+	CountOpenButtonKeys(ctx context.Context, arg dbgen.CountOpenButtonKeysParams) ([]dbgen.CountOpenButtonKeysRow,
+		error)
 	ListActivatedKeys(ctx context.Context, orgID int64) ([]dbgen.ListActivatedKeysRow, error)
 }
 
@@ -75,8 +77,24 @@ func NewStatusQueries(db dbgen.DBTX) StatusQueries {
 	return dbgen.New(db)
 }
 
-// ReadStatus reads the Keyring status (C-20.FR-6) with held, the key ids of this process, at now on the real clock,
-// against which replica records are live. Keys are installation-wide, so what depends on them is counted over every
+// CallAcknowledgeWindow is bridge.event_max_age, how long after an acknowledgement happened it is still acted on; a
+// test of internal/gateways keeps the two equal.
+const CallAcknowledgeWindow = time.Hour
+
+// CallKeyWindow is how long after a call ended — when the gateway accepted it, or the last attempt failed — its key
+// stays needed (C-30.FR-6): CallAcknowledgeWindow, plus as long again as a margin for the call to ring, be retried by
+// the gateway and be acknowledged after it was accepted.
+const CallKeyWindow = 2 * CallAcknowledgeWindow
+
+// ReadStatus is ReadStatusAt with now as the business time too, as for `muster doctor`, which has no development
+// clock.
+func ReadStatus(ctx context.Context, q StatusQueries, held []string, now time.Time) (Status, error) {
+	return ReadStatusAt(ctx, q, held, now, now)
+}
+
+// ReadStatusAt reads the Keyring status (C-20.FR-6) with held, the key ids of this process, at now on the real clock,
+// against which replica records are live, and business on the business clock, on which the calls through
+// Notification gateways ended. Keys are installation-wide, so what depends on them is counted over every
 // Organization.
 //
 // A key is needed when a row of encrypted_values carries its id or a delivery of an open Alert Group that is not
@@ -86,8 +104,12 @@ func NewStatusQueries(db dbgen.DBTX) StatusQueries {
 // so such a delivery must not keep a key needed; nor does it re-sign an older Root message, whose key stays needed
 // until its Alert Group resolves. It was active before when it is the active key, when it is the before or after value
 // of /active_key_id in a keyring.key_activated Audit entry, or when it is needed: only the active key encrypts or
-// signs. It is removable when it was active before and is neither active nor needed.
-func ReadStatus(ctx context.Context, q StatusQueries, held []string, now time.Time) (Status, error) {
+// signs. A call through a Notification gateway whose action data the key signed needs it too while the gateway may
+// still report an acknowledgement of it: waiting or being sent, or accepted or Not delivered after an attempt within
+// CallKeyWindow before business while any of its Alert Groups is open, its gateway and its person not deleted.
+// It is removable when it was active before and is neither active nor needed.
+func ReadStatusAt(ctx context.Context, q StatusQueries, held []string, now, business time.Time) (Status,
+	error) {
 	active, err := q.GetActiveKeyID(ctx)
 	if err != nil {
 		return Status{}, fmt.Errorf("read the active key: %w", err)
@@ -112,7 +134,8 @@ func ReadStatus(ctx context.Context, q StatusQueries, held []string, now time.Ti
 				in.encrypted[v.KeyID.String] += v.Encrypted
 			}
 		}
-		messages, err := q.CountOpenButtonKeys(ctx, org)
+		messages, err := q.CountOpenButtonKeys(ctx, dbgen.CountOpenButtonKeysParams{OrgID: org,
+			EndedSince: business.Add(-CallKeyWindow).UTC()})
 		if err != nil {
 			return Status{}, fmt.Errorf("count the open root messages by key: %w", err)
 		}
@@ -202,17 +225,18 @@ func (in statusInput) derive() Status {
 
 // StatusReader reads the Keyring status of this process for the API.
 type StatusReader struct {
-	q    StatusQueries
-	keys *Keyring
-	real clock.Clock
+	q      StatusQueries
+	keys   *Keyring
+	clocks clock.Clocks
 }
 
-// NewStatusReader is the StatusReader over q with the keys of k, at the time of the real clock.
-func NewStatusReader(q StatusQueries, k *Keyring, realClock clock.Clock) *StatusReader {
-	return &StatusReader{q: q, keys: k, real: realClock}
+// NewStatusReader is the StatusReader over q with the keys of k, at the times of clocks: the real clock for the
+// replica records, the business clock for the ends of calls.
+func NewStatusReader(q StatusQueries, k *Keyring, clocks clock.Clocks) *StatusReader {
+	return &StatusReader{q: q, keys: k, clocks: clocks}
 }
 
 // Status reads the Keyring status.
 func (r *StatusReader) Status(ctx context.Context) (Status, error) {
-	return ReadStatus(ctx, r.q, r.keys.KeyIDs(), r.real.Now())
+	return ReadStatusAt(ctx, r.q, r.keys.KeyIDs(), r.clocks.Real.Now(), r.clocks.Business.Now())
 }

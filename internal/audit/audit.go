@@ -44,8 +44,10 @@ const (
 	TransportTelegram   Transport = "telegram"
 	TransportBridge     Transport = "bridge"
 	TransportSlack      Transport = "slack"
-	TransportCLI        Transport = "cli"
-	TransportSystem     Transport = "system"
+	// TransportGateway is a Notification gateway: an Acknowledge from a call (C-30.FR-6).
+	TransportGateway Transport = "gateway"
+	TransportCLI     Transport = "cli"
+	TransportSystem  Transport = "system"
 )
 
 // The actions of C-03; each capability adds its own.
@@ -259,7 +261,7 @@ func (e Entry) check() error {
 	}
 	switch e.Transport {
 	case TransportUI, TransportAPI, TransportMattermost, TransportTelegram, TransportBridge, TransportSlack,
-		TransportCLI, TransportSystem:
+		TransportGateway, TransportCLI, TransportSystem:
 	default:
 		return fmt.Errorf("audit %s: unknown transport %q", e.Action, e.Transport)
 	}

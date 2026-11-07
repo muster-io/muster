@@ -4,6 +4,7 @@
 package fakebridge
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -45,10 +46,16 @@ type Notification struct {
 }
 
 // Acknowledge is a person's acknowledgement of a notification as POST /_fake/acknowledge takes it: the notification,
-// and when it happened, now by default.
+// and when it happened, now by default. Data, when given, is sent in place of the action's data, as a tampering bridge
+// would; Bot, when not zero, queues the event for that bot instead of the one that sent the notification, as the data
+// of one Connection reported by another; and EventID, when given, queues that earlier event again unchanged, under
+// its id, as a bridge that delivers an event twice, and ignores the other members.
 type Acknowledge struct {
 	NotificationID string     `json:"notification_id"`
 	OccurredAt     *time.Time `json:"occurred_at"`
+	Data           *string    `json:"data"`
+	Bot            int        `json:"bot"`
+	EventID        string     `json:"event_id"`
 }
 
 type notificationAcknowledgedEvent struct {
@@ -136,13 +143,18 @@ func (f *Fake) postAcknowledge(w http.ResponseWriter, r *http.Request) {
 	fakeserver.WriteJSON(w, http.StatusOK, ev)
 }
 
-// Acknowledge queues a notification_acknowledged event of the notification a names, for the bot that sent it, with
-// the data of its action unchanged, and returns it; ctx is what caused it. It fails for a notification the fake did
-// not send and for one without an action, which there is nothing to acknowledge in.
+// Acknowledge queues a notification_acknowledged event of the notification a names, for the bot that sent it or the
+// bot a names, with the data of its action unchanged or the data a gives, and returns it; ctx is what caused it. It
+// fails for a notification the fake did not send, for one without an action, which there is nothing to acknowledge
+// in, and for an unknown bot. With EventID it queues that earlier event again, under its id, for its bot, and fails
+// for an event the fake did not queue.
 func (f *Fake) Acknowledge(ctx context.Context, a Acknowledge) (Event, error) {
 	at := occurred(a.OccurredAt)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if a.EventID != "" {
+		return f.redeliver(ctx, a.EventID)
+	}
 	i := slices.IndexFunc(f.notifications, func(n Notification) bool { return n.ID == a.NotificationID })
 	switch {
 	case i < 0:
@@ -151,8 +163,16 @@ func (f *Fake) Acknowledge(ctx context.Context, a Acknowledge) (Event, error) {
 		return Event{}, fmt.Errorf("the notification %s has no action to acknowledge", a.NotificationID)
 	}
 	n := f.notifications[i]
-	return f.queue(ctx, f.botByNumber(n.Bot), TypeNotificationAcknowledged, n.ID, "", func(id string) any {
+	b := f.botByNumber(cmp.Or(a.Bot, n.Bot))
+	if b == nil {
+		return Event{}, fmt.Errorf("unknown bot %d", a.Bot)
+	}
+	data := n.Action.Data
+	if a.Data != nil {
+		data = *a.Data
+	}
+	return f.queue(ctx, b, TypeNotificationAcknowledged, n.ID, "", func(id string) any {
 		return notificationAcknowledgedEvent{ID: id, Type: TypeNotificationAcknowledged, OccurredAt: at,
-			NotificationID: n.ID, Data: n.Action.Data}
+			NotificationID: n.ID, Data: data}
 	}), nil
 }

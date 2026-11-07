@@ -446,7 +446,7 @@ func (q *Queries) DropCallItems(ctx context.Context, arg DropCallItemsParams) er
 
 const endCall = `-- name: EndCall :one
 UPDATE gateway_calls
-SET state = $1::text, text = NULL, reason = $2::text, notification_id = $3::text,
+SET state = $1::text, text = NULL, action_data = NULL, reason = $2::text, notification_id = $3::text,
     attempts = attempts + $4::bigint, ended_at = $5::timestamptz, next_attempt_at = NULL,
     lease_owner = NULL, lease_until = NULL,
     first_failed_at = CASE WHEN $6::text IS NULL THEN first_failed_at
@@ -471,8 +471,9 @@ type EndCallParams struct {
 }
 
 // EndCall ends a call — accepted, Not delivered with its reason, or dropped — counting the attempt that ended it, if
-// one did, and clears its text, which names its Alert Groups and is never sent again; the language stays. It returns
-// whether the call went, which starts the combine window of the next one.
+// one did, and clears its text, which names its Alert Groups, and its action data, which are never sent again; the
+// language and the id of the key that signed the data stay. It returns whether the call went, which starts the combine
+// window of the next one.
 func (q *Queries) EndCall(ctx context.Context, arg EndCallParams) (bool, error) {
 	row := q.db.QueryRow(ctx, endCall,
 		arg.State,
@@ -489,6 +490,50 @@ func (q *Queries) EndCall(ctx context.Context, arg EndCallParams) (bool, error) 
 	var went bool
 	err := row.Scan(&went)
 	return went, err
+}
+
+const getAcknowledgedCall = `-- name: GetAcknowledgedCall :one
+SELECT g.id, g.public_id, g.state, u.id AS user_id, u.public_id AS user_public_id, u.role AS user_role,
+       u.status AS user_status, u.language AS user_language
+FROM gateway_calls g
+JOIN users u ON u.org_id = g.org_id AND u.id = g.user_id
+WHERE g.org_id = $1 AND g.connection_id = $2 AND g.public_id = $3
+`
+
+type GetAcknowledgedCallParams struct {
+	OrgID        int64
+	ConnectionID int64
+	PublicID     string
+}
+
+type GetAcknowledgedCallRow struct {
+	ID           int64
+	PublicID     string
+	State        string
+	UserID       int64
+	UserPublicID string
+	UserRole     string
+	UserStatus   string
+	UserLanguage pgtype.Text
+}
+
+// GetAcknowledgedCall reads the call public_id of a Notification gateway's Connection, whatever its state, with the
+// User it was for — Role, state, name and profile language — for the Acknowledge of a notification_acknowledged event
+// (C-30.FR-6). No row for a call of another Connection or Organization, or none.
+func (q *Queries) GetAcknowledgedCall(ctx context.Context, arg GetAcknowledgedCallParams) (GetAcknowledgedCallRow, error) {
+	row := q.db.QueryRow(ctx, getAcknowledgedCall, arg.OrgID, arg.ConnectionID, arg.PublicID)
+	var i GetAcknowledgedCallRow
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.State,
+		&i.UserID,
+		&i.UserPublicID,
+		&i.UserRole,
+		&i.UserStatus,
+		&i.UserLanguage,
+	)
+	return i, err
 }
 
 const getGateway = `-- name: GetGateway :one
@@ -519,7 +564,7 @@ func (q *Queries) GetGateway(ctx context.Context, arg GetGatewayParams) (GetGate
 
 const getLeasedCall = `-- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
-       g.first_failed_at, c.public_id AS connection_public_id, c.name AS connection_name,
+       g.first_failed_at, g.action_data, c.public_id AS connection_public_id, c.name AS connection_name,
        (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
            AS gateway,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.language AS user_language,
@@ -551,6 +596,7 @@ type GetLeasedCallRow struct {
 	Text               pgtype.Text
 	Attempts           int64
 	FirstFailedAt      pgtype.Timestamptz
+	ActionData         pgtype.Text
 	ConnectionPublicID string
 	ConnectionName     string
 	Gateway            bool
@@ -563,7 +609,8 @@ type GetLeasedCallRow struct {
 
 // GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway
 // and whether it is still a Notification gateway, not deleted, its User and, from its first attempt, its contact while
-// that is still confirmed. No row when the lease ran out or went to another replica, or the call ended.
+// that is still confirmed and its signed action data, null for a call that a replica of an earlier version started.
+// No row when the lease ran out or went to another replica, or the call ended.
 func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (GetLeasedCallRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedCall,
 		arg.OrgID,
@@ -583,6 +630,7 @@ func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (G
 		&i.Text,
 		&i.Attempts,
 		&i.FirstFailedAt,
+		&i.ActionData,
 		&i.ConnectionPublicID,
 		&i.ConnectionName,
 		&i.Gateway,
@@ -1452,29 +1500,35 @@ func (q *Queries) RescheduleCall(ctx context.Context, arg RescheduleCallParams) 
 const startCall = `-- name: StartCall :execrows
 UPDATE gateway_calls
 SET state = 'sending', contact_id = $1::bigint, language = $2::text, text = $3::text,
-    first_attempt_at = $4::timestamptz, next_attempt_at = $4::timestamptz, not_before = coalesce(not_before, $4),
-    lease_until = $5::timestamptz
-WHERE org_id = $6 AND id = $7 AND state = 'waiting' AND lease_owner = $8::text
+    action_data = $4::text, button_key_id = $5::text,
+    first_attempt_at = $6::timestamptz, next_attempt_at = $6::timestamptz, not_before = coalesce(not_before, $6),
+    lease_until = $7::timestamptz
+WHERE org_id = $8 AND id = $9 AND state = 'waiting' AND lease_owner = $10::text
 `
 
 type StartCallParams struct {
-	ContactID  pgtype.Int8
-	Language   string
-	Text       string
-	Now        time.Time
-	LeaseUntil time.Time
-	OrgID      int64
-	ID         int64
-	Owner      string
+	ContactID   pgtype.Int8
+	Language    string
+	Text        string
+	ActionData  pgtype.Text
+	ButtonKeyID pgtype.Text
+	Now         time.Time
+	LeaseUntil  time.Time
+	OrgID       int64
+	ID          int64
+	Owner       string
 }
 
-// StartCall makes the first attempt of a waiting call: it keeps its contact, its text and its language from now on,
-// takes no more Alert Groups and is due now, its lease renewed for the attempt.
+// StartCall makes the first attempt of a waiting call: it keeps its contact, its text, its language and its action
+// data, signed by the key button_key_id, from now on, takes no more Alert Groups and is due now, its lease renewed for
+// the attempt.
 func (q *Queries) StartCall(ctx context.Context, arg StartCallParams) (int64, error) {
 	result, err := q.db.Exec(ctx, startCall,
 		arg.ContactID,
 		arg.Language,
 		arg.Text,
+		arg.ActionData,
+		arg.ButtonKeyID,
 		arg.Now,
 		arg.LeaseUntil,
 		arg.OrgID,

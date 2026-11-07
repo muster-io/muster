@@ -140,7 +140,8 @@ func TestBridgeGateway(t *testing.T) {
 		t.Errorf("linkable %v", linkable)
 	}
 
-	// C-22.FR-11: a notification_acknowledged of the gateway bot, polled by the Leader, is handled once as unhandled.
+	// C-22.FR-11: a notification_acknowledged of the gateway bot, polled by the Leader, is handled once; its data is
+	// not Muster's, so it is refused and answered so (C-30.FR-6).
 	sent := call(t, http.MethodPost, h.Fakes.Bridge+"/v1/notifications", `{"contact":"`+gatewayContact+`",`+
 		`"text":"A test","language":"en","action":{"data":"e2e-data","label":"Press 1"}}`,
 		"Authorization", "Bearer "+devmode.GatewayConnectionBotToken, "Idempotency-Key", "e2e-1",
@@ -161,8 +162,8 @@ func TestBridgeGateway(t *testing.T) {
 	if err := json.Unmarshal(queued.Event, &ev); err != nil || queued.Bot != 3 {
 		t.Fatalf("acknowledge = %+v", queued)
 	}
-	e.waitLine("bridge_event_unhandled", map[string]any{"connection": gw, "event_id": ev.ID,
-		"type": "notification_acknowledged"})
+	e.waitLine("gateway_acknowledge_refused", map[string]any{"connection": gw, "call": "",
+		"reason": "not_verified"})
 	if n := h.count(t, `SELECT count(*) FROM bridge_events_seen WHERE event_id = '`+ev.ID+`'`); n != 1 {
 		t.Errorf("%d records of the event", n)
 	}
