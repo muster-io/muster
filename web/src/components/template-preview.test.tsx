@@ -5,21 +5,33 @@
 // opened only when they are http(s), in a new tab without access to the page; Telegram HTML shown as its text; a failed
 // template showing its error in place of the message; and "Shortened to fit".
 
-import type { UseQueryResult } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, type UseQueryResult } from "@tanstack/react-query";
+import { useState } from "react";
 import { I18nextProvider } from "react-i18next";
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { page } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
 import type { TemplatePreviewResult } from "../api/gen/model";
 import i18n from "../i18n";
+import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
+import { messageLayout } from "../test/fixtures/message-layout";
 import {
   FormatSwitch,
   MarkdownText,
+  MarkupTabs,
+  type PreviewFormat,
+  type RootPreviewContext,
   TemplatePreview,
   safeUrl,
   type TemplatePreviewState,
+  useTemplatePreview,
 } from "./template-preview";
+import { DEFAULT_SAMPLE } from "./sample-picker";
+
+/** Waits until an element's text holds a text: toHaveTextContent with a string compares all of it. */
+const hasText = (el: { element: () => Element }, text: string) =>
+  vi.waitFor(() => expect(el.element().textContent).toContain(text));
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
@@ -195,5 +207,288 @@ describe("TemplatePreview", () => {
     await expect
       .element(page.getByText("Rendered against a built-in example", { exact: false }))
       .toBeVisible();
+  });
+});
+
+const CONTEXT: RootPreviewContext = {
+  tabsId: "root-markup",
+  markup: "markdown",
+  rootCustom: false,
+  lineCustom: false,
+  labelsUnsaved: false,
+};
+
+function rootResult(overrides: Partial<TemplatePreviewResult> = {}): TemplatePreviewResult {
+  return {
+    valid: true,
+    output: "**#1287** KubernetesContainerOOMKilled",
+    format: "markdown",
+    truncated: false,
+    sample: "stored_snapshot",
+    layout: messageLayout(),
+    length: 812,
+    messenger_limit: 16383,
+    errors: [],
+    ...overrides,
+  };
+}
+
+async function renderRoot(context: Partial<RootPreviewContext>, result: TemplatePreviewResult) {
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <TemplatePreview
+        id="root-preview"
+        kind="root_message"
+        preview={preview(result, "")}
+        context={{ ...CONTEXT, ...context }}
+      />
+    </I18nextProvider>,
+  );
+}
+
+describe("the preview of a Root message", () => {
+  test("draws the layout in each tab's messenger form with the length against its limit", async () => {
+    await renderRoot({ markup: "markdown" }, rootResult());
+    await expect.element(page.getByTestId("layout-mattermost")).toBeVisible();
+    await hasText(page.getByTestId("template-preview-length"), "812 of 16383 characters");
+    expect(page.getByTestId("template-preview-output").elements()).toHaveLength(0);
+  });
+
+  test("Telegram shows 'of 4096 characters', and warns in red when the message is over the limit", async () => {
+    await renderRoot(
+      { markup: "html" },
+      rootResult({ format: "html", length: 4300, messenger_limit: 4096 }),
+    );
+    await expect.element(page.getByTestId("layout-telegram")).toBeVisible();
+    const length = page.getByTestId("template-preview-length");
+    await hasText(length, "4300 of 4096 characters");
+    expect(length.element().querySelector("p")?.className).toContain("text-destructive");
+    await hasText(
+      page.getByRole("alert"),
+      "Longer than the limit: Muster shortens the message when it sends it.",
+    );
+  });
+
+  test("Slack shows the section limit, and under it no warning", async () => {
+    await renderRoot(
+      { markup: "mrkdwn" },
+      rootResult({ format: "mrkdwn", length: 900, messenger_limit: 3000 }),
+    );
+    await expect.element(page.getByTestId("layout-slack")).toBeVisible();
+    await hasText(page.getByTestId("template-preview-length"), "900 of 3000 characters");
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+  });
+
+  test("Bridge shows the layout JSON and a length without a limit", async () => {
+    await renderRoot(
+      { markup: "commonmark" },
+      rootResult({ format: "commonmark", length: 640, messenger_limit: null }),
+    );
+    await hasText(page.getByTestId("layout-json"), '"number": 1287');
+    await hasText(
+      page.getByTestId("template-preview-length"),
+      "640 characters; the bridge sets its own limit",
+    );
+  });
+
+  test("a length counted for another tab is not shown", async () => {
+    await renderRoot({ markup: "html" }, rootResult({ format: "markdown" }));
+    expect(page.getByTestId("template-preview-length").elements()).toHaveLength(0);
+  });
+
+  test("a Root message template of its own shows its text in place of the layout, and a bridge no layout", async () => {
+    await renderRoot(
+      { markup: "markdown", rootCustom: true },
+      rootResult({ output: "Own body", layout: null }),
+    );
+    await hasText(page.getByTestId("template-preview-output"), "Own body");
+    expect(page.getByTestId("message-layout-preview").elements()).toHaveLength(0);
+  });
+
+  test("a bridge gets no layout from a Route with an Alert line template, which the other tabs say", async () => {
+    const view = await renderRoot(
+      { markup: "commonmark", lineCustom: true },
+      rootResult({ format: "commonmark" }),
+    );
+    await expect.element(page.getByTestId("layout-bridge-none")).toBeVisible();
+    expect(page.getByTestId("layout-json").elements()).toHaveLength(0);
+    await view.rerender(
+      <I18nextProvider i18n={i18n}>
+        <TemplatePreview
+          id="root-preview"
+          kind="root_message"
+          preview={preview(rootResult(), "")}
+          context={{ ...CONTEXT, lineCustom: true }}
+        />
+      </I18nextProvider>,
+    );
+    await hasText(
+      page.getByTestId("template-preview-line-note"),
+      "The Alert line template of this Route puts each Alert on a line of its own.",
+    );
+  });
+
+  test("says that the preview shows the labels saved on the Route while the form's differ", async () => {
+    await renderRoot({ labelsUnsaved: true }, rootResult());
+    await hasText(
+      page.getByTestId("template-preview-labels-unsaved"),
+      "The preview shows the labels saved on the Route. Save to see the change.",
+    );
+  });
+
+  test("has no layout to draw when the template failed: it shows the error", async () => {
+    await renderRoot(
+      {},
+      { valid: false, output: null, errors: [{ pointer: "/template", code: "syntax" }] },
+    );
+    await expect.element(page.getByTestId("template-preview-error")).toBeVisible();
+    expect(page.getByTestId("template-preview-length").elements()).toHaveLength(0);
+  });
+
+  test("in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    await renderRoot(
+      { markup: "html" },
+      rootResult({ format: "html", length: 100, messenger_limit: 4096 }),
+    );
+    await hasText(page.getByTestId("template-preview-length"), "100 из 4096 символов");
+    await i18n.changeLanguage("en");
+  });
+});
+
+function Tabs({ onChange }: { onChange: (f: PreviewFormat) => void }) {
+  const [value, setValue] = useState<PreviewFormat>("markdown");
+  return (
+    <MarkupTabs
+      id="t"
+      panelId="p"
+      value={value}
+      onChange={(f) => {
+        onChange(f);
+        setValue(f);
+      }}
+    />
+  );
+}
+
+describe("MarkupTabs", () => {
+  test("offers Mattermost, Slack, Telegram and Bridge as tabs, and the arrow keys move between them", async () => {
+    const onChange = vi.fn();
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <Tabs onChange={onChange} />
+      </I18nextProvider>,
+    );
+    const tabs = page.getByRole("tab");
+    expect(tabs.elements().map((t) => t.textContent)).toEqual([
+      "Mattermost",
+      "Slack",
+      "Telegram",
+      "Bridge",
+    ]);
+    await expect
+      .element(page.getByRole("tab", { name: "Mattermost" }))
+      .toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Telegram" }).click();
+    expect(onChange).toHaveBeenLastCalledWith("html");
+    await expect
+      .element(page.getByRole("tab", { name: "Telegram" }))
+      .toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{ArrowRight}");
+    expect(onChange).toHaveBeenLastCalledWith("commonmark");
+    await expect.element(page.getByRole("tab", { name: "Bridge" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(onChange).toHaveBeenLastCalledWith("markdown");
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(onChange).toHaveBeenLastCalledWith("commonmark");
+    // Only the selected tab is in the tab order.
+    await expect
+      .element(page.getByRole("tab", { name: "Slack" }))
+      .toHaveAttribute("tabindex", "-1");
+  });
+
+  test("names the tabs in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <Tabs onChange={() => {}} />
+      </I18nextProvider>,
+    );
+    await expect
+      .element(page.getByRole("tablist", { name: "Разметка предпросмотра" }))
+      .toBeVisible();
+    await i18n.changeLanguage("en");
+  });
+});
+
+function Live() {
+  const [template, setTemplate] = useState("");
+  const state = useTemplatePreview(
+    { kind: "root_message", template, sample: DEFAULT_SAMPLE, format: "markdown" },
+    true,
+  );
+  return (
+    <>
+      <button type="button" onClick={() => setTemplate("x")}>
+        change
+      </button>
+      <TemplatePreview id="live" kind="root_message" preview={state} context={CONTEXT} />
+    </>
+  );
+}
+
+describe("a preview whose refresh failed", () => {
+  let fail = false;
+
+  beforeEach(() => {
+    fail = false;
+    vi.spyOn(window, "fetch").mockImplementation(() =>
+      fail
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({ title: "Unavailable", status: 503, code: "unavailable" }),
+              {
+                status: 503,
+                headers: { "Content-Type": "application/problem+json" },
+              },
+            ),
+          )
+        : Promise.resolve(
+            new Response(JSON.stringify(rootResult()), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          ),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("keeps the previous result on screen, dimmed and marked as out of date, with the error", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(SESSION_QUERY_KEY, {
+      session: null,
+      ended: false,
+    } satisfies SessionRead);
+    await render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <Live />
+        </QueryClientProvider>
+      </I18nextProvider>,
+    );
+    await expect.element(page.getByTestId("layout-mattermost")).toBeVisible();
+    fail = true;
+    await page.getByRole("button", { name: "change" }).click();
+    await expect.element(page.getByTestId("template-preview-refresh-error")).toBeVisible();
+    const stale = page.getByTestId("template-preview-stale");
+    await hasText(
+      stale,
+      "The last refresh failed. This is the previous result, which may be out of date.",
+    );
+    expect(stale.element().className).toContain("opacity-50");
+    await expect.element(stale.getByTestId("layout-mattermost")).toBeVisible();
   });
 });

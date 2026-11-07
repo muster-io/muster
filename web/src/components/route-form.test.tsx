@@ -375,3 +375,143 @@ describe("the Route editor's Destinations and Teams option", () => {
     expect(page.getByTestId("route-delivery-preview").elements()).toHaveLength(0);
   });
 });
+
+const labelsRoute = (overrides: Partial<Route> = {}) =>
+  routeOf({
+    own_message_labels: false,
+    message_labels: ["system", "team", "namespace"],
+    ...overrides,
+  });
+
+describe("the Route editor's Labels in the message", () => {
+  beforeEach(() => {
+    const base = vi.mocked(window.fetch).getMockImplementation();
+    vi.mocked(window.fetch).mockImplementation((input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/label-suggestions")) {
+        return reply({
+          items: [{ label: "cluster", example_value: "prod-eu", alert_group_count: 2 }],
+        });
+      }
+      return base === undefined ? reply({ items: [] }) : base(input, init);
+    });
+  });
+
+  test("shows the computed list, and a save that did not touch it sends own_message_labels false alone", async () => {
+    const { save } = await renderForm(labelsRoute());
+    const chips = page.getByTestId("message-label");
+    await expect.element(chips.first()).toBeVisible();
+    expect(chips.elements().map((c) => c.textContent?.trim())).toEqual([
+      "system",
+      "team",
+      "namespace",
+    ]);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const input = lastInput(save);
+    expect(input.own_message_labels).toBe(false);
+    expect(input).not.toHaveProperty("message_labels");
+  });
+
+  test("a label chosen from the suggestions is sent with the list as own", async () => {
+    const { save } = await renderForm(labelsRoute());
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByRole("button", { name: "Remove team from the message" }).click();
+    await page.getByRole("button", { name: "+ label" }).click();
+    await page.getByRole("button", { name: "cluster — e.g. prod-eu" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const input = lastInput(save);
+    expect(input.own_message_labels).toBe(true);
+    expect(input.message_labels).toEqual(["system", "namespace", "cluster"]);
+  });
+
+  test("Reset to default on an own list sends own_message_labels false and no list", async () => {
+    const { save } = await renderForm(
+      labelsRoute({ own_message_labels: true, message_labels: ["cluster"] }),
+    );
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByRole("button", { name: "Reset to default" }).click();
+    await expect
+      .element(page.getByText("The default list shows here once you save the Route."))
+      .toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const input = lastInput(save);
+    expect(input.own_message_labels).toBe(false);
+    expect(input).not.toHaveProperty("message_labels");
+  });
+
+  test("an unchanged own list is sent as it was read", async () => {
+    const { save } = await renderForm(
+      labelsRoute({ own_message_labels: true, message_labels: ["pod", "cluster"] }),
+    );
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(lastInput(save).message_labels).toEqual(["pod", "cluster"]);
+    expect(lastInput(save).own_message_labels).toBe(true);
+  });
+
+  test("shows a refusal of the list under it, and clears it when the list changes", async () => {
+    const save = vi.fn<Save>(() =>
+      Promise.reject(
+        new ApiError(
+          422,
+          {
+            type: "about:blank",
+            title: "Unprocessable",
+            status: 422,
+            code: "validation_failed",
+            errors: [{ pointer: "/message_labels/1", code: "duplicate" }],
+          },
+          undefined,
+        ),
+      ),
+    );
+    await renderForm(
+      labelsRoute({ own_message_labels: true, message_labels: ["pod", "cluster"] }),
+      {
+        save,
+      },
+    );
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    const section = page.getByTestId("message-labels");
+    await expect.element(section.getByRole("alert")).toBeVisible();
+    await page.getByRole("button", { name: "Remove pod from the message" }).click();
+    expect(section.getByRole("alert").elements()).toHaveLength(0);
+  });
+
+  test("a form that is read-only shows the list without controls", async () => {
+    await renderForm(labelsRoute({ own_message_labels: true, message_labels: ["pod"] }), {
+      readOnly: true,
+    });
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    expect(page.getByRole("button", { name: "+ label" }).elements()).toHaveLength(0);
+    expect(page.getByRole("button", { name: "Reset to default" }).elements()).toHaveLength(0);
+  });
+
+  test("the list is part of the version: a newer version reloads through the editor's Reload", async () => {
+    const { onReload } = await renderForm(labelsRoute(), {
+      save: () =>
+        Promise.reject(
+          new ApiError(412, { type: "about:blank", title: "Precondition", status: 412 }, undefined),
+        ),
+    });
+    await expect.element(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByRole("button", { name: "Remove team from the message" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect
+      .element(page.getByText("Someone else changed this route. Reload to see the changes."))
+      .toBeVisible();
+    expect(
+      page
+        .getByRole("alert")
+        .elements()
+        .filter((e) => e.textContent?.includes("Someone else")),
+    ).toHaveLength(1);
+    await page.getByRole("button", { name: "Reload" }).click();
+    expect(onReload).toHaveBeenCalledOnce();
+  });
+});

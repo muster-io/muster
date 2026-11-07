@@ -8,19 +8,36 @@
 // built-in body as Telegram HTML, `{{ env "HOME" }}` is marked at line 1, column 4 and refused on save. A stored
 // Route's editor previews against its most recent Stored Snapshots by default. A Route whose template keeps failing
 // shows the banner and its mark in the Routes list. No Content Security Policy violation.
+//
+// "Labels in the message" and the preview of the compact layout (the last test): three firing Alerts of one Alert Group
+// in the fake Mattermost server; the Route's "Message" lists the chips system, team and namespace; "+ label" offers
+// `cluster` and `pod` with example values; the unsaved `cluster` is not in the preview yet, "Save" edits the open Root
+// message Quietly to show `cluster=prod-eu`; the preview has the tabs Mattermost, Slack, Telegram and Bridge with the
+// length against the limit and the layout JSON; "Reset to default" goes back; an empty list, a duplicate, Russian at
+// 360 px, and the Audit log entry.
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
+  FMM,
+  TEAM_SPEC_PASSWORD,
   adminApi,
+  alertGroupOf,
   createRoute,
+  createRoutingRoute,
   deleteRoute,
   devClockOffset,
+  dropRouting,
+  ensureLocalUser,
   expectNoHorizontalScroll,
   fakeIntegration,
   fam,
   notify,
+  removeIntegration,
+  removeRoute,
+  seedRouting,
   shot,
+  signIn,
   signInAdmin,
   sql,
   watchCsp,
@@ -68,6 +85,16 @@ function template(page: Page, name: "root_message" | "line" | "ack_timeout_notic
 }
 
 test.beforeAll(async () => {
+  // A rerun on the same database starts from the same state.
+  const admin = await adminApi();
+  try {
+    for (const name of ["msg-one", "msg-pods", "msg-own"]) {
+      await removeRoute(admin, name);
+    }
+    await removeIntegration(admin, "msg-lab");
+  } finally {
+    await admin.dispose();
+  }
   integrationId = await fakeIntegration("msg-lab");
   // A Route of its own, so that the Alerts do not join a HighLatency Alert Group of an earlier spec.
   oneRouteId = await createRoute("msg-one", "msg-one", ["alertname"]);
@@ -150,7 +177,7 @@ test("edits the message templates with live previews and refuses an unknown func
   await root.getByRole("radio", { name: "Custom" }).check();
   const rootEditor = root.getByRole("textbox", { name: "Root message" });
   await expect(rootEditor).toHaveValue(/^\{\{ with \.AlertGroup\.Summary \}\}/);
-  await root.getByRole("radio", { name: "Telegram" }).check();
+  await root.getByRole("tab", { name: "Telegram" }).click();
   const rootOutput = root.getByTestId("template-preview-output");
   await expect(rootOutput).toContainText("Error rate above 5%");
   await expect(rootOutput).toContainText("Started");
@@ -247,3 +274,312 @@ test("previews against the most recent Stored Snapshots of a stored Route by def
   );
   expect(csp).toEqual([]);
 });
+
+interface MattermostPost {
+  id: string;
+  channel_id: string;
+  edit_at: number;
+  message: string;
+  props: unknown;
+}
+
+/** The posts of a channel of the fake Mattermost server whose attachment names the Alert. */
+async function postsOf(channel: string, alertname: string): Promise<MattermostPost[]> {
+  const res = await fetch(`${FMM}/posts`);
+  expect(res.ok).toBe(true);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the fake's own list of posts
+  const posts = (await res.json()) as MattermostPost[];
+  return posts.filter(
+    (p) => p.channel_id === channel && JSON.stringify(p.props ?? {}).includes(alertname),
+  );
+}
+
+/** What the fake server notified about a post: an edit notifies nobody. */
+async function notificationsOf(postId: string): Promise<number> {
+  const res = await fetch(`${FMM}/notifications`);
+  expect(res.ok).toBe(true);
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the fake's own list of notifications
+  const list = (await res.json()) as { post_id: string }[];
+  return list.filter((n) => n.post_id === postId).length;
+}
+
+const labelNames = (page: Page) =>
+  page.getByTestId("message-label").evaluateAll((els) => els.map((e) => e.textContent?.trim()));
+
+test("chooses the labels in the message, previews the compact layout for every markup and edits the open message", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const csp = watchCsp(page);
+  const seed = await seedRouting("msglab");
+  const channel = "ch-infra-notice";
+  const alertname = seed.alertName("OOMKilled");
+  try {
+    const target = seed.destination("infra-notice");
+    const routeId = await createRoutingRoute(seed, "Infra-msglab", {
+      entries: [{ destination_id: target.id }],
+      deliverToTeams: false,
+      groupKey: ["alertname", "system", "team"],
+    });
+    // Three firing Alerts of one Alert Group, with the labels the Route will offer.
+    for (const pod of ["checkout-api-7d9f4", "checkout-api-5b2c1", "checkout-worker-8e6a0"]) {
+      await fam("PUT", `/groups/msglab-routing/alerts/${alertname}-${pod}`, {
+        labels: {
+          alertname,
+          category: seed.category,
+          team: seed.slugs.pay,
+          system: "kubernetes",
+          severity: "warning",
+          namespace: "checkout",
+          cluster: "prod-eu",
+          pod,
+        },
+        annotations: {
+          summary: "Container restarted for lack of memory",
+          description: "A container went over its memory limit.",
+        },
+      });
+    }
+    await notify(seed.integrationId, "msglab-routing", { reason: "first notification" });
+    let root: MattermostPost | undefined;
+    await expect
+      .poll(async () => {
+        root = (await postsOf(channel, alertname))[0];
+        return root?.id ?? "";
+      })
+      .not.toBe("");
+    const rootId = root?.id ?? "";
+    const before = JSON.stringify(root?.props);
+    expect(before).toContain("system=kubernetes");
+    expect(before).not.toContain("cluster=");
+    const editedBefore = root?.edit_at ?? 0;
+    const notifiedBefore = await notificationsOf(rootId);
+
+    // 1. Routes → the Route → "Message" → "Labels in the message": the chips and the hint.
+    await signInAdmin(page);
+    await page.goto(`/routes/${routeId}`);
+    const labels = page.getByTestId("message-labels");
+    await expect(labels.getByRole("heading", { name: "Labels in the message" })).toBeVisible();
+    await expect(page.getByTestId("message-label").first()).toBeVisible();
+    expect(await labelNames(page)).toEqual(["system", "team", "namespace"]);
+    await expect(labels).toContainText(
+      "By default: the Group key without alertname and the severity label, the Team label and namespace. Labels without a value in the Alert Group are not shown.",
+    );
+    await expect(labels.getByTestId("docs-link")).toHaveAttribute(
+      "href",
+      "https://muster-io.github.io/muster/latest/configure/messages-and-templates/#labels-in-the-message",
+    );
+    await expect(labels.getByRole("button", { name: "Reset to default" })).toHaveCount(0);
+
+    // 2. "+ label": the suggestions with an example value; a duplicate is refused; cluster is chosen.
+    await labels.getByRole("button", { name: "+ label" }).click();
+    await expect(labels.getByText("From recent Alert Groups of the Route")).toBeVisible();
+    await expect(
+      labels.getByRole("button", { name: "cluster — e.g. prod-eu", exact: true }),
+    ).toBeVisible();
+    await expect(labels.getByRole("button", { name: /^pod — e\.g\. checkout-/ })).toBeVisible();
+    // `namespace` is in the message already, so it is not offered.
+    await expect(labels.getByRole("button", { name: /^namespace — e\.g\./ })).toHaveCount(0);
+    await labels.getByRole("textbox", { name: "Label name" }).fill("team");
+    await expect(labels.getByText("This label is already in the message.")).toBeVisible();
+    await expect(labels.getByRole("button", { name: "Add label" })).toBeDisabled();
+    await labels.getByRole("textbox", { name: "Label name" }).fill("");
+    await labels.getByRole("button", { name: "cluster — e.g. prod-eu", exact: true }).click();
+    expect(await labelNames(page)).toEqual(["system", "team", "namespace", "cluster"]);
+    await expect(labels.getByRole("button", { name: "Reset to default" })).toBeVisible();
+
+    // The preview renders the labels saved on the Route, and says so while these are not saved.
+    const rootTemplate = page.getByTestId("template-root_message");
+    await expect(rootTemplate.getByTestId("template-preview-labels-unsaved")).toContainText(
+      "The preview shows the labels saved on the Route. Save to see the change.",
+    );
+    await expect(rootTemplate.getByTestId("layout-mattermost")).not.toContainText("cluster=");
+
+    // 3. "Save": the open Root message is edited Quietly to show cluster=prod-eu.
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page).toHaveURL(/\/routes$/);
+    await expect
+      .poll(async () => JSON.stringify((await postsOf(channel, alertname))[0]?.props))
+      .toContain("cluster=prod-eu");
+    const after = (await postsOf(channel, alertname))[0];
+    expect(after?.id, "the same post, edited").toBe(rootId);
+    expect(after?.edit_at ?? 0).toBeGreaterThan(editedBefore);
+    expect(await postsOf(channel, alertname)).toHaveLength(1);
+    expect(await notificationsOf(rootId), "an edit notifies nobody").toBe(notifiedBefore);
+    console.log("MATTERMOST ROOT AFTER SAVE", JSON.stringify(after?.props));
+
+    // The Audit log names the field.
+    await page.goto(
+      `/admin/audit-log?action=route.updated&resource_type=route&resource_id=${routeId}`,
+    );
+    const diff = page.getByTestId("audit-diff").first();
+    await expect(diff).toContainText("Labels in the message");
+    await expect(diff).toContainText('["system","team","namespace","cluster"]');
+
+    // 4. The editor again: the chips, and the preview in every markup.
+    await page.goto(`/routes/${routeId}`);
+    await expect(page.getByTestId("message-label").first()).toBeVisible();
+    expect(await labelNames(page)).toEqual(["system", "team", "namespace", "cluster"]);
+    const preview = rootTemplate.getByTestId("template-preview");
+    await expect(rootTemplate.getByRole("tab")).toHaveText([
+      "Mattermost",
+      "Slack",
+      "Telegram",
+      "Bridge",
+    ]);
+    await expect(rootTemplate.getByTestId("template-preview-labels-unsaved")).toHaveCount(0);
+    // The sample is the Alert Group itself, which has its Teams; a Stored Snapshot has none to show.
+    const groupId = await alertGroupOf(seed.integrationId, alertname);
+    await rootTemplate
+      .getByTestId("sample-picker")
+      .selectOption({ value: `alert_group:${groupId}` });
+    const mm = rootTemplate.getByTestId("layout-mattermost");
+    await expect(mm.getByTestId("layout-title")).toContainText(
+      new RegExp(`^#\\d+ ${alertname}.* — Firing$`),
+    );
+    for (const field of [
+      "Severity",
+      "warning",
+      "Route",
+      "Infra-msglab",
+      "Teams",
+      seed.slugs.pay,
+      "Started",
+    ]) {
+      await expect(mm.getByTestId("layout-fields")).toContainText(field);
+    }
+    await expect(mm.getByTestId("layout-labels")).toContainText(
+      `system=kubernetes · team=${seed.slugs.pay} · namespace=checkout · cluster=prod-eu`,
+    );
+    await expect(mm.getByTestId("layout-alerts")).toContainText("pod: checkout-api-");
+    await expect(rootTemplate.getByTestId("template-preview-length")).toContainText(
+      /of 16383 characters$/,
+    );
+
+    await rootTemplate.getByRole("tab", { name: "Slack" }).click();
+    const slack = rootTemplate.getByTestId("layout-slack");
+    await expect(slack.getByTestId("layout-title")).toContainText("— Firing");
+    await expect(slack.getByTestId("layout-labels")).toContainText("cluster=prod-eu");
+    await expect(slack.getByTestId("layout-alerts")).toContainText("pod:");
+    await expect(rootTemplate.getByTestId("template-preview-length")).toContainText(
+      /of 3000 characters$/,
+    );
+
+    await rootTemplate.getByRole("tab", { name: "Telegram" }).click();
+    const telegram = rootTemplate.getByTestId("layout-telegram");
+    await expect(telegram.getByTestId("layout-title")).toContainText("— Firing");
+    await expect(telegram.getByTestId("layout-fields")).toContainText("Severity: warning");
+    await expect(telegram.getByTestId("layout-labels")).toContainText("cluster=prod-eu");
+    await expect(telegram.getByTestId("layout-alerts")).toContainText("pod:");
+    await expect(rootTemplate.getByTestId("template-preview-length")).toContainText(
+      /of 4096 characters$/,
+    );
+
+    await rootTemplate.getByRole("tab", { name: "Bridge" }).click();
+    const json = rootTemplate.getByTestId("layout-json");
+    await expect(json).toContainText('"key": "firing"');
+    await expect(json).toContainText('"key": "cluster"');
+    await expect(json).toContainText('"value": "prod-eu"');
+    await expect(rootTemplate.getByTestId("layout-body")).not.toBeEmpty();
+    await expect(rootTemplate.getByTestId("template-preview-length")).toContainText(
+      /characters; the bridge sets its own limit$/,
+    );
+    await expect(preview).toBeVisible();
+    await shot(page, "route-message-labels");
+
+    // 5. "Reset to default" → "Save": the chips are the computed list again, and the message follows.
+    await resetLabels(page);
+    await expect
+      .poll(async () => JSON.stringify((await postsOf(channel, alertname))[0]?.props))
+      .not.toContain("cluster=");
+    await page.goto(`/routes/${routeId}`);
+    await expect(page.getByTestId("message-label").first()).toBeVisible();
+    expect(await labelNames(page)).toEqual(["system", "team", "namespace"]);
+    await expect(
+      page.getByTestId("message-labels").getByRole("button", { name: "Reset to default" }),
+    ).toHaveCount(0);
+
+    // 6. Negative: an empty own list says so, saves, and the message shows no key labels; then back to the default.
+    const section = page.getByTestId("message-labels");
+    for (const name of ["system", "team", "namespace"]) {
+      await section.getByRole("button", { name: `Remove ${name} from the message` }).click();
+    }
+    await expect(section.getByTestId("message-labels-empty")).toHaveText(
+      "No labels: the message has no line of key labels.",
+    );
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page).toHaveURL(/\/routes$/);
+    await expect
+      .poll(async () => JSON.stringify((await postsOf(channel, alertname))[0]?.props))
+      .not.toContain("system=kubernetes");
+    await page.goto(`/routes/${routeId}`);
+    await expect(page.getByTestId("message-labels-empty")).toBeVisible();
+    await resetLabels(page);
+    await expect
+      .poll(async () => JSON.stringify((await postsOf(channel, alertname))[0]?.props))
+      .toContain("system=kubernetes");
+
+    // 7. Phone width: no sideways scroll, and the layout JSON scrolls inside itself.
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.goto(`/routes/${routeId}`);
+    await expect(page.getByTestId("message-label").first()).toBeVisible();
+    await page.getByTestId("template-root_message").getByRole("tab", { name: "Bridge" }).click();
+    await expect(page.getByTestId("layout-json")).toBeVisible();
+    await expectNoHorizontalScroll(page);
+    await shot(page, "route-message-labels-360");
+
+    // 8. Russian at 360 px.
+    const admin = await adminApi();
+    try {
+      await ensureLocalUser(admin, "msglab-ru", "admin");
+    } finally {
+      await admin.dispose();
+    }
+    const context = await browser.newContext({ viewport: { width: 360, height: 800 } });
+    try {
+      const ru = await context.newPage();
+      const ruCsp = watchCsp(ru);
+      await signIn(ru, "msglab-ru", TEAM_SPEC_PASSWORD);
+      await ru.goto("/profile");
+      await ru.getByLabel(/^(Language|Язык)$/).selectOption("ru");
+      await expect(ru.getByRole("navigation", { name: "Основная" })).toBeVisible();
+      await ru.goto(`/routes/${routeId}`);
+      const ruLabels = ru.getByTestId("message-labels");
+      await expect(ruLabels.getByRole("heading", { name: "Метки в сообщении" })).toBeVisible();
+      await expect(ruLabels).toContainText(
+        "По умолчанию: ключ группировки без alertname и метки важности, метку команды и namespace. Метки без значения в группе не показываются.",
+      );
+      expect(await labelNames(ru)).toEqual(["system", "team", "namespace"]);
+      await ruLabels.getByRole("button", { name: "+ метка" }).click();
+      await expect(ruLabels.getByText("Из недавних групп маршрута")).toBeVisible();
+      await expect(
+        ruLabels.getByRole("button", { name: "cluster — напр. prod-eu", exact: true }),
+      ).toBeVisible();
+      const ruRoot = ru.getByTestId("template-root_message");
+      await ruRoot.getByRole("tab", { name: "Telegram" }).click();
+      await expect(ruRoot.getByTestId("template-preview-length")).toContainText(
+        /из 4096 символов$/,
+      );
+      await expect(ruRoot.getByTestId("layout-telegram")).toContainText("— Firing");
+      await expectNoHorizontalScroll(ru);
+      await shot(ru, "route-message-labels-ru-360");
+      expect(ruCsp).toEqual([]);
+    } finally {
+      await context.close();
+    }
+    expect(csp).toEqual([]);
+  } finally {
+    await dropRouting("msglab");
+  }
+});
+
+/** "Reset to default" → "Save" on the Route editor that is open. */
+async function resetLabels(page: Page): Promise<void> {
+  await page
+    .getByTestId("message-labels")
+    .getByRole("button", { name: "Reset to default" })
+    .click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page).toHaveURL(/\/routes$/);
+}

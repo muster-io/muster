@@ -100,6 +100,10 @@ function routeField(t: TFunction, pointer: string): string | undefined {
       return t("audit.fields.deliverToTeams");
     case "/run_team_chains":
       return t("audit.fields.runTeamChains");
+    case "/message_labels":
+      return t("audit.fields.messageLabels");
+    case "/own_message_labels":
+      return t("audit.fields.ownMessageLabels");
     case "/policy/reopen_window_seconds":
       return t("audit.fields.reopenWindowSeconds");
     case "/policy/grace_period_seconds":

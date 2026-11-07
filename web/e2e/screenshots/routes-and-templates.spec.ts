@@ -190,6 +190,7 @@ test("creates a Route, edits its message, and adds a Lookup table and a Link rul
   const message = page.getByTestId("route-message");
   await scrollToTop(message);
   await expect(message.getByLabel("Language")).toHaveValue("en");
+  await expect(message.getByTestId("message-label").first()).toBeVisible();
   await capture(page, TEMPLATES, "01-message", {
     waitFor: page.getByTestId("template-line").getByTestId("template-preview-output"),
   });

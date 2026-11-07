@@ -15,7 +15,10 @@ files_touched:
   - web/src/components/message-layout-preview.tsx
   - web/src/components/message-layout-preview.test.tsx
   - web/src/components/route-form.tsx
+  - web/src/components/route-form.test.tsx
   - web/src/components/audit-diff.tsx
+  - web/src/test/fixtures/message-layout.ts
+  - docs/configure/messages-and-templates.md
   - web/src/lib/docs-links.json
   - web/src/locales/en.json
   - web/src/locales/ru.json
@@ -100,6 +103,12 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): choose the labels of root messages and preview the layout per messenger`.
+- The layout carries no buttons, which come from the Destination, so the previews say that they are added when the
+  message is sent. A Route that is not saved yet has no computed list and no Alert Groups to suggest from: the editor
+  says so and offers no controls until the Route is saved. The preview renders the labels saved on the Route, and says
+  so while the form's differ. The API records `/message_labels` in the Audit log but not `/own_message_labels`; the
+  second name is kept for when it does. The tabs apply to the Root message; the other templates keep the markup radios.
+  A Stored Snapshot sample has no Teams, so the preview shows the field Teams only against an Alert Group.
 - The previews render the layout in the browser from `layout`, so that one request per markup gives all four tabs the
   same content the adapters lay out; the server's length is the authority for the limit.
 

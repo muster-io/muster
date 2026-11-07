@@ -7,9 +7,11 @@
 // never as HTML, and links open only when they are http(s), in a new tab; a Telegram result is shown as its HTML text,
 // and a Slack result as its mrkdwn text, with the note that a Mention written in a template, such as <!here>, notifies
 // nobody: only the Destination's Mention settings do (C-12.FR-8). A template that fails shows its error in place of
-// the message, and the editor marks it.
+// the message, and the editor marks it. The preview of a Root message has the tabs Mattermost, Slack, Telegram and Bridge:
+// the compact layout of its `layout` in each messenger's form (message-layout-preview.tsx) and its length against the
+// messenger's limit (C-29.AC-7). A refresh that fails keeps the previous result on screen, dimmed and marked.
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -21,12 +23,13 @@ import type {
   TemplatePreviewResult,
 } from "../api/gen/model";
 import { problemText } from "../lib/api";
+import { BridgeLayoutPreview, MessageLayoutPreview } from "./message-layout-preview";
 import { type Sample, sampleFields } from "./sample-picker";
 import { positionedErrorText } from "./template-editor";
 import { cn } from "./ui/utils";
 
-/** The markup of a preview: Mattermost Markdown, Telegram HTML or Slack's mrkdwn. */
-export type PreviewFormat = "markdown" | "html" | "mrkdwn";
+/** The markup of a preview: Mattermost Markdown, Telegram HTML, Slack's mrkdwn or a bridge's CommonMark. */
+export type PreviewFormat = "markdown" | "html" | "mrkdwn" | "commonmark";
 
 /** How long the preview waits after the last change of the text before it renders. */
 export const PREVIEW_DELAY_MS = 400;
@@ -85,12 +88,21 @@ export function useTemplatePreview(params: PreviewParams, enabled = true) {
     staleTime: 30_000,
     retry: false,
   });
+  // The last result that rendered, which stays on screen, marked, when a later refresh fails.
+  const [kept, setKept] = useState<TemplatePreviewResult>();
+  if (query.data !== undefined && !query.isPlaceholderData && query.data !== kept) {
+    setKept(query.data);
+  }
   // The errors of a result point into the template it rendered; an older result kept on screen names none.
-  return { query, template: query.isPlaceholderData ? undefined : request.template };
+  return { query, template: query.isPlaceholderData ? undefined : request.template, kept };
 }
 
-/** A preview with the template its result belongs to. */
-export type TemplatePreviewState = ReturnType<typeof useTemplatePreview>;
+/** A preview with the template its result belongs to, and the last result that rendered. */
+export interface TemplatePreviewState {
+  query: UseQueryResult<TemplatePreviewResult>;
+  template: string | undefined;
+  kept?: TemplatePreviewResult;
+}
 
 /** The errors of a preview for the template the editor holds, or none while the preview is for another text. */
 export function previewErrors(preview: TemplatePreviewState, template: string) {
@@ -375,35 +387,197 @@ function Output({ result, kind }: { result: TemplatePreviewResult; kind: Templat
   );
 }
 
-export function TemplatePreview({
+/** The markups of a Root message, in the order of the tabs. */
+const MARKUPS: readonly PreviewFormat[] = ["markdown", "mrkdwn", "html", "commonmark"];
+
+function markupName(t: (key: string) => string, format: PreviewFormat): string {
+  switch (format) {
+    case "markdown":
+      return t("templates.preview.mattermost");
+    case "mrkdwn":
+      return t("templates.preview.slack");
+    case "html":
+      return t("templates.preview.telegram");
+    default:
+      return t("templates.preview.bridge");
+  }
+}
+
+/** The tabs that switch the preview of a Root message between Mattermost, Slack, Telegram and Bridge. */
+export function MarkupTabs({
   id,
-  kind,
-  preview,
+  panelId,
+  value,
+  onChange,
 }: {
+  /** The prefix of the ids of the tabs. */
   id: string;
-  kind: TemplateKind;
-  preview: TemplatePreviewState;
+  /** The id of the preview the tabs switch. */
+  panelId: string;
+  value: PreviewFormat;
+  onChange: (format: PreviewFormat) => void;
 }) {
   const { t } = useTranslation();
-  const { query } = preview;
-  // The names that errors point at are read from the template the result belongs to.
-  const template = preview.template ?? "";
-  const result = query.data;
+  const refs = useRef(new Map<PreviewFormat, HTMLButtonElement>());
+  const move = (to: number) => {
+    const next = MARKUPS[(to + MARKUPS.length) % MARKUPS.length];
+    if (next !== undefined) {
+      onChange(next);
+      refs.current.get(next)?.focus();
+    }
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={t("templates.preview.markup")}
+      className="flex flex-wrap gap-1 border-b"
+    >
+      {MARKUPS.map((format, index) => {
+        const selected = format === value;
+        return (
+          <button
+            key={format}
+            ref={(el) => {
+              if (el === null) {
+                refs.current.delete(format);
+              } else {
+                refs.current.set(format, el);
+              }
+            }}
+            type="button"
+            role="tab"
+            id={`${id}-tab-${format}`}
+            aria-selected={selected}
+            aria-controls={panelId}
+            tabIndex={selected ? 0 : -1}
+            className={cn(
+              "-mb-px rounded-t-md border-b-2 px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              selected
+                ? "border-primary font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => onChange(format)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowRight") {
+                e.preventDefault();
+                move(index + 1);
+              } else if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                move(index - 1);
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                move(0);
+              } else if (e.key === "End") {
+                e.preventDefault();
+                move(MARKUPS.length - 1);
+              }
+            }}
+          >
+            {markupName(t, format)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** What the preview of a Root message needs to know about the Route besides the template it renders. */
+export interface RootPreviewContext {
+  /** The prefix of the ids of the tabs, which name the preview. */
+  tabsId: string;
+  /** The tab: the markup the layout is laid out in. */
+  markup: PreviewFormat;
+  /** The Route has a Root message template of its own, whose body the messengers show in place of the layout. */
+  rootCustom: boolean;
+  /** The Route has an Alert line template: the previews draw the Alerts by their label, a bridge receives no layout. */
+  lineCustom: boolean;
+  /** The labels in the form differ from those saved on the Route, which the preview renders. */
+  labelsUnsaved: boolean;
+}
+
+/** The length of the message against its messenger's limit, red above it. */
+export function LengthLine({
+  result,
+  markup,
+}: {
+  result: TemplatePreviewResult;
+  markup: PreviewFormat;
+}) {
+  const { t } = useTranslation();
+  // A result kept from another tab was counted in that tab's markup.
+  if (result.length === undefined || result.format !== markup) {
+    return null;
+  }
+  const limit = result.messenger_limit ?? null;
+  const over = limit !== null && result.length > limit;
+  return (
+    <div className="flex flex-col gap-0.5" data-testid="template-preview-length">
+      <p className={cn("text-xs", over ? "font-medium text-destructive" : "text-muted-foreground")}>
+        {limit === null
+          ? t("templates.preview.lengthNoLimit", { length: result.length })
+          : t("templates.preview.length", { length: result.length, limit })}
+      </p>
+      {over && (
+        <p className="text-xs text-destructive" role="alert">
+          {t("templates.preview.overLimit")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A valid result of a Root message: its layout in the tab's markup, or the text of its body. */
+function RootResult({
+  result,
+  context,
+}: {
+  result: TemplatePreviewResult;
+  context: RootPreviewContext;
+}) {
+  const { t } = useTranslation();
+  const layout = result.layout ?? null;
+  const bridgeLayout = context.rootCustom || context.lineCustom ? null : layout;
   let body: ReactNode;
-  if (query.isError) {
-    body = (
-      <p className="text-sm text-destructive" role="alert">
-        {problemText(t, query.error)}
-      </p>
-    );
-  } else if (result === undefined) {
-    body = (
-      <p className="text-sm text-muted-foreground" role="status">
-        {t("common.loading")}
-      </p>
-    );
-  } else if (!result.valid) {
-    body = (
+  if (context.markup === "commonmark") {
+    body = <BridgeLayoutPreview layout={bridgeLayout} body={result.output ?? ""} />;
+  } else if (layout !== null && !context.rootCustom) {
+    body = <MessageLayoutPreview layout={layout} markup={context.markup} />;
+  } else {
+    body = <Output result={result} kind="root_message" />;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {body}
+      {context.lineCustom && context.markup !== "commonmark" && layout !== null && (
+        <p className="text-xs text-muted-foreground" data-testid="template-preview-line-note">
+          {t("templates.layout.lineTemplateNote")}
+        </p>
+      )}
+      <LengthLine result={result} markup={context.markup} />
+      {context.labelsUnsaved && (
+        <p className="text-xs text-muted-foreground" data-testid="template-preview-labels-unsaved">
+          {t("templates.layout.labelsUnsaved")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The body of a preview for a result: its message, or the error of a template that failed. */
+function ResultBody({
+  result,
+  kind,
+  template,
+  context,
+}: {
+  result: TemplatePreviewResult;
+  kind: TemplateKind;
+  template: string;
+  context?: RootPreviewContext;
+}) {
+  const { t } = useTranslation();
+  if (!result.valid) {
+    return (
       <div className="flex flex-col gap-1" data-testid="template-preview-error">
         <p className="text-sm font-medium text-destructive">{t("templates.preview.failed")}</p>
         {result.errors.map((error, index) => (
@@ -413,24 +587,78 @@ export function TemplatePreview({
         ))}
       </div>
     );
-  } else {
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {kind === "root_message" && context !== undefined ? (
+        <RootResult result={result} context={context} />
+      ) : (
+        <Output result={result} kind={kind} />
+      )}
+      {result.truncated === true && (
+        <p className="text-xs text-muted-foreground" data-testid="template-preview-truncated">
+          {t("templates.preview.truncated")}
+        </p>
+      )}
+      {result.sample === "example" && (
+        <p className="text-xs text-muted-foreground">{t("templates.preview.example")}</p>
+      )}
+    </div>
+  );
+}
+
+export function TemplatePreview({
+  id,
+  kind,
+  preview,
+  context,
+}: {
+  id: string;
+  kind: TemplateKind;
+  preview: TemplatePreviewState;
+  /** For a Root message: the tab and what the Route has, which decide what the preview draws. */
+  context?: RootPreviewContext;
+}) {
+  const { t } = useTranslation();
+  const { query, kept } = preview;
+  // The names that errors point at are read from the template the result belongs to.
+  const template = preview.template ?? "";
+  const result = query.data;
+  let body: ReactNode;
+  if (query.isError) {
     body = (
       <div className="flex flex-col gap-2">
-        <Output result={result} kind={kind} />
-        {result.truncated === true && (
-          <p className="text-xs text-muted-foreground" data-testid="template-preview-truncated">
-            {t("templates.preview.truncated")}
-          </p>
-        )}
-        {result.sample === "example" && (
-          <p className="text-xs text-muted-foreground">{t("templates.preview.example")}</p>
+        <p
+          className="text-sm text-destructive"
+          role="alert"
+          data-testid="template-preview-refresh-error"
+        >
+          {problemText(t, query.error)}
+        </p>
+        {kept !== undefined && (
+          <div className="flex flex-col gap-2 opacity-50" data-testid="template-preview-stale">
+            <p className="text-xs font-medium">{t("templates.preview.stale")}</p>
+            <ResultBody result={kept} kind={kind} template="" context={context} />
+          </div>
         )}
       </div>
     );
+  } else if (result === undefined) {
+    body = (
+      <p className="text-sm text-muted-foreground" role="status">
+        {t("common.loading")}
+      </p>
+    );
+  } else {
+    body = <ResultBody result={result} kind={kind} template={template} context={context} />;
   }
   return (
     <div
       id={id}
+      role={context === undefined ? undefined : "tabpanel"}
+      aria-labelledby={
+        context === undefined ? undefined : `${context.tabsId}-tab-${context.markup}`
+      }
       className={cn(
         "flex min-w-0 flex-col gap-2 rounded-lg border bg-muted/30 p-3 transition-opacity",
         query.isFetching && "opacity-70",
