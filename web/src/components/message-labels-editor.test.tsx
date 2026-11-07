@@ -71,7 +71,9 @@ function Harness({
   routeId = "RT0000000000IN",
   readOnly = false,
   error,
+  replaced = false,
 }: {
+  replaced?: boolean;
   initial?: MessageLabelsValue;
   defaultNames?: readonly string[] | null;
   routeId?: string;
@@ -89,6 +91,7 @@ function Harness({
         routeId={routeId}
         readOnly={readOnly}
         error={error}
+        replaced={replaced}
       />
       <output data-testid="sent">{JSON.stringify(value)}</output>
     </>
@@ -273,9 +276,45 @@ describe("Labels in the message", () => {
     expect(page.getByRole("button", { name: "Reset to default" }).elements()).toHaveLength(0);
   });
 
-  test("with no default list read, Reset to default says that it shows once saved", async () => {
+  test("a removal moves the focus to the next chip, then the previous one, then + label, and says what was removed", async () => {
+    await renderEditor({ initial: { own: true, names: ["a", "b", "c"] } });
+    await page.getByRole("button", { name: "Remove b from the message" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Remove c from the message" }))
+      .toHaveFocus();
+    await expect.element(page.getByText("Removed b")).toBeInTheDocument();
+    await page.getByRole("button", { name: "Remove c from the message" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Remove a from the message" }))
+      .toHaveFocus();
+    await page.getByRole("button", { name: "Remove a from the message" }).click();
+    await expect.element(page.getByRole("button", { name: "+ label" })).toHaveFocus();
+  });
+
+  test("says that a Root message template of its own replaces the line of key labels", async () => {
+    await renderEditor({ replaced: true });
+    await expect
+      .element(page.getByTestId("message-labels-replaced"))
+      .toHaveTextContent(
+        "This Route's Root message template is custom and replaces the line of key labels, so these labels are not shown.",
+      );
+    await i18n.changeLanguage("ru");
+    await expect
+      .element(page.getByTestId("message-labels-replaced"))
+      .toHaveTextContent(
+        "Шаблон корневого сообщения этого маршрута свой и заменяет строку ключевых меток, поэтому эти метки не показываются.",
+      );
+  });
+
+  test("says nothing of the sort while the Root message is built in", async () => {
+    await renderEditor();
+    expect(page.getByTestId("message-labels-replaced").elements()).toHaveLength(0);
+  });
+
+  test("with no default list read, Reset to default says that it shows once saved, and + label waits", async () => {
     await renderEditor({ initial: { own: true, names: ["cluster"] }, defaultNames: null });
     await page.getByRole("button", { name: "Reset to default" }).click();
+    expect(page.getByRole("button", { name: "+ label" }).elements()).toHaveLength(0);
     await expect.element(sent()).toHaveTextContent('{"own":false,"names":[]}');
     expect(chips().elements()).toHaveLength(0);
     await expect

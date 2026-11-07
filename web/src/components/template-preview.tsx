@@ -76,12 +76,21 @@ export function previewRequest(p: PreviewParams): TemplatePreviewRequest {
   };
 }
 
+/** The key of the previews in the query cache, to invalidate them when the Route they render is saved. */
+export const PREVIEW_QUERY_KEY = ["previewTemplate"] as const;
+
 /** The preview of a template, rendered a short while after its parameters stop changing. */
 export function useTemplatePreview(params: PreviewParams, enabled = true) {
   const current = previewRequest(params);
-  const request = useDebounced(current, JSON.stringify(current), PREVIEW_DELAY_MS);
+  // A change of the markup, which is a click on a tab, renders at once; only the text and the sample wait.
+  const settled = useDebounced(
+    current,
+    JSON.stringify({ ...current, format: null }),
+    PREVIEW_DELAY_MS,
+  );
+  const request = { ...settled, format: current.format };
   const query = useQuery({
-    queryKey: ["previewTemplate", request],
+    queryKey: [...PREVIEW_QUERY_KEY, request],
     queryFn: ({ signal }) => previewTemplate(request, { signal }),
     enabled,
     placeholderData: keepPreviousData,
@@ -514,7 +523,7 @@ export function LengthLine({
     <div className="flex flex-col gap-0.5" data-testid="template-preview-length">
       <p className={cn("text-xs", over ? "font-medium text-destructive" : "text-muted-foreground")}>
         {limit === null
-          ? t("templates.preview.lengthNoLimit", { length: result.length })
+          ? t("templates.preview.lengthNoLimit", { count: result.length })
           : t("templates.preview.length", { length: result.length, limit })}
       </p>
       {over && (
@@ -586,6 +595,19 @@ function ResultBody({
           </p>
         ))}
       </div>
+    );
+  }
+  // A result kept from another tab was laid out in that tab's markup: wait for the one of this tab.
+  if (
+    kind === "root_message" &&
+    context !== undefined &&
+    result.format != null &&
+    result.format !== context.markup
+  ) {
+    return (
+      <p className="text-sm text-muted-foreground" role="status">
+        {t("common.loading")}
+      </p>
     );
   }
   return (

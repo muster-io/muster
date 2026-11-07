@@ -291,8 +291,11 @@ describe("the preview of a Root message", () => {
     );
   });
 
-  test("a length counted for another tab is not shown", async () => {
-    await renderRoot({ markup: "html" }, rootResult({ format: "markdown" }));
+  test("a result laid out for another tab is not shown under this one: the tab waits for its own", async () => {
+    await renderRoot({ markup: "commonmark" }, rootResult({ format: "markdown" }));
+    await hasText(page.getByRole("status"), "Loading");
+    expect(page.getByTestId("layout-mattermost").elements()).toHaveLength(0);
+    expect(page.getByTestId("layout-json").elements()).toHaveLength(0);
     expect(page.getByTestId("template-preview-length").elements()).toHaveLength(0);
   });
 

@@ -8,7 +8,15 @@
 // default list is not known to the form, so it says so instead of showing chips.
 
 import { PlusIcon, XIcon } from "lucide-react";
-import { Fragment, type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
+import {
+  Fragment,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { useListRouteLabelSuggestions } from "../api/gen/endpoints/routes/routes";
@@ -134,6 +142,7 @@ export function MessageLabelsEditor({
   routeId,
   error,
   readOnly = false,
+  replaced = false,
 }: {
   id: string;
   value: MessageLabelsValue;
@@ -145,8 +154,11 @@ export function MessageLabelsEditor({
   /** The code of a refusal of the list. */
   error?: string;
   readOnly?: boolean;
+  /** The Route's Root message template is custom and replaces the line of key labels (C-29.FR-5). */
+  replaced?: boolean;
 }) {
   const { t } = useTranslation();
+  const [liveText, setLiveText] = useState("");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const field = useRef<HTMLInputElement>(null);
@@ -162,6 +174,26 @@ export function MessageLabelsEditor({
   const editable = !readOnly && routeId !== undefined;
 
   const change = (names: string[]) => onChange({ own: true, names });
+  // After a removal the focus goes to the next chip, else the previous one, else "+ label".
+  const focusAfter = useRef<string | null>(null);
+  const list = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (target === null) {
+      return;
+    }
+    focusAfter.current = null;
+    const chip = [...(list.current?.querySelectorAll<HTMLElement>("[data-remove]") ?? [])].find(
+      (el) => el.dataset.remove === target,
+    );
+    (chip ?? document.getElementById(`${id}-add`))?.focus();
+  });
+  const remove = (label: string) => {
+    const index = shown.indexOf(label);
+    focusAfter.current = shown[index + 1] ?? shown[index - 1] ?? "";
+    setLiveText(t("routes.messageLabels.removed", { label }));
+    change(shown.filter((l) => l !== label));
+  };
   const add = (label: string) => {
     const next = label.trim();
     if (next === "" || shown.includes(next) || shown.length >= MESSAGE_LABELS_MAX) {
@@ -202,6 +234,11 @@ export function MessageLabelsEditor({
       <p id={hintId} className="text-sm text-muted-foreground">
         {withCode(t("routes.messageLabels.hint"))}
       </p>
+      {replaced && (
+        <p className="text-sm text-muted-foreground" data-testid="message-labels-replaced">
+          {t("routes.messageLabels.replaced")}
+        </p>
+      )}
       {!known ? (
         <p className="text-sm text-muted-foreground" data-testid="message-labels-unknown">
           {routeId === undefined
@@ -214,6 +251,7 @@ export function MessageLabelsEditor({
         </p>
       ) : (
         <ul
+          ref={list}
           className="flex flex-wrap gap-1.5"
           aria-labelledby={`${id}-title`}
           data-testid="message-labels-list"
@@ -233,7 +271,8 @@ export function MessageLabelsEditor({
                   variant="ghost"
                   size="icon-xs"
                   aria-label={t("routes.messageLabels.remove", { label })}
-                  onClick={() => change(shown.filter((l) => l !== label))}
+                  data-remove={label}
+                  onClick={() => remove(label)}
                 >
                   <XIcon aria-hidden="true" />
                 </Button>
@@ -249,17 +288,20 @@ export function MessageLabelsEditor({
       )}
       {editable && (
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((o) => !o)}
-          >
-            <PlusIcon aria-hidden="true" />
-            {t("routes.messageLabels.add")}
-          </Button>
+          {known && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              id={`${id}-add`}
+              aria-expanded={open}
+              aria-controls={panelId}
+              onClick={() => setOpen((o) => !o)}
+            >
+              <PlusIcon aria-hidden="true" />
+              {t("routes.messageLabels.add")}
+            </Button>
+          )}
           {value.own && (
             <Button
               type="button"
@@ -276,7 +318,7 @@ export function MessageLabelsEditor({
           )}
         </div>
       )}
-      {editable && open && (
+      {editable && open && known && (
         <div
           id={panelId}
           className="flex min-w-0 flex-col gap-3 rounded-lg border bg-muted/30 p-3"
@@ -317,6 +359,9 @@ export function MessageLabelsEditor({
           />
         </div>
       )}
+      <p className="sr-only" role="status" aria-live="polite">
+        {liveText}
+      </p>
       {message !== null && (
         <p id={errorId} className="text-sm break-words text-destructive" role="alert">
           {message}

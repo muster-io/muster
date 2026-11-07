@@ -357,6 +357,7 @@ export function RoutePolicyMessage({
         routeId={routeId}
         error={labels.error}
         readOnly={readOnly}
+        replaced={value.templates.root_message !== null}
       />
       {MESSAGE_TEMPLATES.map((name) => (
         <TemplateField

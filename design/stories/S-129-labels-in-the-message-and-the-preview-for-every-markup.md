@@ -54,7 +54,7 @@ issue: 418
 - **API used**: `getRoute`, `updateRoute` (`own_message_labels`, `message_labels`), `listRouteLabelSuggestions`,
   `previewTemplate` (`kind` `root_message`, `format` `markdown`, `mrkdwn`, `html` or `commonmark`, `length_limit` of
   each messenger; the result's `layout`, `length`, `messenger_limit`).
-- **Components**: `message-labels-editor.tsx` — the chips, "+ label" with a combobox of the suggestions (each "{label}
+- **Components**: `message-labels-editor.tsx` — the chips, "+ label" with a disclosure panel of the suggestions (each "{label}
   — e.g. {value}") and free text, "Reset to default" while the list is own; `message-layout-preview.tsx` — renders a
   `MessageLayout` as a Mattermost attachment (title, short fields, text, links, buttons), a Slack message (a section
   with fields, context lines, actions), a Telegram message (lines "{name}: {value}", the keyboard) and, for a Bridge,
@@ -103,6 +103,8 @@ None.
 ## Notes
 
 - Suggested commit: `feat(web): choose the labels of root messages and preview the layout per messenger`.
+- "+ label" opens a disclosure panel (a field and the suggestions as buttons), not a combobox. A Route whose Root
+  message template is custom says under "Labels in the message" that the template replaces the line of key labels.
 - The layout carries no buttons, which come from the Destination, so the previews say that they are added when the
   message is sent. A Route that is not saved yet has no computed list and no Alert Groups to suggest from: the editor
   says so and offers no controls until the Route is saved. The preview renders the labels saved on the Route, and says

@@ -28,6 +28,7 @@ import { RouteDeleteDialog } from "../components/route-delete-dialog";
 import { RouteForm } from "../components/route-form";
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { buttonVariants } from "../components/ui/button";
+import { PREVIEW_QUERY_KEY } from "../components/template-preview";
 import { problemText } from "../lib/api";
 
 export const Route = createFileRoute("/routes/$routeId")({
@@ -81,6 +82,8 @@ function EditForm({ current }: { current: RouteModel }) {
           queryClient.setQueryData(getGetRouteQueryKey(updated.id), updated);
           void queryClient.invalidateQueries({ queryKey: getListRoutesQueryKey() });
           void queryClient.invalidateQueries({ queryKey: getListRouteSuggestionsQueryKey() });
+          // The previews render the Route as saved, so those kept for the old version are out of date.
+          void queryClient.invalidateQueries({ queryKey: PREVIEW_QUERY_KEY });
         }}
         onReload={() => {
           setReloadError(null);
