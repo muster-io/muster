@@ -11,7 +11,7 @@ image:
   # The path of the image in the registry. A value that starts with a registry host (a first path segment with a "." or
   # ":", or localhost), such as ghcr.io/muster-io/muster, is used as it is, with neither registry applied.
   repository: muster-io/muster
-  tag: ""
+  tag: "@sha256:1856cc4a00ff082aa7263b670f635a60f13be175992452421889357ea21491e5"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
