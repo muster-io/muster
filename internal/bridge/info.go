@@ -58,6 +58,41 @@ type Info struct {
 	Raw json.RawMessage `json:"-"`
 }
 
+// The roles a bridge declares in info (C-30.FR-1): messenger, the default, and gateway, a Notification gateway.
+const (
+	RoleMessenger = string(gen.Messenger)
+	RoleGateway   = string(gen.Gateway)
+)
+
+// Roles are the roles the info declares, in its order: messenger when it declares none, as a bridge written before
+// roles existed does (C-30.FR-1).
+func (i Info) Roles() []string {
+	if i.Info.Roles == nil || len(*i.Info.Roles) == 0 {
+		return []string{RoleMessenger}
+	}
+	out := make([]string, len(*i.Info.Roles))
+	for n, r := range *i.Info.Roles {
+		out[n] = string(r)
+	}
+	return out
+}
+
+// HasRole reports whether the info declares the role, messenger included when it declares none.
+func (i Info) HasRole(role string) bool { return slices.Contains(i.Roles(), role) }
+
+// StoredRoles are the roles of the info Muster stored for a Connection, raw as the bridge sent it: messenger while
+// there is none, and for a copy that does not decode, which the next read replaces.
+func StoredRoles(raw []byte) []string {
+	if len(raw) == 0 {
+		return []string{RoleMessenger}
+	}
+	i, err := DecodeInfo(raw)
+	if err != nil {
+		return []string{RoleMessenger}
+	}
+	return i.Roles()
+}
+
 // Features are the names of the optional features the info declares, sorted.
 func (i Info) Features() []string {
 	c := i.Capabilities
@@ -228,7 +263,7 @@ type shape struct {
 var infoShape = shape{
 	required: []string{"protocol_version", "bridge", "messenger", "capabilities", "limits", "user_lookup",
 		"event_delivery"},
-	optional: []string{"link_url_template"},
+	optional: []string{"link_url_template", "roles"},
 	nullable: []string{"link_url_template"},
 	nested: map[string]shape{
 		"bridge":    {required: []string{"name", "version"}},
@@ -312,6 +347,14 @@ func validateInfo(i gen.Info) string {
 	}
 	if problem := validateLimits(i.Limits); problem != "" {
 		return problem
+	}
+	if i.Roles != nil {
+		if len(*i.Roles) == 0 {
+			return "roles is empty"
+		}
+		if problem := uniqueValid("roles", *i.Roles); problem != "" {
+			return problem
+		}
 	}
 	if t, err := i.LinkUrlTemplate.Get(); err == nil &&
 		(utf8.RuneCountInString(t) > 1024 || !linkURLTemplateRe.MatchString(t)) {

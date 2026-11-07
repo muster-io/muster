@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -236,6 +237,90 @@ func (s *Service) BridgeTarget(ctx context.Context, destinationID int64) (bridge
 	}
 	return bridge.Target{Conn: bridge.Conn{ID: r.ID, PublicID: r.PublicID, Version: r.Version, Client: c},
 		ChannelID: r.BridgeChannelID.String}, nil
+}
+
+// BridgeConnection is the Bridge Connection id with its client, kept until the Connection changes, for the
+// notifications of a Notification gateway (bridge.Targets); an id that names no Bridge Connection that is not deleted
+// is bridge.ErrNoTarget.
+func (s *Service) BridgeConnection(ctx context.Context, connectionID int64) (bridge.Conn, error) {
+	row, err := s.cfg.Store.GetConnection(ctx, dbgen.GetConnectionParams{OrgID: s.cfg.OrgID,
+		ID: pgtype.Int8{Int64: connectionID, Valid: true}})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.Type != TypeBridge) {
+		return bridge.Conn{}, bridge.ErrNoTarget
+	}
+	if err != nil {
+		return bridge.Conn{}, fmt.Errorf("read the connection %d: %w", connectionID, err)
+	}
+	c, err := s.cachedBridgeClient(row.ID, row.Version, func() (*bridge.Client, error) { return s.bridgeClient(row) })
+	if err != nil {
+		return bridge.Conn{}, err
+	}
+	return bridge.Conn{ID: row.ID, PublicID: row.PublicID, Version: row.Version, Client: c}, nil
+}
+
+// BridgeRoles are the roles of a Bridge Connection from its stored info (C-30.FR-1): messenger while the info is null
+// or declares none; nil for a Connection of another type.
+func (c Connection) BridgeRoles() []string {
+	if c.Type != TypeBridge {
+		return nil
+	}
+	return bridge.StoredRoles(c.BridgeInfo)
+}
+
+// GatewayOnly reports whether the Connection publicID is a Bridge Connection whose stored info declares roles without
+// messenger, a Notification gateway that cannot be a Destination (C-30.FR-1), for the Destination write path; an
+// unknown, deleted or other Connection is not, and the Destination check names it.
+func (s *Service) GatewayOnly(ctx context.Context, publicID string) (bool, error) {
+	row, err := s.row(ctx, s.cfg.Store, publicID)
+	if errors.Is(err, ErrNotFound) || (err == nil && row.Type != TypeBridge) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !slices.Contains(bridge.StoredRoles(row.BridgeInfo), bridge.RoleMessenger), nil
+}
+
+// CheckDemo runs the check of the demo Bridge Connection name at the start of `muster dev`, so that its stored info,
+// and so its roles, are current without a person checking it (C-30.FR-1); a Connection of that name that does not
+// exist or is not a Bridge Connection is left alone. Only a failed read of the Connection is an error, which ends the
+// start; a check that fails or cannot run — the bridge does not answer, no limiter token within the budget — is
+// logged as demo_check_failed and the start goes on: its requests are in the Request log, and the next check reads
+// info again.
+func (s *Service) CheckDemo(ctx context.Context, name string) error {
+	id, err := s.cfg.Store.FindConnectionByName(ctx, dbgen.FindConnectionByNameParams{OrgID: s.cfg.OrgID, Name: name})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("find the demo connection %s: %w", name, err)
+	}
+	row, err := s.cfg.Store.GetConnection(ctx, dbgen.GetConnectionParams{OrgID: s.cfg.OrgID,
+		ID: pgtype.Int8{Int64: id, Valid: true}})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.Type != TypeBridge) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the demo connection %s: %w", name, err)
+	}
+	res, err := s.Check(ctx, row.PublicID, nil)
+	reason := ""
+	switch {
+	case err != nil:
+		reason = err.Error()
+	case !res.OK:
+		for _, st := range res.Steps {
+			if !st.OK && !st.Skipped {
+				reason = strings.TrimSpace(st.Name + ": " + st.Code + " " + st.Message)
+				break
+			}
+		}
+	}
+	if err != nil || !res.OK {
+		s.cfg.Log.Log(ctx, logging.DemoCheckFailed, logging.F("connection", row.PublicID),
+			logging.F("error", reason))
+	}
+	return nil
 }
 
 // BridgeInfo is the info of the Bridge Connection conn for the Bridge delivery (bridge.Targets): Muster's copy, through

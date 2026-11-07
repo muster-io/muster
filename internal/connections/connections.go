@@ -229,9 +229,11 @@ type Input struct {
 	Limiter            Limiter
 }
 
-// ListFilter selects a page of Connections, of a type when set, in the order they were created, after the id After.
+// ListFilter selects a page of Connections, of a type and of a role (bridge.RoleMessenger or bridge.RoleGateway) when
+// set, in the order they were created, after the id After.
 type ListFilter struct {
 	Type  *string
+	Role  *string
 	After *int64
 	Limit int
 }
@@ -398,7 +400,7 @@ func (s *Service) CallbackURL(publicID string) string {
 func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	limit := min(max(f.Limit, 1), 1000)
 	rows, err := s.cfg.Store.ListConnections(ctx, dbgen.ListConnectionsParams{OrgID: s.cfg.OrgID,
-		Type: text(f.Type), AfterID: nullInt(f.After), PageSize: int32(limit) + 1})
+		Type: text(f.Type), Role: text(f.Role), AfterID: nullInt(f.After), PageSize: int32(limit) + 1})
 	if err != nil {
 		return Page{}, fmt.Errorf("list the connections: %w", err)
 	}

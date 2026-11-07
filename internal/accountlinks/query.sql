@@ -31,7 +31,8 @@ WHERE org_id = @org_id AND public_id = @public_id AND deleted_at IS NULL;
 
 -- ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
 -- a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
--- its bot can start a direct chat.
+-- its bot can start a direct chat. A Bridge Connection whose stored info lists roles without messenger, a Notification
+-- gateway alone, is left out: it looks nobody up and sends no account_link events (C-30.FR-1).
 -- name: ListLinkableConnections :many
 SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
        coalesce(bridge_info->>'user_lookup', '')::text AS user_lookup,
@@ -39,6 +40,7 @@ SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
            AS bot_can_start
 FROM connections
 WHERE org_id = @org_id AND deleted_at IS NULL
+  AND (type <> 'bridge' OR bridge_info->'roles' IS NULL OR bridge_info->'roles' @> '["messenger"]'::jsonb)
 ORDER BY type, lower(name), id;
 
 -- LockLinkUser locks the User a link is made for, so that the links of one User change one at a time.

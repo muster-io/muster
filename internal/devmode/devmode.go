@@ -249,6 +249,22 @@ func BridgeDemo() connections.Demo {
 		BaseURL: "http://" + BridgeAddr, BotToken: logging.Secret(BridgeConnectionBotToken)}
 }
 
+// The demo Notification gateway that `muster dev` ensures and checks at start (C-30.FR-1): "Example Gateway" on the
+// fake bridge, in poll mode, with the published token of the fake's gateway bot, whose info declares only the role
+// gateway.
+const (
+	GatewayConnectionName     = "Example Gateway"
+	GatewayConnectionBotToken = fakebridge.GatewayToken
+)
+
+// GatewayDemo is the demo Connection "Example Gateway", to the fake bridge's gateway bot in poll mode, under the fake's
+// GatewayPrefix, so that the faults tests script for the fake's other bots never reach its polls; it cannot be a
+// Destination.
+func GatewayDemo() connections.Demo {
+	return connections.Demo{Type: connections.TypeBridge, Name: GatewayConnectionName,
+		BaseURL: "http://" + BridgeAddr + fakebridge.GatewayPrefix, BotToken: logging.Secret(GatewayConnectionBotToken)}
+}
+
 // The demo Slack Connection that `muster dev` ensures at start: "Example Slack" on the fake Slack server's first app,
 // in socket mode, with its published bot token and app-level token.
 const (
@@ -309,9 +325,11 @@ func MattermostRoute(serverURL string, token logging.Secret) string {
 }
 
 // BridgeRoute is the Bridge route of `muster dev`: a Bridge Connection on BridgeRouteURL whose token is one of the fake
-// bridge's published tokens calls the fake bridge; any other address or token calls the address the Connection names.
+// bridge's published tokens — of its gateway bot too — calls the fake bridge; any other address or token calls the
+// address the Connection names.
 func BridgeRoute(baseURL string, token logging.Secret) string {
-	if sameAddress(baseURL, BridgeRouteURL) && (token == BridgeConnectionBotToken || token == BridgeSecondBotToken) {
+	if sameAddress(baseURL, BridgeRouteURL) && (token == BridgeConnectionBotToken || token == BridgeSecondBotToken ||
+		token == GatewayConnectionBotToken) {
 		return "http://" + BridgeAddr
 	}
 	return ""

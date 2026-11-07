@@ -7,6 +7,7 @@ import type { BridgeInfoBridge } from './bridgeInfoBridge';
 import type { BridgeInfoEventDeliveryItem } from './bridgeInfoEventDeliveryItem';
 import type { BridgeInfoMessenger } from './bridgeInfoMessenger';
 import type { BridgeInfoProtocolVersion } from './bridgeInfoProtocolVersion';
+import type { BridgeInfoRole } from './bridgeInfoRole';
 import type { BridgeInfoUserLookup } from './bridgeInfoUserLookup';
 import type { BridgeLimits } from './bridgeLimits';
 
@@ -34,4 +35,9 @@ export interface BridgeInfo {
      * @pattern ^https?://\S*\{token\}\S*$
      */
   link_url_template?: string | null;
+  /**
+     * What the bridge is; `messenger` when it is missing.
+     * @minItems 1
+     */
+  roles?: BridgeInfoRole[];
 }

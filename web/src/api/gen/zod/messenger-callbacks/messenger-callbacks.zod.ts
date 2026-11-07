@@ -101,6 +101,10 @@ export const bridgeEventBodyThreeTwoUserDisplayNameMax = 200;
 export const bridgeEventBodyThreeTwoUserHandleMax = 320;
 
 export const bridgeEventBodyFourOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventBodyFiveOneIdRegExp = new RegExp('^[!-~]{1,200}$');
+export const bridgeEventBodyFiveTwoNotificationIdMax = 512;
+
+export const bridgeEventBodyFiveTwoDataRegExp = new RegExp('^[!-~]{1,64}$');
 
 
 export const BridgeEventBody = zod.union([zod.object({
@@ -157,6 +161,16 @@ export const BridgeEventBody = zod.union([zod.object({
   "message_id": zod.string()
 }).describe('A message of the bot was deleted in the messenger; sent when `capabilities.deletion_events` is declared.')).and(zod.object({
   "type": zod.enum(['message_deleted'])
+})),zod.object({
+  "id": zod.string().regex(bridgeEventBodyFiveOneIdRegExp).describe('Stable across retries and polls; Muster handles each id of a Connection once. Printable ASCII without spaces, so that it can travel as the `webhook-id` header.'),
+  "type": zod.string(),
+  "occurred_at": zod.iso.datetime({"offset":true}).describe('When it happened in the messenger, or when the bridge learned of it.')
+}).describe('The members of every Bridge event, a copy of the schema `EventBase` of the Bridge protocol.').and(zod.object({
+  "type": zod.literal("notification_acknowledged"),
+  "notification_id": zod.string().min(1).max(bridgeEventBodyFiveTwoNotificationIdMax),
+  "data": zod.string().regex(bridgeEventBodyFiveTwoDataRegExp)
+}).describe('The person acknowledged a notification of a Notification gateway; sent only by a bridge in the role `gateway`.')).and(zod.object({
+  "type": zod.enum(['notification_acknowledged'])
 }))]).describe('An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol (`api/bridge.yaml`). `type` selects the variant.')
 
 export const BridgeEventResponse = zod.void()

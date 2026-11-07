@@ -429,3 +429,39 @@ func TestInteractiveNoLimiter(t *testing.T) {
 		}
 	}
 }
+
+// notifyGateway is a Notification gateway that records the calls of Notify.
+type notifyGateway struct {
+	calls []delivery.Call
+	sent  []delivery.Notification
+}
+
+func (g *notifyGateway) Notify(_ context.Context, c delivery.Call, n delivery.Notification) delivery.Outcome {
+	g.calls, g.sent = append(g.calls, c), append(g.sent, n)
+	return delivery.Outcome{Kind: delivery.OutcomeOK, MessageID: "n1"}
+}
+
+// TestInteractiveNotify is C-30.FR-3 and C-30.FR-4 on the interactive path: NotifyOp, limited by the gateway's
+// Connection, takes a token of the Connection's bucket and calls Notify in the interactive client class with its key;
+// once the Connection's tokens are taken, the next notification is a *LimitedError and calls nothing.
+func TestInteractiveNotify(t *testing.T) {
+	e := newEnv(t)
+	e.db.connLimits[connID] = [2]int64{1, 60}
+	conn := int64(connID)
+	in := e.interactive()
+	g := &notifyGateway{}
+	n := delivery.Notification{Connection: conn, Contact: "+10000000001", Text: "code 123456", Language: "en"}
+	out, err := in.Do(t.Context(), delivery.Subject{Connection: &conn}, delivery.NotifyOp(g, "code-1", n))
+	if err != nil || out.Kind != delivery.OutcomeOK || out.MessageID != "n1" || len(g.calls) != 1 ||
+		g.calls[0].Class != "interactive" || g.calls[0].Key != "code-1" || g.sent[0] != n {
+		t.Fatalf("notify = %+v, %v, calls %+v", out, err, g.calls)
+	}
+	if b := e.db.buckets[bucketKey{"connection", connID}]; b == nil || b.tokens >= 1 {
+		t.Errorf("the connection bucket %+v", b)
+	}
+	_, err = in.Do(t.Context(), delivery.Subject{Connection: &conn}, delivery.NotifyOp(g, "code-2", n))
+	var limited *delivery.LimitedError
+	if !errors.As(err, &limited) || len(g.calls) != 1 {
+		t.Errorf("a notification without a token = %v, calls %d", err, len(g.calls))
+	}
+}

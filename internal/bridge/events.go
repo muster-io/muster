@@ -24,10 +24,11 @@ import (
 
 // The types of the events of the Bridge protocol (C-22.FR-11).
 const (
-	TypePress          = "press"
-	TypeThreadMessage  = "thread_message"
-	TypeAccountLink    = "account_link"
-	TypeMessageDeleted = "message_deleted"
+	TypePress                    = "press"
+	TypeThreadMessage            = "thread_message"
+	TypeAccountLink              = "account_link"
+	TypeMessageDeleted           = "message_deleted"
+	TypeNotificationAcknowledged = "notification_acknowledged"
 )
 
 // The event delivery modes of a Bridge Connection (connection.bridge.event_delivery).
@@ -59,6 +60,8 @@ const (
 var (
 	eventIDRe = regexp.MustCompile(`^[!-~]{1,200}$`)
 	tokenRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+	// actionDataRe is the data of a button or of a notification's action, as api/bridge.yaml allows it.
+	actionDataRe = regexp.MustCompile(`^[!-~]{1,64}$`)
 )
 
 // ErrNotAnEvent is a body that is no event of the Bridge protocol: not a JSON object, of a type the protocol does not
@@ -71,18 +74,20 @@ var ErrNoConnection = errors.New("no such bridge connection")
 
 // Event is one event of the Bridge protocol, checked against api/bridge.yaml, since the generated models check
 // nothing. MessageID is a press's, a Thread message's and a message_deleted event's; User a press's, a Thread
-// message's and an account_link event's; Data a press's; Text and ThreadRef a Thread message's; Token an account_link
-// event's.
+// message's and an account_link event's; Data a press's and a notification_acknowledged event's, the action data of
+// its notification; Text and ThreadRef a Thread message's; Token an account_link event's; NotificationID a
+// notification_acknowledged event's.
 type Event struct {
-	ID         string
-	Type       string
-	OccurredAt time.Time
-	MessageID  string
-	User       gen.Person
-	Data       string
-	Text       string
-	ThreadRef  *string
-	Token      string
+	ID             string
+	Type           string
+	OccurredAt     time.Time
+	MessageID      string
+	User           gen.Person
+	Data           string
+	Text           string
+	ThreadRef      *string
+	Token          string
+	NotificationID string
 }
 
 func notAnEvent(format string, args ...any) error {
@@ -91,14 +96,15 @@ func notAnEvent(format string, args ...any) error {
 
 // required are the members each type of event must have, besides id, type and occurred_at.
 var required = map[string][]string{
-	TypePress:          {"message_id", "user", "data"},
-	TypeThreadMessage:  {"message_id", "thread_ref", "user", "text"},
-	TypeAccountLink:    {"token", "user"},
-	TypeMessageDeleted: {"message_id"},
+	TypePress:                    {"message_id", "user", "data"},
+	TypeThreadMessage:            {"message_id", "thread_ref", "user", "text"},
+	TypeAccountLink:              {"token", "user"},
+	TypeMessageDeleted:           {"message_id"},
+	TypeNotificationAcknowledged: {"notification_id", "data"},
 }
 
 // DecodeEvent decodes one event of the Bridge protocol (C-22.FR-11) with the generated models and checks it against
-// api/bridge.yaml: a JSON object of one of the four types, with its id, occurred_at and every member its type requires,
+// api/bridge.yaml: a JSON object of one of the five types, with its id, occurred_at and every member its type requires,
 // within their bounds; members it does not know are ignored. Anything else is ErrNotAnEvent.
 func DecodeEvent(raw []byte) (Event, error) {
 	var members map[string]json.RawMessage
@@ -154,8 +160,16 @@ func DecodeEvent(raw []byte) (Event, error) {
 		}
 	case gen.MessageDeletedEvent:
 		ev.MessageID = e.MessageId
+	case gen.NotificationAcknowledgedEvent:
+		ev.NotificationID, ev.Data = e.NotificationId, e.Data
+		if !validID(ev.NotificationID) {
+			return Event{}, notAnEvent("notification_id is not 1 to %d characters", maxID)
+		}
+		if !actionDataRe.MatchString(ev.Data) {
+			return Event{}, notAnEvent("data is not 1 to 64 printable ASCII characters without spaces")
+		}
 	}
-	if ev.Type != TypeMessageDeleted {
+	if ev.Type != TypeMessageDeleted && ev.Type != TypeNotificationAcknowledged {
 		if err := checkPerson(members["user"], ev.User); err != nil {
 			return Event{}, err
 		}
@@ -218,6 +232,13 @@ type Connections interface {
 		error)
 }
 
+// Acknowledgements handle the notification_acknowledged events of Notification gateways (C-30.FR-6), declared by
+// their consumer; S-173 registers them. Acknowledged runs inside the event's claim and returns the text to answer the
+// person with, empty for none.
+type Acknowledgements interface {
+	Acknowledged(ctx context.Context, c Conn, ev Event) (string, error)
+}
+
 // handled is what the handling of an event leads to once its claim committed: the line to log, when there is one; the
 // text to answer the person behind the event with, empty for none; what failed without failing the event, such as a
 // Command, logged with the line; and after, when set, what runs once the answer was made or failed, with its error,
@@ -246,6 +267,9 @@ type Events struct {
 	Linker Linker
 	// Commands run the Commands of presses and Text commands through the dispatcher.
 	Commands Commands
+	// Acknowledgements handle notification_acknowledged events; nil records them as handled and logs
+	// bridge_event_unhandled.
+	Acknowledgements Acknowledgements
 	// Roles are the Permissions of each Role, which a linked User acts with.
 	Roles auth.Roles
 	// Keys verify the signed data of a press: the Keyring.
@@ -352,7 +376,9 @@ func (e *Events) Handle(ctx context.Context, c Conn, ev Event) error {
 // a Text command runs its Command, and any other is ignored (commands.go). A message_deleted event starts the deleted
 // Root message flow at once when it names the current Root message of an open delivery, and changes nothing
 // otherwise; a failed start fails the event (C-22.FR-10). An account_link event links the sender's account through
-// the Linker, whatever its age (links.go).
+// the Linker, whatever its age (links.go). A notification_acknowledged event goes to the Acknowledgements, whose
+// answer is made like any other; without them it is recorded as handled, logged as bridge_event_unhandled and so
+// acknowledged (C-22.FR-11), whatever the Connection's roles.
 func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error) {
 	if err := ctx.Err(); err != nil {
 		return handled{}, err
@@ -373,6 +399,16 @@ func (e *Events) dispatch(ctx context.Context, c Conn, ev Event) (handled, error
 		if err := e.Bindings.RootDeleted(ctx, c.ID, ev.MessageID); err != nil {
 			return handled{}, err
 		}
+	case TypeNotificationAcknowledged:
+		if e.Acknowledgements == nil {
+			return handled{line: logging.BridgeEventUnhandled, fields: []logging.Field{
+				logging.F("connection", c.PublicID), logging.F("event_id", ev.ID), logging.F("type", ev.Type)}}, nil
+		}
+		answer, err := e.Acknowledgements.Acknowledged(ctx, c, ev)
+		if err != nil {
+			return handled{}, err
+		}
+		return handled{answer: answer}, nil
 	}
 	return handled{}, nil
 }

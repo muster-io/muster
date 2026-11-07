@@ -16,7 +16,11 @@ export const listConnectionsQueryLimitMax = 500;
 export const ListConnectionsQueryParams = zod.object({
   "cursor": zod.string().optional().describe('Opaque cursor from `next_cursor` of the previous page. Offsets are not supported.'),
   "limit": zod.int().min(1).max(listConnectionsQueryLimitMax).default(listConnectionsQueryLimitDefault).describe('Page size (`api.page_size`).'),
-  "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']).optional().describe('Filter by type.')
+  "type": zod.enum(['mattermost', 'telegram', 'bridge', 'slack']).optional().describe('Filter by type.'),
+  "role": zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).optional().describe('Filter by role: `messenger` lists every Mattermost, Telegram and Slack Connection and the Bridge Connections whose stored `info` has the role `messenger`, which a bridge that declares no roles has; `gateway` only the Bridge Connections whose stored `info` has the role `gateway`.')
 })
 
 
@@ -56,6 +60,8 @@ export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax =
 
 
 export const listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
 
 
 
@@ -185,9 +191,17 @@ export const ListConnectionsResponse = zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax).regex(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateMax).regex(listConnectionsResponseItemsItemThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -395,6 +409,8 @@ export const createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new 
 
 
 
+
+
 export const createConnectionResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const createConnectionResponseFourTwoSocketOneOtherConnectionsMin = 0;
 
@@ -520,9 +536,17 @@ export const CreateConnectionResponse = zod.union([zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(createConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -675,6 +699,7 @@ export const checkConnectionDraftResponseInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
 export const checkConnectionDraftResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -732,7 +757,11 @@ export const CheckConnectionDraftResponse = zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(checkConnectionDraftResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionDraftResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
   "slack": zod.union([zod.object({
   "team_id": zod.string().describe('The workspace\'s id (`T…`).'),
@@ -790,6 +819,8 @@ export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
+
 
 
 
@@ -918,9 +949,17 @@ export const GetConnectionResponse = zod.union([zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(getConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -1137,6 +1176,8 @@ export const updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp = new 
 
 
 
+
+
 export const updateConnectionResponseFourTwoIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 export const updateConnectionResponseFourTwoSocketOneOtherConnectionsMin = 0;
 
@@ -1262,9 +1303,17 @@ export const UpdateConnectionResponse = zod.union([zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateMax).regex(updateConnectionResponseThreeTwoInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).describe('The last `info` a Connection check read, with the members of `BridgeInfo`; Muster stores the whole answer, and members this version does not know are not returned. Null before the first check and after the base URL or the token changed.'),
   "info_read_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster read `info`; null while `info` is null.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -1386,6 +1435,7 @@ export const checkConnectionResponseInfoOneLinkUrlTemplateMax = 1024;
 
 
 export const checkConnectionResponseInfoOneLinkUrlTemplateRegExp = new RegExp('^https?://\\S*\\{token\\}\\S*$');
+
 export const checkConnectionResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
 
 
@@ -1443,7 +1493,11 @@ export const CheckConnectionResponse = zod.object({
 }).describe('The limits of the bridge, a copy of the schema `Limits` of the Bridge protocol.'),
   "user_lookup": zod.enum(['email', 'login', 'username', 'user_id', 'none']).describe('What a person enters to be found for an Account link by code, and what `findUsers` searches by. `none` offers only the token sent to the bot.'),
   "event_delivery": zod.array(zod.enum(['poll', 'push'])).min(1).describe('The event delivery modes the bridge offers; each Connection chooses one.'),
-  "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.')
+  "link_url_template": zod.string().max(checkConnectionResponseInfoOneLinkUrlTemplateMax).regex(checkConnectionResponseInfoOneLinkUrlTemplateRegExp).nullish().describe('An `http` or `https` link that opens a chat with the bot and hands it the Account link token, with `{token}` where the token goes.'),
+  "roles": zod.array(zod.enum({
+  BridgeInfoRoleMessenger: 'messenger',
+  BridgeInfoRoleGateway: 'gateway',
+}).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).optional().describe('What the bridge is; `messenger` when it is missing.')
 }).describe('The `info` of a bridge, a copy of the schema `Info` of the Bridge protocol (`api/bridge.yaml`).'),zod.null()]).optional().describe('Bridge only. The `info` that the step `info` read, with the members of `BridgeInfo` — stored on the Connection by `checkConnection`, never by `checkConnectionDraft` —, null when that step failed or was skipped; omitted for the other types.'),
   "slack": zod.union([zod.object({
   "team_id": zod.string().describe('The workspace\'s id (`T…`).'),

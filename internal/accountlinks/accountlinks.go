@@ -342,7 +342,8 @@ type LinkableConnection struct {
 }
 
 // Connections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), each Bridge Connection
-// with how its accounts can be linked as its stored info says.
+// with how its accounts can be linked as its stored info says; a Bridge Connection whose stored info declares only the
+// role gateway is not one to link through (C-30.FR-1).
 func (s *Service) Connections(ctx context.Context) ([]LinkableConnection, error) {
 	rows, err := s.cfg.Store.ListLinkableConnections(ctx, s.cfg.OrgID)
 	if err != nil {

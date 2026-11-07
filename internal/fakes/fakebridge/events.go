@@ -83,17 +83,18 @@ const (
 	pushSecretPrefix = "whsec_"
 )
 
-// Event is an event of a bot as GET /_fake/events lists it: the bot it belongs to, 1 for Token and 2 for SecondToken,
-// and the event as the bot sends it, by polling and by push.
+// Event is an event of a bot as GET /_fake/events lists it: the bot it belongs to, 1 for Token, 2 for SecondToken and 3
+// for GatewayToken, and the event as the bot sends it, by polling and by push.
 type Event struct {
 	Bot   int             `json:"bot"`
 	Event json.RawMessage `json:"event"`
 }
 
 // Answer is an answer Muster made with answerEvent, as GET /_fake/answers lists it: the bot, the event and its type,
-// the message the event is about, empty for an account_link, the person behind it, the text, and where the person sees
-// it — ephemeral or popup for a press when the messenger can answer privately, direct for an account_link, otherwise
-// thread, in the Thread of the message.
+// the message the event is about — the notification for a notification_acknowledged, empty for an account_link — the
+// person behind it, empty for a notification_acknowledged, the text, and where the person sees it — ephemeral or popup
+// for a press when the messenger can answer privately, direct for an account_link, notification for a
+// notification_acknowledged, otherwise thread, in the Thread of the message.
 type Answer struct {
 	Bot       int    `json:"bot"`
 	EventID   string `json:"event_id"`
@@ -286,9 +287,10 @@ func (f *Fake) pollEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // answerEvent answers answerEvent: a repeated Idempotency-Key gets its first answer, replayed; otherwise the answer is
-// recorded for an event of the bot that a person caused, a press, a Thread message or an account_link, and shown
-// privately for a press when capabilities.private_answers allows it — ephemeral before popup — in the direct chat with
-// the bot for an account_link, and in the Thread of its message otherwise. An event the bot does not know, and a
+// recorded for an event of the bot that a person caused, a press, a Thread message, an account_link or a
+// notification_acknowledged, and shown privately for a press when capabilities.private_answers allows it — ephemeral
+// before popup — in the direct chat with the bot for an account_link, as notification for a notification_acknowledged,
+// told in the call, and in the Thread of its message otherwise. An event the bot does not know, and a
 // message_deleted event, are gone.
 func (f *Fake) answerEvent(w http.ResponseWriter, r *http.Request) {
 	key, ok := idempotencyKey(w, r)
@@ -316,8 +318,11 @@ func (f *Fake) answerEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shown := gen.AnswerShownShownAsThread
-	if ev.typ == TypeAccountLink {
+	switch ev.typ {
+	case TypeAccountLink:
 		shown = gen.AnswerShownShownAsDirect
+	case TypeNotificationAcknowledged:
+		shown = gen.AnswerShownShownAsNotification
 	}
 	if ev.typ == TypePress && f.config.Capabilities.PrivateAnswers != nil {
 		switch private := *f.config.Capabilities.PrivateAnswers; {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
@@ -40,7 +41,8 @@ func TestBridgeCheckUsage(t *testing.T) {
 		{"ftp", "the bridge URL is not an absolute http", []string{"ftp://a", "--token-file", token, "--channel", "c"}},
 		{"query", "the bridge URL is not an absolute http", []string{"http://a/?x=1", "--token-file", token}},
 		{"no token file", "--token-file is required", []string{"http://a", "--channel", "c"}},
-		{"no channel", "--channel is required", []string{"http://a", "--token-file", token, "--channel", " "}},
+		{"long contact", "--contact is longer than 200 characters", []string{"http://a", "--token-file", token,
+			"--contact", strings.Repeat("1", 201)}},
 		{"unknown flag", "flag provided but not defined: -nope", []string{"http://a", "--nope"}},
 		{"push URL", "--push-url is not an absolute http or https URL", []string{"http://a", "--token-file", token,
 			"--channel", "c", "--push-url", "localhost:1"}},
@@ -120,9 +122,12 @@ func TestBridgeCheckAgainstTheFake(t *testing.T) {
 		}
 		outs = append(outs, stdout.String())
 	}
-	want := "PASS info\nPASS channel_check\nPASS post\nPASS replayed_key\nPASS buttons\nPASS edit\nPASS thread_reply\n" +
+	want := "PASS info\nROLES messenger\nPASS channel_check\nPASS post\nPASS replayed_key\nPASS buttons\nPASS edit\n" +
+		"PASS thread_reply\n" +
 		"PASS thread_ref\nPASS forbidden_channel\nPASS user_lookup\nPASS direct_message\nPASS delete\nPASS poll\n" +
-		"SKIP press: --no-interactive\nSKIP push: --no-interactive\nPASS answer\n"
+		"SKIP press: --no-interactive\nSKIP push: --no-interactive\nPASS answer\n" +
+		"SKIP notification: the bridge is not in the role gateway\n" +
+		"SKIP notification_acknowledged: the bridge is not in the role gateway\n"
 	if outs[0] != want || outs[1] != want {
 		t.Fatalf("stdout\n%s\n%s", outs[0], outs[1])
 	}
@@ -155,5 +160,82 @@ func TestBridgeCheckInterrupted(t *testing.T) {
 		secretFile(t, "push", "whsec_YQ==\n")}, &stdout, &stderr)
 	if code != exitFailure || stdout.Len() != 0 || stderr.String() != "muster bridge check: interrupted\n" {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+// waitWriter is the standard output of an interactive check: it hands each line to on as soon as it is written.
+type waitWriter struct {
+	mu      sync.Mutex
+	pending string
+	out     strings.Builder
+	on      func(line string)
+}
+
+func (w *waitWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.out.Write(p)
+	w.pending += string(p)
+	for {
+		line, rest, ok := strings.Cut(w.pending, "\n")
+		if !ok {
+			return len(p), nil
+		}
+		w.pending = rest
+		w.on(line)
+	}
+}
+
+// TestBridgeCheckGateway is C-22.FR-21 as revised and C-30.FR-2 through the command: against the fake's gateway bot,
+// without --channel, the output names the roles, skips the messenger's steps, sends a notification to --contact and,
+// interactively, passes notification_acknowledged once the fake acknowledges it; a check without --contact skips both
+// gateway steps; a check of a messenger without --channel is a usage error once info named the role, exit 2, before any
+// step of the messenger.
+func TestBridgeCheckGateway(t *testing.T) {
+	f := fakebridge.New()
+	if err := f.Start(t.Context(), "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close(context.WithoutCancel(t.Context())) })
+	token := secretFile(t, "token", fakebridge.GatewayToken+"\n")
+	stdout := &waitWriter{on: func(line string) {
+		if _, id, ok := strings.Cut(line, ", notification_id "); ok && strings.HasPrefix(line, "WAIT ") {
+			if _, err := f.Acknowledge(t.Context(), fakebridge.Acknowledge{NotificationID: id}); err != nil {
+				t.Error(err)
+			}
+		}
+	}}
+	var stderr bytes.Buffer
+	code := BridgeCheckCommand(t.Context(), []string{f.URL(), "--token-file", token, "--contact", " +10000000001 "},
+		stdout, &stderr)
+	out := stdout.out.String()
+	if code != exitOK || stderr.Len() != 0 || !strings.HasPrefix(out, "PASS info\nROLES gateway\n"+
+		"SKIP channel_check: the bridge is not in the role messenger\n") ||
+		!strings.HasSuffix(out, "PASS answer\nPASS notification\nWAIT notification_acknowledged: acknowledge the "+
+			"notification sent to the contact within 5m0s, notification_id n1\nPASS notification_acknowledged\n") ||
+		strings.Contains(out, fakebridge.GatewayToken) {
+		t.Fatalf("exit %d, stdout\n%s\nstderr %s", code, out, stderr.String())
+	}
+	if ns := f.Notifications(); len(ns) != 1 || ns[0].Contact != "+10000000001" {
+		t.Errorf("notifications %+v", ns)
+	}
+
+	var plain bytes.Buffer
+	if code := BridgeCheckCommand(t.Context(), []string{f.URL(), "--token-file", token}, &plain, &stderr); code !=
+		exitOK || !strings.HasSuffix(plain.String(), "SKIP notification: no --contact\n"+
+		"SKIP notification_acknowledged: no --contact\n") {
+		t.Fatalf("without --contact: exit %d, stdout\n%s", code, plain.String())
+	}
+	plain.Reset()
+	stderr.Reset()
+	messenger := secretFile(t, "messenger", fakebridge.SecondToken)
+	if code := BridgeCheckCommand(t.Context(), []string{f.URL(), "--token-file", messenger}, &plain, &stderr); code !=
+		exitUsage || plain.String() != "PASS info\nROLES messenger\n" || stderr.String() != "muster bridge check: "+
+		"--channel is required for a bridge in the role messenger\n\n"+bridgeUsage {
+		t.Fatalf("a messenger without --channel: exit %d, stdout\n%s\nstderr\n%s", code, plain.String(),
+			stderr.String())
+	}
+	if ms := f.Messages(); len(ms) != 0 {
+		t.Errorf("a messenger step ran without --channel: %+v", ms)
 	}
 }

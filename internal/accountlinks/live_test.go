@@ -824,12 +824,17 @@ func TestLiveBridgeLinks(t *testing.T) {
 		}
 		const info = `{"protocol_version": "1", "user_lookup": "email", "capabilities": {"direct_messages":
 			{"bot_can_start": true}}, "link_url_template": "https://chat.example.org/bot?start={token}"}`
+		// A Notification gateway alone is no Connection to link through; one with both roles is (C-30.FR-1).
+		const gateway = `{"protocol_version": "1", "user_lookup": "none", "capabilities": {}, "roles": ["gateway"]}`
+		const both = `{"protocol_version": "1", "user_lookup": "none", "capabilities": {},
+			"roles": ["messenger", "gateway"]}`
 		conns := map[string]int64{}
 		for _, c := range []struct {
 			id, typ, name string
 			info          *string
 		}{{"CNAAAAAAAAAAT1", "telegram", "tg", nil}, {"CNAAAAAAAAAAB1", "bridge", "Example Bridge", new(info)},
-			{"CNAAAAAAAAAAB2", "bridge", "br", nil}} {
+			{"CNAAAAAAAAAAB2", "bridge", "br", nil}, {"CNAAAAAAAAAAG1", "bridge", "Example Gateway", new(gateway)},
+			{"CNAAAAAAAAAAG2", "bridge", "z both", new(both)}} {
 			var id int64
 			if err := d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name,
 				telegram_bot_api_base_url, telegram_update_mode, bridge_base_url, bridge_event_delivery, bridge_info,
@@ -870,12 +875,13 @@ func TestLiveBridgeLinks(t *testing.T) {
 			}
 			return n
 		}
-		// The Connections with the link methods of their stored info.
+		// The Connections with the link methods of their stored info, the gateway alone left out.
 		cs, err := svc.Connections(ctx)
-		if err != nil || len(cs) != 3 || cs[0].Name != "br" || !slices.Equal(cs[0].LinkMethods, []string{"token"}) ||
+		if err != nil || len(cs) != 4 || cs[0].Name != "br" || !slices.Equal(cs[0].LinkMethods, []string{"token"}) ||
 			cs[0].HandleKind != "" || cs[1].Name != "Example Bridge" ||
 			!slices.Equal(cs[1].LinkMethods, []string{"token", "code"}) || cs[1].HandleKind != "email" ||
-			cs[2].Messenger != "telegram" || cs[2].LinkMethods != nil {
+			cs[2].Name != "z both" || !slices.Equal(cs[2].LinkMethods, []string{"token"}) ||
+			cs[3].Messenger != "telegram" || cs[3].LinkMethods != nil {
 			t.Fatalf("Connections = %+v, %v", cs, err)
 		}
 		// A token: its link from the stored template, and two events with it at once link once.

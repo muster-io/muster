@@ -2,15 +2,20 @@
 // Copyright The Muster Authors
 
 // Package fakebridge is the fake bridge of the Bridge protocol (api/bridge.yaml) for tests and `muster dev`. It serves
-// two bots, one per published token, each with its own state, as the protocol's "one token, one bot" asks: Token,
-// which the demo Connection of `muster dev` uses, and SecondToken. getInfo answers the configured info — the
-// messenger "Example chat", every feature on and both event delivery modes by default — checkChannel answers the
-// configured channels (channels.go), postMessage, editMessage and replyInThread keep the messages of each bot with
-// their edits and Thread replies, and deleteMessage marks a message of the bot deleted, without a message_deleted
-// event, answering 204 also for one already deleted, of the other bot or unknown (messages.go), pollEvents and
-// answerEvent serve the events of each bot (events.go), findUsers and sendDirectMessage serve Account links by code
-// (people.go), and every request with any other token, none or a revoked one gets 401. Operations that no story has
-// added yet answer 501.
+// three bots, one per published token, each with its own state, as the protocol's "one token, one bot" asks: Token,
+// which the demo Connection "Example Bridge" of `muster dev` uses, SecondToken, and GatewayToken, a Notification
+// gateway whose info declares only the role gateway, which the demo Connection "Example Gateway" uses. getInfo answers
+// the configured info — the messenger "Example chat", every feature on and both event delivery modes by default; for
+// the gateway bot, the provider "Example Gateway" without a messenger's features, with no user lookup — with the roles
+// /_fake/config sets for the token, none for the first two bots by default, as a bridge written before roles existed
+// sends it; sendNotification records the notifications of each bot (notifications.go), and a bot without the role
+// messenger answers 501 to the operations of a messenger; every operation is served under GatewayPrefix too;
+// checkChannel answers the configured channels (channels.go), postMessage, editMessage and replyInThread keep the
+// messages of each bot with their edits and Thread replies, and deleteMessage marks a message of the bot deleted,
+// without a message_deleted event, answering 204 also for one already deleted, of the other bot or unknown
+// (messages.go), pollEvents and answerEvent serve the events of each bot (events.go), findUsers and sendDirectMessage
+// serve Account links by code (people.go), and every request with any other token, none or a revoked one gets 401.
+// Operations that no story has added yet answer 501.
 //
 // Each bot keeps the Idempotency-Key of every post and Thread reply that succeeded and answers a repeated key with
 // its first result and replayed: true, unless replays are turned off, as for a bridge that lost its keys. The faults
@@ -35,12 +40,15 @@
 //
 // The control endpoints under /_fake/ come from the fake-server harness (requests, faults) and add GET and PUT
 // /_fake/config: the protocol version, the capabilities, the limits, the user lookup, the link_url_template, the event
-// delivery modes, the revoked tokens, a padding that makes info larger, the channels, which both bots share, replays,
-// the push target and the people the bot cannot write to; GET /_fake/messages, the messages of both bots with their
-// edits and replies, and DELETE /_fake/messages/{id}, which deletes a message as a person would; the event endpoints
-// above; GET /_fake/events, the events of both bots with their bot; GET /_fake/answers, the answers Muster made; and
-// GET /_fake/direct-messages, the direct messages the bots sent. The fake answers what it is configured to, also when that breaks
-// the protocol, so that the checks of Muster can be tried against a broken bridge.
+// delivery modes, the revoked tokens, a padding that makes info larger, the channels, which the bots share, replays,
+// the push target, the people the bot cannot write to and the roles of each bot; GET /_fake/messages, the messages of
+// both bots with their edits and replies, and DELETE /_fake/messages/{id}, which deletes a message as a person would;
+// the event endpoints above; GET /_fake/events, the events of both bots with their bot; GET /_fake/answers, the answers
+// Muster made; and GET /_fake/direct-messages, the direct messages the bots sent; GET /_fake/notifications, the
+// notifications the bots sent, and POST /_fake/acknowledge {notification_id[, occurred_at]}, which acknowledges one as
+// its person would and queues notification_acknowledged with its action data for its bot (notifications.go). The fake
+// answers what it is configured to, also when that breaks the protocol, so that the checks of Muster can be tried
+// against a broken bridge.
 package fakebridge
 
 import (
@@ -60,18 +68,28 @@ import (
 	"github.com/muster-io/muster/internal/fakes/fakeserver"
 )
 
-// The published tokens of the two bots.
+// The published tokens of the three bots.
 const (
-	Token       = "muster-dev-bridge-token"   //nolint:gosec // G101: the published development token of the fake
-	SecondToken = "muster-dev-bridge-token-b" //nolint:gosec // G101: the published development token of the fake
+	Token        = "muster-dev-bridge-token"   //nolint:gosec // G101: the published development token of the fake
+	SecondToken  = "muster-dev-bridge-token-b" //nolint:gosec // G101: the published development token of the fake
+	GatewayToken = "muster-dev-gateway-token"  //nolint:gosec // G101: the published development token of the fake
 )
 
-// What getInfo names.
+// What getInfo names; GatewayName is the provider the gateway bot names as its messenger.
 const (
 	MessengerName = "Example chat"
+	GatewayName   = "Example Gateway"
 	BridgeName    = "Example bridge"
 	BridgeVersion = "1.0.0"
 )
+
+// gatewayMaxBodyLength is limits.max_body_length of the gateway bot, the protocol's floor: it posts no messages.
+const gatewayMaxBodyLength = 500
+
+// GatewayPrefix is a path prefix under which the fake serves the protocol too, which the demo Connection "Example
+// Gateway" of `muster dev` has in its base URL: the faults of the harness and the requests that tests count match the
+// paths without it, so that the polls of that Connection never take a fault a test scripted for another Connection's.
+const GatewayPrefix = "/gateway"
 
 // MaxPadding bounds info_padding_bytes: enough for an info larger than the 4 MiB the outbound client reads.
 const MaxPadding = 8 << 20
@@ -100,50 +118,55 @@ const defaultConfig = `{
   "channels": {"ch-alerts": "alerts", "ch-alerts-prod": "alerts-prod", "ch-nobot": null},
   "replays": true,
   "push": null,
-  "dm_blocked": []
+  "dm_blocked": [],
+  "roles": {"muster-dev-gateway-token": ["gateway"]}
 }`
 
-// Config is the configuration of the fake, as GET and PUT /_fake/config show it. ProtocolVersion, Capabilities,
-// Limits, UserLookup, LinkURLTemplate — left out while nil — and EventDelivery are served in info as they are, also when
-// they break the protocol; UserLookup is also the kind of handle findUsers searches by and the events carry; Revoked
-// tokens get 401; InfoPaddingBytes adds a
-// member "padding" of that many bytes to info, which the protocol allows and Muster ignores, to make it larger.
-// Channels are the channels checkChannel knows, by id: the name of one the bot can use, or null for one it cannot;
-// any other id is one it cannot use either; postMessage posts only to a channel the bot can use. With Replays, a
-// repeated Idempotency-Key answers the first result; without, every request posts again. Push is where the events of
-// both bots are pushed to, nil for nowhere. DMBlocked are the people, by external id, to whom the bots cannot send a
-// direct message.
+// Config is the configuration of the fake, as GET and PUT /_fake/config show it. ProtocolVersion, Capabilities, Limits,
+// UserLookup, LinkURLTemplate — left out while nil — and EventDelivery are served in info as they are, also when they
+// break the protocol; UserLookup is also the kind of handle findUsers searches by and the events carry; Revoked tokens
+// get 401; InfoPaddingBytes adds a member "padding" of that many bytes to info, which the protocol allows and Muster
+// ignores, to make it larger. Channels are the channels checkChannel knows, by id: the name of one the bot can use, or
+// null for one it cannot; any other id is one it cannot use either; postMessage posts only to a channel the bot can
+// use. With Replays, a repeated Idempotency-Key answers the first result; without, every request posts again. Push is
+// where the events of both bots are pushed to, nil for nowhere. DMBlocked are the people, by external id, to whom the
+// bots cannot send a direct message. Roles are the roles the info of each bot declares, by its token; a bot without an
+// entry declares none, which the protocol reads as messenger.
 type Config struct {
-	ProtocolVersion  string                  `json:"protocol_version"`
-	Capabilities     gen.Capabilities        `json:"capabilities"`
-	Limits           gen.Limits              `json:"limits"`
-	UserLookup       gen.InfoUserLookup      `json:"user_lookup"`
-	LinkURLTemplate  *string                 `json:"link_url_template"`
-	EventDelivery    []gen.InfoEventDelivery `json:"event_delivery"`
-	Revoked          []string                `json:"revoked"`
-	InfoPaddingBytes int                     `json:"info_padding_bytes"`
-	Channels         map[string]*string      `json:"channels"`
-	Replays          bool                    `json:"replays"`
-	Push             *PushTarget             `json:"push"`
-	DMBlocked        []string                `json:"dm_blocked"`
+	ProtocolVersion  string                    `json:"protocol_version"`
+	Capabilities     gen.Capabilities          `json:"capabilities"`
+	Limits           gen.Limits                `json:"limits"`
+	UserLookup       gen.InfoUserLookup        `json:"user_lookup"`
+	LinkURLTemplate  *string                   `json:"link_url_template"`
+	EventDelivery    []gen.InfoEventDelivery   `json:"event_delivery"`
+	Revoked          []string                  `json:"revoked"`
+	InfoPaddingBytes int                       `json:"info_padding_bytes"`
+	Channels         map[string]*string        `json:"channels"`
+	Replays          bool                      `json:"replays"`
+	Push             *PushTarget               `json:"push"`
+	DMBlocked        []string                  `json:"dm_blocked"`
+	Roles            map[string][]gen.InfoRole `json:"roles"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
 // channels, whose entries are added or replaced one by one: a name adds or renames a channel, null forbids it; push
-// null stops pushing, and link_url_template null removes the link.
+// null stops pushing, and link_url_template null removes the link; and roles, which with token replace the roles of
+// that bot only, null removing them, so that its info declares none.
 type configPatch struct {
-	ProtocolVersion  *string                       `json:"protocol_version"`
-	Capabilities     *gen.Capabilities             `json:"capabilities"`
-	Limits           *gen.Limits                   `json:"limits"`
-	UserLookup       *gen.InfoUserLookup           `json:"user_lookup"`
-	LinkURLTemplate  nullable.Nullable[string]     `json:"link_url_template"`
-	EventDelivery    *[]gen.InfoEventDelivery      `json:"event_delivery"`
-	Revoked          *[]string                     `json:"revoked"`
-	InfoPaddingBytes *int                          `json:"info_padding_bytes"`
-	Channels         map[string]*string            `json:"channels"`
-	Replays          *bool                         `json:"replays"`
-	Push             nullable.Nullable[PushTarget] `json:"push"`
-	DMBlocked        *[]string                     `json:"dm_blocked"`
+	Token            string                            `json:"token"`
+	Roles            nullable.Nullable[[]gen.InfoRole] `json:"roles"`
+	ProtocolVersion  *string                           `json:"protocol_version"`
+	Capabilities     *gen.Capabilities                 `json:"capabilities"`
+	Limits           *gen.Limits                       `json:"limits"`
+	UserLookup       *gen.InfoUserLookup               `json:"user_lookup"`
+	LinkURLTemplate  nullable.Nullable[string]         `json:"link_url_template"`
+	EventDelivery    *[]gen.InfoEventDelivery          `json:"event_delivery"`
+	Revoked          *[]string                         `json:"revoked"`
+	InfoPaddingBytes *int                              `json:"info_padding_bytes"`
+	Channels         map[string]*string                `json:"channels"`
+	Replays          *bool                             `json:"replays"`
+	Push             nullable.Nullable[PushTarget]     `json:"push"`
+	DMBlocked        *[]string                         `json:"dm_blocked"`
 }
 
 // DefaultConfig is the configuration of a new fake: protocol version 1, every feature on, a body of up to 4000 code
@@ -158,13 +181,14 @@ func DefaultConfig() Config {
 	return c
 }
 
-// bot is the state of one bot, named by its token, apart from the other bot's: its number, 1 for Token and 2 for
-// SecondToken, which /_fake/messages shows in place of the token, the answers of its Idempotency-Keys, and its events
-// in the order they happened, whose index is the cursor of pollEvents, with the channel that a new event closes to wake
-// the long polls.
+// bot is the state of one bot, named by its token, apart from the other bots': its number, 1 for Token, 2 for
+// SecondToken and 3 for GatewayToken, which /_fake/messages shows in place of the token, whether its info is the
+// gateway's, the answers of its Idempotency-Keys, and its events in the order they happened, whose index is the cursor
+// of pollEvents, with the channel that a new event closes to wake the long polls.
 type bot struct {
 	token   string
 	n       int
+	gateway bool
 	keys    map[string]stored
 	events  []json.RawMessage
 	changed chan struct{}
@@ -191,6 +215,8 @@ type Fake struct {
 	eventIDs       int
 	answers        []Answer
 	directMessages []DirectMessage
+	// notifications are the notifications the bots sent, in order.
+	notifications []Notification
 	// toPush are the events waiting to be pushed; a pusher runs while pushing, in pushCtx, which pushStop ends and
 	// pushers waits for; pushWake makes it retry at once after the target changed; pushStopped once the fake closed.
 	toPush      []pending
@@ -206,7 +232,9 @@ type Fake struct {
 func New() *Fake {
 	f := &Fake{api: http.NewServeMux(), config: DefaultConfig(), bots: map[string]*bot{
 		Token:       {token: Token, n: 1, keys: map[string]stored{}, changed: make(chan struct{})},
-		SecondToken: {token: SecondToken, n: 2, keys: map[string]stored{}, changed: make(chan struct{})}},
+		SecondToken: {token: SecondToken, n: 2, keys: map[string]stored{}, changed: make(chan struct{})},
+		GatewayToken: {token: GatewayToken, n: 3, gateway: true, keys: map[string]stored{},
+			changed: make(chan struct{})}},
 		sent: map[string]sent{}, pushWake: make(chan struct{}, 1),
 		client: &http.Client{Timeout: pushTimeout + time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -221,6 +249,7 @@ func New() *Fake {
 	f.api.HandleFunc("POST /v1/answers", f.answerEvent)
 	f.api.HandleFunc("GET /v1/users", f.findUsers)
 	f.api.HandleFunc("POST /v1/direct-messages", f.sendDirectMessage)
+	f.api.HandleFunc("POST /v1/notifications", f.sendNotification)
 	f.api.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
 			r.Method+" "+r.URL.Path+" is not implemented by the fake bridge")
@@ -246,6 +275,10 @@ func New() *Fake {
 	f.HandleControl("GET /_fake/direct-messages", func(w http.ResponseWriter, _ *http.Request) {
 		fakeserver.WriteJSON(w, http.StatusOK, f.DirectMessages())
 	})
+	f.HandleControl("GET /_fake/notifications", func(w http.ResponseWriter, _ *http.Request) {
+		fakeserver.WriteJSON(w, http.StatusOK, f.Notifications())
+	})
+	f.HandleControl("POST /_fake/acknowledge", f.postAcknowledge)
 	return f
 }
 
@@ -307,6 +340,9 @@ func normalize(c Config) Config {
 	if c.DMBlocked == nil {
 		c.DMBlocked = []string{}
 	}
+	if c.Roles == nil {
+		c.Roles = map[string][]gen.InfoRole{}
+	}
 	if !c.Limits.EditMaxAgeSeconds.IsSpecified() {
 		c.Limits.EditMaxAgeSeconds = nullable.NewNullNullable[int]()
 	}
@@ -341,6 +377,14 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 			fakeserver.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if p.Roles.IsSpecified() != (p.Token != "") {
+		fakeserver.WriteError(w, http.StatusBadRequest, "roles and token go together")
+		return
+	}
+	if _, ok := f.bots[p.Token]; p.Token != "" && !ok {
+		fakeserver.WriteError(w, http.StatusBadRequest, "token is not one of the fake's bots")
+		return
 	}
 	var push *PushTarget
 	if p.Push.IsSpecified() && !p.Push.IsNull() {
@@ -386,6 +430,17 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 	if p.Replays != nil {
 		c.Replays = *p.Replays
 	}
+	if p.Roles.IsSpecified() {
+		roles := maps.Clone(c.Roles)
+		if roles == nil {
+			roles = map[string][]gen.InfoRole{}
+		}
+		delete(roles, p.Token)
+		if v, err := p.Roles.Get(); err == nil {
+			roles[p.Token] = v
+		}
+		c.Roles = roles
+	}
 	if len(p.Channels) > 0 {
 		channels := maps.Clone(c.Channels)
 		if channels == nil {
@@ -408,15 +463,42 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 // botKey is the key of the request's bot in its context.
 type botKey struct{}
 
-// serve answers the requests of the protocol: 401 unless the bearer token is one of a bot and not revoked; the
-// handlers find the bot in the request's context.
+// serve answers the requests of the protocol, also under GatewayPrefix: 401 unless the bearer token is one of a bot
+// and not revoked, and 501 to an operation of a messenger for a bot whose info lacks the role messenger, as a
+// gateway alone serves only info, events, answers and notifications; the handlers find the bot in the request's
+// context.
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	b, ok := f.botOf(r)
 	if !ok {
 		writeProblem(w, http.StatusUnauthorized, gen.ErrorClassForbidden, "Unauthorized")
 		return
 	}
-	f.api.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), botKey{}, b)))
+	r = r.WithContext(context.WithValue(r.Context(), botKey{}, b))
+	if rest, ok := strings.CutPrefix(r.URL.Path, GatewayPrefix+"/"); ok {
+		u := *r.URL
+		u.Path, u.RawPath = "/"+rest, strings.TrimPrefix(r.URL.RawPath, GatewayPrefix)
+		r.URL = &u
+	}
+	f.mu.Lock()
+	messenger := f.hasRole(b, gen.Messenger)
+	f.mu.Unlock()
+	if !messenger && messengerOperation(r.URL.Path) {
+		writeProblem(w, http.StatusNotImplemented, gen.ErrorClassInvalid,
+			r.Method+" "+r.URL.Path+" is served by a bot in the role messenger only")
+		return
+	}
+	f.api.ServeHTTP(w, r)
+}
+
+// messengerOperation reports whether path is an operation that only a bridge in the role messenger serves: the
+// channels, the messages and their Thread replies, and the people with their direct messages.
+func messengerOperation(path string) bool {
+	for _, p := range []string{"/v1/channels/", "/v1/messages", "/v1/users", "/v1/direct-messages"} {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // botOf is the bot of the request's bearer token; false for no token, another one or a revoked one.
@@ -440,16 +522,35 @@ type info struct {
 	Padding string `json:"padding,omitempty"`
 }
 
-func (f *Fake) getInfo(w http.ResponseWriter, _ *http.Request) {
-	c := f.Config()
+// getInfo answers the info of the request's bot: the configured one, or the gateway's — the provider GatewayName, no
+// capabilities, the protocol's floor of max_body_length, no user lookup and no link — each with the roles of its token,
+// none when it has no entry.
+func (f *Fake) getInfo(w http.ResponseWriter, r *http.Request) {
+	c, b := f.Config(), botFrom(r)
 	i := info{Info: gen.Info{ProtocolVersion: gen.InfoProtocolVersion(c.ProtocolVersion), Capabilities: c.Capabilities,
 		Limits: c.Limits, UserLookup: c.UserLookup, EventDelivery: c.EventDelivery},
 		Padding: strings.Repeat("x", c.InfoPaddingBytes)}
 	i.Bridge.Name, i.Bridge.Version, i.Messenger.Name = BridgeName, BridgeVersion, MessengerName
-	if c.LinkURLTemplate != nil {
+	if c.LinkURLTemplate != nil && !b.gateway {
 		i.LinkUrlTemplate = nullable.NewNullableWithValue(*c.LinkURLTemplate)
 	}
+	if b.gateway {
+		i.Messenger.Name, i.Capabilities, i.UserLookup = GatewayName, gen.Capabilities{}, gen.None
+		i.Limits = gen.Limits{MaxBodyLength: gatewayMaxBodyLength, EditMaxAgeSeconds: nullable.NewNullNullable[int]()}
+	}
+	if roles, ok := c.Roles[b.token]; ok {
+		i.Roles = &roles
+	}
 	fakeserver.WriteJSON(w, http.StatusOK, i)
+}
+
+// hasRole reports whether the info of the bot b declares the role, messenger when it declares none. f.mu is held.
+func (f *Fake) hasRole(b *bot, role gen.InfoRole) bool {
+	roles, ok := f.config.Roles[b.token]
+	if !ok {
+		return role == gen.Messenger
+	}
+	return slices.Contains(roles, role)
 }
 
 // writeProblem answers a problem of the protocol (RFC 9457) with its class.

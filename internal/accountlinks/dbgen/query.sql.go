@@ -731,6 +731,7 @@ SELECT public_id, name, type, (bridge_info IS NOT NULL)::boolean AS info_read,
            AS bot_can_start
 FROM connections
 WHERE org_id = $1 AND deleted_at IS NULL
+  AND (type <> 'bridge' OR bridge_info->'roles' IS NULL OR bridge_info->'roles' @> '["messenger"]'::jsonb)
 ORDER BY type, lower(name), id
 `
 
@@ -745,7 +746,8 @@ type ListLinkableConnectionsRow struct {
 
 // ListLinkableConnections lists the Connections that are not deleted, by messenger and name (C-18.FR-10), with what
 // a Bridge Connection's stored info says of its links (C-22.FR-15): whether there is one, its user_lookup, and whether
-// its bot can start a direct chat.
+// its bot can start a direct chat. A Bridge Connection whose stored info lists roles without messenger, a Notification
+// gateway alone, is left out: it looks nobody up and sends no account_link events (C-30.FR-1).
 func (q *Queries) ListLinkableConnections(ctx context.Context, orgID int64) ([]ListLinkableConnectionsRow, error) {
 	rows, err := q.db.Query(ctx, listLinkableConnections, orgID)
 	if err != nil {

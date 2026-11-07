@@ -10,7 +10,9 @@
 // the ingest listener, handled once per id and answered through answerEvent (events.go, poller.go, push.go, presses.go,
 // commands.go); the Account links by a token sent to the bot or a code sent by direct message (links.go); and the
 // conformance check `muster bridge check`, which runs the protocol against a bridge outside any installation and also
-// deletes its message (conformance.go). The models are generated from api/bridge.yaml into internal/bridge/gen.
+// deletes its message (conformance.go); and sendNotification of a bridge in the role gateway, a Notification gateway,
+// behind the Bridge adapter's Notify (delivery.go). The models are generated from api/bridge.yaml into
+// internal/bridge/gen.
 package bridge
 
 import (
@@ -444,6 +446,24 @@ func (c *Client) SendDirectMessage(ctx context.Context, class outbound.Class, ke
 		gen.DirectMessageInput{UserExternalId: externalID, Body: cutText(body, MaxDirectMessageLength)}, &out)
 	if r.OK() && out.MessageId == "" {
 		return gen.DirectMessageSent{}, notExpected(r.Status, "POST direct-messages")
+	}
+	return out, r
+}
+
+// MaxNotificationText is the longest text of a notification, in characters (api/bridge.yaml NotificationInput).
+const MaxNotificationText = 1000
+
+// SendNotification calls sendNotification (C-30.FR-2) in class with the Idempotency-Key key: in, its text cut to
+// MaxNotificationText characters, to the person at its contact through a bridge in the role gateway. A successful
+// answer without a notification_id of 1 to 512 characters is invalid. The texts of a failure are the bridge's, masked
+// of the token and the push secret; the caller masks the contact and the text in them.
+func (c *Client) SendNotification(ctx context.Context, class outbound.Class, key string, in gen.NotificationInput) (
+	gen.NotificationSent, Result) {
+	var out gen.NotificationSent
+	in.Text = cutText(in.Text, MaxNotificationText)
+	_, r := c.do(ctx, class, "sendNotification", http.MethodPost, "notifications", idempotency(key), in, &out)
+	if r.OK() && !validID(out.NotificationId) {
+		return gen.NotificationSent{}, notExpected(r.Status, "POST notifications")
 	}
 	return out, r
 }

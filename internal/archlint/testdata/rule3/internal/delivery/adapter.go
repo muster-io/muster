@@ -12,3 +12,13 @@ type Adapter interface {
 	Update(ctx context.Context, id string, msg Message) error
 	Reply(ctx context.Context, id string, msg Message) (string, error)
 }
+
+type Notification struct {
+	Contact string
+	Text    string
+}
+
+// Gateway is the Notification gateway: Notify sends a notification to a person.
+type Gateway interface {
+	Notify(ctx context.Context, n Notification) error
+}

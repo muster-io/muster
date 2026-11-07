@@ -746,6 +746,30 @@ var BridgeEventRejected = newEvent("bridge_event_rejected", LevelInfo, "C-22",
 		"signature, the push secret, the headers or the body.",
 	"connection", "reason")
 
+// BridgeEventUnhandled is logged when a Bridge event of a type this binary reads found no handler yet (C-22.FR-11).
+var BridgeEventUnhandled = newEvent("bridge_event_unhandled", LevelInfo, "C-22",
+	"A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the "+
+		"Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and "+
+		"acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. "+
+		"The event is not handled again.",
+	"connection", "event_id", "type")
+
+// DemoCheckFailed is logged when the check of a demo Connection at the start of `muster dev` failed (C-30.FR-1).
+var DemoCheckFailed = newEvent("demo_check_failed", LevelWarn, "C-01",
+	"The check that `muster dev` runs at start on a demo Connection, the Notification gateway \"Example Gateway\", "+
+		"failed or could not run, and the start went on: connection is the public_id of the Connection and error "+
+		"what failed — a step with its code and message, or why the check did not run. Its roles stay those of its "+
+		"last stored info until a check passes; check it again from its page or the API.",
+	"connection", "error")
+
+// GatewayNotificationSent is logged for each sendNotification through a Notification gateway (C-30.FR-10).
+var GatewayNotificationSent = newEvent("gateway_notification_sent", LevelInfo, "C-30",
+	"Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the "+
+		"Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered "+
+		"it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. "+
+		"The contact and the text are never logged; the Request log of the Connection has the request.",
+	"connection", "key", "class")
+
 // BridgeEventFailed is logged when the handling of a Bridge event failed and its id was not recorded
 // (C-22.FR-11, FR-24).
 var BridgeEventFailed = newEvent("bridge_event_failed", LevelWarn, "C-22",

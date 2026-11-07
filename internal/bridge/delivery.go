@@ -5,13 +5,17 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/muster-io/muster/internal/bridge/gen"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -26,20 +30,24 @@ type Target struct {
 	ChannelID string
 }
 
-// Targets find the Target of a Destination by its id — of a deleted Destination too, for its final edit — and read
-// the info of its Connection through the InfoCache, again past bridge.info_max_age; declared by their consumer,
-// *connections.Service implements them. A Destination without a Target is ErrNoTarget.
+// Targets find the Target of a Destination by its id — of a deleted Destination too, for its final edit — and the
+// Bridge Connection of a Notification gateway by its id, and read the info of a Connection through the InfoCache, again
+// past bridge.info_max_age; declared by their consumer, *connections.Service implements them. A Destination without a
+// Target, and an id that names no Bridge Connection that is not deleted, are ErrNoTarget.
 type Targets interface {
 	BridgeTarget(ctx context.Context, destinationID int64) (Target, error)
+	BridgeConnection(ctx context.Context, connectionID int64) (Conn, error)
 	BridgeInfo(ctx context.Context, conn Conn, class outbound.Class) (Info, Result)
 }
 
 // Adapter is the Bridge delivery (C-22.FR-4 to FR-8, ADR-0017): Publish, Update and Reply post, edit and reply as
 // envelopes, called by the delivery worker and the interactive path only, in the client class of their Call, with the
-// idempotency key of the Call; and Check, the Destination check of C-22.FR-3, for the Broken probe. Each body is fitted
-// to the limit of the Destination's Connection, which its info gives.
+// idempotency key of the Call; Check, the Destination check of C-22.FR-3, for the Broken probe; and Notify, the
+// Notification gateway of a bridge in the role gateway (C-30.FR-2, FR-5). Each body is fitted to the limit of the
+// Destination's Connection, which its info gives. Log takes gateway_notification_sent; nil logs nothing.
 type Adapter struct {
 	Targets Targets
+	Log     *logging.Logger
 }
 
 var (
@@ -47,7 +55,91 @@ var (
 	_ delivery.Checker      = (*Adapter)(nil)
 	_ delivery.Idempotent   = (*Adapter)(nil)
 	_ delivery.EditWindowed = (*Adapter)(nil)
+	_ delivery.Gateway      = (*Adapter)(nil)
 )
+
+// MessageNotGateway is the error of a notification to a bridge whose info does not declare the role gateway.
+const MessageNotGateway = "the bridge does not declare the role gateway"
+
+// Notify sends n through sendNotification of its Connection in the client class of c, with the idempotency key of c,
+// once the Connection's info, read again past bridge.info_max_age, declares the role gateway; a bridge that does not is
+// Fatal without a call, as is an id that names no Bridge Connection (C-30.FR-2). The outcome is classified as a
+// delivery's, names the notification in MessageID and says whether the answer was Replayed; its error, the bridge's
+// text, has the contact and the text masked, and so has the Request log's record of the request and its answer
+// (outbound.WithSecrets). It logs gateway_notification_sent with the Connection, the key and the class of the answer,
+// never the contact or the text (C-30.FR-10).
+func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notification) delivery.Outcome {
+	conn, err := a.Targets.BridgeConnection(ctx, n.Connection)
+	switch {
+	case errors.Is(err, ErrNoTarget):
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(ErrNoTarget.Error())}
+	case err != nil:
+		return delivery.Outcome{Kind: delivery.OutcomeTransient,
+			Error: "the connection of the gateway could not be read"}
+	}
+	i, _, fail := a.info(ctx, Target{Conn: conn}, c)
+	if fail != nil {
+		fail.Error = maskNotification(fail.Error, n)
+		return *fail
+	}
+	if !i.HasRole(RoleGateway) {
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: MessageNotGateway}
+	}
+	in := gen.NotificationInput{Contact: n.Contact, Text: n.Text, Language: gen.NotificationInputLanguage(n.Language)}
+	if n.Action != nil {
+		in.Action = &gen.NotificationAction{Data: n.Action.Data, Label: n.Action.Label}
+	}
+	out, r := conn.Client.SendNotification(outbound.WithSecrets(ctx, notificationSecrets(n)...), c.Class, c.Key, in)
+	o := r.Outcome()
+	o.Error = maskNotification(o.Error, n)
+	if r.OK() {
+		o.MessageID, o.Replayed = out.NotificationId, out.Replayed
+	}
+	if a.Log != nil {
+		class := string(r.Classification.Class)
+		if r.OK() {
+			class = "ok"
+		}
+		a.Log.Log(ctx, logging.GatewayNotificationSent, logging.F("connection", conn.PublicID),
+			logging.F("key", c.Key), logging.F("class", class))
+	}
+	return o
+}
+
+// notificationSecrets are the contact and the text of n, also as the client cuts the text, which the record of the
+// request masks like a Secret, though they are personal data rather than Secrets.
+func notificationSecrets(n delivery.Notification) []logging.Secret {
+	var out []logging.Secret
+	for _, v := range []string{n.Contact, n.Text, cutText(n.Text, MaxNotificationText)} {
+		if v != "" && !slices.Contains(out, logging.Secret(v)) {
+			out = append(out, logging.Secret(v))
+		}
+	}
+	return out
+}
+
+// maskNotification is the text of a bridge's answer to n with its contact and its text replaced, as they are and as a
+// JSON string carries them, the longer first, so that an answer that echoes them, or the request's body, carries
+// neither.
+func maskNotification(text outbound.Untrusted, n delivery.Notification) outbound.Untrusted {
+	var forms []string
+	// The client sends the text cut to MaxNotificationText characters, which is what a bridge may echo.
+	for _, v := range []string{n.Contact, n.Text, cutText(n.Text, MaxNotificationText)} {
+		if v == "" || slices.Contains(forms, v) {
+			continue
+		}
+		forms = append(forms, v)
+		if b, err := json.Marshal(v); err == nil {
+			forms = append(forms, string(b[1:len(b)-1]))
+		}
+	}
+	slices.SortFunc(forms, func(a, b string) int { return len(b) - len(a) })
+	s := string(text)
+	for _, f := range forms {
+		s = strings.ReplaceAll(s, f, "[redacted]")
+	}
+	return outbound.Untrusted(s)
+}
 
 // LengthLimit is the protocol's floor of limits.max_body_length. Delivery never shortens for a bridge: the adapter
 // fits each body to its Connection's limit itself.

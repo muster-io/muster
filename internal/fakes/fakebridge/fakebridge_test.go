@@ -2019,3 +2019,220 @@ func TestLinkConfig(t *testing.T) {
 		t.Errorf("SetConfig without dm_blocked: %v", err)
 	}
 }
+
+// TestGatewayInfo is C-30.FR-2 at the fake: the gateway bot's info declares only the role gateway, names the provider
+// "Example Gateway", offers none of a messenger's features, looks nobody up and offers both event delivery modes; the
+// other bots' info declares no roles, as a bridge written before roles existed; /_fake/config sets and removes the
+// roles of one bot by its token, and refuses roles without a token and an unknown token.
+func TestGatewayInfo(t *testing.T) {
+	s := start(t)
+	s.configure(t, `{"link_url_template":"https://chat.example.org/start?t={token}"}`)
+	i := s.getInfo(t, fakebridge.GatewayToken).valid(t)
+	if !slices.Equal(i.Roles(), []string{bridge.RoleGateway}) || i.Messenger.Name != fakebridge.GatewayName ||
+		len(i.Features()) != 0 || i.UserLookup != gen.None || i.Limits.MaxBodyLength != 500 ||
+		!slices.Equal(i.EventDelivery, []gen.InfoEventDelivery{gen.Poll, gen.Push}) || i.LinkUrlTemplate.IsSpecified() {
+		t.Errorf("the gateway's info: %s", i.Raw)
+	}
+	for _, token := range []string{fakebridge.Token, fakebridge.SecondToken} {
+		if i := s.getInfo(t, token).valid(t); strings.Contains(string(i.Raw), "roles") ||
+			!slices.Equal(i.Roles(), []string{bridge.RoleMessenger}) {
+			t.Errorf("info of %s: %s", token, i.Raw)
+		}
+	}
+	s.configure(t, `{"token":"`+fakebridge.Token+`","roles":["messenger","gateway"]}`)
+	if i := s.getInfo(t, fakebridge.Token).valid(t); !slices.Equal(i.Roles(),
+		[]string{bridge.RoleMessenger, bridge.RoleGateway}) || i.Messenger.Name != fakebridge.MessengerName {
+		t.Errorf("both roles: %s", i.Raw)
+	}
+	if c := s.fake.Config(); !slices.Equal(c.Roles[fakebridge.Token], []gen.InfoRole{gen.Messenger,
+		gen.Gateway}) || !slices.Equal(c.Roles[fakebridge.GatewayToken], []gen.InfoRole{gen.Gateway}) {
+		t.Errorf("roles %v", c.Roles)
+	}
+	s.configure(t, `{"token":"`+fakebridge.Token+`","roles":null}`)
+	if i := s.getInfo(t, fakebridge.Token).valid(t); strings.Contains(string(i.Raw), "roles") {
+		t.Errorf("roles removed: %s", i.Raw)
+	}
+	for _, patch := range []string{`{"roles":["gateway"]}`, `{"token":"other","roles":["gateway"]}`,
+		`{"token":"` + fakebridge.Token + `"}`} {
+		if status, body := s.control(t, http.MethodPut, "/_fake/config", patch); status != http.StatusBadRequest {
+			t.Errorf("PUT %s = %d %s", patch, status, body)
+		}
+	}
+	if fakebridge.GatewayToken != "muster-dev-gateway-token" {
+		t.Errorf("token %q", fakebridge.GatewayToken)
+	}
+}
+
+// notify sends sendNotification with the token and the Idempotency-Key, checked against api/bridge.yaml.
+func (s *spec) notify(t *testing.T, token, key string, in any, broken bool) answer {
+	t.Helper()
+	return s.exchange(t, request{method: http.MethodPost, path: "/v1/notifications", token: token, key: key, body: in,
+		broken: broken})
+}
+
+func (a answer) sent(t *testing.T) gen.NotificationSent {
+	t.Helper()
+	var out gen.NotificationSent
+	a.ok(t, http.StatusCreated, &out)
+	return out
+}
+
+// TestNotifications is C-30.FR-2 at the fake: sendNotification of the gateway bot records each notification with its
+// key, contact, text, language and action in /_fake/notifications and answers its id; a repeated key answers the first
+// result, replayed, and records nothing; a bot without the role gateway answers 501; a request outside the protocol
+// is invalid; /_fake/faults scripts its answers; POST /_fake/acknowledge queues notification_acknowledged with the
+// action's data for the bot, which polling returns and answerEvent answers as notification, recorded in
+// /_fake/answers; a notification without an action and an unknown one cannot be acknowledged.
+func TestNotifications(t *testing.T) {
+	s := start(t)
+	data := strings.Repeat("d", 64)
+	in := gen.NotificationInput{Contact: "+10000000001", Text: "#7 DiskFull is firing", Language: gen.Ru,
+		Action: &gen.NotificationAction{Data: data, Label: "Press 1 to acknowledge"}}
+	if n := s.notify(t, fakebridge.GatewayToken, "k1", in, false).sent(t); n.NotificationId != "n1" || n.Replayed {
+		t.Fatalf("sent %+v", n)
+	}
+	if n := s.notify(t, fakebridge.GatewayToken, "k1", gen.NotificationInput{Contact: "+1", Text: "other",
+		Language: gen.En}, false).sent(t); n.NotificationId != "n1" || !n.Replayed {
+		t.Errorf("replayed %+v", n)
+	}
+	code := gen.NotificationInput{Contact: "+10000000002", Text: "Your code is 123456", Language: gen.En}
+	if n := s.notify(t, fakebridge.GatewayToken, "k2", code, false).sent(t); n.NotificationId != "n2" {
+		t.Errorf("the code %+v", n)
+	}
+	want := []fakebridge.Notification{{ID: "n1", Bot: 3, Key: "k1", Contact: in.Contact, Text: in.Text, Language: "ru",
+		Action: in.Action}, {ID: "n2", Bot: 3, Key: "k2", Contact: code.Contact, Text: code.Text, Language: "en"}}
+	if got := s.fake.Notifications(); !reflect.DeepEqual(got, want) {
+		t.Errorf("notifications %+v, want %+v", got, want)
+	}
+	status, body := s.control(t, http.MethodGet, "/_fake/notifications", "")
+	if status != http.StatusOK || !strings.Contains(body, `"key":"k1","contact":"+10000000001"`) ||
+		!strings.Contains(body, `"action":null`) {
+		t.Errorf("GET /_fake/notifications = %d %s", status, body)
+	}
+
+	if a := s.notify(t, fakebridge.Token, "k3", in, false); a.status != http.StatusNotImplemented {
+		t.Errorf("a messenger = %d %s", a.status, a.body)
+	}
+	for _, broken := range []gen.NotificationInput{{Contact: "", Text: "x", Language: gen.En},
+		{Contact: "+1", Text: strings.Repeat("я", 1001), Language: gen.En}, {Contact: "+1", Text: "x", Language: "de"},
+		{Contact: "+1", Text: "x", Language: gen.En, Action: &gen.NotificationAction{Data: strings.Repeat("d", 65),
+			Label: "x"}}} {
+		s.notify(t, fakebridge.GatewayToken, "k4", broken, true).refused(t, http.StatusBadRequest,
+			gen.ErrorClassInvalid)
+	}
+	if len(s.fake.Notifications()) != 2 {
+		t.Errorf("a refused notification was recorded: %+v", s.fake.Notifications())
+	}
+
+	if status, body := s.control(t, http.MethodPost, "/_fake/faults", `{"path":"/v1/notifications","status":503,
+		"content_type":"application/problem+json","body":"{\"title\":\"Down\",\"status\":503,\"class\":\"transient\"}",
+		"times":1}`); status != http.StatusNoContent {
+		t.Fatalf("POST /_fake/faults = %d %s", status, body)
+	}
+	_, r := s.client(t, fakebridge.GatewayToken).SendNotification(t.Context(), outbound.ClassDelivery, "k5", in)
+	if r.Classification.Class != bridge.ClassTransient || r.Status != http.StatusServiceUnavailable {
+		t.Errorf("the scripted fault = %+v", r)
+	}
+	if n, r := s.client(t, fakebridge.GatewayToken).SendNotification(t.Context(), outbound.ClassDelivery, "k5",
+		in); !r.OK() || n.NotificationId != "n3" {
+		t.Errorf("after the fault %+v %+v", n, r)
+	}
+
+	status, body = s.control(t, http.MethodPost, "/_fake/acknowledge", `{"notification_id":"n1"}`)
+	var ev fakebridge.Event
+	if err := json.Unmarshal([]byte(body), &ev); err != nil || status != http.StatusOK || ev.Bot != 3 {
+		t.Fatalf("POST /_fake/acknowledge = %d %s", status, body)
+	}
+	evs, _ := s.poll(t, fakebridge.GatewayToken, "wait=0").batch(t)
+	if len(evs) != 1 || evs[0].Type != bridge.TypeNotificationAcknowledged || evs[0].NotificationID != "n1" ||
+		evs[0].Data != data || !reflect.DeepEqual(evs[0], decoded(t, ev)) {
+		t.Fatalf("polled %+v", evs)
+	}
+	if evs, _ := s.poll(t, fakebridge.Token, "wait=0").batch(t); len(evs) != 0 {
+		t.Errorf("another bot got %+v", evs)
+	}
+	if a := s.answerOf(t, fakebridge.GatewayToken, "answer-"+evs[0].ID, gen.AnswerInput{EventId: evs[0].ID,
+		Text: "Done: Acknowledged #7"}, false).shown(t); a.ShownAs != gen.AnswerShownShownAsNotification {
+		t.Errorf("shown %+v", a)
+	}
+	if got := s.fake.Answers(); len(got) != 1 || got[0] != (fakebridge.Answer{Bot: 3, EventID: evs[0].ID,
+		EventType: bridge.TypeNotificationAcknowledged, MessageID: "n1", Text: "Done: Acknowledged #7",
+		ShownAs: "notification"}) {
+		t.Errorf("answers %+v", got)
+	}
+	for _, bad := range []string{`{"notification_id":"n2"}`, `{"notification_id":"n9"}`} {
+		if status, body := s.control(t, http.MethodPost, "/_fake/acknowledge", bad); status != http.StatusBadRequest {
+			t.Errorf("POST /_fake/acknowledge %s = %d %s", bad, status, body)
+		}
+	}
+}
+
+// TestGatewayPrefix: the fake serves the protocol under GatewayPrefix too, which the demo Connection "Example Gateway"
+// has in its base URL, and a fault scripted on a path without it never answers a request under it.
+func TestGatewayPrefix(t *testing.T) {
+	s := start(t)
+	if status, body := s.control(t, http.MethodPost, "/_fake/faults",
+		`{"path":"/v1/events","status":403,"times":1}`); status != http.StatusNoContent {
+		t.Fatalf("POST /_fake/faults = %d %s", status, body)
+	}
+	c, err := bridge.NewClient(network(t), bridge.Settings{BaseURL: s.fake.URL() + fakebridge.GatewayPrefix,
+		Token: logging.Secret(fakebridge.GatewayToken)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i, r := c.GetInfo(t.Context(), outbound.ClassInteractive); !r.OK() ||
+		i.Messenger.Name != fakebridge.GatewayName {
+		t.Fatalf("info under the prefix %+v %+v", i, r)
+	}
+	if _, r := c.PollEvents(t.Context(), nil, 0); !r.OK() {
+		t.Errorf("a poll under the prefix took the fault: %+v", r)
+	}
+	if _, r := s.client(t, fakebridge.GatewayToken).PollEvents(t.Context(), nil, 0); r.Status != http.StatusForbidden {
+		t.Errorf("a poll without the prefix: %+v", r)
+	}
+}
+
+// TestGatewayServesNoMessenger: a bot whose info lacks the role messenger — the gateway bot, or another one given only
+// the role gateway — answers 501 to the operations of a messenger, under the gateway prefix too, and still serves
+// info, events, answers and notifications; given both roles it serves them again.
+func TestGatewayServesNoMessenger(t *testing.T) {
+	s := start(t)
+	for _, token := range []string{fakebridge.GatewayToken, fakebridge.SecondToken} {
+		if token == fakebridge.SecondToken {
+			s.configure(t, `{"token":"`+fakebridge.SecondToken+`","roles":["gateway"]}`)
+		}
+		if a := s.checkChannel(t, token, fakebridge.ChannelAlerts); a.status != http.StatusNotImplemented ||
+			!strings.Contains(string(a.body), "served by a bot in the role messenger only") {
+			t.Errorf("%s checkChannel = %d %s", token, a.status, a.body)
+		}
+		for _, rq := range []request{
+			{method: http.MethodPost, path: "/v1/messages", token: token, key: "k1",
+				body: envelope(fakebridge.ChannelAlerts)},
+			{method: http.MethodPatch, path: "/v1/messages/m1", token: token, body: content(gen.StatusAcknowledged)},
+			{method: http.MethodPost, path: "/v1/messages/m1/thread-replies", token: token, key: "k2",
+				body: replyOf(nil)},
+			{method: http.MethodDelete, path: "/v1/messages/m1", token: token},
+			{method: http.MethodGet, path: "/v1/users?handle=alice", token: token},
+			{method: http.MethodPost, path: "/v1/direct-messages", token: token, key: "k3",
+				body: gen.DirectMessageInput{UserExternalId: fakebridge.AliceID, Body: "code"}},
+		} {
+			if a := s.exchange(t, rq); a.status != http.StatusNotImplemented {
+				t.Errorf("%s %s %s = %d %s", token, rq.method, rq.path, a.status, a.body)
+			}
+		}
+		s.getInfo(t, token).valid(t)
+		s.poll(t, token, "wait=0").batch(t)
+		s.notify(t, token, "n-"+token, gen.NotificationInput{Contact: "+1", Text: "x", Language: gen.En}, false).sent(t)
+	}
+	c, err := bridge.NewClient(network(t), bridge.Settings{BaseURL: s.fake.URL() + fakebridge.GatewayPrefix,
+		Token: logging.Secret(fakebridge.GatewayToken)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, r := c.CheckChannel(t.Context(), outbound.ClassInteractive, fakebridge.ChannelAlerts); r.Status !=
+		http.StatusNotImplemented || r.Classification.Class != bridge.ClassInvalid {
+		t.Errorf("checkChannel under the prefix %+v", r)
+	}
+	s.configure(t, `{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`)
+	s.post(t, fakebridge.SecondToken, "k9", envelope(fakebridge.ChannelAlerts)).posted(t)
+}

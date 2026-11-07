@@ -37,9 +37,9 @@ var (
 	wsFuncs = []string{"Dial"}
 )
 
-// checkGo runs the Go part of rule 2 (imports of the generated groups queries), rule 3 (messenger sends and edits)
-// and rule 4 (HTTP clients and transports, and WebSocket dials) over the non-test files of the module, the code
-// behind the lint build tag included.
+// checkGo runs the Go part of rule 2 (imports of the generated groups queries), rule 3 (messenger sends and edits, and
+// notifications through a Notification gateway) and rule 4 (HTTP clients and transports, and WebSocket dials) over the
+// non-test files of the module, the code behind the lint build tag included.
 func checkGo(root string, cfg Config) ([]Diagnostic, error) {
 	pkgs, err := packages.Load(&packages.Config{
 		Mode:       loadMode,
@@ -59,9 +59,15 @@ func checkGo(root string, cfg Config) ([]Diagnostic, error) {
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("load packages: %w", errors.Join(errs...))
 	}
-	adapter, err := findAdapter(pkgs, cfg)
-	if err != nil {
-		return nil, err
+	var adapters []*adapter
+	for _, ac := range []MessengerConfig{cfg.Messenger, cfg.Gateway} {
+		a, err := findAdapter(pkgs, cfg.Module, ac)
+		if err != nil {
+			return nil, err
+		}
+		if a != nil {
+			adapters = append(adapters, a)
+		}
 	}
 	var diags []Diagnostic
 	for _, p := range pkgs {
@@ -74,8 +80,10 @@ func checkGo(root string, cfg Config) ([]Diagnostic, error) {
 			if !inDir(rel, cfg.GroupsDir) {
 				c.checkGroupImports(f, cfg)
 			}
-			if adapter != nil && !slices.Contains(cfg.Messenger.AllowedFiles, rel) {
-				c.adapter = adapter
+			for _, a := range adapters {
+				if !slices.Contains(a.cfg.AllowedFiles, rel) {
+					c.adapters = append(c.adapters, a)
+				}
 			}
 			c.checkHTTP = !slices.ContainsFunc(cfg.HTTPExempt, func(dir string) bool { return inDir(rel, dir) })
 			c.inspect(f)
@@ -95,45 +103,46 @@ func relPath(root, name string) (string, bool) {
 
 type adapter struct {
 	// sigs maps the name of each send and edit method to its signature.
-	sigs    map[string]string
-	allowed []string
+	sigs map[string]string
+	cfg  MessengerConfig
 }
 
-// findAdapter returns the messenger adapter interface of rule 3, or nil while its package does not exist yet. A
-// package without the configured interface is an error, so a rename cannot switch the rule off silently.
-func findAdapter(pkgs []*packages.Package, cfg Config) (*adapter, error) {
-	pkgPath := cfg.Module + "/" + cfg.Messenger.Package
+// findAdapter returns the interface of rule 3 that ac names, the messenger adapter or the Notification gateway, or nil
+// while its package does not exist yet. A package without the configured interface is an error, so a rename cannot
+// switch the rule off silently.
+func findAdapter(pkgs []*packages.Package, module string, ac MessengerConfig) (*adapter, error) {
+	pkgPath := module + "/" + ac.Package
 	i := slices.IndexFunc(pkgs, func(p *packages.Package) bool { return p.PkgPath == pkgPath })
 	if i < 0 {
 		return nil, nil
 	}
-	obj, ok := pkgs[i].Types.Scope().Lookup(cfg.Messenger.Interface).(*types.TypeName)
+	obj, ok := pkgs[i].Types.Scope().Lookup(ac.Interface).(*types.TypeName)
 	if !ok {
-		return nil, fmt.Errorf("rule 3: %s has no type %s; update the messenger adapter in the lint configuration",
-			cfg.Messenger.Package, cfg.Messenger.Interface)
+		return nil, fmt.Errorf("rule 3: %s has no type %s; update the interface in the lint configuration",
+			ac.Package, ac.Interface)
 	}
 	iface, ok := obj.Type().Underlying().(*types.Interface)
 	if !ok {
-		return nil, fmt.Errorf("rule 3: %s.%s is not an interface", cfg.Messenger.Package, cfg.Messenger.Interface)
+		return nil, fmt.Errorf("rule 3: %s.%s is not an interface", ac.Package, ac.Interface)
 	}
 	sigs := map[string]string{}
 	for m := range iface.Methods() {
 		sigs[m.Name()] = signatureKey(m.Signature())
 	}
-	a := &adapter{sigs: map[string]string{}, allowed: cfg.Messenger.AllowedFiles}
-	for _, name := range cfg.Messenger.Methods {
+	a := &adapter{sigs: map[string]string{}, cfg: ac}
+	for _, name := range ac.Methods {
 		sig, ok := sigs[name]
 		if !ok {
-			return nil, fmt.Errorf("rule 3: %s.%s has no method %s; update the messenger adapter in the lint configuration",
-				cfg.Messenger.Package, cfg.Messenger.Interface, name)
+			return nil, fmt.Errorf("rule 3: %s.%s has no method %s; update the interface in the lint configuration",
+				ac.Package, ac.Interface, name)
 		}
 		a.sigs[name] = sig
 	}
 	return a, nil
 }
 
-// matches reports whether fn is a messenger send or edit: a method with the name and the signature of one of the
-// adapter's, whatever type it is selected on, so that an interface the caller declares cannot hide the call. The
+// matches reports whether fn is a send or an edit of the interface: a method with the name and the signature of one of
+// its methods, whatever type it is selected on, so that an interface the caller declares cannot hide the call. The
 // signatures are compared as strings, because packages are type-checked one at a time and the same named type may be
 // two distinct objects.
 func (a *adapter) matches(fn *types.Func) bool {
@@ -157,9 +166,10 @@ func signatureKey(sig *types.Signature) string {
 }
 
 type goFile struct {
-	pkg       *packages.Package
-	rel       string
-	adapter   *adapter
+	pkg *packages.Package
+	rel string
+	// adapters are the interfaces of rule 3 whose calls this file may not make.
+	adapters  []*adapter
 	checkHTTP bool
 	diags     []Diagnostic
 }
@@ -183,7 +193,7 @@ func (c *goFile) checkGroupImports(f *ast.File, cfg Config) {
 }
 
 func (c *goFile) inspect(f *ast.File) {
-	if c.adapter == nil && !c.checkHTTP {
+	if len(c.adapters) == 0 && !c.checkHTTP {
 		return
 	}
 	info := c.pkg.TypesInfo
@@ -239,13 +249,18 @@ func (c *goFile) selector(n *ast.SelectorExpr, sel *types.Selection) {
 		return
 	}
 	name := sel.Obj().Name()
-	if fn, ok := sel.Obj().(*types.Func); ok && c.adapter != nil && c.adapter.matches(fn) {
-		recv := types.TypeString(sel.Recv(), (*types.Package).Name)
-		if strings.HasPrefix(recv, "*") {
-			recv = "(" + recv + ")"
+	if fn, ok := sel.Obj().(*types.Func); ok {
+		for _, a := range c.adapters {
+			if !a.matches(fn) {
+				continue
+			}
+			recv := types.TypeString(sel.Recv(), (*types.Package).Name)
+			if strings.HasPrefix(recv, "*") {
+				recv = "(" + recv + ")"
+			}
+			c.report(3, n.Sel.Pos(), "%s.%s %s outside %s (%s)", recv, name, a.cfg.Does, a.cfg.Belongs,
+				strings.Join(a.cfg.AllowedFiles, ", "))
 		}
-		c.report(3, n.Sel.Pos(), "%s.%s sends or edits a messenger message outside the delivery worker and the interactive path (%s)",
-			recv, name, strings.Join(c.adapter.allowed, ", "))
 	}
 	if c.checkHTTP && name == "Clone" && httpType(deref(sel.Recv())) == "Transport" {
 		c.report(4, n.Sel.Pos(), "(*http.Transport).Clone%s", httpSuffix)

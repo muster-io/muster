@@ -4,10 +4,11 @@
  */
 import type { BridgeAccountLinkEvent } from './bridgeAccountLinkEvent';
 import type { BridgeMessageDeletedEvent } from './bridgeMessageDeletedEvent';
+import type { BridgeNotificationAcknowledgedEvent } from './bridgeNotificationAcknowledgedEvent';
 import type { BridgePressEvent } from './bridgePressEvent';
 import type { BridgeThreadMessageEvent } from './bridgeThreadMessageEvent';
 
 /**
  * An event of a bridge, pushed by `bridgeEvent`; a copy of the schema `Event` of the Bridge protocol (`api/bridge.yaml`). `type` selects the variant.
  */
-export type BridgeEvent = BridgePressEvent | BridgeThreadMessageEvent | BridgeAccountLinkEvent | BridgeMessageDeletedEvent;
+export type BridgeEvent = BridgePressEvent | BridgeThreadMessageEvent | BridgeAccountLinkEvent | BridgeMessageDeletedEvent | BridgeNotificationAcknowledgedEvent;

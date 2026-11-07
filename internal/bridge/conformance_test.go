@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -30,11 +31,16 @@ import (
 	"github.com/muster-io/muster/internal/webhooks"
 )
 
-// everyFeature are the lines of a run with --no-interactive against the fake bridge with every feature.
-var everyFeature = []string{"PASS info", "PASS channel_check", "PASS post", "PASS replayed_key", "PASS buttons",
-	"PASS edit", "PASS thread_reply", "PASS thread_ref", "PASS forbidden_channel", "PASS user_lookup",
-	"PASS direct_message", "PASS delete", "PASS poll", "SKIP press: --no-interactive", "SKIP push: --no-interactive",
-	"PASS answer"}
+// everyFeature are the lines of a run with --no-interactive against the fake bridge with every feature, a messenger
+// whose info declares no roles.
+var everyFeature = slices.Concat([]string{"PASS info", "ROLES messenger", "PASS channel_check", "PASS post",
+	"PASS replayed_key", "PASS buttons", "PASS edit", "PASS thread_reply", "PASS thread_ref", "PASS forbidden_channel",
+	"PASS user_lookup", "PASS direct_message", "PASS delete", "PASS poll", "SKIP press: --no-interactive",
+	"SKIP push: --no-interactive", "PASS answer"}, noGateway)
+
+// noGateway are the last lines of a run against a bridge without the role gateway.
+var noGateway = []string{"SKIP notification: the bridge is not in the role gateway",
+	"SKIP notification_acknowledged: the bridge is not in the role gateway"}
 
 func startFake(t *testing.T) *fakebridge.Fake {
 	t.Helper()
@@ -246,12 +252,13 @@ func TestConformanceReducedFeatures(t *testing.T) {
 	cfg := conf(f, nil)
 	cfg.ForbiddenChannel, cfg.Handle = "", ""
 	lines, failed := run(t, cfg)
-	sameLines(t, lines, []string{"PASS info", "PASS channel_check", "PASS post", "PASS replayed_key",
+	sameLines(t, lines, slices.Concat([]string{"PASS info", "ROLES messenger", "PASS channel_check", "PASS post",
+		"PASS replayed_key",
 		"SKIP buttons: the bridge does not offer buttons", "PASS edit", "PASS thread_reply", "PASS thread_ref",
 		"SKIP forbidden_channel: no --forbidden-channel", "SKIP user_lookup: the bridge looks up nobody",
 		"SKIP direct_message: the bridge does not offer direct_messages",
 		"SKIP delete: the bridge does not offer delete", "PASS poll", "SKIP press: the bridge does not offer buttons",
-		"SKIP push: the bridge does not offer push", "PASS answer"})
+		"SKIP push: the bridge does not offer push", "PASS answer"}, noGateway))
 	if failed {
 		t.Fatal("failed")
 	}
@@ -291,7 +298,7 @@ func TestConformanceReplaysOff(t *testing.T) {
 	lines, failed := run(t, conf(f, nil))
 	re := regexp.MustCompile(`^FAIL replayed_key: the second request with the same Idempotency-Key created message ` +
 		`m\d+ instead of returning m\d+$`)
-	if !failed || !re.MatchString(lines[3]) {
+	if !failed || !re.MatchString(lines[4]) {
 		t.Fatalf("failed %v, lines %q", failed, lines)
 	}
 }
@@ -411,8 +418,8 @@ func TestConformanceInteractive(t *testing.T) {
 	if failed || push < 0 || wait != push+1 || len(strings.Fields(lines[push])) != 3 {
 		t.Fatalf("failed %v, lines %q", failed, w.lines)
 	}
-	sameLines(t, slices.Delete(slices.Clone(lines), push, wait+1), slices.Concat(everyFeature[:13],
-		[]string{"PASS press", "PASS push", "PASS answer"}))
+	sameLines(t, slices.Delete(slices.Clone(lines), push, wait+1), slices.Concat(everyFeature[:14],
+		[]string{"PASS press", "PASS push", "PASS answer"}, noGateway))
 	answers := f.Answers()
 	if len(answers) != 1 || answers[0].Bot != 2 || answers[0].EventType != "press" || answers[0].ShownAs != "ephemeral" ||
 		answers[0].Text != "muster bridge check: answer" {
@@ -507,11 +514,13 @@ func TestConformancePushOnlyFailures(t *testing.T) {
 	var asked []time.Duration
 	cn := &conformance{cfg: ConformanceConfig{Wait: time.Minute, timer: firesFor(time.Minute, &asked)}, listener: l,
 		buttonsID: "m2"}
-	if ev, why := cn.pressByPush(t.Context()); ev != nil || why != "no press of message m2 within 1m0s"+refused {
+	press := func(ev Event) bool { return ev.Type == TypePress && ev.MessageID == "m2" }
+	if ev, why := cn.awaitByPush(t.Context(), "press of message m2", press); ev != nil ||
+		why != "no press of message m2 within 1m0s"+refused {
 		t.Errorf("press %+v, %q", ev, why)
 	}
 	cn.cfg.timer = firesFor(pushGrace, &asked)
-	if ev, why := cn.pressByPush(t.Context()); ev != nil ||
+	if ev, why := cn.awaitByPush(t.Context(), "press of message m2", press); ev != nil ||
 		why != "no valid press of message m2 within 30s of the first refused push"+refused {
 		t.Errorf("press %+v, %q", ev, why)
 	}
@@ -536,7 +545,7 @@ func TestConformancePushOnlyRefused(t *testing.T) {
 		refused)
 	push := regexp.MustCompile(`^FAIL push: the press step saw no press` + refused)
 	if !failed || !slices.ContainsFunc(lines, press.MatchString) || !slices.ContainsFunc(lines, push.MatchString) ||
-		lines[len(lines)-1] != "PASS answer" {
+		lines[len(lines)-3] != "PASS answer" {
 		t.Fatalf("failed %v, lines %q", failed, lines)
 	}
 	if !slices.Equal(asked, []time.Duration{ConformanceWait, pushGrace}) {
@@ -573,7 +582,7 @@ func TestConformancePressTimeout(t *testing.T) {
 	cfg.sleep = func(_ context.Context, d time.Duration) { manual.Advance(d) }
 	lines, failed := run(t, cfg)
 	if !failed || !slices.Contains(lines, "FAIL press: no press of message m2 within 3s") ||
-		!slices.Contains(lines, "SKIP push: the bridge does not offer push") || lines[len(lines)-1] != "PASS answer" {
+		!slices.Contains(lines, "SKIP push: the bridge does not offer push") || lines[len(lines)-3] != "PASS answer" {
 		t.Fatalf("lines %q", lines)
 	}
 }
@@ -586,7 +595,7 @@ func TestConformancePressDataChanged(t *testing.T) {
 	_, cfg := interactive(t, f, "", &changed)
 	lines, failed := run(t, cfg)
 	if !failed || !slices.Contains(lines, "FAIL press: the press of message m2 carries data that none of its "+
-		"buttons has") || lines[len(lines)-1] != "PASS answer" || len(f.Answers()) != 1 {
+		"buttons has") || lines[len(lines)-3] != "PASS answer" || len(f.Answers()) != 1 {
 		t.Fatalf("lines %q", lines)
 	}
 }
@@ -639,7 +648,7 @@ func TestConformanceKeepsSecrets(t *testing.T) {
 		ForbiddenChannel: "f", Handle: "h", Log: logging.New(&log, logging.LevelInfo)}
 	lines, failed := run(t, cfg)
 	all := strings.Join(lines, "\n") + log.String()
-	if !failed || len(lines) != 16 || !strings.Contains(all, "[redacted]") || strings.Contains(all, testToken) ||
+	if !failed || len(lines) != 19 || !strings.Contains(all, "[redacted]") || strings.Contains(all, testToken) ||
 		strings.Contains(all, testPushSecret) {
 		t.Fatalf("lines %q, log %s", lines, log.String())
 	}
@@ -735,7 +744,10 @@ func TestPushListener(t *testing.T) {
 			t.Errorf("%s = %d %s", tc.name, rec.Code, rec.Body)
 		}
 	}
-	if ev := l.press("m2"); ev == nil || ev.ID != "e1" || ev.Data != "d1" || l.press("m1") != nil {
+	pressOf := func(id string) func(Event) bool {
+		return func(ev Event) bool { return ev.Type == TypePress && ev.MessageID == id }
+	}
+	if ev := l.first(pressOf("m2")); ev == nil || ev.ID != "e1" || ev.Data != "d1" || l.first(pressOf("m1")) != nil {
 		t.Errorf("press %+v", ev)
 	}
 	if a, ok := l.attempt("e1"); !ok || a.event == nil {
@@ -780,5 +792,204 @@ func TestValidPushSecret(t *testing.T) {
 		if ValidPushSecret(s) != want {
 			t.Errorf("%q: %v", s, !want)
 		}
+	}
+}
+
+// gatewayLines are the lines of a run against the fake's gateway bot, whose only role is gateway, up to its gateway
+// steps: the messenger's steps are skipped, poll and answer run.
+var gatewayLines = []string{"PASS info", "ROLES gateway", "SKIP channel_check: " + notMessenger,
+	"SKIP post: " + notMessenger, "SKIP replayed_key: " + notMessenger, "SKIP buttons: " + notMessenger,
+	"SKIP edit: " + notMessenger, "SKIP thread_reply: " + notMessenger, "SKIP thread_ref: " + notMessenger,
+	"SKIP forbidden_channel: " + notMessenger, "SKIP user_lookup: " + notMessenger,
+	"SKIP direct_message: " + notMessenger, "SKIP delete: " + notMessenger, "PASS poll",
+	"SKIP press: " + notMessenger, "SKIP push: " + notMessenger, "PASS answer"}
+
+// gatewayConf is a run against the fake's gateway bot with the contact, without a channel.
+func gatewayConf(f *fakebridge.Fake, out io.Writer) ConformanceConfig {
+	return ConformanceConfig{BaseURL: f.URL(), Token: fakebridge.GatewayToken, Contact: "+10000000001", Out: out}
+}
+
+// TestConformanceGateway is C-22.FR-21 as revised and C-30.FR-2: against the gateway bot the run prints its roles,
+// skips the messenger's steps without needing --channel, sends one notification to the contact with test action data
+// of 64 bytes and the same request again, which must be replayed, and in an interactive run waits for the
+// notification_acknowledged, which the fake sends when the notification is acknowledged, and answers it; every step
+// passes. Without --contact both gateway steps are skipped; with --no-interactive the second is.
+func TestConformanceGateway(t *testing.T) {
+	f := startFake(t)
+	w := &lineWriter{}
+	w.on = func(line string) {
+		if _, id, ok := strings.Cut(line, ", notification_id "); ok && strings.HasPrefix(line, "WAIT ") {
+			if _, err := f.Acknowledge(t.Context(), fakebridge.Acknowledge{NotificationID: id}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	cfg := gatewayConf(f, w)
+	cfg.Interactive = true
+	lines, failed := run(t, cfg)
+	wait := slices.IndexFunc(lines, func(l string) bool {
+		return strings.HasPrefix(l, "WAIT notification_acknowledged: acknowledge the notification sent to the "+
+			"contact within 5m0s, notification_id n1")
+	})
+	if failed || wait < 0 {
+		t.Fatalf("failed %v, lines %q", failed, lines)
+	}
+	sameLines(t, slices.Delete(slices.Clone(lines), wait, wait+1), slices.Concat(gatewayLines,
+		[]string{"PASS notification", "PASS notification_acknowledged"}))
+	ns := f.Notifications()
+	if len(ns) != 1 || ns[0].Contact != "+10000000001" || ns[0].Action == nil || len(ns[0].Action.Data) != 64 ||
+		ns[0].Action.Label != checkNotificationLabel || ns[0].Text != checkNotification || ns[0].Language != "en" ||
+		ns[0].Bot != 3 {
+		t.Errorf("notifications %+v", ns)
+	}
+	answers := f.Answers()
+	if len(answers) != 1 || answers[0].EventType != TypeNotificationAcknowledged ||
+		answers[0].ShownAs != "notification" ||
+		answers[0].Text != checkTitle+"notification_acknowledged" || answers[0].MessageID != "n1" {
+		t.Errorf("answers %+v", answers)
+	}
+
+	cfg = gatewayConf(f, nil)
+	cfg.Contact = ""
+	lines, failed = run(t, cfg)
+	sameLines(t, lines, slices.Concat(gatewayLines, []string{"SKIP notification: no --contact",
+		"SKIP notification_acknowledged: no --contact"}))
+	if failed {
+		t.Fatal("failed without --contact")
+	}
+	lines, failed = run(t, gatewayConf(f, nil))
+	sameLines(t, lines, slices.Concat(gatewayLines, []string{"PASS notification",
+		"SKIP notification_acknowledged: --no-interactive"}))
+	if failed || len(f.Notifications()) != 2 {
+		t.Fatalf("failed %v, notifications %+v", failed, f.Notifications())
+	}
+}
+
+// TestConformanceBothRoles: a bridge with both roles runs the messenger's steps and the gateway's, and a bridge in the
+// role messenger needs --channel, whose absence ends the run after info with ErrChannelRequired, before any step of
+// the messenger.
+func TestConformanceBothRoles(t *testing.T) {
+	f := startFake(t)
+	configure(t, f, `{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`)
+	cfg := conf(f, nil)
+	cfg.Contact = "+10000000001"
+	lines, failed := run(t, cfg)
+	want := slices.Concat([]string{"PASS info", "ROLES messenger gateway"}, everyFeature[2:17],
+		[]string{"PASS notification", "SKIP notification_acknowledged: --no-interactive"})
+	sameLines(t, lines, want)
+	if failed {
+		t.Fatal("failed")
+	}
+	w := &lineWriter{}
+	cfg.Channel, cfg.Out = "", w
+	failed, err := RunConformance(t.Context(), cfg)
+	if !errors.Is(err, ErrChannelRequired) || failed {
+		t.Fatalf("without --channel: failed %v, err %v", failed, err)
+	}
+	sameLines(t, w.lines, []string{"PASS info", "ROLES messenger gateway"})
+}
+
+// TestConformanceGatewayFailures: a sendNotification that fails, a replay that is not one, an acknowledgement with
+// other data and none at all fail their steps, naming why.
+func TestConformanceGatewayFailures(t *testing.T) {
+	f := startFake(t)
+	fault := func(t *testing.T, body string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.URL()+"/_fake/faults",
+			strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		t.Cleanup(f.ResetFaults)
+	}
+	fault(t, `{"path":"/v1/notifications","status":403,"content_type":"application/problem+json",`+
+		`"body":"{\"title\":\"Forbidden\",\"status\":403,\"class\":\"forbidden\",\"detail\":\"bad credentials\"}"}`)
+	lines, failed := run(t, gatewayConf(f, nil))
+	if !failed || !slices.Contains(lines, "FAIL notification: answered 403 forbidden: bad credentials") ||
+		lines[len(lines)-1] != "SKIP notification_acknowledged: --no-interactive" {
+		t.Fatalf("a refused notification: lines %q", lines)
+	}
+	f.ResetFaults()
+
+	configure(t, f, `{"replays":false}`)
+	lines, failed = run(t, gatewayConf(f, nil))
+	re := regexp.MustCompile(`^FAIL notification: the second request with the same Idempotency-Key sent ` +
+		`notification n\d+ instead of returning n\d+$`)
+	if !failed || !slices.ContainsFunc(lines, re.MatchString) {
+		t.Fatalf("replays off: lines %q", lines)
+	}
+	configure(t, f, `{"replays":true}`)
+
+	cfg := gatewayConf(f, nil)
+	cfg.Interactive = true
+	cfg.Wait, cfg.longPoll, cfg.sleep = time.Second, time.Second, func(context.Context, time.Duration) {}
+	lines, failed = run(t, cfg)
+	if !failed || lines[len(lines)-1] != "FAIL notification_acknowledged: no notification_acknowledged of "+
+		"notification n3 within 1s" {
+		t.Fatalf("no acknowledgement: lines %q", lines)
+	}
+
+	// A stand-in gateway that acknowledges its notification with data that is not the action's.
+	var sent atomic.Int32
+	b := startStandIn(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/info":
+			answerJSON(http.StatusOK, "application/json", string(validInfo(t, func(m map[string]any) {
+				m["roles"], m["event_delivery"] = []string{"gateway"}, []string{"poll"}
+			})))(w, r)
+		case "/v1/notifications":
+			answerJSON(http.StatusCreated, "application/json",
+				fmt.Sprintf(`{"notification_id":"n-x","replayed":%t}`, sent.Add(1) > 1))(w, r)
+		case "/v1/events":
+			events := ""
+			if sent.Load() > 0 {
+				events = `{"id":"x1","type":"notification_acknowledged","occurred_at":"2026-11-07T12:00:00Z",` +
+					`"notification_id":"n-x","data":"other"}`
+			}
+			answerJSON(http.StatusOK, "application/json", `{"events":[`+events+`],"next_cursor":"1"}`)(w, r)
+		default:
+			answerJSON(http.StatusNotFound, problemType, `{"title":"gone","class":"gone"}`)(w, r)
+		}
+	})
+	cfg = ConformanceConfig{BaseURL: b.srv.URL, Token: testToken, Contact: "+10000000001", Interactive: true,
+		longPoll: time.Second}
+	lines, failed = run(t, cfg)
+	if !failed || lines[len(lines)-1] != "FAIL notification_acknowledged: the notification_acknowledged of "+
+		"notification n-x carries data that its action did not have" {
+		t.Fatalf("other data: lines %q", lines)
+	}
+}
+
+// TestConformanceGatewayPushOnly: against a gateway that only pushes, the interactive run opens the push listener for
+// the notification_acknowledged, which arrives as a signed push, and answers it.
+func TestConformanceGatewayPushOnly(t *testing.T) {
+	f := startFake(t)
+	configure(t, f, `{"event_delivery":["push"]}`)
+	w := &lineWriter{}
+	w.on = func(line string) {
+		switch kind, rest, _ := strings.Cut(line, " "); kind {
+		case "PUSH":
+			fields := strings.Fields(rest)
+			b, _ := json.Marshal(map[string]any{"push": map[string]string{"url": fields[0], "secret": fields[1]}})
+			configure(t, f, string(b))
+		case "WAIT":
+			_, id, _ := strings.Cut(rest, ", notification_id ")
+			if _, err := f.Acknowledge(t.Context(), fakebridge.Acknowledge{NotificationID: id}); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	cfg := gatewayConf(f, w)
+	cfg.Interactive = true
+	lines, failed := run(t, cfg)
+	push := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, "PUSH http://127.0.0.1:") })
+	if failed || push < 0 || lines[len(lines)-1] != "PASS notification_acknowledged" ||
+		!slices.Contains(lines, "SKIP poll: the bridge does not offer poll") {
+		t.Fatalf("failed %v, lines %q", failed, lines)
 	}
 }

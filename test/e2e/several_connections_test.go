@@ -479,7 +479,8 @@ func (e *several) pressLogged(event, conn, outcome string) bool {
 // through two Connections in one channel and an outgoing webhook gives every Destination its own Root message and its
 // own events (C-11.FR-1, C-14.FR-2); Acknowledge, a new Alert and Resolve reach each Root message and Thread through
 // its own Connection only (C-13.FR-4, C-14.FR-4); listLinkableConnections lists every Connection of every messenger,
-// the demo Bridge Connection "Example Bridge" too (C-18.FR-10, C-22.FR-15).
+// the demo Bridge Connection "Example Bridge" too, but not the demo Notification gateway "Example Gateway"
+// (C-18.FR-10, C-22.FR-15, C-30.FR-1).
 func TestSeveralConnectionsRoute(t *testing.T) {
 	h := Start(t, DevProcess)
 	r := h.Replicas[0]
@@ -637,6 +638,10 @@ func TestSeveralConnectionsRoute(t *testing.T) {
 		"telegram " + devmode.TelegramConnectionName, "telegram tg-b"}
 	if !slices.Equal(names, want) {
 		t.Errorf("linkable connections %v, want %v", names, want)
+	}
+	// C-30.FR-1: the demo Notification gateway alone is no Connection to link through.
+	if slices.Contains(names, "bridge "+devmode.GatewayConnectionName) {
+		t.Errorf("linkable connections %v offer %s", names, devmode.GatewayConnectionName)
 	}
 }
 

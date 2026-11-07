@@ -91,7 +91,7 @@ export function slackConnection(
   };
 }
 
-/** A Bridge Connection that polls and whose info no check has read yet. */
+/** A Bridge Connection that polls and whose info no check has read yet, so a messenger. */
 export function bridgeConnection(
   overrides: ConnectionOverrides<BridgeConnection> = {},
 ): BridgeConnection {
@@ -107,6 +107,7 @@ export function bridgeConnection(
     callback_url: callbackUrl("bridge", id),
     info: null,
     info_read_at: null,
+    roles: ["messenger"],
     proxy: { enabled: false },
     destination_count: 0,
     created_at: CREATED_AT,

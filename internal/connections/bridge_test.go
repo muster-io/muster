@@ -1378,3 +1378,182 @@ func TestBridgeDevRoute(t *testing.T) {
 		t.Fatalf("unrouted or blocked requests reached the fake: %d, want %d", got, n)
 	}
 }
+
+// TestBridgeRoles is C-30.FR-1, C-30.AC-1 and C-22.FR-3 as revised at the Connections: a Bridge Connection reads the
+// roles of its stored info — messenger before its first check and when the info declares none, gateway alone for a
+// gateway-only bridge, both for a bridge with both — and only a gateway-only one is GatewayOnly; the role filter lists
+// every Connection of another type and the Bridge Connections with messenger as messengers, and only the Bridge
+// Connections with gateway as gateways.
+func TestBridgeRoles(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	mm := e.create(t, "mm")
+	old := e.createFakeBridge(t, f, "old", fakebridge.Token, connections.EventDeliveryPoll)
+	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
+	both := e.createFakeBridge(t, f, "both", fakebridge.SecondToken, connections.EventDeliveryPoll)
+	if c, _ := e.svc.Get(ctx, gw.PublicID); !slices.Equal(c.BridgeRoles(), []string{bridge.RoleMessenger}) {
+		t.Errorf("before the first check %v", c.BridgeRoles())
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, f.URL()+"/_fake/config", strings.NewReader(
+		`{"token":"`+fakebridge.SecondToken+`","roles":["messenger","gateway"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /_fake/config = %d", resp.StatusCode)
+	}
+	for _, c := range []connections.Connection{old, gw, both} {
+		if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK {
+			t.Fatalf("check of %s = %+v, %v", c.Name, res, err)
+		}
+	}
+	for _, tc := range []struct {
+		c    connections.Connection
+		want []string
+		only bool
+	}{
+		{old, []string{bridge.RoleMessenger}, false},
+		{gw, []string{bridge.RoleGateway}, true},
+		{both, []string{bridge.RoleMessenger, bridge.RoleGateway}, false},
+	} {
+		c, err := e.svc.Get(ctx, tc.c.PublicID)
+		if err != nil || !slices.Equal(c.BridgeRoles(), tc.want) {
+			t.Errorf("%s: roles %v, %v", tc.c.Name, c.BridgeRoles(), err)
+		}
+		if only, err := e.svc.GatewayOnly(ctx, tc.c.PublicID); err != nil || only != tc.only {
+			t.Errorf("%s: GatewayOnly %v, %v", tc.c.Name, only, err)
+		}
+	}
+	if c, _ := e.svc.Get(ctx, mm.PublicID); c.BridgeRoles() != nil {
+		t.Errorf("a Mattermost Connection has roles %v", c.BridgeRoles())
+	}
+	for _, id := range []string{mm.PublicID, "CNAAAAAAAAAAA9", "nonsense"} {
+		if only, err := e.svc.GatewayOnly(ctx, id); err != nil || only {
+			t.Errorf("%s: GatewayOnly %v, %v", id, only, err)
+		}
+	}
+	names := func(role string) []string {
+		page, err := e.svc.List(ctx, connections.ListFilter{Role: &role, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, c := range page.Connections {
+			out = append(out, c.Name)
+		}
+		return out
+	}
+	if got := names(bridge.RoleMessenger); !slices.Equal(got, []string{"mm", "old", "both"}) {
+		t.Errorf("messengers %v", got)
+	}
+	if got := names(bridge.RoleGateway); !slices.Equal(got, []string{"gw", "both"}) {
+		t.Errorf("gateways %v", got)
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.GatewayOnly(ctx, gw.PublicID); err == nil {
+		t.Error("a failed read")
+	}
+}
+
+// TestBridgeConnectionForGateways is the Bridge Connection of a Notification gateway by its id (bridge.Targets): its
+// client, kept until the Connection changes; a Connection that is no Bridge Connection, or none, is bridge.ErrNoTarget.
+func TestBridgeConnectionForGateways(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
+	conn, err := e.svc.BridgeConnection(ctx, gw.ID)
+	if err != nil || conn.ID != gw.ID || conn.PublicID != gw.PublicID || conn.Version != gw.Version ||
+		conn.Client == nil {
+		t.Fatalf("conn %+v, %v", conn, err)
+	}
+	if again, _ := e.svc.BridgeConnection(ctx, gw.ID); again.Client != conn.Client {
+		t.Error("the client was built again")
+	}
+	mm := e.create(t, "mm")
+	for _, id := range []int64{mm.ID, 999} {
+		if _, err := e.svc.BridgeConnection(ctx, id); !errors.Is(err, bridge.ErrNoTarget) {
+			t.Errorf("%d: %v", id, err)
+		}
+	}
+	e.store.fail["GetConnection"] = errors.New("down")
+	if _, err := e.svc.BridgeConnection(ctx, gw.ID); err == nil || errors.Is(err, bridge.ErrNoTarget) {
+		t.Errorf("a failed read: %v", err)
+	}
+}
+
+// TestCheckDemoGateway is C-30.FR-1 for `muster dev`: CheckDemo checks the demo Bridge Connection of a name, so that
+// its stored info has the gateway's roles at start; a name without a Connection, or of a Connection of another type, is
+// left alone; a check that cannot run for want of a limiter token, or that fails, is logged as demo_check_failed and
+// is no error, while a failed read of the Connection is.
+func TestCheckDemoGateway(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	d := connections.Demo{Type: connections.TypeBridge, Name: "Example Gateway", BaseURL: f.URL(),
+		BotToken: fakebridge.GatewayToken}
+	if err := e.svc.EnsureDemo(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.CheckDemo(ctx, d.Name); err != nil {
+		t.Fatal(err)
+	}
+	page, err := e.svc.List(ctx, connections.ListFilter{Limit: 10})
+	if err != nil || len(page.Connections) != 1 ||
+		!slices.Equal(page.Connections[0].BridgeRoles(), []string{bridge.RoleGateway}) {
+		t.Fatalf("page %+v, %v", page, err)
+	}
+	mm := e.create(t, "mm")
+	requests := len(f.Requests())
+	for _, name := range []string{"none", mm.Name} {
+		if err := e.svc.CheckDemo(ctx, name); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if len(f.Requests()) != requests {
+		t.Error("a request for another Connection")
+	}
+	// A check that cannot run, or fails, is logged and ends nothing.
+	e.path.limited = true
+	if err := e.svc.CheckDemo(ctx, d.Name); err != nil {
+		t.Errorf("a limited check = %v", err)
+	}
+	e.path.limited = false
+	if !strings.Contains(e.log.String(), `"event":"demo_check_failed","connection":"`+page.Connections[0].PublicID+
+		`","error":"no limiter token was free within the interactive budget`) {
+		t.Errorf("logged %s", e.log.String())
+	}
+	revoke, err := http.NewRequestWithContext(ctx, http.MethodPut, f.URL()+"/_fake/config",
+		strings.NewReader(`{"revoked":["`+fakebridge.GatewayToken+`"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(revoke)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if err := e.svc.CheckDemo(ctx, d.Name); err != nil {
+		t.Errorf("a failed check = %v", err)
+	}
+	if !strings.Contains(e.log.String(), `"event":"demo_check_failed","connection":"`+page.Connections[0].PublicID+
+		`","error":"info: token_invalid The bridge refused the token."`) {
+		t.Errorf("logged %s", e.log.String())
+	}
+	// A failed read of the Connection ends the start.
+	e.store.fail["GetConnection"] = errors.New("down")
+	if err := e.svc.CheckDemo(ctx, d.Name); err == nil {
+		t.Error("a failed read")
+	}
+	delete(e.store.fail, "GetConnection")
+	e.store.fail["FindConnectionByName"] = errors.New("down")
+	if err := e.svc.CheckDemo(ctx, d.Name); err == nil {
+		t.Error("a failed lookup")
+	}
+}

@@ -359,10 +359,15 @@ func TestRun(t *testing.T) {
 	if status := get(t, m[3]+"/bot"+devmode.TelegramSecondBotToken+"/getMe"); status != http.StatusOK {
 		t.Errorf("Telegram getMe of the second bot = %d", status)
 	}
-	for _, token := range []string{devmode.BridgeConnectionBotToken, devmode.BridgeSecondBotToken} {
+	for _, token := range []string{devmode.BridgeConnectionBotToken, devmode.BridgeSecondBotToken,
+		devmode.GatewayConnectionBotToken} {
 		if status := get(t, m[7]+"/v1/info", "Authorization", "Bearer "+token); status != http.StatusOK {
 			t.Errorf("bridge info with %s = %d", token, status)
 		}
+	}
+	if status := get(t, m[7]+fakebridge.GatewayPrefix+"/v1/info", "Authorization",
+		"Bearer "+devmode.GatewayConnectionBotToken); status != http.StatusOK {
+		t.Errorf("the gateway's info under its prefix = %d", status)
 	}
 	if status := get(t, m[7]+"/v1/info", "Authorization", "Bearer nope"); status != http.StatusUnauthorized {
 		t.Errorf("bridge info with another token = %d", status)
@@ -712,6 +717,19 @@ func TestBridgeDemo(t *testing.T) {
 	}
 }
 
+// TestGatewayDemo is C-30.FR-1: the demo Connection "Example Gateway" on the fake bridge's gateway bot, in poll mode
+// as every demo Bridge Connection, under the fake's gateway prefix, with the published token of that bot; the start
+// checks it with connections.Service.CheckDemo, so that it reads the role gateway (TestBridgeGateway of the end-to-end
+// tests starts muster dev and reads it).
+func TestGatewayDemo(t *testing.T) {
+	d := devmode.GatewayDemo()
+	if d.Type != connections.TypeBridge || d.Name != "Example Gateway" ||
+		d.BaseURL != "http://127.0.0.1:18094/gateway" || string(d.BotToken) != "muster-dev-gateway-token" ||
+		devmode.GatewayConnectionBotToken != fakebridge.GatewayToken || d.Was != "" {
+		t.Errorf("GatewayDemo() = %+v", d)
+	}
+}
+
 // TestRunBusyBridgePort: a busy port of the fake bridge fails the start, naming it, and closes the fakes already
 // started.
 func TestRunBusyBridgePort(t *testing.T) {
@@ -795,6 +813,7 @@ func TestRoutes(t *testing.T) {
 			"muster-dev-mattermost-token-b", ""},
 		{"bridge, the demo bot", devmode.BridgeRoute, "https://bridge.example.org", "muster-dev-bridge-token", br},
 		{"bridge, the second bot", devmode.BridgeRoute, "https://bridge.example.org/", "muster-dev-bridge-token-b", br},
+		{"bridge, the gateway bot", devmode.BridgeRoute, "https://bridge.example.org", "muster-dev-gateway-token", br},
 		{"bridge, another token", devmode.BridgeRoute, "https://bridge.example.org", "real-token", ""},
 		{"bridge, a path prefix", devmode.BridgeRoute, "https://bridge.example.org/muster", "muster-dev-bridge-token-b",
 			""},
