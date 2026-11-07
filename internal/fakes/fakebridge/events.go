@@ -215,6 +215,31 @@ func (f *Fake) queue(ctx context.Context, b *bot, typ, messageID, userID string,
 	return ev
 }
 
+// redeliver queues the event id again, unchanged and under its id, for the bot it was queued for, as a bridge that
+// delivers an event twice, and returns it; it fails for an event the fake did not queue. f.mu is held.
+func (f *Fake) redeliver(ctx context.Context, id string) (Event, error) {
+	i := slices.IndexFunc(f.events, func(ev Event) bool {
+		var v struct {
+			ID string `json:"id"`
+		}
+		return json.Unmarshal(ev.Event, &v) == nil && v.ID == id
+	})
+	if i < 0 {
+		return Event{}, fmt.Errorf("unknown event %q", id)
+	}
+	ev := f.events[i]
+	b := f.botByNumber(ev.Bot)
+	b.events = append(b.events, ev.Event)
+	close(b.changed)
+	b.changed = make(chan struct{})
+	f.events = append(f.events, ev)
+	if f.config.Push != nil {
+		f.toPush = append(f.toPush, pending{id: id, raw: ev.Event})
+		f.startPusher(ctx)
+	}
+	return ev, nil
+}
+
 // botByNumber is the bot n, 1 or 2. f.mu is held.
 func (f *Fake) botByNumber(n int) *bot {
 	for _, b := range f.bots {

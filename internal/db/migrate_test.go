@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (34)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (35)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":34`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":35`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":34`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":35`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (34)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (35)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":34`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":35`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3542,6 +3542,47 @@ func TestIntegrationGatewayCalls(t *testing.T) {
 		}
 		if got := e.count(t, `SELECT count(*) FROM pg_tables WHERE tablename LIKE 'gateway_call%'`); got != 2 {
 			t.Errorf("up again: %d tables of calls", got)
+		}
+	})
+}
+
+// TestIntegrationGatewayCallSignature runs 0035 over a database at 34 with a call that a replica of an earlier version
+// started: it keeps the call, without action data or key id, and a call takes both; down drops the two columns and
+// keeps the calls; up again works.
+func TestIntegrationGatewayCallSignature(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 34)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PA', 'petr', 'petr', 'responder', 'local', 'active', now(), now()
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CN0000000000G1', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', now(), 1, 1, now(), now()
+			FROM organizations`)
+		e.exec(t, `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, language, text,
+			first_attempt_at, next_attempt_at, created_at)
+			SELECT u.org_id, 'CA0000000000A1', c.id, u.id, 'sending', 'en', 'Muster: 1 Alert Group needs you.', now(),
+				now(), now()
+			FROM users u, connections c`)
+		if err := e.mm.Migrate(35); err != nil {
+			t.Fatalf("up to 35: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM gateway_calls
+			WHERE public_id = 'CA0000000000A1' AND action_data IS NULL AND button_key_id IS NULL`); got != 1 {
+			t.Errorf("the call of an earlier version: %d rows", got)
+		}
+		e.exec(t, `UPDATE gateway_calls SET action_data = 'AQ', button_key_id = 'k-00000001'`)
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'gateway_calls' AND column_name IN ('action_data', 'button_key_id')`); got != 0 {
+			t.Errorf("after down: %d columns left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM gateway_calls`); got != 1 {
+			t.Errorf("after down: %d calls", got)
+		}
+		if err := e.mm.Migrate(35); err != nil {
+			t.Errorf("up again: %v", err)
 		}
 	})
 }

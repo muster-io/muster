@@ -108,6 +108,8 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return "Slack";
     case "bridge":
       return t("audit.transport.bridge");
+    case "gateway":
+      return t("audit.transport.gateway");
     case "cli":
       return t("audit.transport.cli");
     case "system":

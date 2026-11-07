@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -290,6 +291,113 @@ func TestAcknowledge(t *testing.T) {
 	if res, err := h.svc.Acknowledge(t.Context(), bobToken, other.PublicID); err != nil ||
 		res.Group.Owner.Name != "Bob" {
 		t.Errorf("bob's token = %v %+v", err, res.Group.Owner)
+	}
+}
+
+// TestAcknowledgeThroughGateway is C-30.FR-6 and C-30.AC-4 in the dispatcher: an Acknowledge with the Transport
+// gateway makes a firing or a snoozed Alert Group acknowledged, with gateway in the Timeline and the Audit log; one that
+// another User or the same person owns stays as it is, refused owned_by_other with the Owner's name and logged as a
+// refused Command, so that a call never makes a Takeover; a resolved one is refused already_resolved; a Viewer is
+// refused forbidden; an Owner without a row is refused without a name, and one that cannot be read fails the Command.
+// The entries of a Command through the gateway name its Connection in gateway_connection_id.
+func TestAcknowledgeThroughGateway(t *testing.T) {
+	gw := func(c Caller) Caller {
+		c.Transport, c.Gateway = audit.TransportGateway, 77
+		return c
+	}
+	h := newHarness(t)
+	h.people()
+	g := h.firing(t, "x")
+	res, err := h.svc.Acknowledge(t.Context(), gw(alice), g.PublicID)
+	if err != nil || res.Outcome != OutcomeDone || g.Status != "acknowledged" || g.OwnerUserID != i8(owner) {
+		t.Fatalf("acknowledge = %v %+v", err, res)
+	}
+	if e := h.last(t, g); e.Event.String != "acknowledged" || e.Transport != "gateway" ||
+		e.GatewayConnectionID != i8(77) {
+		t.Errorf("entry %+v", e)
+	}
+	if a := h.db.audit[len(h.db.audit)-1]; a.Action != ActionAcknowledged || a.Transport != "gateway" {
+		t.Errorf("audit %+v", a)
+	}
+	snoozed := h.firing(t, "y")
+	h.snooze(snoozed, t0.Add(time.Hour), false)
+	if _, err := h.svc.Acknowledge(t.Context(), gw(bob), snoozed.PublicID); err != nil ||
+		snoozed.Status != "acknowledged" || snoozed.OwnerUserID != i8(bobID) || snoozed.SnoozeUntil.Valid {
+		t.Errorf("a snoozed one = %v, row %+v", err, snoozed)
+	}
+	audits, entries := len(h.db.audit), len(h.entriesOf(g))
+	for _, c := range []struct {
+		caller Caller
+		owner  string
+	}{{gw(bob), "Alice"}, {gw(alice), "Alice"}} {
+		_, err := h.svc.Acknowledge(t.Context(), c.caller, g.PublicID)
+		r, ok := errors.AsType[*RefusedError](err)
+		if !ok || r.Code != CodeOwnedByOther || r.OwnerName != c.owner || r.Detail() != "Owned by another user." {
+			t.Errorf("acknowledge of an owned one by %s = %v", c.caller.Actor.PublicID, err)
+		}
+	}
+	if g.OwnerUserID != i8(owner) || len(h.db.audit) != audits || len(h.entriesOf(g)) != entries {
+		t.Errorf("a refusal changed the alert group: owner %v, %d audit entries", g.OwnerUserID, len(h.db.audit))
+	}
+	if !strings.Contains(h.log.String(), `"event":"command_refused","command":"acknowledge","group":"`+g.PublicID+
+		`","actor":"SRAAAAAAAAAAB0","transport":"gateway","code":"owned_by_other"`) {
+		t.Errorf("log %s", h.log)
+	}
+	resolved := h.firing(t, "z")
+	h.personResolve(resolved, time.Minute)
+	if _, err := h.svc.Acknowledge(t.Context(), gw(alice), resolved.PublicID); code(err) != CodeAlreadyResolved {
+		t.Errorf("a resolved one = %v", err)
+	}
+	if _, err := h.svc.Acknowledge(t.Context(), gw(carol), h.firing(t, "v").PublicID); code(err) != CodeForbidden {
+		t.Errorf("a viewer = %v", err)
+	}
+	// An Owner without a row has no name, which the Transport gives in its own language.
+	delete(h.db.users, owner)
+	_, err = h.svc.Acknowledge(t.Context(), gw(bob), g.PublicID)
+	if r, ok := errors.AsType[*RefusedError](err); !ok || r.Code != CodeOwnedByOther || r.OwnerName != "" {
+		t.Errorf("an owner without a row = %v", err)
+	}
+	h.db.fail["ListUserRefs"] = errBoom
+	if _, err := h.svc.Acknowledge(t.Context(), gw(bob), g.PublicID); !errors.Is(err, errBoom) {
+		t.Errorf("an owner that cannot be named = %v", err)
+	}
+}
+
+// gatewayEntries is a transition that records, as one Command would, a status entry, an alerts entry and two
+// escalation entries, one naming a gateway of its own.
+type gatewayEntries struct{}
+
+func (gatewayEntries) precondition(*Group) error { return nil }
+
+func (gatewayEntries) apply(_ context.Context, _ Queries, g *Group, c *change) error {
+	c.add(entry{Event: EventAcknowledged, From: g.Status, To: StatusAcknowledged, OwnerUserID: ptr(int64(owner))})
+	c.add(entry{Event: EventAlertsAdded, Variant: VariantFiring})
+	c.add(entry{Event: EventPageNotDelivered, Page: &Page{Reason: PageCallRefused,
+		Gateway: &PageGateway{ID: 5, PublicID: "CN000000000005", Name: "other"}}})
+	c.add(entry{Event: EventPageNotDelivered, Page: &Page{Reason: PageCallRefused}})
+	return nil
+}
+
+// TestGatewayOfStatusEntryOnly: the gateway of a Command through the Transport gateway names its status entry only;
+// its other entries name none, and an escalation entry keeps the gateway of its Page.
+func TestGatewayOfStatusEntryOnly(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	row := h.firing(t, "x")
+	g, _ := groupOf(*row)
+	before := len(h.entriesOf(row))
+	var after committed
+	actor := Actor{Kind: audit.ActorUser, Transport: audit.TransportGateway, Person: alice.Actor, Gateway: 77}
+	if err := h.svc.d.dispatch(t.Context(), h.db, g, actor, gatewayEntries{}, &after); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range h.entriesOf(row)[before:] {
+		got = append(got, fmt.Sprintf("%s %d", e.Event.String, e.GatewayConnectionID.Int64))
+	}
+	want := []string{"acknowledged 77", "alerts_added 0", "page_not_delivered 5", "page_not_delivered 0"}
+	if !slices.Equal(got, want) {
+		t.Errorf("entries %v, want %v", got, want)
 	}
 }
 

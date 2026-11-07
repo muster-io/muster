@@ -617,6 +617,11 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 		if e.LabelConflicts != nil {
 			v.LabelConflicts = &e.LabelConflicts
 		}
+		if g := e.Gateway; g != nil {
+			v.Gateway.Set(gen.EntityRef{Id: g.PublicID, Name: g.Name})
+		} else {
+			v.Gateway.SetNull()
+		}
 		err = out.FromTimelineStatusEntry(v)
 	case groups.KindAlerts:
 		v := gen.TimelineAlertsEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineAlertsEntryKindAlerts, Actor: actor,

@@ -206,6 +206,9 @@ type Actor struct {
 	Transport audit.Transport
 	Person    audit.Actor
 	Address   netip.Addr
+	// Gateway is the Connection of the Notification gateway of the call a Command through the Transport gateway came
+	// from, written to gateway_connection_id of its status entry; 0 for none.
+	Gateway int64
 }
 
 // System is Muster as the actor of a system transition.
@@ -737,6 +740,11 @@ func (d *dispatcher) record(ctx context.Context, q Queries, g *Group, actor Acto
 		if e.Page != nil {
 			p.PagedUserIds, p.GatewayConnectionID, p.Reason = e.Page.userIDs(), e.Page.gatewayID(),
 				nonEmpty(e.Page.Reason)
+		}
+		// The gateway of a Command through the Transport gateway names its status entry, such as acknowledged, never
+		// the other entries the same Command records.
+		if actor.Gateway != 0 && e.Page == nil && e.Event != "" && rowOf(e.Event, e.Variant).Kind == KindStatus {
+			p.GatewayConnectionID = pgtype.Int8{Int64: actor.Gateway, Valid: true}
 		}
 		switch person := actor.Person; person.Kind {
 		case audit.ActorUser:

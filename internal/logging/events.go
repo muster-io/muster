@@ -746,12 +746,12 @@ var BridgeEventRejected = newEvent("bridge_event_rejected", LevelInfo, "C-22",
 		"signature, the push secret, the headers or the body.",
 	"connection", "reason")
 
-// BridgeEventUnhandled is logged when a Bridge event of a type this binary reads found no handler yet (C-22.FR-11).
+// BridgeEventUnhandled is logged when a Bridge event of a type this binary reads found no handler (C-22.FR-11).
 var BridgeEventUnhandled = newEvent("bridge_event_unhandled", LevelInfo, "C-22",
-	"A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the "+
-		"Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and "+
-		"acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. "+
-		"The event is not handled again.",
+	"A Bridge event of a type that this Muster reads but no handler of this process takes — notification_acknowledged "+
+		"in a process without the Acknowledge through a Notification gateway, which a running server always has — "+
+		"was recorded as handled without acting on it, and acknowledged: connection is the public_id of the "+
+		"Connection, event_id the event's id and type its type. The event is not handled again.",
 	"connection", "event_id", "type")
 
 // DemoCheckFailed is logged when the check of a demo Connection at the start of `muster dev` failed (C-30.FR-1).
@@ -826,6 +826,17 @@ var GatewayCallFailed = newEvent("gateway_call_failed", LevelWarn, "C-30",
 		"attempts it again once its lease runs out, with the same Idempotency-Key, so that a gateway that already "+
 		"accepted it answers replayed. Never carries the contact or the text of the call.",
 	"call", "error")
+
+// GatewayAcknowledgeRefused is logged when a notification_acknowledged event of a Notification gateway acknowledged
+// nothing because of its action data or the person the call was for (C-30.FR-6).
+var GatewayAcknowledgeRefused = newEvent("gateway_acknowledge_refused", LevelInfo, "C-30",
+	"A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the "+
+		"public_id of the call its action data names, empty when the data names none, connection the public_id of the "+
+		"Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, "+
+		"expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this "+
+		"Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the "+
+		"Commands themselves are logged as command_refused.",
+	"call", "connection", "reason")
 
 // GatewayContactCodeRejected is logged when a code typed for a contact at a Notification gateway did not confirm it
 // (C-30.FR-3).

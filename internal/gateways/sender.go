@@ -38,8 +38,10 @@ import (
 // the delivery client class through the limiter of the gateway's Connection, and records the outcome in another short
 // transaction, guarded by its lease. Lint 3 allows Notify here and in delivery's interactive path only.
 //
-// A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact and its text are fixed at its first
-// attempt and identical on every retry, on any replica and after a restart. When a replica dies after the gateway
+// A call is sent at least once: its Idempotency-Key calls/<public_id>, its contact, its text and its action data, signed
+// with the active button-signature key whose id the call keeps (button_key_id), so that the Keyring keeps that key
+// while the gateway may still report the data, are fixed at its first attempt and identical on every retry, on any
+// replica and after a restart. When a replica dies after the gateway
 // accepted the call but before the outcome committed, or its lease ran out during a slow call, the replica that claims
 // the call again resends it with the same key; a gateway that keeps idempotency keys answers replayed, which counts as
 // accepted, and makes no second call. Two replicas never hold the lease of one call at once, and the outcome of a
@@ -238,7 +240,10 @@ type call struct {
 	contact  string
 	text     string
 	language string
-	unsent   string
+	// data is the action data signed at the first attempt, empty for a call that a replica of an earlier version
+	// started, whose attempts are signed with the active key each.
+	data   string
+	unsent string
 }
 
 // key is the Idempotency-Key of the call, the same for each of its attempts.
@@ -337,7 +342,7 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 			kept = live
 		}
 		next := &call{row: row, groups: kept, contact: row.Contact.String, text: row.Text.String,
-			language: row.Language.String}
+			language: row.Language.String, data: row.ActionData.String}
 		if !row.Contact.Valid {
 			next.unsent = groups.PageNoConfirmedContact
 		}
@@ -376,9 +381,17 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 		}
 		leaseUntil := realNow.Add(s.Lease.Duration)
 		if row.State == CallWaiting {
+			var keyID pgtype.Text
+			if next.unsent == "" {
+				var kid string
+				if next.data, kid, err = s.sign(row.PublicID); err != nil {
+					return err
+				}
+				keyID = nonEmpty(kid)
+			}
 			if _, err := q.StartCall(ctx, dbgen.StartCallParams{OrgID: s.OrgID, ID: row.ID, Owner: s.Lease.Owner,
-				ContactID: contactID, Language: next.language, Text: next.text, Now: now,
-				LeaseUntil: leaseUntil}); err != nil {
+				ContactID: contactID, Language: next.language, Text: next.text, ActionData: nonEmpty(next.data),
+				ButtonKeyID: keyID, Now: now, LeaseUntil: leaseUntil}); err != nil {
 				return fmt.Errorf("start the call %s: %w", row.PublicID, err)
 			}
 		} else if _, err := q.RenewCallLease(ctx, dbgen.RenewCallLeaseParams{OrgID: s.OrgID, ID: row.ID,
@@ -425,13 +438,26 @@ func (s *Sender) end(ctx context.Context, q CallQueries, row dbgen.GetLeasedCall
 	return true, nil
 }
 
-// send makes the attempt of the call c — its text, its action data signed with the button-signature key, under its
-// Idempotency-Key — in the delivery client class, counts it, and records its outcome.
-func (s *Sender) send(ctx context.Context, c *call) error {
-	data, _, err := buttons.Sign(s.Keys, buttons.Action{Subject: buttons.SubjectCall, PublicID: c.row.PublicID,
+// sign is the action data of the call publicID, signed with the active button-signature key, and the id of that key.
+func (s *Sender) sign(publicID string) (data, keyID string, err error) {
+	data, keyID, err = buttons.Sign(s.Keys, buttons.Action{Subject: buttons.SubjectCall, PublicID: publicID,
 		Command: buttons.CommandAcknowledge})
 	if err != nil {
-		return fmt.Errorf("sign the action data of the call %s: %w", c.row.PublicID, err)
+		return "", "", fmt.Errorf("sign the action data of the call %s: %w", publicID, err)
+	}
+	return data, keyID, nil
+}
+
+// send makes the attempt of the call c — its text and its action data, signed at its first attempt and the same on
+// every retry, under its Idempotency-Key — in the delivery client class, counts it, and records its outcome. A call
+// that a replica of an earlier version started has no stored data, and its attempt is signed with the active key.
+func (s *Sender) send(ctx context.Context, c *call) error {
+	data := c.data
+	if data == "" {
+		var err error
+		if data, _, err = s.sign(c.row.PublicID); err != nil {
+			return err
+		}
 	}
 	out := s.Gateway.Notify(ctx, delivery.Call{Class: outbound.ClassDelivery,
 		Key: c.key()}, delivery.Notification{Connection: c.row.ConnectionID, Contact: c.contact, Text: c.text,

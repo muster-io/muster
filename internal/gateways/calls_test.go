@@ -50,6 +50,7 @@ type fakeCall struct {
 	state                               string
 	critical                            bool
 	language, text                      pgtype.Text
+	actionData, buttonKeyID             pgtype.Text
 	notBefore, nextAttempt              pgtype.Timestamptz
 	owner                               string
 	leaseUntil                          pgtype.Timestamptz
@@ -333,8 +334,9 @@ func (f *fakeCalls) GetLeasedCall(_ context.Context, a dbgen.GetLeasedCallParams
 	gw, u := f.gateways[c.conn], f.users[c.user]
 	row := dbgen.GetLeasedCallRow{ID: c.id, PublicID: c.publicID, ConnectionID: c.conn, UserID: c.user,
 		State: c.state, Critical: c.critical, Language: c.language, Text: c.text, Attempts: c.attempts,
-		FirstFailedAt: c.firstFailed, ConnectionPublicID: gw.publicID, ConnectionName: gw.name,
-		UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login, UserLanguage: u.language, Gateway: gw.gateway}
+		FirstFailedAt: c.firstFailed, ActionData: c.actionData, ConnectionPublicID: gw.publicID,
+		ConnectionName: gw.name, UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login,
+		UserLanguage: u.language, Gateway: gw.gateway}
 	for _, k := range f.contacts {
 		if c.contactID.Valid && k.ID == c.contactID.Int64 {
 			row.Contact = pgtype.Text{String: k.Contact, Valid: true}
@@ -400,6 +402,7 @@ func (f *fakeCalls) StartCall(_ context.Context, a dbgen.StartCallParams) (int64
 	c.state, c.contactID, c.language, c.text = CallSending, a.ContactID, pgtype.Text{String: a.Language, Valid: true},
 		pgtype.Text{String: a.Text, Valid: true}
 	c.firstAttempt, c.nextAttempt, c.leaseUntil = at, at, pgtype.Timestamptz{Time: a.LeaseUntil, Valid: true}
+	c.actionData, c.buttonKeyID = a.ActionData, a.ButtonKeyID
 	if !c.notBefore.Valid {
 		c.notBefore = at
 	}
@@ -475,7 +478,8 @@ func (f *fakeCalls) EndCall(_ context.Context, a dbgen.EndCallParams) (bool, err
 	if c == nil || (c.state != CallWaiting && c.state != CallSending) || c.owner != a.Owner {
 		return false, pgx.ErrNoRows
 	}
-	c.state, c.reason, c.notification, c.text = a.State, a.Reason, a.NotificationID, pgtype.Text{}
+	c.state, c.reason, c.notification, c.text, c.actionData = a.State, a.Reason, a.NotificationID, pgtype.Text{},
+		pgtype.Text{}
 	c.attempts += a.Attempted
 	c.ended, c.nextAttempt = pgtype.Timestamptz{Time: a.Now, Valid: true}, pgtype.Timestamptz{}
 	if a.ErrorClass.Valid {

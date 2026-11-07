@@ -143,3 +143,97 @@ func TestIntegrationStatusSupersededButtons(t *testing.T) {
 		check("resolved", keyring.KeyRemovable, 0)
 	})
 }
+
+// TestIntegrationStatusGatewayCalls covers the Note of S-173 on PostgreSQL: a call through a Notification gateway whose
+// action data the old key signed keeps that key needed while the call is being sent, and once accepted while any of
+// its Alert Groups is open; a call accepted whose Alert Groups all resolved, one Not delivered, and an Alert Group
+// dropped from a call before its first attempt keep nothing needed. A call without a key id, which a replica of an
+// earlier version started, counts for no key.
+func TestIntegrationStatusGatewayCalls(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		keys, err := keyring.New([][]byte{material('a'), material('b')}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, org := migratedForRotation(t, s, keys)
+		a, b := keyring.KeyID(material('a')), keyring.KeyID(material('b'))
+		if err := routing.EnsureDefault(ctx, routing.NewStore(d.Pool), org, t0); err != nil {
+			t.Fatal(err)
+		}
+		token, _, err := keys.Encrypt("connections.bot_token", []byte("gateway token"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var call, group int64
+		if err := d.Pool.QueryRow(ctx, `WITH c AS (INSERT INTO connections (org_id, public_id, type, name,
+				bridge_base_url, bridge_event_delivery, bot_token_ciphertext, bot_token_key_id, bot_token_updated_at,
+				limiter_limit, limiter_per_seconds, created_at, updated_at)
+				VALUES ($1, 'CNAAAAAAAAAAG1', 'bridge', 'gw', 'https://gateway.example.org', 'poll', $2, $3, $4, 10, 1,
+				$4, $4) RETURNING id),
+			u AS (INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+				VALUES ($1, 'SRAAAAAAAAAAP1', 'petr', 'Petr', 'responder', 'local', 'active', $4, $4) RETURNING id),
+			g AS (INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+				group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level,
+				urgent, created_at, last_changed_at)
+				SELECT $1, 'AGAAAAAAAAAAG1', 1, r.id, '{alertname}', '{}', sha256('call'::bytea), 'Disk', '{}', '{}',
+				'{}', 'firing', 'critical', false, $4, $4
+				FROM routes r WHERE r.org_id = $1 AND r.is_default RETURNING id),
+			k AS (INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, language, text,
+				first_attempt_at, next_attempt_at, action_data, button_key_id, created_at)
+				SELECT $1, 'CAAAAAAAAAAAG1', c.id, u.id, 'sending', 'en', 'Muster: 1 Alert Group needs you.', $4, $4,
+				'data', $3, $4
+				FROM c, u RETURNING id)
+			INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
+			SELECT $1, k.id, g.id, $4 FROM k, g
+			RETURNING call_id, alert_group_id`, org, token, a, t0).Scan(&call, &group); err != nil {
+			t.Fatal(err)
+		}
+		// The call of an earlier version, without a key id, about the same Alert Group.
+		if _, err := d.Pool.Exec(ctx, `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state,
+			language, text, first_attempt_at, next_attempt_at, created_at)
+			SELECT org_id, 'CAAAAAAAAAAAG2', connection_id, user_id, 'sending', 'en', 'x', $2, $2, $2
+			FROM gateway_calls WHERE id = $1`, call, t0); err != nil {
+			t.Fatal(err)
+		}
+		rotation := keyring.Rotation{Store: keyring.NewRotationStore(d.Pool), Keys: keys,
+			Audit: audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+			Log:   logging.New(&bytes.Buffer{}, logging.LevelInfo), Business: clock.NewManual(t0), Real: clock.Real{}}
+		if err := d.WithMigrationLock(ctx, func(ctx context.Context) error {
+			_, err := rotation.Activate(ctx, b, "ops")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		check := func(step string, state keyring.KeyState, n int64) {
+			t.Helper()
+			st, err := keyring.ReadStatus(ctx, keyring.NewStatusQueries(d.Pool), keys.KeyIDs(), time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if k, ok := st.Key(a); !ok || k.State != state || k.OpenMessages != n {
+				t.Errorf("%s: old key %+v", step, k)
+			}
+		}
+		set := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := d.Pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		check("being sent", keyring.KeyNeeded, 1)
+		set(`UPDATE gateway_calls SET state = 'accepted', text = NULL, action_data = NULL, ended_at = $2,
+			next_attempt_at = NULL WHERE id = $1`, call, t0)
+		check("accepted, its Alert Group open", keyring.KeyNeeded, 1)
+		set(`UPDATE gateway_call_items SET dropped_at = $2 WHERE call_id = $1`, call, t0)
+		check("its Alert Group dropped before the first attempt", keyring.KeyRemovable, 0)
+		set(`UPDATE gateway_call_items SET dropped_at = NULL WHERE call_id = $1`, call)
+		set(`UPDATE alert_groups SET status = 'resolved', resolved_at = $2, resolved_by_kind = 'system',
+			resolve_reason = 'resolved' WHERE id = $1`, group, t0)
+		check("accepted, its Alert Group resolved", keyring.KeyRemovable, 0)
+		set(`UPDATE alert_groups SET status = 'firing', resolved_at = NULL, resolved_by_kind = NULL,
+			resolve_reason = NULL WHERE id = $1`, group)
+		set(`UPDATE gateway_calls SET state = 'not_delivered', reason = 'call_refused' WHERE id = $1`, call)
+		check("not delivered", keyring.KeyRemovable, 0)
+	})
+}

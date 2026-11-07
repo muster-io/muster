@@ -110,6 +110,28 @@ func TestRecordEmptyDiffAndDetails(t *testing.T) {
 	}
 }
 
+// TestRecordTransports is C-03.FR-14 revised for L2: every Transport of the closed list is recorded, gateway among them,
+// and one outside it is refused as an unknown transport.
+func TestRecordTransports(t *testing.T) {
+	w, _ := newWriter()
+	s := &fakeStore{}
+	for _, tr := range []Transport{TransportUI, TransportAPI, TransportMattermost, TransportTelegram, TransportBridge,
+		TransportSlack, TransportGateway, TransportSystem} {
+		if err := w.Record(t.Context(), s, Entry{OrgID: 1, Actor: User(3, "SRAAAAAAAAAAAA"), Transport: tr,
+			Action: "alert_group.acknowledged"}); err != nil {
+			t.Errorf("%s: %v", tr, err)
+		}
+	}
+	if r := s.rows[6]; r.Transport != "gateway" || r.Action != "alert_group.acknowledged" {
+		t.Errorf("the gateway row = %+v", r)
+	}
+	err := w.Record(t.Context(), s, Entry{OrgID: 1, Actor: User(3, "SRAAAAAAAAAAAA"), Transport: "mcp",
+		Action: "alert_group.acknowledged"})
+	if err == nil || !strings.Contains(err.Error(), `unknown transport "mcp"`) || len(s.rows) != 8 {
+		t.Errorf("an unknown transport = %v, %d rows", err, len(s.rows))
+	}
+}
+
 // TestRecordRefuses entries that break the rules of audit_log before writing anything.
 func TestRecordRefuses(t *testing.T) {
 	w, _ := newWriter()

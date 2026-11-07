@@ -96,7 +96,7 @@ A Bridge event was refused and changed nothing: connection is the public_id the 
 
 INFO · fields: `connection`, `event_id`, `type` · C-22
 
-A Bridge event of a type that this Muster reads but no handler takes yet — notification_acknowledged before the Acknowledge through a Notification gateway exists — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
+A Bridge event of a type that this Muster reads but no handler of this process takes — notification_acknowledged in a process without the Acknowledge through a Notification gateway, which a running server always has — was recorded as handled without acting on it, and acknowledged: connection is the public_id of the Connection, event_id the event's id and type its type. The event is not handled again.
 
 ### `bridge_info_read`
 
@@ -235,6 +235,12 @@ Muster was unavailable: no Leader wrote the alive mark and no replica refreshed 
 WARN · fields: `route`, `group`, `template`, `error` · C-12
 
 A template of a Route failed while rendering a message, so the message used the Fallback template — every label under Muster's heading, footer and buttons: route is the public_id of the Route, group the public_id of the Alert Group, template the kind of template and error what failed, with its line and column. The Route shows a template error and MusterTemplateError fires until the template renders again. Logged once the change committed.
+
+### `gateway_acknowledge_refused`
+
+INFO · fields: `call`, `connection`, `reason` · C-30
+
+A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
 
 ### `gateway_call_attempted`
 

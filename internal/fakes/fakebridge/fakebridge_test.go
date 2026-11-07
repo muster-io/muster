@@ -2082,7 +2082,8 @@ func (a answer) sent(t *testing.T) gen.NotificationSent {
 // result, replayed, and records nothing; a bot without the role gateway answers 501; a request outside the protocol
 // is invalid; /_fake/faults scripts its answers; POST /_fake/acknowledge queues notification_acknowledged with the
 // action's data for the bot, which polling returns and answerEvent answers as notification, recorded in
-// /_fake/answers; a notification without an action and an unknown one cannot be acknowledged.
+// /_fake/answers; it sends the data given for the bot given, and queues an earlier event again under its id; a
+// notification without an action, an unknown one, an unknown bot and an unknown event cannot be acknowledged.
 func TestNotifications(t *testing.T) {
 	s := start(t)
 	data := strings.Repeat("d", 64)
@@ -2160,7 +2161,27 @@ func TestNotifications(t *testing.T) {
 		ShownAs: "notification"}) {
 		t.Errorf("answers %+v", got)
 	}
-	for _, bad := range []string{`{"notification_id":"n2"}`, `{"notification_id":"n9"}`} {
+	// The data given, for the bot given, as a tampering bridge or another Connection would report it; and the same
+	// event again, under its id, as a bridge that delivers it twice.
+	status, body = s.control(t, http.MethodPost, "/_fake/acknowledge",
+		`{"notification_id":"n1","data":"tampered","bot":1}`)
+	if err := json.Unmarshal([]byte(body), &ev); err != nil || status != http.StatusOK || ev.Bot != 1 {
+		t.Fatalf("POST /_fake/acknowledge for bot 1 = %d %s", status, body)
+	}
+	if evs, _ := s.poll(t, fakebridge.Token, "wait=0").batch(t); len(evs) != 1 || evs[0].Data != "tampered" ||
+		evs[0].NotificationID != "n1" {
+		t.Errorf("bot 1 polled %+v", evs)
+	}
+	status, body = s.control(t, http.MethodPost, "/_fake/acknowledge", `{"event_id":"`+evs[0].ID+`"}`)
+	if err := json.Unmarshal([]byte(body), &ev); err != nil || status != http.StatusOK || ev.Bot != 3 {
+		t.Fatalf("POST /_fake/acknowledge again = %d %s", status, body)
+	}
+	if again, _ := s.poll(t, fakebridge.GatewayToken, "wait=0").batch(t); len(again) != 2 ||
+		!reflect.DeepEqual(again[1], evs[0]) {
+		t.Errorf("redelivered %+v", again)
+	}
+	for _, bad := range []string{`{"notification_id":"n2"}`, `{"notification_id":"n9"}`,
+		`{"notification_id":"n1","bot":9}`, `{"event_id":"e99"}`} {
 		if status, body := s.control(t, http.MethodPost, "/_fake/acknowledge", bad); status != http.StatusBadRequest {
 			t.Errorf("POST /_fake/acknowledge %s = %d %s", bad, status, body)
 		}

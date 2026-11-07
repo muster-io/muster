@@ -77,11 +77,25 @@ func (q *Queries) CountEncryptedValuesByKey(ctx context.Context, orgID int64) ([
 
 const countOpenButtonKeys = `-- name: CountOpenButtonKeys :many
 SELECT k.key_id::text AS key_id, count(*) AS messages
-FROM deliveries d
-JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
-CROSS JOIN LATERAL unnest(d.superseded_button_key_ids || d.actual_button_key_id) AS k (key_id)
-WHERE d.org_id = $1 AND k.key_id IS NOT NULL
-  AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld') AND g.status <> 'resolved'
+FROM (
+    SELECT b.key_id
+    FROM deliveries d
+    JOIN alert_groups g ON g.org_id = d.org_id AND g.id = d.alert_group_id
+    CROSS JOIN LATERAL unnest(d.superseded_button_key_ids || d.actual_button_key_id) AS b (key_id)
+    WHERE d.org_id = $1 AND b.key_id IS NOT NULL
+      AND d.state NOT IN ('deleted_in_messenger', 'retired', 'withheld') AND g.status <> 'resolved'
+    UNION ALL
+    SELECT c.button_key_id
+    FROM gateway_calls c
+    WHERE c.org_id = $1 AND c.button_key_id IS NOT NULL
+      AND (c.state IN ('waiting', 'sending')
+           OR (c.state = 'accepted'
+               AND EXISTS (SELECT 1
+                           FROM gateway_call_items i
+                           JOIN alert_groups a ON a.org_id = i.org_id AND a.id = i.alert_group_id
+                           WHERE i.org_id = c.org_id AND i.call_id = c.id AND i.dropped_at IS NULL
+                             AND a.org_id = $1 AND a.status <> 'resolved')))
+) AS k
 GROUP BY k.key_id
 ORDER BY 1
 `
@@ -94,7 +108,10 @@ type CountOpenButtonKeysRow struct {
 // CountOpenButtonKeys counts, by key id, the Root messages of the Organization's open Alert Groups whose buttons that
 // key signed (C-20.FR-6): the current one of each delivery, and every older one a republication past a bridge's edit
 // window replaced, whose buttons still work (C-22.FR-9). A delivery deleted in the messenger, retired or withheld
-// depends on nothing: the re-render after a rotation never re-signs it.
+// depends on nothing: the re-render after a rotation never re-signs it. It counts with them the calls through
+// Notification gateways whose action data that key signed (C-30.FR-6), which a gateway may still report: those waiting
+// or being sent, and those accepted while any of their Alert Groups is open. A waiting call has no key id yet, since
+// StartCall signs it as it becomes sending; waiting is listed so that the rule reads as its contract.
 func (q *Queries) CountOpenButtonKeys(ctx context.Context, orgID int64) ([]CountOpenButtonKeysRow, error) {
 	rows, err := q.db.Query(ctx, countOpenButtonKeys, orgID)
 	if err != nil {

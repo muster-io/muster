@@ -467,6 +467,7 @@
       "api": "API",
       "bridge": "Bridge",
       "cli": "CLI",
+      "gateway": "Notification gateway",
       "system": "Muster",
       "ui": "Web UI"
     },
@@ -2894,6 +2895,7 @@
     }
   },
   "timeline": {
+    "actorFromCall": "{{actor}} from a call through {{gateway}}",
     "actorVia": "{{actor}} via {{transport}}",
     "actorWithToken": "{{actor}} via {{transport}}, token {{token}}",
     "deletedActor": "A deleted account",
@@ -3007,6 +3009,7 @@
       "api": "the API",
       "bridge": "Bridge",
       "cli": "the CLI",
+      "gateway": "a Notification gateway",
       "mattermost": "Mattermost",
       "slack": "Slack",
       "system": "Muster",

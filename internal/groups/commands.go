@@ -114,6 +114,7 @@ var messages = map[string]string{
 	CodeOwnerMustBeUser:       "a Service account cannot be an Owner",
 	CodeRouteDeleted:          "its Route was deleted",
 	CodeNotOwner:              "only the Owner answers a Reminder",
+	CodeOwnedByOther:          "owned by another user",
 	CodeNoReminderPending:     "no Reminder waits for an answer",
 }
 
@@ -125,6 +126,9 @@ type Caller struct {
 	Transport   audit.Transport
 	Permissions []auth.Permission
 	Address     netip.Addr
+	// Gateway is the Connection of the Notification gateway of the call that a Command through the Transport gateway
+	// came from, which its Timeline entries name (C-30.FR-6); 0 for any other Transport.
+	Gateway int64
 }
 
 func (c Caller) can(p auth.Permission) bool { return slices.Contains(c.Permissions, p) }
@@ -138,7 +142,7 @@ func (c Caller) user() int64 {
 }
 
 func (c Caller) actor() Actor {
-	return Actor{Kind: c.Actor.Kind, Transport: c.Transport, Person: c.Actor, Address: c.Address}
+	return Actor{Kind: c.Actor.Kind, Transport: c.Transport, Person: c.Actor, Address: c.Address, Gateway: c.Gateway}
 }
 
 // person is the User or the Service account of the caller, as the columns of a resolver or a snoozer take it.
@@ -177,6 +181,11 @@ type RefusedError struct {
 	Message string
 	// Related is the newer open Alert Group of newer_alert_group_exists.
 	Related *GroupRef
+	// OwnerName is the name of the Owner of owned_by_other, which an Acknowledge through a Notification gateway is
+	// refused with; empty for an Owner without a row, whom the Transport names in its own language.
+	OwnerName string
+	// owner is the row id of that Owner, whom run names once the transaction ended.
+	owner int64
 }
 
 func (e *RefusedError) Error() string { return "command refused: " + e.Code }
@@ -376,6 +385,15 @@ func (s *Service) run(ctx context.Context, c Caller, cmd Command, publicID strin
 	count := func(o string) { metrics.Commands.With(string(cmd), string(c.Transport), o).Inc() }
 	if r, ok := errors.AsType[*RefusedError](err); ok {
 		s.refused(ctx, c, cmd, publicID, r.Code, 1)
+		if r.owner != 0 {
+			rows, err := s.store.ListUserRefs(ctx, dbgen.ListUserRefsParams{OrgID: s.orgID, Ids: []int64{r.owner}})
+			if err != nil {
+				return "", number, fmt.Errorf("read the owner: %w", err)
+			}
+			if len(rows) > 0 {
+				r.OwnerName = rows[0].Name
+			}
+		}
 		return "", number, err
 	}
 	if _, ok := errors.AsType[*skippedError](err); ok {
@@ -481,7 +499,8 @@ func (s *Service) transition(ctx context.Context, q Queries, c Caller, cmd Comma
 	now := s.clock.Now().UTC()
 	switch cmd {
 	case CommandAcknowledge:
-		return &acknowledge{user: c.user(), bulk: a.bulk, now: now, orgID: s.orgID}, nil
+		return &acknowledge{user: c.user(), bulk: a.bulk, gateway: c.Transport == audit.TransportGateway, now: now,
+			orgID: s.orgID}, nil
 	case CommandUnacknowledge:
 		return unacknowledge{orgID: s.orgID}, nil
 	case CommandResolve:
@@ -588,10 +607,13 @@ func clearSnooze(g *Group) {
 }
 
 // acknowledge is Acknowledge by the User user, 0 for a Service account; first is set at the first acknowledgement of
-// the Alert Group and unchanged when the current Owner acknowledges again.
+// the Alert Group and unchanged when the current Owner acknowledges again. Through a Notification gateway (gateway)
+// it has the precondition of C-30.FR-6: an Alert Group that someone owns, the same person included, is refused with
+// owned_by_other and its Owner, so that a call never makes a Takeover.
 type acknowledge struct {
 	user      int64
 	bulk      bool
+	gateway   bool
 	now       time.Time
 	orgID     int64
 	first     bool
@@ -604,6 +626,10 @@ func (t *acknowledge) precondition(g *Group) error {
 		return refusal(CodeOwnerMustBeUser)
 	case g.Status == StatusResolved:
 		return refusal(CodeAlreadyResolved)
+	case t.gateway && g.Status == StatusAcknowledged:
+		r := refusal(CodeOwnedByOther)
+		r.owner = *g.OwnerUserID
+		return r
 	case t.bulk && g.Status == StatusAcknowledged && *g.OwnerUserID != t.user:
 		return &skippedError{owner: *g.OwnerUserID}
 	}

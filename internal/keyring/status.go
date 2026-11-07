@@ -39,7 +39,8 @@ type KeyStatus struct {
 	State     KeyState
 	// EncryptedValues are the rows of encrypted_values the key encrypted, and OpenMessages the Root messages of open
 	// Alert Groups, not deleted in the messenger, retired or withheld, whose buttons it signed, the older ones a
-	// republication past a bridge's edit window replaced included.
+	// republication past a bridge's edit window replaced included, with the calls through Notification gateways whose
+	// action data it signed: waiting or being sent, or accepted while any of their Alert Groups is open.
 	EncryptedValues int64
 	OpenMessages    int64
 }

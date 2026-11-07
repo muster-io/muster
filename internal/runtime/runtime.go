@@ -1070,10 +1070,14 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// The events of Bridge Connections reach one handler, from the Leader's poller or from the push callback, which
 	// claims each event id once per Connection (C-22.FR-11), runs the Commands of presses as the linked Users through
 	// the dispatcher, links the accounts that send a token to the bot and answers the people behind them on the
-	// interactive path (C-22.FR-12, FR-13, FR-15).
+	// interactive path (C-22.FR-12, FR-13, FR-15); a notification_acknowledged of a Notification gateway runs
+	// Acknowledge as the person the call was for, with the Transport gateway (C-30.FR-6).
 	p.bridgeEvents = &bridge.Events{Store: conns, Bindings: p.delivery, Links: p.links, Linker: p.links,
 		Commands: p.groups, Roles: roles, Keys: p.keyring, Path: interactive, PublicURL: p.cfg.PublicURL.String(),
-		Clocks: p.clocks, Log: p.log}
+		Clocks: p.clocks, Log: p.log,
+		Acknowledgements: &gateways.Acknowledgements{OrgID: orgID,
+			Queries: gateways.NewAckQueries(p.db.AccountLinksDB()), Commands: p.groups, Roles: roles,
+			Keys: p.keyring, Log: p.log}}
 	p.bridgePoller = &bridge.Poller{Source: conns, Events: p.bridgeEvents, Log: p.log}
 	// The presses of Slack Connections reach one handler, which runs their Commands as the linked Users through the
 	// dispatcher and answers the people who pressed on the interactive path (C-24.FR-10, FR-11).

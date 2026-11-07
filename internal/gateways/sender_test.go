@@ -339,6 +339,66 @@ func TestSenderRetries(t *testing.T) {
 	}
 }
 
+// rotatingKeys sign with the key k-0123456789abcdef first, and with k-fedcba9876543210 once rotated, as a Keyring
+// whose active key changed between two attempts.
+type rotatingKeys struct {
+	signKeys
+	rotated bool
+}
+
+func (k *rotatingKeys) Sign(keyring.Purpose, []byte) ([]byte, string, error) {
+	if k.rotated {
+		return bytes.Repeat([]byte{9}, 32), "k-fedcba9876543210", nil
+	}
+	return bytes.Repeat([]byte{7}, 32), "k-0123456789abcdef", nil
+}
+
+func (k *rotatingKeys) KeyIDs() []string { return []string{"k-0123456789abcdef", "k-fedcba9876543210"} }
+
+// TestSenderSignsOnce is the Note of S-173: the action data of a call is signed once, at its first attempt, with the
+// active key, whose id the call keeps; a retry after the active key changed sends the same data, and the end of the
+// call clears the data and keeps the key id. A call that a replica of an earlier version started has no data, and
+// each of its attempts is signed with the active key, as before.
+func TestSenderSignsOnce(t *testing.T) {
+	e := newSender(t)
+	keys := &rotatingKeys{}
+	e.s.Keys = keys
+	e.gw.script(delivery.Outcome{Kind: delivery.OutcomeTransient}, delivery.Outcome{Kind: delivery.OutcomeTransient})
+	e.page(t, 1, 10, 1)
+	e.round(t)
+	call := e.f.calls[0]
+	first := e.gw.last().n.Action.Data
+	if call.buttonKeyID.String != "k-0123456789abcdef" || call.actionData.String != first {
+		t.Fatalf("the started call %+v", call)
+	}
+	keys.rotated = true
+	e.advance(delivery.TransientFirstStep)
+	e.round(t)
+	if got := e.gw.last().n.Action.Data; got != first {
+		t.Errorf("a retry after the rotation sent %q, want %q", got, first)
+	}
+	// A call of an earlier version, without data, is signed with the active key at its attempt.
+	e.f.calls[0].actionData, e.f.calls[0].buttonKeyID = pgtype.Text{}, pgtype.Text{}
+	e.advance(2 * delivery.TransientFirstStep)
+	e.round(t)
+	a, err := buttons.Verify(keys, e.gw.last().n.Action.Data, "")
+	if e.gw.count() != 3 || e.gw.last().n.Action.Data == first || err != nil || a.PublicID != call.publicID {
+		t.Errorf("the attempt of an earlier version's call: %d attempts, %q, %v", e.gw.count(),
+			e.gw.last().n.Action.Data, err)
+	}
+	call = e.f.calls[0]
+	if call.state != CallAccepted || call.actionData.Valid {
+		t.Errorf("the ended call %+v", call)
+	}
+	e.page(t, 1, 10, 2)
+	e.advance(CombineWindow)
+	e.round(t)
+	if ended := e.f.calls[1]; ended.state != CallAccepted || ended.actionData.Valid ||
+		ended.buttonKeyID.String != "k-fedcba9876543210" {
+		t.Errorf("the next call %+v", ended)
+	}
+}
+
 // TestSenderRetriesEnd: once every Alert Group of a call being retried has stopped, its retries end and it ends
 // dropped, which starts the window of the call waiting behind it; while one still fires, it is retried.
 func TestSenderRetriesEnd(t *testing.T) {

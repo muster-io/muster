@@ -80,7 +80,9 @@
   [`0034_gateway_calls`](../../internal/db/migrations/0034_gateway_calls.up.sql)
   (the queue of calls through Notification gateways, the Timeline kind `escalation` with its events, the Mention
   `paged`, `timeline_entries.paged_user_ids` and `gateway_connection_id`, and the Transport `gateway`, C-30.FR-4,
-  FR-7, C-32.FR-19, S-148), in
+  FR-7, C-32.FR-19, S-148) and
+  [`0035_gateway_call_signature`](../../internal/db/migrations/0035_gateway_call_signature.up.sql)
+  (`gateway_calls.action_data` and `button_key_id`, the signed action data of a call and its key, C-30.FR-6, S-173), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1643,7 +1645,14 @@ stored `info` declares the role `gateway`; it has no table of its own.
   contact turning null when it is removed (`ON DELETE SET NULL`, `gateway_calls_contact_idx`); `not_before`, the end
   of the previous call plus `gateway.combine_window`, null while that call is still sent; `next_attempt_at`;
   the lease (`gateway_calls_lease_check`); `attempts`, `first_failed_at`, `last_error_class` and `last_error` of
-  `delivery.transient_budget`; and the gateway's `notification_id` of an accepted call. The partial unique index
+  `delivery.transient_budget`; and the gateway's `notification_id` of an accepted call. From the first attempt
+  (migration 0035) `action_data` holds the action data that the active button-signature key signed for the call,
+  which every retry sends again, and `button_key_id` the id of that key; the end of a call clears `action_data` — unless
+  a replica of an earlier version ends it during a rolling update, which leaves it until the call is deleted — and
+  keeps `button_key_id`, which the Keyring page counts while the call is waiting or being sent, or accepted while any
+  of its Alert Groups is open, so that the key is not removed while the gateway may still report the data. A call that
+  a replica of an earlier version started has neither, and each of its attempts is signed with the active key. The
+  partial unique index
   `gateway_calls_waiting_key` on `(connection_id, user_id) WHERE state = 'waiting'` keeps one waiting call per person
   and gateway, which the later Pages join; `gateway_calls_due_idx` on `(org_id, next_attempt_at) WHERE state IN
   ('waiting', 'sending')` serves the claim, `gateway_calls_person_idx` on `(org_id, connection_id, user_id, id)` the

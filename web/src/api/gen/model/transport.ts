@@ -4,7 +4,7 @@
  */
 
 /**
- * How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+ * How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
  */
 export type Transport = typeof Transport[keyof typeof Transport];
 
@@ -16,6 +16,7 @@ export const Transport = {
   telegram: 'telegram',
   bridge: 'bridge',
   slack: 'slack',
+  gateway: 'gateway',
   cli: 'cli',
   system: 'system',
 } as const;

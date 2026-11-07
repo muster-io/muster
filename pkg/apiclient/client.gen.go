@@ -3486,6 +3486,7 @@ const (
 	TransportApi        Transport = "api"
 	TransportBridge     Transport = "bridge"
 	TransportCli        Transport = "cli"
+	TransportGateway    Transport = "gateway"
 	TransportMattermost Transport = "mattermost"
 	TransportSlack      Transport = "slack"
 	TransportSystem     Transport = "system"
@@ -3501,6 +3502,8 @@ func (e Transport) Valid() bool {
 	case TransportBridge:
 		return true
 	case TransportCli:
+		return true
+	case TransportGateway:
 		return true
 	case TransportMattermost:
 		return true
@@ -4395,7 +4398,7 @@ type AuditEntry struct {
 	TokenId   nullable.Nullable[NullablePublicId] `json:"token_id,omitempty"`
 	TokenName nullable.Nullable[string]           `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -5670,17 +5673,17 @@ type KeyringKey struct {
 	// MissingOn Live replicas that do not hold the key; activation is refused while this is not empty.
 	MissingOn []string `json:"missing_on"`
 
-	// Needed A stored Secret or an open Root message still depends on the key.
+	// Needed A stored Secret, an open Root message or a call through a Notification gateway that its person may still acknowledge still depends on the key.
 	Needed bool `json:"needed"`
 
 	// Removable The key is no longer used and can be removed from `MUSTER_SECRET_KEYS`. Only a key that was active before can be removable; a key that was never active is `not_active_yet`, to be activated, never removed.
 	Removable bool `json:"removable"`
 
-	// State `active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
+	// State `active`; else `needed` when a stored Secret, an open Root message or a call through a Notification gateway still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
 	State KeyringKeyState `json:"state"`
 }
 
-// KeyringKeyState `active`; else `needed` when a stored Secret or an open Root message still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
+// KeyringKeyState `active`; else `needed` when a stored Secret, an open Root message or a call through a Notification gateway still depends on the key; else `removable` when it was active before; else `not_active_yet`: a key that was never active, such as one added for a rotation.
 type KeyringKeyState string
 
 // Labels Label names and values.
@@ -6254,7 +6257,7 @@ type Note struct {
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport Transport `json:"transport"`
 }
 
@@ -8810,7 +8813,7 @@ type TimelineActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 
@@ -8979,6 +8982,9 @@ type TimelineStatusEntry struct {
 	Fingerprints *[]string                                   `json:"fingerprints,omitempty"`
 	FromStatus   nullable.Nullable[NullableAlertGroupStatus] `json:"from_status,omitempty"`
 
+	// Gateway The Notification gateway of the call that an acknowledgement through the Transport `gateway` came from, as the `gateway` of an entry of the kind `escalation`; null for any other entry, and for one that a version without it recorded.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway,omitempty"`
+
 	// Id `TE` for lifecycle and system entries, `NE` for a Note (the same id as its `note`), `DE` for a delivery event.
 	Id   PublicId                `json:"id"`
 	Kind TimelineStatusEntryKind `json:"kind"`
@@ -9104,7 +9110,7 @@ type TotpStatus struct {
 	RecoveryCodesRemaining int                          `json:"recovery_codes_remaining"`
 }
 
-// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 type Transport string
 
 // User defines model for User.
@@ -9215,7 +9221,7 @@ type WebhookActor struct {
 	Reason    nullable.Nullable[string] `json:"reason,omitempty"`
 	TokenName nullable.Nullable[string] `json:"token_name,omitempty"`
 
-	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
+	// Transport How a Command or change reached Muster. `bridge` marks presses and Text commands through a Bridge Connection; `slack` marks presses through a Slack Connection; `gateway` marks an Acknowledge from a call through a Notification gateway; `cli` marks audited CLI commands (`--actor`); `system` marks transitions Muster starts on its own.
 	Transport *Transport `json:"transport,omitempty"`
 }
 

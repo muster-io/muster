@@ -76,6 +76,8 @@ function transportLabel(t: TFunction, transport: Transport): string {
       return t("timeline.transport.bridge");
     case "slack":
       return t("timeline.transport.slack");
+    case "gateway":
+      return t("timeline.transport.gateway");
     case "cli":
       return t("timeline.transport.cli");
     case "system":
@@ -92,8 +94,11 @@ function userName(t: TFunction, user: UserRef | undefined): string {
   return user.deactivated ? t("alertGroups.deactivated", { name: user.name }) : user.name;
 }
 
-/** Who caused an entry and how: "Muster", or "Alice via Mattermost", with the token an API call came through. */
-export function actorText(t: TFunction, actor: TimelineActor): string {
+/**
+ * Who caused an entry and how: "Muster", "Alice via Mattermost", with the token an API call came through, or "Alice from
+ * a call through Example Gateway", the gateway of the call; "a Notification gateway" when the entry names none.
+ */
+export function actorText(t: TFunction, actor: TimelineActor, gateway?: string | null): string {
   if (actor.kind === "system") {
     return t("timeline.muster");
   }
@@ -102,6 +107,9 @@ export function actorText(t: TFunction, actor: TimelineActor): string {
     return name;
   }
   const transport = transportLabel(t, actor.transport);
+  if (actor.transport === "gateway") {
+    return t("timeline.actorFromCall", { actor: name, gateway: gateway ?? transport });
+  }
   return actor.token_name
     ? t("timeline.actorWithToken", { actor: name, transport, token: actor.token_name })
     : t("timeline.actorVia", { actor: name, transport });
@@ -456,7 +464,7 @@ export function TimelineItem({
           {dateTime(entry.at)}
         </time>
         <span className="wrap-anywhere" data-testid="timeline-actor">
-          {actorText(t, entry.actor)}
+          {actorText(t, entry.actor, entry.kind === "status" ? entry.gateway?.name : undefined)}
         </span>
       </div>
       <p

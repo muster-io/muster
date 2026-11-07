@@ -136,3 +136,19 @@ Alert Group it is about is removed by `retention.alert_group_summaries`.
 `muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
 `gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
 `gateway_call_failed`, none with the contact or the text.
+
+## Acknowledge from a call
+
+When the person acknowledges in the call — presses 1, for example — the gateway reports `notification_acknowledged`
+with the call's action data. Muster verifies the data, which names the call and its Connection, and acknowledges each
+Alert Group of the call as the person the call was for, never as whoever holds the phone, with the Transport `gateway`:
+the Timeline shows "Ivan from a call through Example Gateway", with the name of the gateway. It acknowledges only while nobody owns an Alert
+Group: an Alert Group someone has already, the same person included, stays theirs, as a resolved one stays resolved —
+a call never takes an Alert Group over. The gateway tells the person, in the language of their profile, what happened:
+"Acknowledged: #12, #13", "Already taken by Alice" or "Already resolved". A Viewer, a disabled person, and data that does
+not verify or belongs to another Connection change nothing and are answered so; the log records the latter as
+`gateway_acknowledge_refused`. An event is handled once, however often the gateway reports it.
+
+An acknowledgement through a gateway counts in `muster_commands_total{transport="gateway"}`. The key that signed a
+call's action data stays needed in the Keyring while the call is being sent, and once accepted while any of its Alert
+Groups is open.

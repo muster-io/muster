@@ -10,23 +10,47 @@ files_touched:
   - api/openapi.yaml
   - internal/gateways/acknowledge.go
   - internal/gateways/acknowledge_test.go
-  - internal/bridge/events.go
+  - internal/gateways/query.sql
+  - internal/gateways/sender.go
+  - internal/gateways/sender_test.go
+  - internal/gateways/calls_test.go
   - internal/bridge/events_test.go
   - internal/groups/commands.go
   - internal/groups/commands_test.go
+  - internal/groups/dispatcher.go
+  - internal/groups/read.go
+  - internal/api/alertgroups.go
+  - internal/api/alertgroups_test.go
   - internal/audit/audit.go
   - internal/audit/audit_test.go
+  - internal/keyring/query.sql
+  - internal/keyring/status.go
+  - internal/keyring/status_integration_test.go
+  - internal/db/migrations/0035_gateway_call_signature.up.sql
+  - internal/db/migrations/0035_gateway_call_signature.down.sql
+  - internal/db/db_test.go
+  - internal/db/migrate_test.go
+  - internal/fakes/fakebridge/fakebridge.go
+  - internal/fakes/fakebridge/events.go
+  - internal/fakes/fakebridge/notifications.go
+  - internal/fakes/fakebridge/fakebridge_test.go
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
   - design/prd/l1/reference.md
+  - design/db/schema.md
+  - docs/install/versions.md
+  - docs/messengers/notification-gateways.md
   - web/src/components/timeline.tsx
+  - web/src/components/timeline.test.tsx
   - web/src/routes/admin.audit-log.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - test/e2e/gateway_acknowledge_test.go
+  - test/e2e/bridge_gateway_test.go
 acceptance:
   - "[C-30.FR-6, C-30.AC-4, C-10.FR-1, C-30.FR-2] `notification_acknowledged` whose data verifies runs Acknowledge with the Transport `gateway` as the person the call was for, for each Alert Group of the call: a firing or snoozed one becomes acknowledged, with `gateway` in the Timeline and the Audit log, and the answer through `answerEvent` names what was acknowledged; one that another User or the same person owns stays as it is, the refusal `owned_by_other` is logged as a refused Command and the answer says \"Already taken by\" that User; a resolved one is answered \"Already resolved\"; a Takeover is never made; a disabled person or a Viewer is refused as for a press (`acknowledge_test.go`, `commands_test.go`, `gateway_acknowledge_test.go`)."
   - "[C-03.FR-14] `internal/audit` accepts the Transport `gateway` (`TransportGateway`): an Acknowledge through a gateway writes its Audit log entry `alert_group.acknowledged` with the transport `gateway`, and an entry with a transport outside the closed list is still refused (`audit_test.go`)."
@@ -56,30 +80,40 @@ issue: 462
 
 ## Contracts
 
-- **Spec** (`api/openapi.yaml`): `Transport` gains `gateway`.
-- **Schema**: none new; `timeline_entries_transport_v4_check` and `audit_log_transport_v4_check` take `gateway` since
-  S-148.
-- **Packages**: as S-148 and S-169 state them; `bridge` hands the event to `bridge.NotificationAcks`, an interface
-  declared there that `gateways` implements and `internal/runtime` wires, so that `bridge` does not import `gateways`.
+- **Spec** (`api/openapi.yaml`): `Transport` gains `gateway`; `TimelineStatusEntry` gains `gateway`, the same
+  `EntityRef` or null as the `gateway` of `TimelineEscalationEntry`, naming the gateway of the call an acknowledgement
+  came from, so that the Timeline reads "from a call through {gateway}".
+- **Schema**: migration `0035_gateway_call_signature` adds `gateway_calls.action_data` and `button_key_id`, nullable
+  (expand only), for the Note below; `timeline_entries_transport_v4_check` and `audit_log_transport_v4_check` take
+  `gateway` since S-148.
+- **Packages**: as S-148 and S-169 state them; `bridge` hands the event to `bridge.Acknowledgements`, the interface
+  S-145 declared there, which `gateways` implements and `internal/runtime` wires, so that `bridge` does not import
+  `gateways`.
 - **Gateways** (`internal/gateways/acknowledge.go`): the data is verified with the key it names and must be a call's
   (`buttons.SubjectCall`, S-148) of this Connection; the actor is the call's User, never the contact (ADR-0013); for
   each Alert Group the call carried from its first attempt — as C-30.FR-6 says, also one whose chain stopped meanwhile —
   the dispatcher runs Acknowledge with the Transport `gateway`; the answer goes through `answerEvent` on the interactive
   path, in the person's language.
-- **Groups** (`internal/groups/commands.go`): Acknowledge with the Transport `gateway` has the precondition of
+- **Groups** (`internal/groups/commands.go`, `dispatcher.go`, `read.go`): the `Caller` of a Command through the Transport
+  `gateway` names the gateway's Connection, which the dispatcher writes to `timeline_entries.gateway_connection_id` of
+  its entries and the Timeline read names; Acknowledge with the Transport `gateway` has the precondition of
   C-30.FR-6: firing or snoozed → acknowledged; acknowledged by anyone → refused with the existing code `owned_by_other`
   and the Owner; resolved → refused `already_resolved`; never a Takeover; the Role and state of the person as for a
   press (C-18.FR-8).
 - **Audit log** (`internal/audit/audit.go`): `TransportGateway` (`gateway`) joins the closed list of transports that
   the validation of an entry accepts, which refuses any other as "unknown transport".
-- **Bridge** (`internal/bridge/events.go`): `notification_acknowledged` is handed to `NotificationAcks` once per event
-  id under the claim of C-22.FR-11, in place of the `bridge_event_unhandled` of S-145.
+- **Bridge** (`internal/bridge/events.go`, unchanged): `notification_acknowledged` is handed to `Acknowledgements` once
+  per event id under the claim of C-22.FR-11, as S-145 wrote it; wired by `internal/runtime`, it replaces the
+  `bridge_event_unhandled` that S-145 logs without a handler.
 - **Texts** (`internal/messages/texts`): the answers, in English and Russian with their plurals (C-12.FR-3 revised).
 - **SPA** (`web/src/components/timeline.tsx`, `web/src/routes/admin.audit-log.tsx`, locales): the exhaustive switches
   over `Transport` gain `gateway` — "Notification gateway" / «шлюз оповещений».
 - **Metrics** (`internal/metrics/catalogue.go`): `gateway` among the `transport` values of `muster_commands_total`;
   reference.md adds it to the row of that metric and drops the sentence about it under "Metrics added in L2".
-- **Log events** (`internal/logging/events.go`): `gateway_acknowledge_refused` (info; the call, the reason), C-30.
+- **Log events** (`internal/logging/events.go`): `gateway_acknowledge_refused` (info; the call, the Connection, the
+  reason: `not_verified`, `expired`, `unknown_call`, `disabled` or `deleted`), C-30.
+- **Keyring** (`internal/keyring/query.sql`): `CountOpenButtonKeys` counts, with the Root messages, the calls whose
+  action data a key signed — waiting or being sent, or accepted while any of their Alert Groups is open.
 - **Settings**: `delivery.interactive_budget`.
 
 ## Steps
