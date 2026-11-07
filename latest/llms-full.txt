@@ -1561,12 +1561,14 @@ status, the fields, the footer, the buttons and the link to Muster always stay.
 
 ## Labels in the message
 
-"Labels in the message" (`route.message_labels`) chooses the labels of item 4. Set it through the API: give the Route
-`own_message_labels: true` and its list as `message_labels` in `updateRoute`, or `own_message_labels: false` to go back
-to the default. The field of the Route form, **Routes → a Route → Message → Labels in the message**, comes in a later
-release. By default the list is the Route's Group key without `alertname` and the Organization's severity label, which
-the field Severity already shows, then the Team label and `namespace`; it follows the Group key and the
-Organization's settings until the Route has a list of its own.
+"Labels in the message" (`route.message_labels`) chooses the labels of item 4. Choose them in **Routes → a Route →
+Message → Labels in the message**: the labels are chips that you remove with their ×, and **+ label** offers the labels
+**From recent Alert Groups of the Route**, each with an example value, and takes any other name you type. **Reset to
+default** goes back to the computed list. Through the API, give the Route `own_message_labels: true` and its list as
+`message_labels` in `updateRoute`, or `own_message_labels: false` to go back to the default. By default the list is the
+Route's Group key without `alertname` and the Organization's severity label, which the field Severity already shows,
+then the Team label and `namespace`; it follows the Group key and the Organization's settings until the Route has a
+list of its own. The preview under the Root message shows the labels saved on the Route.
 
 A label shows as `name=value` when every firing Alert has the same value, as `name: N values` when their values
 differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
@@ -1604,8 +1606,11 @@ Choosing **Custom** fills the editor with the source of the built-in template in
 from what people see today and edit it. Choosing **Built-in** again keeps your text until you leave the page.
 
 Each editor has a **Preview** under it. Choose the **Sample** it renders against: a **Built-in example**, the **Recent
-snapshots of this route**, or the Stored Snapshots of one Integration; and the **Markup of the preview**, Mattermost,
-Slack or Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
+snapshots of this route**, or the Stored Snapshots of one Integration; and, for the other templates, the **Markup of the preview**, Mattermost,
+Slack or Telegram. The preview of the Root message has the tabs **Mattermost**, **Slack**, **Telegram** and **Bridge**:
+each lays out [the default message](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-default-message) as its messenger does and shows its length against the
+messenger's limit, in red when it is over; the **Bridge** tab shows the `layout` a bridge receives as JSON beside the
+CommonMark body, and says so when a Route with a template of its own sends the body alone. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
 the Route (up to 20, `template.dry_run_sample`, or the built-in example when there are none). A template that does not
 parse, or that calls a function Muster does not have, is **not saved**: the editor marks the error at its line and
 column.

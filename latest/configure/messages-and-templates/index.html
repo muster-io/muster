@@ -3156,12 +3156,14 @@ items in order, with the buttons as its inline keyboard.</dd>
 Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
 status, the fields, the footer, the buttons and the link to Muster always stay.</p>
 <h2 id="labels-in-the-message">Labels in the message<a class="headerlink" href="#labels-in-the-message" title="Permanent link">&para;</a></h2>
-<p>"Labels in the message" (<code>route.message_labels</code>) chooses the labels of item 4. Set it through the API: give the Route
-<code>own_message_labels: true</code> and its list as <code>message_labels</code> in <code>updateRoute</code>, or <code>own_message_labels: false</code> to go back
-to the default. The field of the Route form, <strong>Routes → a Route → Message → Labels in the message</strong>, comes in a later
-release. By default the list is the Route's Group key without <code>alertname</code> and the Organization's severity label, which
-the field Severity already shows, then the Team label and <code>namespace</code>; it follows the Group key and the
-Organization's settings until the Route has a list of its own.</p>
+<p>"Labels in the message" (<code>route.message_labels</code>) chooses the labels of item 4. Choose them in <strong>Routes → a Route →
+Message → Labels in the message</strong>: the labels are chips that you remove with their ×, and <strong>+ label</strong> offers the labels
+<strong>From recent Alert Groups of the Route</strong>, each with an example value, and takes any other name you type. <strong>Reset to
+default</strong> goes back to the computed list. Through the API, give the Route <code>own_message_labels: true</code> and its list as
+<code>message_labels</code> in <code>updateRoute</code>, or <code>own_message_labels: false</code> to go back to the default. By default the list is the
+Route's Group key without <code>alertname</code> and the Organization's severity label, which the field Severity already shows,
+then the Team label and <code>namespace</code>; it follows the Group key and the Organization's settings until the Route has a
+list of its own. The preview under the Root message shows the labels saved on the Route.</p>
 <p>A label shows as <code>name=value</code> when every firing Alert has the same value, as <code>name: N values</code> when their values
 differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
 example value (<code>listRouteLabelSuggestions</code>). A change of the list, or of the Group key while the list is the default,
@@ -3191,8 +3193,11 @@ relative: see <a href="../organization/#general">Organization settings</a>.</p>
 <p>Choosing <strong>Custom</strong> fills the editor with the source of the built-in template in the Route's language, so you start
 from what people see today and edit it. Choosing <strong>Built-in</strong> again keeps your text until you leave the page.</p>
 <p>Each editor has a <strong>Preview</strong> under it. Choose the <strong>Sample</strong> it renders against: a <strong>Built-in example</strong>, the <strong>Recent
-snapshots of this route</strong>, or the Stored Snapshots of one Integration; and the <strong>Markup of the preview</strong>, Mattermost,
-Slack or Telegram. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
+snapshots of this route</strong>, or the Stored Snapshots of one Integration; and, for the other templates, the <strong>Markup of the preview</strong>, Mattermost,
+Slack or Telegram. The preview of the Root message has the tabs <strong>Mattermost</strong>, <strong>Slack</strong>, <strong>Telegram</strong> and <strong>Bridge</strong>:
+each lays out <a href="#the-default-message">the default message</a> as its messenger does and shows its length against the
+messenger's limit, in red when it is over; the <strong>Bridge</strong> tab shows the <code>layout</code> a bridge receives as JSON beside the
+CommonMark body, and says so when a Route with a template of its own sends the body alone. When you save, Muster parses every template and runs it against the most recent Stored Snapshots of
 the Route (up to 20, <code>template.dry_run_sample</code>, or the built-in example when there are none). A template that does not
 parse, or that calls a function Muster does not have, is <strong>not saved</strong>: the editor marks the error at its line and
 column.</p>
