@@ -13,4 +13,5 @@ export const TimelineKind = {
   timers: 'timers',
   delivery: 'delivery',
   system: 'system',
+  escalation: 'escalation',
 } as const;

@@ -47,6 +47,8 @@ type readQueries interface {
 	ListTeamRefs(ctx context.Context, arg dbgen.ListTeamRefsParams) ([]dbgen.ListTeamRefsRow, error)
 	ListTimelineDestinations(ctx context.Context, arg dbgen.ListTimelineDestinationsParams) (
 		[]dbgen.ListTimelineDestinationsRow, error)
+	ListTimelineGateways(ctx context.Context, arg dbgen.ListTimelineGatewaysParams) (
+		[]dbgen.ListTimelineGatewaysRow, error)
 }
 
 // The notices of the Alert Group page (AlertGroupNotice).
@@ -548,11 +550,16 @@ type TimelineEntry struct {
 	TeamValue   *string
 	// Destination is the Destination of a destination_joined (C-26.FR-5).
 	Destination *TimelineDestination
-	position    TimelinePosition
-	// teamID is the id of Team, which entryTeams names, and destinationID the id of Destination, which
-	// entryDestinations names.
+	// PagedUsers are the people a Page names and Gateway the Notification gateway of a call, for an event of the kind
+	// escalation (C-32.FR-19, C-30.FR-7); the reason is Reason.
+	PagedUsers []*ActorRef
+	Gateway    *Ref
+	position   TimelinePosition
+	// teamID is the id of Team, which entryTeams names, destinationID the id of Destination, which entryDestinations
+	// names, and gatewayID the id of Gateway, which entryGateways names.
 	teamID        int64
 	destinationID int64
+	gatewayID     int64
 }
 
 // TimelineDestination is the Destination of a Timeline entry with its type and health, deleted or not.
@@ -642,6 +649,9 @@ func (s *Service) Timeline(ctx context.Context, publicID string, f TimelineFilte
 	if err := s.entryDestinations(ctx, out.Entries); err != nil {
 		return TimelinePage{}, err
 	}
+	if err := s.entryGateways(ctx, out.Entries); err != nil {
+		return TimelinePage{}, err
+	}
 	return out, nil
 }
 
@@ -684,9 +694,15 @@ func (s *Service) entries(ctx context.Context, gid int64, asc bool, kinds []stri
 			MissedCount: int8Of(r.MissedCount), PeriodFrom: timeOf(r.PeriodFrom), PeriodTo: timeOf(r.PeriodTo),
 			Detail: textOf(r.Detail), position: TimelinePosition{At: r.At.UTC(), Source: sourceEntries, ID: r.ID},
 			TeamRule: textOf(r.TeamRule), TeamMatcher: textOf(r.TeamMatcher), TeamValue: textOf(r.TeamValue),
-			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64}
+			teamID: r.TeamID.Int64, destinationID: r.DestinationID.Int64, gatewayID: r.GatewayConnectionID.Int64}
 		if r.Event.Valid {
 			e.Mentions = orEmpty(r.Mentions)
+		}
+		if e.Kind == KindEscalation {
+			e.PagedUsers = make([]*ActorRef, len(r.PagedUserIds))
+			for i, id := range r.PagedUserIds {
+				e.PagedUsers[i] = &ActorRef{Kind: "user", id: id}
+			}
 		}
 		e.Owner, e.PreviousOwner = userRef(r.OwnerUserID), userRef(r.PreviousOwnerUserID)
 		e.Actor.Ref = pendingRef(r.ActorUserID, r.ActorServiceAccountID)
@@ -761,7 +777,7 @@ func (s *Service) actors(ctx context.Context, entries []TimelineEntry) error {
 	each := func(f func(r *ActorRef)) {
 		for i := range entries {
 			e := &entries[i]
-			for _, r := range []*ActorRef{e.Actor.Ref, e.Owner, e.PreviousOwner} {
+			for _, r := range append([]*ActorRef{e.Actor.Ref, e.Owner, e.PreviousOwner}, e.PagedUsers...) {
 				if r != nil {
 					f(r)
 				}
@@ -882,6 +898,35 @@ func (s *Service) entryDestinations(ctx context.Context, entries []TimelineEntry
 	for i := range entries {
 		if ref, ok := refs[entries[i].destinationID]; ok {
 			entries[i].Destination = &ref
+		}
+	}
+	return nil
+}
+
+// entryGateways names the Notification gateways of the escalation entries of calls, deleted ones included.
+func (s *Service) entryGateways(ctx context.Context, entries []TimelineEntry) error {
+	var ids []int64
+	for _, e := range entries {
+		if e.gatewayID != 0 {
+			ids = append(ids, e.gatewayID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	rows, err := s.store.ListTimelineGateways(ctx, dbgen.ListTimelineGatewaysParams{OrgID: s.orgID,
+		Ids: slices.Compact(ids)})
+	if err != nil {
+		return fmt.Errorf("read the gateways of the timeline: %w", err)
+	}
+	refs := make(map[int64]Ref, len(rows))
+	for _, r := range rows {
+		refs[r.ID] = Ref{PublicID: r.PublicID, Name: r.Name}
+	}
+	for i := range entries {
+		if ref, ok := refs[entries[i].gatewayID]; ok {
+			entries[i].Gateway = &ref
 		}
 	}
 	return nil

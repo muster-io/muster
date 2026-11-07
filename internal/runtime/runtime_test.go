@@ -38,6 +38,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	destdb "github.com/muster-io/muster/internal/destinations/dbgen"
 	"github.com/muster-io/muster/internal/devmode"
+	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/groups"
 	groupsdb "github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/heartbeat"
@@ -879,6 +880,21 @@ func get(t *testing.T, url string) (int, string) {
 	return resp.StatusCode, string(b)
 }
 
+func post(t *testing.T, url, body string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
 // running starts Run in the background and returns the addresses once it serves.
 func running(t *testing.T, opts Options) (server.Addresses, context.CancelFunc, <-chan error) {
 	t.Helper()
@@ -1511,6 +1527,9 @@ func TestDevClockServed(t *testing.T) {
 	if code, _ := get(t, "http://"+addrs.Internal+"/health/live"); code != http.StatusOK {
 		t.Errorf("health under the dev clock = %d", code)
 	}
+	if code, body := post(t, "http://"+addrs.Internal+devmode.GatewayCallsPath, `{`); code != http.StatusBadRequest {
+		t.Errorf("the gateway calls hook in development mode = %d %s", code, body)
+	}
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -1518,6 +1537,10 @@ func TestDevClockServed(t *testing.T) {
 	addrs, cancel, done = running(t, options(&fakeDB{}, io.Discard, env()))
 	if code, _ := get(t, "http://"+addrs.Internal+devmode.ClockPath); code != http.StatusNotFound {
 		t.Errorf("dev clock outside development mode = %d", code)
+	}
+	if code, _ := post(t, "http://"+addrs.Internal+devmode.GatewayCallsPath,
+		`{"user_id":"SR1","connection_id":"CN1","alert_group_ids":["AG1"]}`); code != http.StatusNotFound {
+		t.Errorf("the gateway calls hook outside development mode = %d", code)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -1765,11 +1788,17 @@ func TestConfigureWorker(t *testing.T) {
 		cfg:     config.Config{PublicURL: public, IngestURL: ingestURL, RunbookBaseURL: public},
 		replica: keyring.NewRecorder(nil, nil, business, log, "r-1", "host", "v1"),
 		worker:  &ingest.Worker{Log: log}, timers: &timers.Worker{Log: log}, deliverer: &delivery.Worker{Log: log},
-		openUpdates: &groups.UpdateWorker{Log: log},
-		groups:      groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
+		openUpdates: &groups.UpdateWorker{Log: log}, gatewaySender: &gateways.Sender{Log: log},
+		groups: groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
 		delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
 			Business: business})}
 	p.configureWorker()
+	// The gateway sender of every replica sends through the Bridge adapter and records page_not_delivered through
+	// the dispatcher (C-30.FR-4).
+	if s := p.gatewaySender; s.OrgID != 1 || s.Lease.Owner != "r-1" || s.Lease.Duration != gateways.SenderLease ||
+		s.Gateway != delivery.Gateway(p.bridge) || s.Pages != gateways.PageRecorder(p.groups) || s.Store == nil {
+		t.Errorf("gateway sender = %+v", s)
+	}
 	if u := p.openUpdates; u.Service != p.groups || u.Lease.Owner != "r-1" || u.Lease.Duration != groups.UpdateLease ||
 		u.Lease.Clocks.Real != realClock {
 		t.Errorf("open alert group updates = %+v", u)

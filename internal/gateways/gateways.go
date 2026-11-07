@@ -205,6 +205,41 @@ type Pruner struct {
 	}
 }
 
+// CallPruner deletes the calls whose Alert Groups were all deleted, for the alert_group_retention Leader task.
+type CallPruner struct {
+	q interface {
+		PruneEndedCalls(ctx context.Context, arg dbgen.PruneEndedCallsParams) (int64, error)
+	}
+}
+
+// NewCallPruner returns the CallPruner over d.
+func NewCallPruner(d DBTX) CallPruner {
+	return CallPruner{q: dbgen.New(d)}
+}
+
+// CallRetentionBatch is the most calls one delete of their retention removes.
+const CallRetentionBatch = 5000
+
+// Calls deletes the calls of the Organization that ended at or before now — accepted, Not delivered or dropped — and
+// are about no Alert Group any more, the retention of Alert Groups having deleted every one of theirs with their items
+// (retention.alert_group_summaries), in batches of at most CallRetentionBatch until a batch comes back short; their
+// texts, which named those Alert Groups, were cleared when they ended. It runs after the Alert Group retention, in its Leader task; running
+// it twice deletes nothing more.
+func (p CallPruner) Calls(ctx context.Context, orgID int64, now time.Time) (int64, error) {
+	var total int64
+	for {
+		n, err := p.q.PruneEndedCalls(ctx, dbgen.PruneEndedCallsParams{OrgID: orgID, Now: now.UTC(),
+			BatchSize: CallRetentionBatch})
+		total += n
+		if err != nil {
+			return total, fmt.Errorf("delete the ended calls of deleted alert groups: %w", err)
+		}
+		if n < CallRetentionBatch {
+			return total, nil
+		}
+	}
+}
+
 // NewPruner returns the Pruner over d.
 func NewPruner(d DBTX) Pruner {
 	return Pruner{q: dbgen.New(d)}

@@ -55,6 +55,8 @@ export function kindLabel(t: TFunction, kind: TimelineKind): string {
       return t("timeline.kinds.timers");
     case "delivery":
       return t("timeline.kinds.delivery");
+    case "escalation":
+      return t("timeline.kinds.escalation");
     default:
       return t("timeline.kinds.system");
   }
@@ -292,6 +294,14 @@ export function entryText(
           return t("timeline.delivery.other", { destination });
       }
     }
+    case "escalation":
+      // The events of Escalation chains and Pages show their name until S-159 renders them fully.
+      switch (entry.event) {
+        case "page_not_delivered":
+          return t("timeline.escalation.event", { event: entry.event });
+        default:
+          return t("timeline.escalation.event", { event: entry.event });
+      }
     default:
       switch (entry.system_event) {
         case "moved_to_default_route":

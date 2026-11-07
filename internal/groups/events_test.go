@@ -206,6 +206,15 @@ func TestLifecycleEventTable(t *testing.T) {
 				h.changes(t, ingest.ChangeFired, h.teamAlert("x", "", byLabel(search)))
 				return g
 			}},
+		{"page not delivered", want{EventPageNotDelivered, KindEscalation, Quiet, nil},
+			func(t *testing.T, h *harness) *dbgen.LockGroupsRow {
+				a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+				h.changes(t, ingest.ChangeFired, a)
+				g := h.groupOf(t, a)
+				h.clock.Advance(time.Minute)
+				h.pageNotDelivered(t, []int64{g.ID}, PageCallRefused)
+				return g
+			}},
 	}
 	produced := map[Event]bool{}
 	for _, c := range cases {
@@ -765,6 +774,26 @@ func (f *fakeDB) ListTimelineDestinations(_ context.Context, arg dbgen.ListTimel
 	return out, nil
 }
 
+// ListTimelineGateways names the Notification gateway gatewayID of the page_not_delivered tests, and no other.
+func (f *fakeDB) ListTimelineGateways(_ context.Context, arg dbgen.ListTimelineGatewaysParams) (
+	[]dbgen.ListTimelineGatewaysRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListTimelineGateways"); err != nil || arg.OrgID != orgID {
+		return nil, err
+	}
+	var out []dbgen.ListTimelineGatewaysRow
+	for _, id := range arg.Ids {
+		if id == gatewayID {
+			out = append(out, dbgen.ListTimelineGatewaysRow{ID: id, PublicID: "CN00000000GW01", Name: "Gateway"})
+		}
+	}
+	return out, nil
+}
+
+// gatewayID is the Notification gateway of the page_not_delivered tests.
+const gatewayID = 77
+
 // The Destinations of the reach tests: notice of the Route db below critical, critical of the Route db for
 // critical, and the search Team's notice below critical.
 const (
@@ -1074,4 +1103,96 @@ func TestDestinationJoined(t *testing.T) {
 			t.Errorf("timeline: %v", err)
 		}
 	})
+}
+
+// callPage is a call through the Notification gateway gatewayID to the User owner.
+func callPage(reason string) Page {
+	return Page{Users: []PagedUser{{ID: owner, PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice"}},
+		Gateway: &PageGateway{ID: gatewayID, PublicID: "CN00000000GW01", Name: "Gateway"}, Reason: reason}
+}
+
+// pageNotDelivered records page_not_delivered of a call on the Alert Groups ids and runs what it returns.
+func (h *harness) pageNotDelivered(t *testing.T, ids []int64, reason string) {
+	t.Helper()
+	after, err := h.svc.PageNotDelivered(t.Context(), nil, ids, callPage(reason))
+	if err != nil {
+		t.Fatal(err)
+	}
+	after(t.Context())
+}
+
+// TestPageNotDelivered is C-30.FR-7 and C-32.FR-19: a call through a Notification gateway that ended Not delivered
+// records, through the dispatcher as a system transition, the Quiet page_not_delivered of the kind escalation on each
+// of its Alert Groups in id order, whatever their status, with the person in paged_user_ids, the gateway and the
+// reason, without changing a status; the re-render step gets the event with its Page, for outgoing webhooks; the
+// Timeline reads the person and the gateway back. An Alert Group that no longer exists is skipped; an unknown reason,
+// a Page that names nobody and a failed lock are refused.
+func TestPageNotDelivered(t *testing.T) {
+	h := newHarness(t)
+	var renderings []Rendering
+	h.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		renderings = append(renderings, r)
+		return nil
+	})
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	b := h.alert(2, "critical", map[string]string{"alertname": "B", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a, b)
+	ga, gb := h.groupOf(t, a), h.groupOf(t, b)
+	h.acknowledge(gb)
+	h.db.users[owner] = dbgen.ListUserRefsRow{ID: owner, PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice",
+		Status: "active"}
+	h.clock.Advance(time.Minute)
+	renderings = nil
+	h.pageNotDelivered(t, []int64{gb.ID, ga.ID, 999}, PageCallBudgetUsed)
+	for _, g := range []*dbgen.LockGroupsRow{ga, gb} {
+		var found *fakeEntry
+		for _, e := range h.entriesOf(g) {
+			if e.Event.String == string(EventPageNotDelivered) {
+				found = e
+			}
+		}
+		if found == nil || found.Kind != string(KindEscalation) || found.Loudness.String != string(Quiet) ||
+			!slices.Equal(found.PagedUserIds, []int64{owner}) || found.GatewayConnectionID.Int64 != gatewayID ||
+			found.Reason.String != PageCallBudgetUsed || found.Transport != "system" {
+			t.Fatalf("#%d: %+v", g.Number, found)
+		}
+	}
+	if ga.Status != "firing" || gb.Status != "acknowledged" {
+		t.Errorf("statuses %s %s", ga.Status, gb.Status)
+	}
+	if len(renderings) != 2 || renderings[0].Group.ID != min(ga.ID, gb.ID) || len(renderings[0].Events) != 1 ||
+		renderings[0].Events[0].Page == nil || renderings[0].Events[0].Page.Reason != PageCallBudgetUsed {
+		t.Errorf("renderings %+v", renderings)
+	}
+	page, err := h.svc.Timeline(t.Context(), ga.PublicID, TimelineFilter{Kinds: []Kind{KindEscalation}, Limit: 10})
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("Timeline = %+v, %v", page, err)
+	}
+	e := page.Entries[0]
+	if len(e.PagedUsers) != 1 || e.PagedUsers[0].Login != "alice" || e.Gateway == nil ||
+		e.Gateway.Name != "Gateway" || e.Reason == nil || *e.Reason != PageCallBudgetUsed {
+		t.Errorf("the entry %+v", e)
+	}
+	h.db.fail["ListTimelineGateways"] = errBoom
+	if _, err := h.svc.Timeline(t.Context(), ga.PublicID, TimelineFilter{Limit: 10}); !errors.Is(err, errBoom) {
+		t.Errorf("a failed read of the gateways: %v", err)
+	}
+	delete(h.db.fail, "ListTimelineGateways")
+
+	for _, p := range []Page{{Users: callPage("").Users, Reason: "rang_out"}, {Reason: PageCallRefused}} {
+		if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, p); err == nil {
+			t.Errorf("%+v was recorded", p)
+		}
+	}
+	h.db.fail["LockGroups"] = errBoom
+	if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, callPage(PageCallRefused)); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed lock: %v", err)
+	}
+	delete(h.db.fail, "LockGroups")
+	h.svc.SetRerender(func(context.Context, DBTX, Rendering) error { return errBoom })
+	if _, err := h.svc.PageNotDelivered(t.Context(), nil, []int64{ga.ID}, callPage(PageCallRefused)); !errors.Is(err,
+		errBoom) {
+		t.Errorf("a failed re-render: %v", err)
+	}
 }

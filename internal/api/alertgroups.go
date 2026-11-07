@@ -662,6 +662,24 @@ func timelineEntryOf(e groups.TimelineEntry) (gen.TimelineEntry, error) {
 			Kind: gen.TimelineDeliveryEntryKindDelivery, Actor: actor, DeliveryEvent: gen.DeliveryEventKind(d.Event),
 			Destination: gen.EntityRef{Id: d.Destination.PublicID, Name: d.Destination.Name},
 			Error:       nullableString(d.Error), Loudness: loudness, Mentions: mentions})
+	case groups.KindEscalation:
+		v := gen.TimelineEscalationEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineEscalationEntryKindEscalation,
+			Actor: actor, Event: event, Loudness: loudness, Mentions: mentions,
+			PagedUsers: make([]gen.UserRef, 0, len(e.PagedUsers))}
+		for _, u := range e.PagedUsers {
+			v.PagedUsers = append(v.PagedUsers, *userRefOf(u))
+		}
+		if g := e.Gateway; g != nil {
+			v.Gateway.Set(gen.EntityRef{Id: g.PublicID, Name: g.Name})
+		} else {
+			v.Gateway.SetNull()
+		}
+		if e.Reason != nil {
+			v.Reason.Set(gen.PageNotDeliveredReason(*e.Reason))
+		} else {
+			v.Reason.SetNull()
+		}
+		err = out.FromTimelineEscalationEntry(v)
 	default:
 		v := gen.TimelineSystemEntry{Id: e.PublicID, At: e.At, Kind: gen.TimelineSystemEntryKindSystem, Actor: actor,
 			SystemEvent: gen.TimelineSystemEntrySystemEvent(e.System), PeriodFrom: nullableTime(e.PeriodFrom),

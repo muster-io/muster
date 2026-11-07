@@ -31,10 +31,10 @@ var person = groups.Actor{Kind: audit.ActorUser, Transport: audit.TransportUI}
 // TestTableMatchesLifecycleEvents: the table of delivery has a row for every row of the lifecycle event tables of
 // C-09.FR-22 and C-10.FR-15, with the same loudness and Mentions, resolved split by who resolved; the six rows of
 // C-17.FR-11, the two of C-25 — team_joined, a Root message update, and unknown_team_value, nothing (C-11.FR-20
-// revised) — and the three of destination_joined of C-26, a new Root message, complete the 37; a Loud event is always a
-// new message and an edit is always Quiet (C-11.FR-7).
+// revised) — the three of destination_joined of C-26, a new Root message, and page_not_delivered of C-30, nothing in a
+// messenger, complete the 38; a Loud event is always a new message and an edit is always Quiet (C-11.FR-7).
 func TestTableMatchesLifecycleEvents(t *testing.T) {
-	if len(delivery.Table) != 37 {
+	if len(delivery.Table) != 38 {
 		t.Errorf("%d rows", len(delivery.Table))
 	}
 	seen := map[string]bool{}

@@ -79,6 +79,13 @@ const TeamMembershipLockClass int32 = 0x6d75_0009
 // (gateway.contact_code_requests), whichever User asks.
 const GatewayContactLockClass int32 = 0x6d75_000a
 
+// GatewayCallLockClass is the first key of the transaction advisory lock of the calls of one person through one
+// Notification gateway, whose second key is hashtext of the Organization, the gateway's Connection and the User: a
+// Page holds it while it joins or creates the waiting call, and the gateway sender while a call starts its first
+// attempt or ends, so that a Page never joins a call that started, and the end of a call always finds the waiting call
+// whose combine window it sets (gateways' calls.go, sender.go).
+const GatewayCallLockClass int32 = 0x6d75_000b
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

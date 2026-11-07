@@ -9,13 +9,16 @@ covers: [C-30.FR-2, C-30.FR-4, C-30.FR-5, C-30.FR-7, C-30.FR-10, C-30.AC-3, C-30
 files_touched:
   - api/openapi.yaml
   - api/README.md
-  - internal/db/migrations/0037_gateway_calls.up.sql
-  - internal/db/migrations/0037_gateway_calls.down.sql
+  - internal/db/migrations/0034_gateway_calls.up.sql
+  - internal/db/migrations/0034_gateway_calls.down.sql
   - design/db/schema.md
+  - docs/install/versions.md
+  - internal/db/checks.go
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/publicid/publicid.go
   - internal/gateways/calls.go
+  - internal/gateways/gateways.go
   - internal/gateways/calls_test.go
   - internal/gateways/sender.go
   - internal/gateways/sender_test.go
@@ -31,9 +34,14 @@ files_touched:
   - internal/messages/texts/en.json
   - internal/messages/texts/ru.json
   - internal/archlint/archlint.go
+  - internal/archlint/secretleak.go
+  - internal/archlint/testdata/rule3/internal/gateways/sender.go
   - internal/metrics/catalogue.go
+  - internal/metrics/metrics.go
+  - internal/metrics/metrics_test.go
   - internal/logging/events.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/devmode/devmode.go
   - internal/devmode/devmode_test.go
   - design/prd/l1/reference.md
@@ -41,12 +49,22 @@ files_touched:
   - AGENTS.md
   - internal/delivery/enqueue.go
   - internal/delivery/enqueue_test.go
+  - internal/delivery/limiter.go
+  - internal/delivery/outcomes.go
+  - internal/groups/dispatcher.go
+  - internal/groups/dispatcher_test.go
   - internal/groups/query.sql
   - internal/groups/read.go
   - internal/api/alertgroups.go
   - web/src/components/timeline.tsx
+  - web/src/components/timeline.test.tsx
   - web/src/locales/en.json
   - web/src/locales/ru.json
+  - docs/outgoing-webhooks/events.md
+  - docs/messengers/notification-gateways.md
+  - docs/concepts/alert-groups.md
+  - docs/configure/organization.md
+  - design/stories/S-173-the-acknowledge-of-the-transport-gateway.md
 acceptance:
   - "[C-30.FR-4, C-30.AC-3] A Page through a gateway to a person with a confirmed contact there is a row of `gateway_calls` with a `public_id`, its Alert Groups and `next_attempt_at`; the first call to a person through a gateway goes at once; of three Pages to one person within `gateway.combine_window`, the first reaches the fake gateway at once and the other two as one call with both Alert Groups once the window after the first one ended has passed; when the second Alert Group is acknowledged meanwhile, that call is about the third only; a call whose Alert Groups were all acknowledged before its first attempt is not sent and ends `dropped`; after a call that ends Not delivered, the next one goes once the window after it has passed; calls about critical Alert Groups are claimed first; Mentions are never joined (`calls_test.go`, `calls_integration_test.go`)."
   - "[C-30.FR-4, C-30.AC-3, C-11.FR-2] A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` and the same text within `delivery.transient_backoff` and `delivery.transient_budget` until it is accepted, through the Connection's limiter, on any replica that claims it; once every Alert Group of a call being retried has stopped, its retries end and it ends `dropped`; a call takes no Alert Group after its first attempt (`sender_test.go`)."
@@ -95,7 +113,7 @@ issue: 437
     from S-149, S-155 and S-157)}; `WebhookEventName` gains `page_not_delivered`, and `OutgoingWebhookEvent` gains the
     optional `page` {`users`, `gateway`, `reason`}, set on that event only, as `test` is on its own.
   - `PublicId` and `api/README.md` gain the prefix `CA` (call).
-- **Schema** (migration `0037_gateway_calls`, expand only; `schema.md` §4.9, §4.13, §4.17, §5):
+- **Schema** (migration `0034_gateway_calls`, expand only; `schema.md` §4.9, §4.13, §4.17, §5):
   - `gateway_calls`: `id`, `org_id`, `public_id` (`CHECK (public_id ~ '^CA[0-9A-HJKMNP-TV-Z]{12}$')`), `connection_id`,
     `user_id`, `contact_id` (FK `gateway_contacts`, `ON DELETE SET NULL`, so that S-167's erasure and
     `deleteMyGatewayContact` leave the call's record; set at the first attempt), `state` (`CHECK IN ('waiting',
@@ -159,9 +177,10 @@ issue: 437
   `delivery.Gateway.Notify`.
 - **Metrics** (`internal/metrics/catalogue.go`): `muster_gateway_calls_total{connection,outcome}` (counter, C-30);
   reference.md moves it into the catalogue.
-- **Log events** (`internal/logging/events.go`): `gateway_call_queued` (debug), `gateway_call_attempted` (info; the
-  call, the Connection, the outcome class), `gateway_call_not_delivered` (warn; the reason), `gateway_call_dropped`
-  (info), C-30; none carries the contact or the text.
+- **Log events** (`internal/logging/events.go`): `gateway_call_queued` (info: the logger has no debug level, and
+  `MUSTER_LOG_LEVEL` takes none), `gateway_call_attempted` (info; the call, the Connection, the outcome class),
+  `gateway_call_not_delivered` (warn; the reason), `gateway_call_dropped` (info) and `gateway_call_failed` (warn; an
+  attempt or its record that failed, such as without the database), C-30; none carries the contact or the text.
 - **Development mode** (`internal/devmode/devmode.go`): `POST /_dev/gateway-calls` {`user_id`, `connection_id`,
   `alert_group_ids`} on the internal listener, served only under `muster dev` like `/_dev/clock`, calls `gateways.Page`
   for each Alert Group with the stop check of this story.
@@ -201,7 +220,7 @@ curl -s $FB/notifications | jq -r 'last.text'
 curl -s $FB/notifications | jq -r 'last.action.data | length <= 64'                            # true
 
 # a call refused as invalid ends Not delivered
-curl -s -X POST $FB/faults -d '{"path":"/v1/notifications","status":400,"times":1,
+curl -s -X POST $FB/faults -d '{"path":"/gateway/v1/notifications","status":400,"times":1,
   "body":"{\"type\":\"about:blank\",\"title\":\"Bad number\",\"status\":400,\"class\":\"invalid\"}"}' > /dev/null
 curl -s -X POST $CLK -d '{"advance_seconds": 61}' > /dev/null; CALL $G1; sleep 2
 curl -s "${A[@]}" "$API/alert-groups/$G1/timeline?kind=escalation" | jq -c '[.items[] | {event, u: [.paged_users[].login], g: .gateway.name, reason}]'
@@ -225,11 +244,26 @@ None.
 - The Timeline's `_v4` takes all five `escalation` events at once, because they are one closed group of the L2 event
   table; S-152 to S-157 add only the columns they need.
 - `paged` for a call (Quiet), the call's Assignees and "stopped" for a chain or a rule that started over come with
-  S-157, which also passes its own `StopCheck` to `gateways.Page`.
+  S-157, which also passes its own `StopCheck` to `gateways.Page`. `StopCheck` is a name, not a function, since any
+  replica sends the call, and this story stores none: the sender applies `not_firing` to every call. S-157 needs a
+  column for its `StopCheck` (on `gateway_call_items`, as each Alert Group of a call may come from another chain or
+  rule) and a migration for it.
 - The hook of `muster dev` is a development aid like the clock; it is no product behaviour and is never served outside
   `muster dev`.
 - P-87 stays provisional; the test environment confirms it.
-- Migration `0037` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- Review of the pull request: a gateway's RetryAfter counts no attempt, but its waits count toward the time budget of
+  `delivery.transient_budget` from the first one (`first_failed_at`), so that a gateway that keeps answering
+  `rate_limited` ends the call Not delivered with `call_budget_used` instead of holding the person's later Pages. Ended
+  calls are deleted by the existing Leader task `alert_group_retention` once its Alert Group retention deleted all
+  their items, since their texts name those Alert Groups (`gateways.CallPruner`, `gateway_calls_ended_idx`; no new
+  Leader task). A call through a gateway deleted before it went ends with `gateway_deleted` (C-30.FR-9; the PRD names
+  no reason, the name is S-157's). The text of a call stays within the 1,000 characters of the Bridge protocol: as
+  many Alert Groups as fit, then "And N more." (`gatewayCall.more`). The removal of a key that signed an outstanding
+  call is S-173's (its Notes). The end of a call clears its text, which names its Alert Groups, so that no title
+  outlives its Alert Group while another Alert Group of the call lives; the language stays (`gateway_calls_text_check`
+  relaxed in 0034, which is not on master yet).
+- Migration `0037` followed the story map; renumbered `0034`: merged out of story-map order after 0033 (S-167), a
+  story merged out of that order renumbering its migration (S-167's Notes).
 
 ## Coverage
 

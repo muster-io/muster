@@ -13049,7 +13049,8 @@ components:
       description: 'Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random
         characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as
         `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE`
-        Audit log entry, `AK` Account link, `AR` Account link request, `CN` Connection, `CR` check run, `DE` delivery
+        Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN`
+        Connection, `CR` check run, `DE` delivery
         event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal
         access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service
         account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup
@@ -14137,6 +14138,7 @@ components:
       - team_joined
       - unknown_team_value
       - destination_joined
+      - page_not_delivered
       x-event-kinds:
         status:
         - created
@@ -14171,6 +14173,8 @@ components:
         - moved_to_default_route
         - unknown_team_value
         - destination_joined
+        escalation:
+        - page_not_delivered
     Loudness:
       type: string
       enum:
@@ -14197,6 +14201,7 @@ components:
       - timers
       - delivery
       - system
+      - escalation
     TimelineActor:
       type: object
       description: Who caused the entry. `system` entries carry the reason in `reason`.
@@ -14492,6 +14497,50 @@ components:
           destination:
             description: The Destination the Alert Group joined, for `destination_joined`.
             $ref: '#/components/schemas/DestinationRef'
+    PageNotDeliveredReason:
+      type:
+      - string
+      - 'null'
+      description: 'Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the
+        call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry
+        budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt
+        (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call
+        was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show
+        an unknown one as it is.'
+      enum:
+      - call_refused
+      - call_unknown
+      - call_budget_used
+      - no_confirmed_contact
+      - gateway_deleted
+      - null
+    TimelineEscalationEntry:
+      description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
+        Notification gateway that ended Not delivered.
+      allOf:
+      - $ref: '#/components/schemas/TimelineEntryBase'
+      - $ref: '#/components/schemas/TimelineLifecycleFields'
+      - type: object
+        required:
+        - kind
+        - paged_users
+        properties:
+          kind:
+            type: string
+            enum:
+            - escalation
+          paged_users:
+            type: array
+            description: The people the Page names.
+            items:
+              $ref: '#/components/schemas/UserRef'
+          gateway:
+            description: The Notification gateway of a call; null for a Page by Mention.
+            oneOf:
+            - $ref: '#/components/schemas/EntityRef'
+            - type: 'null'
+          reason:
+            $ref: '#/components/schemas/PageNotDeliveredReason'
     TimelineEntry:
       description: One Timeline entry; `kind` selects the variant.
       oneOf:
@@ -14501,6 +14550,7 @@ components:
       - $ref: '#/components/schemas/TimelineTimersEntry'
       - $ref: '#/components/schemas/TimelineDeliveryEntry'
       - $ref: '#/components/schemas/TimelineSystemEntry'
+      - $ref: '#/components/schemas/TimelineEscalationEntry'
       discriminator:
         propertyName: kind
         mapping:
@@ -14510,6 +14560,7 @@ components:
           timers: '#/components/schemas/TimelineTimersEntry'
           delivery: '#/components/schemas/TimelineDeliveryEntry'
           system: '#/components/schemas/TimelineSystemEntry'
+          escalation: '#/components/schemas/TimelineEscalationEntry'
     TimelineEntryList:
       type: object
       required:
@@ -18362,6 +18413,7 @@ components:
       - team_joined
       - unknown_team_value
       - destination_joined
+      - page_not_delivered
       - test
     WebhookMentionTarget:
       type: object
@@ -18506,6 +18558,26 @@ components:
           type: string
         slug:
           type: string
+    WebhookPage:
+      type: object
+      description: A Page as an outgoing webhook event names it, on `page_not_delivered`.
+      required:
+      - users
+      - gateway
+      - reason
+      properties:
+        users:
+          type: array
+          description: The people the Page names.
+          items:
+            $ref: '#/components/schemas/WebhookUser'
+        gateway:
+          description: The Notification gateway of a call; null for a Page by Mention.
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        reason:
+          $ref: '#/components/schemas/PageNotDeliveredReason'
     WebhookDestinationRef:
       type: object
       description: A Destination as an outgoing webhook event names it.
@@ -18602,6 +18674,9 @@ components:
         destination:
           $ref: '#/components/schemas/WebhookDestinationRef'
           description: The Destination the Alert Group joined, only on `destination_joined`.
+        page:
+          $ref: '#/components/schemas/WebhookPage'
+          description: The Page, only on `page_not_delivered`.
         test:
           type: boolean
           description: True only on the `test` event, which carries an example or recent Alert Group and belongs to no Alert

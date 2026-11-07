@@ -882,7 +882,8 @@ func (f *fakeDB) timeline(group int64, kinds []string, at pgtype.Timestamptz, so
 			PreviousOwnerUserID: e.PreviousOwnerUserID, SnoozeUntil: e.SnoozeUntil, Fingerprints: e.Fingerprints,
 			ReplacedLabel: e.ReplacedLabel, LabelConflicts: e.LabelConflicts, PeriodFrom: e.PeriodFrom,
 			PeriodTo: e.PeriodTo, Detail: e.Detail, TeamID: e.TeamID, TeamRule: e.TeamRule,
-			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue, DestinationID: e.DestinationID})
+			TeamMatcher: e.TeamMatcher, TeamValue: e.TeamValue, DestinationID: e.DestinationID,
+			PagedUserIds: e.PagedUserIds, GatewayConnectionID: e.GatewayConnectionID})
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListTimelineDescRow) int {
 		c := cmp.Or(a.At.Compare(b.At), cmp.Compare(a.ID, b.ID))

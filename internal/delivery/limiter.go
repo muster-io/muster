@@ -63,3 +63,21 @@ func holdBucket(ctx context.Context, q queries, orgID int64, d Destination, o Ou
 	}
 	return nil
 }
+
+// ConnectionToken takes, through db — the pool or the caller's transaction — one token of the limiter of the
+// Connection connection at now on the business clock, creating its bucket on first use (C-11.FR-3): the gateway sender
+// of C-30.FR-4 waits for it before every attempt of a call, as a delivery does for its Connection. ok is false when no
+// token is free; due is then when the bucket will hold one.
+func ConnectionToken(ctx context.Context, db dbgen.DBTX, orgID, connection int64, now time.Time) (ok bool,
+	due time.Time, err error) {
+	q := pgQueries{Queries: dbgen.New(db), exec: db}
+	t, err := takeTokens(ctx, q, orgID, subject{connection: &connection}, now)
+	return t.ok, t.due, err
+}
+
+// HoldConnection holds the bucket of the Connection connection, through db, until until on the business clock: a
+// gateway's RetryAfter, which holds the whole gateway whatever its scope, as a call has no Destination.
+func HoldConnection(ctx context.Context, db dbgen.DBTX, orgID, connection int64, until time.Time) error {
+	q := pgQueries{Queries: dbgen.New(db), exec: db}
+	return holdBucket(ctx, q, orgID, Destination{Connection: &connection}, Outcome{Scope: ScopeConnection}, until)
+}

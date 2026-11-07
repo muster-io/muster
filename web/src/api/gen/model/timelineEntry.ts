@@ -4,6 +4,7 @@
  */
 import type { TimelineAlertsEntry } from './timelineAlertsEntry';
 import type { TimelineDeliveryEntry } from './timelineDeliveryEntry';
+import type { TimelineEscalationEntry } from './timelineEscalationEntry';
 import type { TimelineNoteEntry } from './timelineNoteEntry';
 import type { TimelineStatusEntry } from './timelineStatusEntry';
 import type { TimelineSystemEntry } from './timelineSystemEntry';
@@ -12,4 +13,4 @@ import type { TimelineTimersEntry } from './timelineTimersEntry';
 /**
  * One Timeline entry; `kind` selects the variant.
  */
-export type TimelineEntry = TimelineStatusEntry | TimelineAlertsEntry | TimelineNoteEntry | TimelineTimersEntry | TimelineDeliveryEntry | TimelineSystemEntry;
+export type TimelineEntry = TimelineStatusEntry | TimelineAlertsEntry | TimelineNoteEntry | TimelineTimersEntry | TimelineDeliveryEntry | TimelineSystemEntry | TimelineEscalationEntry;

@@ -238,7 +238,9 @@ and of the time to resolve. Days are split in your time zone.
 `retention.alert_group_summaries`
 :   kept for: 2 years
 
-    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes.
+    The summary row of an Alert Group: number, title, summary, times, Route, status, and its Notes; and the calls
+    through a [Notification gateway](../messengers/notification-gateways.md#calls) about it, once every Alert Group
+    a call was about is removed. The text of a call, which names its Alert Groups, is cleared when the call ends.
 
 After the details are removed, search still finds the Alert Group by its title and number, and its page shows the
 summary with the notice that the Alerts and the Timeline were removed. The list shows Alert Groups whose lifetime

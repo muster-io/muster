@@ -53,11 +53,12 @@ type Row struct {
 	EventMentions bool
 }
 
-// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11, C-25 and C-26 that delivery
-// turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
+// Table is the closed table of the lifecycle events of C-09.FR-22, C-10.FR-15, C-17.FR-11, C-25, C-26 and C-30 that
+// delivery turns into messages (C-11.FR-20), keyed by event and variant: an event whose rows differ by actor or reason has a row
 // per variant. moved_to_default_route changes the Destinations of the Alert Group (C-09.FR-19): the final edit in those
 // it leaves, a Quiet Publication in those it joins, an update in those of both. destination_joined is a new Root message
-// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update.
+// in the Destination it names only (C-26.FR-5, C-11.FR-20 revised); the others see an update. page_not_delivered shows
+// nothing in a messenger (C-30.FR-7): the gateway called, and outgoing webhooks in events mode receive it.
 var Table = []Row{
 	{groups.EventCreated, groups.VariantAny, FormPublication, groups.Loud, []groups.Mention{groups.MentionNewAlertGroup},
 		false},
@@ -83,6 +84,7 @@ var Table = []Row{
 	{groups.EventResolved, VariantSystem, FormReplyAndUpdate, groups.Quiet, nil, false},
 	{groups.EventMovedToDefaultRoute, groups.VariantAny, FormUpdate, groups.Quiet, nil, false},
 	{groups.EventUnknownTeamValue, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
+	{groups.EventPageNotDelivered, groups.VariantAny, FormNothing, groups.Quiet, nil, false},
 	{groups.EventDestinationJoined, groups.VariantFiring, FormPublication, groups.Loud,
 		[]groups.Mention{groups.MentionNewAlertGroup}, false},
 	{groups.EventDestinationJoined, groups.VariantAcknowledged, FormPublication, groups.Quiet, nil, false},

@@ -781,6 +781,52 @@ var GatewayContactCodeSent = newEvent("gateway_contact_code_sent", LevelInfo, "C
 		"The contact text and the code are never logged.",
 	"user", "connection", "contact", "outcome")
 
+// GatewayCallQueued is logged for each Page queued as a call through a Notification gateway (C-30.FR-4, FR-10).
+var GatewayCallQueued = newEvent("gateway_call_queued", LevelInfo, "C-30",
+	"A Page through a Notification gateway joined the call that waits for its first attempt, or started one: call is "+
+		"the public_id of the call, connection of the gateway's Connection, user of the User called, group the #N of "+
+		"the Alert Group, joined true when the call was waiting already, and not_before when it may go, empty while "+
+		"the previous call to the person through that gateway is still being sent. Never carries the contact or the "+
+		"text of the call.",
+	"call", "connection", "user", "group", "joined", "not_before")
+
+// GatewayCallAttempted is logged for each attempt of a call through a Notification gateway that ended (C-30.FR-10).
+var GatewayCallAttempted = newEvent("gateway_call_attempted", LevelInfo, "C-30",
+	"An attempt of a call through a Notification gateway ended: call is the public_id of the call, connection of the "+
+		"gateway's Connection, attempt its number, and outcome accepted — a replayed answer to its Idempotency-Key "+
+		"included, with replayed true — or the error class of the answer, retry_after, transient, fatal or unknown, "+
+		"as muster_gateway_calls_total counts it. Never carries the contact or the text of the call.",
+	"call", "connection", "attempt", "outcome", "replayed")
+
+// GatewayCallNotDelivered is logged when a call through a Notification gateway ended Not delivered (C-30.FR-7).
+var GatewayCallNotDelivered = newEvent("gateway_call_not_delivered", LevelWarn, "C-30",
+	"A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: "+
+		"call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason "+
+		"call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, "+
+		"call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the "+
+		"gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or "+
+		"gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, "+
+		"and error the gateway's answer, masked. Never carries the contact or the "+
+		"text of the call.",
+	"call", "connection", "user", "reason", "error")
+
+// GatewayCallDropped is logged when a call through a Notification gateway ended without being sent again because the
+// Paging stopped on every Alert Group it is about (C-30.FR-4).
+var GatewayCallDropped = newEvent("gateway_call_dropped", LevelInfo, "C-30",
+	"A call through a Notification gateway ended dropped: every Alert Group it is about had stopped — acknowledged, "+
+		"snoozed or resolved — before its first attempt, so it was never sent, or while it was being retried, so its "+
+		"retries ended. call is the public_id of the call, connection of the gateway's Connection, and attempts how "+
+		"many attempts it made.",
+	"call", "connection", "attempts")
+
+// GatewayCallFailed is logged when the gateway sender could not attempt a call or record its outcome (C-30.FR-4).
+var GatewayCallFailed = newEvent("gateway_call_failed", LevelWarn, "C-30",
+	"The gateway sender could not attempt a call through a Notification gateway, or record how its attempt ended, "+
+		"because of error, such as a lost database connection: call is the public_id of the call. Any replica "+
+		"attempts it again once its lease runs out, with the same Idempotency-Key, so that a gateway that already "+
+		"accepted it answers replayed. Never carries the contact or the text of the call.",
+	"call", "error")
+
 // GatewayContactCodeRejected is logged when a code typed for a contact at a Notification gateway did not confirm it
 // (C-30.FR-3).
 var GatewayContactCodeRejected = newEvent("gateway_contact_code_rejected", LevelWarn, "C-30",

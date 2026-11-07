@@ -41,7 +41,7 @@ const (
 )
 
 // EntityLabels are the only labels that name configuration entities (ADR-0014).
-var EntityLabels = []string{"integration", "route", "destination", "team", "schedule"}
+var EntityLabels = []string{"integration", "route", "destination", "team", "schedule", "connection"}
 
 // Label is one label of a metric.
 type Label struct {

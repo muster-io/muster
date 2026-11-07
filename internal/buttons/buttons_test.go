@@ -109,7 +109,7 @@ func TestActionIDs(t *testing.T) {
 	if _, err := buttons.Verify(active(t, 'b', 'a'), id, ""); err != nil {
 		t.Errorf("an older key of the Keyring: %v", err)
 	}
-	for _, s := range []buttons.Subject{buttons.SubjectReply, buttons.SubjectTest} {
+	for _, s := range []buttons.Subject{buttons.SubjectReply, buttons.SubjectTest, buttons.SubjectCall} {
 		for _, c := range []string{buttons.CommandAcknowledge, buttons.CommandUnacknowledge, buttons.CommandResolve,
 			buttons.CommandUnsnooze, buttons.CommandStillOnIt} {
 			b := buttons.Action{Subject: s, PublicID: "DS4M1T6RW9KXPA", Command: c}
@@ -203,7 +203,8 @@ func TestExpired(t *testing.T) {
 func TestLooksSigned(t *testing.T) {
 	k := active(t, 'a')
 	var id string
-	for _, s := range []buttons.Subject{buttons.SubjectRoot, buttons.SubjectReply, buttons.SubjectTest} {
+	for _, s := range []buttons.Subject{buttons.SubjectRoot, buttons.SubjectReply, buttons.SubjectTest,
+		buttons.SubjectCall} {
 		for _, c := range []string{buttons.CommandAcknowledge, buttons.CommandUnacknowledge, buttons.CommandResolve,
 			buttons.CommandSnooze, buttons.CommandUnsnooze, buttons.CommandStillOnIt} {
 			signed, _, err := buttons.Sign(k, buttons.Action{Subject: s, PublicID: "AGK7M3QX9P2RTA", Command: c,
@@ -370,5 +371,28 @@ func TestStyleOf(t *testing.T) {
 	}
 	if buttons.StylePrimary != "primary" || buttons.StyleSuccess != "success" || buttons.StyleNeutral != "neutral" {
 		t.Error("the style hints are not named as the Bridge protocol's ButtonStyle")
+	}
+}
+
+// TestCallActionData is C-30.FR-2: the action data of a call names the subject call with the call's public_id and the
+// Command acknowledge, at most 64 bytes, as an action id of a button; it verifies with the button-signature key, and
+// its subject tells it from an action id of the same public_id about a Root message.
+func TestCallActionData(t *testing.T) {
+	k := active(t, 'a')
+	call := buttons.Action{Subject: buttons.SubjectCall, PublicID: "CAK7M3QX9P2RTA", Command: buttons.CommandAcknowledge}
+	data, _, err := buttons.Sign(k, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > buttons.MaxLen || !buttons.LooksSigned(data) {
+		t.Errorf("data %q, %d bytes", data, len(data))
+	}
+	if got, err := buttons.Verify(k, data, ""); err != nil || got != call {
+		t.Errorf("Verify = %+v, %v", got, err)
+	}
+	root, _, err := buttons.Sign(k, buttons.Action{Subject: buttons.SubjectRoot, PublicID: call.PublicID,
+		Command: buttons.CommandAcknowledge})
+	if err != nil || root == data {
+		t.Errorf("a Root message's action id %q, %v", root, err)
 	}
 }

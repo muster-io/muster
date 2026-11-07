@@ -280,3 +280,51 @@ func TestBodyDestinationJoined(t *testing.T) {
 		}
 	}
 }
+
+// TestBodyPageNotDelivered is C-15.FR-2 revised by C-30.FR-7: page_not_delivered carries the Page in its page {users,
+// gateway, reason}, valid against OutgoingWebhookEvent, Quiet without Mentions; no other event carries a page, even
+// one recorded with a Page by mistake, and a Page by Mention has a null gateway.
+func TestBodyPageNotDelivered(t *testing.T) {
+	schema := eventSchema(t)
+	s, f := newService(t)
+	render, err := s.eventBodies(t.Context(), f, bodyFixture(f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := &groups.Page{Users: []groups.PagedUser{{ID: 4, PublicID: "SRAAAAAAAAAAP4", Name: "Petr", Login: "petr"}},
+		Gateway: &groups.PageGateway{ID: 7, PublicID: "CNAAAAAAAAAAG7", Name: "Example Gateway"},
+		Reason:  groups.PageCallRefused}
+	mention := &groups.Page{Users: call.Users, Reason: groups.PageCallUnknown}
+	for _, c := range []struct {
+		event groups.Event
+		page  *groups.Page
+		want  string
+	}{
+		{groups.EventPageNotDelivered, call, `{"users":[{"id":"SRAAAAAAAAAAP4","name":"Petr","login":"petr"}],` +
+			`"gateway":{"id":"CNAAAAAAAAAAG7","name":"Example Gateway"},"reason":"call_refused"}`},
+		{groups.EventPageNotDelivered, mention, `{"users":[{"id":"SRAAAAAAAAAAP4","name":"Petr","login":"petr"}],` +
+			`"gateway":null,"reason":"call_unknown"}`},
+		{groups.EventAlertsAdded, call, ``},
+	} {
+		raw, err := render(delivery.EventBody{Event: groups.Recorded{Seq: 6, Event: c.event, Loudness: groups.Quiet,
+			Page: c.page}, OccurredAt: t0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v any
+		_ = json.Unmarshal(raw, &v)
+		if err := schema.VisitJSON(v); err != nil {
+			t.Fatalf("%s: %v\n%s", c.event, err, raw)
+		}
+		var b struct {
+			Event    string          `json:"event"`
+			Notify   bool            `json:"notify"`
+			Mentions []any           `json:"mentions"`
+			Page     json.RawMessage `json:"page"`
+		}
+		_ = json.Unmarshal(raw, &b)
+		if b.Event != string(c.event) || b.Notify || len(b.Mentions) != 0 || string(b.Page) != c.want {
+			t.Errorf("%s: %s", c.event, raw)
+		}
+	}
+}

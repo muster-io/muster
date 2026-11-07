@@ -133,6 +133,7 @@ var registry = []Probe{
 	{Name: "bridge_check", Run: probeBridgeCheck},
 	{Name: "gateway_notifications", Run: probeGatewayNotifications},
 	{Name: "gateway_contacts", Run: probeGatewayContacts},
+	{Name: "gateway_calls", Run: probeGatewayCalls},
 	{Name: "slack_connections", Run: probeSlack},
 	{Name: "slack_presses", Run: probeSlackPresses},
 	{Name: "slack_socket", Run: probeSlackSocket},
@@ -2299,6 +2300,184 @@ func probeGatewayContacts(ctx context.Context, secrets []string, log io.Writer) 
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// probeGatewayCalls pushes the token, a contact and the text of a call through the gateway sender (C-30.FR-4, FR-10):
+// the first secret is the bridge's token, the second the person's contact and the third the title of the Alert Group,
+// which the call's text carries. Against a stand-in gateway that echoes the request and the token in every answer,
+// the first attempt is answered transient, the retry invalid, which ends the call Not delivered; neither the log lines
+// of the sender and the adapter, nor the errors, nor the error stored with the call, may carry them.
+func probeGatewayCalls(ctx context.Context, secrets []string, log io.Writer) error {
+	logger := logging.New(log, logging.LevelInfo)
+	now := time.Now().UTC()
+	business, realClock := clock.NewManual(now), clock.NewManual(now)
+	var answers atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/info" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"protocol_version":"1","bridge":{"name":"probe","version":"1"},`+
+				`"messenger":{"name":"probe"},"capabilities":{},"limits":{"max_body_length":500,`+
+				`"edit_max_age_seconds":null},"user_lookup":"none","event_delivery":["poll"],"roles":["gateway"]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		echo := "request " + string(body) + " " + r.Header.Get("Authorization")
+		status := http.StatusInternalServerError
+		if answers.Add(1) > 1 {
+			status = http.StatusBadRequest
+		}
+		w.Header().Set("Content-Type", "application/problem+json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": echo, "detail": echo, "status": status,
+			"class": map[int]string{http.StatusInternalServerError: "transient",
+				http.StatusBadRequest: "invalid"}[status]})
+	}))
+	defer srv.Close()
+	policy, err := outbound.ParsePolicy("standard", []string{"127.0.0.0/8"}, nil)
+	if err != nil {
+		return err
+	}
+	c, err := bridge.NewClient(bridge.Network{Policy: outbound.StaticPolicy(policy), Log: logger, Real: clock.Real{}},
+		bridge.Settings{BaseURL: srv.URL, Token: logging.Secret(secrets[0]),
+			Owner: outbound.Owner{Connection: 1, PublicID: "CNAAAAAAAAAAG1"}})
+	if err != nil {
+		return err
+	}
+	store := &probeCallStore{contact: secrets[1], title: secrets[2]}
+	pages := &probePages{}
+	s := &gateways.Sender{OrgID: 1, Store: store, Lease: db.Lease{Owner: "probe", Duration: time.Minute,
+		Clocks: clock.Clocks{Business: business, Real: realClock}},
+		Gateway: &bridge.Adapter{Targets: gatewayTargets{conn: bridge.Conn{ID: 1, PublicID: "CNAAAAAAAAAAG1",
+			Version: 1, Client: c}}, Log: logger}, Limiter: probeLimiter{}, Keys: probeKeys{}, Pages: pages,
+		Log: logger, Random: func() float64 { return 0 }}
+	var errs []error
+	for range 2 {
+		if _, err := s.Round(ctx); err != nil {
+			errs = append(errs, err)
+		}
+		business.Advance(delivery.TransientBackoffMax)
+		realClock.Advance(time.Second)
+	}
+	errs = append(errs, errors.New(store.lastError))
+	if answers.Load() != 2 || store.state != "not_delivered" || len(pages.reasons) != 1 {
+		errs = append(errs, &probeIncomplete{fmt.Sprintf("%d answers, the call %s, pages %v", answers.Load(),
+			store.state, pages.reasons)})
+	}
+	return errors.Join(errs...)
+}
+
+// probeCallStore is the one call of probeGatewayCalls in memory: a waiting call to the User 1 through the gateway 1,
+// about the Alert Group 1, whose title is the probe's.
+type probeCallStore struct {
+	gateways.CallQueries
+	contact, title string
+	state          string
+	text           string
+	attempts       int64
+	next           time.Time
+	owner          string
+	lastError      string
+}
+
+func (p *probeCallStore) InCallTx(_ context.Context, f func(gateways.DBTX, gateways.CallQueries) error) error {
+	return f(nil, p)
+}
+
+func (p *probeCallStore) ClaimDueCalls(_ context.Context, a gwdb.ClaimDueCallsParams) ([]gwdb.ClaimDueCallsRow,
+	error) {
+	if p.state == "" {
+		p.state = gateways.CallWaiting
+	}
+	if (p.state != gateways.CallWaiting && p.state != gateways.CallSending) || p.next.After(a.Due) {
+		return nil, nil
+	}
+	p.owner = a.Owner
+	return []gwdb.ClaimDueCallsRow{{ID: 1, PublicID: "CAAAAAAAAAAAA1", ConnectionID: 1, UserID: 1,
+		NextAttemptAt: p.next}}, nil
+}
+
+func (p *probeCallStore) NextCallWork(context.Context, gwdb.NextCallWorkParams) (gwdb.NextCallWorkRow, error) {
+	return gwdb.NextCallWorkRow{}, nil
+}
+
+func (p *probeCallStore) LockCallPerson(context.Context, gwdb.LockCallPersonParams) error { return nil }
+
+func (p *probeCallStore) GetLeasedCall(context.Context, gwdb.GetLeasedCallParams) (gwdb.GetLeasedCallRow, error) {
+	row := gwdb.GetLeasedCallRow{ID: 1, PublicID: "CAAAAAAAAAAAA1", ConnectionID: 1, UserID: 1, State: p.state,
+		Attempts: p.attempts, ConnectionPublicID: "CNAAAAAAAAAAG1", ConnectionName: "probe",
+		UserPublicID: "SRAAAAAAAAAAA1", UserName: "Petr", UserLogin: "petr", Gateway: true}
+	if p.state == gateways.CallSending {
+		row.Text, row.Language = pgtype.Text{String: p.text, Valid: true}, pgtype.Text{String: "en", Valid: true}
+		row.Contact = pgtype.Text{String: p.contact, Valid: true}
+	}
+	return row, nil
+}
+
+func (p *probeCallStore) ListCallGroups(context.Context, gwdb.ListCallGroupsParams) ([]gwdb.ListCallGroupsRow,
+	error) {
+	return []gwdb.ListCallGroupsRow{{ID: 1, PublicID: "AGAAAAAAAAAAA1", Number: 1, Title: p.title,
+		SeverityLevel: "critical", Status: "firing"}}, nil
+}
+
+func (p *probeCallStore) CallContact(context.Context, gwdb.CallContactParams) (gwdb.CallContactRow, error) {
+	return gwdb.CallContactRow{ID: 1, Contact: p.contact}, nil
+}
+
+func (p *probeCallStore) StartCall(_ context.Context, a gwdb.StartCallParams) (int64, error) {
+	p.state, p.text = gateways.CallSending, a.Text
+	return 1, nil
+}
+
+func (p *probeCallStore) RenewCallLease(context.Context, gwdb.RenewCallLeaseParams) (int64, error) {
+	return 1, nil
+}
+
+func (p *probeCallStore) RecordCallRetry(_ context.Context, a gwdb.RecordCallRetryParams) (int64, error) {
+	p.attempts++
+	p.next, p.lastError = a.At, a.Error.String
+	return 1, nil
+}
+
+func (p *probeCallStore) EndCall(_ context.Context, a gwdb.EndCallParams) (bool, error) {
+	p.state, p.lastError = a.State, p.lastError+" "+a.Error.String
+	return true, nil
+}
+
+func (p *probeCallStore) ReleaseWaitingCall(context.Context, gwdb.ReleaseWaitingCallParams) error {
+	return nil
+}
+
+// probeLimiter always has a token.
+type probeLimiter struct{}
+
+func (probeLimiter) ConnectionToken(context.Context, gateways.DBTX, int64, int64, time.Time) (bool, time.Time, error) {
+	return true, time.Time{}, nil
+}
+
+func (probeLimiter) HoldConnection(context.Context, gateways.DBTX, int64, int64, time.Time) error {
+	return nil
+}
+
+// probeKeys sign with one fixed key.
+type probeKeys struct{}
+
+func (probeKeys) Sign(keyring.Purpose, []byte) ([]byte, string, error) {
+	return bytes.Repeat([]byte{7}, 32), "k-0123456789abcdef", nil
+}
+
+func (probeKeys) VerifyPrefix(keyring.Purpose, string, []byte, []byte) (bool, error) {
+	return true, nil
+}
+
+func (probeKeys) KeyIDs() []string { return []string{"k-0123456789abcdef"} }
+
+// probePages records the reasons of page_not_delivered.
+type probePages struct{ reasons []string }
+
+func (p *probePages) PageNotDelivered(_ context.Context, _ groups.DBTX, _ []int64, page groups.Page) (
+	func(context.Context), error) {
+	p.reasons = append(p.reasons, page.Reason)
+	return nil, nil
 }
 
 // probeContactStore is the contacts of probeGatewayContacts in memory: the User 1, the Notification gateway 1, one

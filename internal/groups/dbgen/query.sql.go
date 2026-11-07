@@ -1262,7 +1262,8 @@ INSERT INTO timeline_entries (
     org_id, public_id, alert_group_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind,
     actor_user_id, actor_service_account_id, api_token_id, token_name, transport, reason, from_status, to_status,
     owner_user_id, previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, period_from,
-    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id
+    period_to, detail, notice_number, missed_count, team_id, team_rule, team_matcher, team_value, destination_id,
+    paged_user_ids, gateway_connection_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7,
@@ -1273,7 +1274,7 @@ VALUES (
     $24, $25::text[], $26,
     $27, $28, $29, $30,
     $31, $32, $33, $34,
-    $35
+    $35, $36::bigint[], $37
 )
 `
 
@@ -1313,6 +1314,8 @@ type InsertTimelineEntryParams struct {
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
 	DestinationID         pgtype.Int8
+	PagedUserIds          []int64
+	GatewayConnectionID   pgtype.Int8
 }
 
 // InsertTimelineEntry records one Timeline entry: a lifecycle event or a system entry.
@@ -1353,6 +1356,8 @@ func (q *Queries) InsertTimelineEntry(ctx context.Context, arg InsertTimelineEnt
 		arg.TeamMatcher,
 		arg.TeamValue,
 		arg.DestinationID,
+		arg.PagedUserIds,
+		arg.GatewayConnectionID,
 	)
 	return err
 }
@@ -3764,7 +3769,8 @@ const listTimelineAsc = `-- name: ListTimelineAsc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
+       paged_user_ids, gateway_connection_id
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -3818,6 +3824,8 @@ type ListTimelineAscRow struct {
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
 	DestinationID         pgtype.Int8
+	PagedUserIds          []int64
+	GatewayConnectionID   pgtype.Int8
 }
 
 // ListTimelineAsc reads the Timeline entries of an Alert Group, oldest first, after a position.
@@ -3872,6 +3880,8 @@ func (q *Queries) ListTimelineAsc(ctx context.Context, arg ListTimelineAscParams
 			&i.TeamMatcher,
 			&i.TeamValue,
 			&i.DestinationID,
+			&i.PagedUserIds,
+			&i.GatewayConnectionID,
 		); err != nil {
 			return nil, err
 		}
@@ -3966,7 +3976,8 @@ const listTimelineDesc = `-- name: ListTimelineDesc :many
 SELECT id, public_id, at, kind, event, event_seq, system_event, loudness, mentions, actor_kind, actor_user_id,
        actor_service_account_id, token_name, transport, reason, from_status, to_status, owner_user_id,
        previous_owner_user_id, snooze_until, fingerprints, replaced_label, label_conflicts, notice_number,
-       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id
+       missed_count, period_from, period_to, detail, team_id, team_rule, team_matcher, team_value, destination_id,
+       paged_user_ids, gateway_connection_id
 FROM timeline_entries
 WHERE org_id = $1 AND alert_group_id = $2
   AND (cardinality($3::text[]) = 0 OR kind = ANY($3::text[]))
@@ -4020,6 +4031,8 @@ type ListTimelineDescRow struct {
 	TeamMatcher           pgtype.Text
 	TeamValue             pgtype.Text
 	DestinationID         pgtype.Int8
+	PagedUserIds          []int64
+	GatewayConnectionID   pgtype.Int8
 }
 
 // The Timeline merges three sources by (at, source, id): its entries (source 0), Notes (1) and delivery events (2).
@@ -4076,6 +4089,8 @@ func (q *Queries) ListTimelineDesc(ctx context.Context, arg ListTimelineDescPara
 			&i.TeamMatcher,
 			&i.TeamValue,
 			&i.DestinationID,
+			&i.PagedUserIds,
+			&i.GatewayConnectionID,
 		); err != nil {
 			return nil, err
 		}
@@ -4128,6 +4143,44 @@ func (q *Queries) ListTimelineDestinations(ctx context.Context, arg ListTimeline
 			&i.BrokenSince,
 			&i.BrokenReason,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTimelineGateways = `-- name: ListTimelineGateways :many
+SELECT id, public_id, name
+FROM connections
+WHERE org_id = $1 AND id = ANY($2::bigint[])
+`
+
+type ListTimelineGatewaysParams struct {
+	OrgID int64
+	Ids   []int64
+}
+
+type ListTimelineGatewaysRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListTimelineGateways names the Notification gateways of the escalation entries of calls, deleted ones included.
+func (q *Queries) ListTimelineGateways(ctx context.Context, arg ListTimelineGatewaysParams) ([]ListTimelineGatewaysRow, error) {
+	rows, err := q.db.Query(ctx, listTimelineGateways, arg.OrgID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTimelineGatewaysRow{}
+	for rows.Next() {
+		var i ListTimelineGatewaysRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

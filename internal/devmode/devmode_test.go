@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -905,5 +906,51 @@ func TestSecondBotTokens(t *testing.T) {
 		t.Errorf("second bot tokens %q, %q, %q, %q, %q", devmode.MattermostSecondBotToken,
 			devmode.TelegramSecondBotToken, devmode.BridgeSecondBotToken, devmode.SlackSecondBotToken,
 			devmode.SlackSecondAppToken)
+	}
+}
+
+// TestGatewayCallsHandler is the hook of muster dev that queues calls through a Notification gateway (C-30.FR-4): a
+// POST with a User, a gateway and Alert Groups hands them to page and answers 204; a body it cannot read, without one
+// of them or with too many Alert Groups is 400 and pages nothing; an id that names nothing is 404 and another failure
+// 500; only POST is served. It is mounted only under muster dev (internal/runtime, TestDevClockServed).
+func TestGatewayCallsHandler(t *testing.T) {
+	notFound := errors.New("no such page")
+	var got []string
+	fail := error(nil)
+	h := devmode.GatewayCallsHandler(func(_ context.Context, user, gateway string, groups []string) error {
+		got = append([]string{user, gateway}, groups...)
+		return fail
+	}, notFound)
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, devmode.GatewayCallsPath,
+			strings.NewReader(body)))
+		return rec
+	}
+	if rec := post(`{"user_id":"SR1","connection_id":"CN1","alert_group_ids":["AG1","AG2"]}`); rec.Code !=
+		http.StatusNoContent || !slices.Equal(got, []string{"SR1", "CN1", "AG1", "AG2"}) {
+		t.Errorf("queue = %d %s, paged %v", rec.Code, rec.Body, got)
+	}
+	many, _ := json.Marshal(slices.Repeat([]string{"AG1"}, 101))
+	for _, body := range []string{`{`, `{"user_id":"SR1","connection_id":"CN1","alert_group_ids":[]}`,
+		`{"connection_id":"CN1","alert_group_ids":["AG1"]}`, `{"user_id":"SR1","alert_group_ids":["AG1"]}`,
+		`{"user_id":"SR1","connection_id":"CN1","alert_group_ids":["AG1"],"other":1}`,
+		`{"user_id":"SR1","connection_id":"CN1","alert_group_ids":` + string(many) + `}`} {
+		got = nil
+		if rec := post(body); rec.Code != http.StatusBadRequest || got != nil {
+			t.Errorf("%s = %d, paged %v", body, rec.Code, got)
+		}
+	}
+	for err, want := range map[error]int{fmt.Errorf("read: %w", notFound): http.StatusNotFound,
+		errors.New("boom"): http.StatusInternalServerError} {
+		fail = err
+		if rec := post(`{"user_id":"SR1","connection_id":"CN1","alert_group_ids":["AG1"]}`); rec.Code != want {
+			t.Errorf("%v = %d %s", err, rec.Code, rec.Body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, devmode.GatewayCallsPath, nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET = %d", rec.Code)
 	}
 }
