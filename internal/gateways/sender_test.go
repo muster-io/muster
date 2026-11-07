@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -218,7 +220,8 @@ func TestSenderCombining(t *testing.T) {
 		t.Errorf("the action data names %+v, %v", a, err)
 	}
 	if call.state != CallAccepted || call.notification.String != "n1" || call.attempts != 1 ||
-		call.contactID.Int64 != 501 || !call.ended.Time.Equal(c0) || call.owner != "" {
+		call.contactID.Int64 != 501 || !call.ended.Time.Equal(c0) || call.owner != "" || call.text.Valid ||
+		call.language.String != "en" {
 		t.Errorf("the first call %+v", call)
 	}
 	if got := counted("accepted"); got != before+1 {
@@ -705,5 +708,129 @@ func TestSenderRepageAfterDrop(t *testing.T) {
 	if e.gw.count() != 1 || !strings.Contains(e.gw.last().n.Text, "2 Alert Groups") ||
 		!strings.Contains(e.gw.last().n.Text, "#2 Disk2") {
 		t.Errorf("the call %+v", e.gw.sent)
+	}
+}
+
+// TestSenderRetryAfterBudget: a gateway that keeps asking to wait counts no attempt, but the time of its waits counts
+// toward the time budget of delivery.transient_budget, from its first RetryAfter: once it is used, the call ends Not
+// delivered with call_budget_used and the call waiting behind it goes after the window. A wait for a limiter token
+// starts no budget.
+func TestSenderRetryAfterBudget(t *testing.T) {
+	e := newSender(t)
+	e.lim.deny, e.lim.due = true, c0
+	e.page(t, 1, 10, 1)
+	e.round(t)
+	if e.f.calls[0].firstFailed.Valid {
+		t.Fatalf("a wait for a token started the budget: %+v", e.f.calls[0])
+	}
+	e.lim.deny = false
+	e.advance(SenderTokenMargin)
+	wait := delivery.Outcome{Kind: delivery.OutcomeRetryAfter, RetryAfter: 10 * time.Minute}
+	e.gw.script(wait, wait, wait, wait)
+	start := e.business.Now()
+	for range 4 {
+		e.round(t)
+		e.advance(10*time.Minute + SenderTokenMargin)
+	}
+	call := e.f.calls[0]
+	if !call.firstFailed.Time.Equal(start) || call.attempts != 0 {
+		t.Fatalf("the waits %+v", call)
+	}
+	if call.state != CallNotDelivered || call.reason.String != groups.PageCallBudgetUsed ||
+		call.errorClass.String != "retry_after" || e.gw.count() != 4 || len(e.pages.pages) != 1 {
+		t.Errorf("after the budget: %d calls, %+v, pages %+v", e.gw.count(), call, e.pages.pages)
+	}
+	e.page(t, 1, 10, 2)
+	if w := e.f.calls[1]; !w.notBefore.Valid {
+		t.Errorf("the call behind it waits forever: %+v", w)
+	}
+}
+
+// TestSenderGatewayDeleted is C-30.FR-9 for calls: a call through a gateway deleted, or that is no Notification gateway
+// any more, before it was sent — at its first attempt or a retry — is not sent and ends Not delivered with
+// gateway_deleted.
+func TestSenderGatewayDeleted(t *testing.T) {
+	for _, retried := range []bool{false, true} {
+		e := newSender(t)
+		e.page(t, 1, 10, 1)
+		if retried {
+			e.gw.script(delivery.Outcome{Kind: delivery.OutcomeTransient})
+			e.round(t)
+			e.advance(delivery.TransientFirstStep)
+		}
+		e.f.gateways[10] = fakeGateway{publicID: "CN00000000GW10", name: "Gateway"}
+		sent := e.gw.count()
+		e.round(t)
+		call := e.f.calls[0]
+		if e.gw.count() != sent || call.state != CallNotDelivered || call.reason.String != groups.PageGatewayDeleted ||
+			len(e.pages.pages) != 1 || e.pages.pages[0].page.Reason != groups.PageGatewayDeleted {
+			t.Errorf("retried %v: %d sent, %+v", retried, e.gw.count(), call)
+		}
+	}
+}
+
+// TestCallTextFits: however many Alert Groups a call is about and however long their titles, its text stays within
+// the limit of the Bridge protocol and ends with how to acknowledge: it lists as many as fit, then "and N more", in
+// English and in Russian, and cuts a title too long to fit alone.
+func TestCallTextFits(t *testing.T) {
+	long := strings.Repeat("Disk full on a host with a very long name ", 4)
+	many := make([]dbgen.ListCallGroupsRow, 30)
+	for i := range many {
+		many[i] = dbgen.ListCallGroupsRow{Number: int64(1000 + i), Title: long, SeverityLevel: "critical"}
+	}
+	for lang, want := range map[string][2]string{"en": {"Muster: 30 Alert Groups need you.", "Press 1 to acknowledge."},
+		"ru": {"Muster: вас ждут 30 групп алертов.", "Нажмите 1, чтобы подтвердить."}} {
+		got := callText(lang, many)
+		listed := strings.Count(got, long)
+		if utf8.RuneCountInString(got) > MaxCallText || !strings.HasPrefix(got, want[0]) ||
+			!strings.HasSuffix(got, want[1]) || listed < 1 || listed >= 30 {
+			t.Errorf("%s: %d runes, %d listed: %q", lang, utf8.RuneCountInString(got), listed, got)
+		}
+		if more := map[string]string{"en": "And %d more.", "ru": "И ещё %d."}[lang]; !strings.Contains(got,
+			fmt.Sprintf(more, 30-listed)) {
+			t.Errorf("%s: no count of the rest in %q", lang, got)
+		}
+	}
+	huge := []dbgen.ListCallGroupsRow{{Number: 1, Title: strings.Repeat("я", 2000), SeverityLevel: "warning"},
+		{Number: 2, Title: "Disk2", SeverityLevel: "warning"}}
+	got := callText("en", huge)
+	if utf8.RuneCountInString(got) > MaxCallText || !strings.Contains(got, "#1 яяя") || !strings.Contains(got, "…") ||
+		!strings.Contains(got, "And 1 more.") || !strings.HasSuffix(got, "Press 1 to acknowledge.") {
+		t.Errorf("a title too long: %d runes, %q", utf8.RuneCountInString(got), got[len(got)-80:])
+	}
+	if got := callText("en", nil); got != "Muster: 0 Alert Groups need you. Press 1 to acknowledge." {
+		t.Errorf("none: %q", got)
+	}
+}
+
+// prunes is the deletion of ended calls of the tests: it deletes n calls per batch until left runs out.
+type prunes struct {
+	left  int64
+	calls []dbgen.PruneEndedCallsParams
+	err   error
+}
+
+func (p *prunes) PruneEndedCalls(_ context.Context, a dbgen.PruneEndedCallsParams) (int64, error) {
+	p.calls = append(p.calls, a)
+	n := min(p.left, int64(a.BatchSize))
+	p.left -= n
+	return n, p.err
+}
+
+// TestCallPruner is the retention of calls (C-30.FR-4, C-09.FR-16): it deletes, at the business time of its run, in
+// batches of CallRetentionBatch until one comes back short, the ended calls whose Alert Groups were deleted.
+func TestCallPruner(t *testing.T) {
+	q := &prunes{left: CallRetentionBatch + 3}
+	n, err := CallPruner{q: q}.Calls(t.Context(), 1, c0)
+	if err != nil || n != CallRetentionBatch+3 || len(q.calls) != 2 || q.calls[0].OrgID != 1 ||
+		!q.calls[0].Now.Equal(c0) || q.calls[0].BatchSize != CallRetentionBatch {
+		t.Errorf("Calls = %d, %v, %+v", n, err, q.calls)
+	}
+	q = &prunes{left: 1, err: errors.New("boom")}
+	if _, err := (CallPruner{q: q}).Calls(t.Context(), 1, c0); err == nil {
+		t.Error("a failed delete")
+	}
+	if NewCallPruner(nil).q == nil {
+		t.Error("NewCallPruner")
 	}
 }

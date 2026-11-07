@@ -197,7 +197,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), which makes 76 tables.
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
-| Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; calls kept, their items with their Alert Group |
+| Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
@@ -1637,7 +1637,9 @@ stored `info` declares the role `gateway`; it has no table of its own.
   then `accepted`, `not_delivered` with its `reason` (`gateway_calls_reason_check`: a reason exactly when Not
   delivered) or `dropped` — and `ended_at` exactly once it ended (`gateway_calls_ended_check`); `critical` once a
   critical Alert Group joined it; from its first attempt (`first_attempt_at`) its `contact_id`, `language` and `text`,
-  which every retry sends again under the `Idempotency-Key` `calls/<public_id>` (`gateway_calls_text_check`), the
+  which every retry sends again under the `Idempotency-Key` `calls/<public_id>`; the end of a call clears its `text`,
+  which names its Alert Groups, and keeps its `language` (`gateway_calls_text_check`: a language exactly from the
+  first attempt, a text only from it and always while the call is sent), the
   contact turning null when it is removed (`ON DELETE SET NULL`, `gateway_calls_contact_idx`); `not_before`, the end
   of the previous call plus `gateway.combine_window`, null while that call is still sent; `next_attempt_at`;
   the lease (`gateway_calls_lease_check`); `attempts`, `first_failed_at`, `last_error_class` and `last_error` of
@@ -1648,8 +1650,11 @@ stored `info` declares the role `gateway`; it has no table of its own.
   previous call whose end starts the window, `gateway_calls_user_idx` on `(org_id, user_id)` the calls of a User.
   `not_before`, `next_attempt_at` and `ended_at` are times of the business clock, `lease_until` of the real clock. A
   Page, the start of a first attempt and the end of a call take the transaction advisory lock of class
-  `GatewayCallLockClass` of their person and gateway first ([5](#5-queues-and-claims)). Calls are kept; written only by
-  `gateways`.
+  `GatewayCallLockClass` of their person and gateway first ([5](#5-queues-and-claims)). An ended call, without its
+  text already, is deleted once
+  it has no item left, its Alert Groups deleted by the Alert Group retention ([6](#6-partitions-and-retention)), as
+  its text names them; `gateway_calls_ended_idx` on `(org_id, id) WHERE state IN ('accepted', 'not_delivered',
+  'dropped')` serves that batch. Written only by `gateways`.
 - **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`
@@ -1863,6 +1868,7 @@ since the foreign-key check of a new item takes `FOR KEY SHARE` on its call. The
 | Alerts view (resolved fingerprints) | `alerts`, `alert_presences` | — | 90 days after resolution | batched `DELETE` (cascades) |
 | Alert Group summary rows | `alert_groups` | — | `retention.alert_group_summaries`, 2 years after resolution | batched `DELETE` (cascades Notes, deliveries, timers, queues) |
 | Notes | `notes` | — | as long as their summary row | the cascade from the summary row; never the details purge |
+| Calls through Notification gateways | `gateway_calls`, `gateway_call_items` | — | items as long as their Alert Group; the text of a call until it ends; an ended call until it has no item left | the cascade from the summary row for the items; then batched `DELETE` of the ended calls without items in the same Leader task `alert_group_retention` |
 | Queue rows | `thread_replies`, `webhook_events`, `deliveries` of long-resolved Alert Groups | — | while needed, then `retention.alert_details` | batched `DELETE` |
 | Short-lived state | sessions, OIDC requests, setup links, link requests, throttles, Telegram copies, handled Bridge event ids, stale replicas | — | until expiry; sessions `auth.session_prune_after` after they ended, throttles `auth.signin_throttle_prune_after` after the last failure, setup links `auth.password_setup_prune_after` after they expired, Account link requests `account_link.request_prune_after` after they expired, `bridge_events_seen` `bridge.event_dedup_window` after `seen_at` | batched `DELETE`; the hourly Leader task `short_lived_pruning` for sessions, throttles and setup links, each later short-lived table added by its story |
 | Request log | `request_log` | — (bounded per owner; ADR-0006 keeps partitions for tables that grow with their retention period) | the newest `request_log.max_records` of each Connection, each outgoing webhook Destination and the records without an owner, none older than `request_log.max_age` | batched `DELETE`, 5,000 rows per statement until a batch comes back short, by the Leader task `request_log_pruning` every minute and when the development clock moves |
@@ -1906,7 +1912,9 @@ transaction by primary key ranges) so that no long transaction holds locks or bl
 development clock moves. Per Organization, at one business time, it deletes first the `alert_group_alerts` rows that
 ended `retention.alert_details` ago, then the `alert_groups` resolved `retention.alert_group_summaries` ago, 5,000 rows
 per statement (`FOR UPDATE SKIP LOCKED`) until a batch comes back short; their Notes, timers, deliveries and queue rows
-go by cascade. Two references between summary rows have no cascade: `firing_again_after_id` becomes null when the
+go by cascade, and so do the items of the calls through Notification gateways about them. The same task then deletes,
+in batches of 5,000 at the same business time, the ended calls without an item left (`PruneEndedCalls`); their texts,
+which named the Alert Groups, were cleared when they ended. Two references between summary rows have no cascade: `firing_again_after_id` becomes null when the
 earlier Alert Group goes (migration 0003; the later one loses the notice `firing_again_after_manual_resolve`), and a
 summary row that an Alert of another Alert Group still names in `moved_to_alert_group_id` waits until that row's
 details are deleted — which, as the move happened while the target was open, is by the same run or an earlier one. The

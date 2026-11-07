@@ -18,6 +18,7 @@ files_touched:
   - internal/db/migrate_test.go
   - internal/publicid/publicid.go
   - internal/gateways/calls.go
+  - internal/gateways/gateways.go
   - internal/gateways/calls_test.go
   - internal/gateways/sender.go
   - internal/gateways/sender_test.go
@@ -61,6 +62,9 @@ files_touched:
   - web/src/locales/ru.json
   - docs/outgoing-webhooks/events.md
   - docs/messengers/notification-gateways.md
+  - docs/concepts/alert-groups.md
+  - docs/configure/organization.md
+  - design/stories/S-173-the-acknowledge-of-the-transport-gateway.md
 acceptance:
   - "[C-30.FR-4, C-30.AC-3] A Page through a gateway to a person with a confirmed contact there is a row of `gateway_calls` with a `public_id`, its Alert Groups and `next_attempt_at`; the first call to a person through a gateway goes at once; of three Pages to one person within `gateway.combine_window`, the first reaches the fake gateway at once and the other two as one call with both Alert Groups once the window after the first one ended has passed; when the second Alert Group is acknowledged meanwhile, that call is about the third only; a call whose Alert Groups were all acknowledged before its first attempt is not sent and ends `dropped`; after a call that ends Not delivered, the next one goes once the window after it has passed; calls about critical Alert Groups are claimed first; Mentions are never joined (`calls_test.go`, `calls_integration_test.go`)."
   - "[C-30.FR-4, C-30.AC-3, C-11.FR-2] A call that the fake gateway answers `transient` is retried with the same `Idempotency-Key` and the same text within `delivery.transient_backoff` and `delivery.transient_budget` until it is accepted, through the Connection's limiter, on any replica that claims it; once every Alert Group of a call being retried has stopped, its retries end and it ends `dropped`; a call takes no Alert Group after its first attempt (`sender_test.go`)."
@@ -247,6 +251,17 @@ None.
 - The hook of `muster dev` is a development aid like the clock; it is no product behaviour and is never served outside
   `muster dev`.
 - P-87 stays provisional; the test environment confirms it.
+- Review of the pull request: a gateway's RetryAfter counts no attempt, but its waits count toward the time budget of
+  `delivery.transient_budget` from the first one (`first_failed_at`), so that a gateway that keeps answering
+  `rate_limited` ends the call Not delivered with `call_budget_used` instead of holding the person's later Pages. Ended
+  calls are deleted by the existing Leader task `alert_group_retention` once its Alert Group retention deleted all
+  their items, since their texts name those Alert Groups (`gateways.CallPruner`, `gateway_calls_ended_idx`; no new
+  Leader task). A call through a gateway deleted before it went ends with `gateway_deleted` (C-30.FR-9; the PRD names
+  no reason, the name is S-157's). The text of a call stays within the 1,000 characters of the Bridge protocol: as
+  many Alert Groups as fit, then "And N more." (`gatewayCall.more`). The removal of a key that signed an outstanding
+  call is S-173's (its Notes). The end of a call clears its text, which names its Alert Groups, so that no title
+  outlives its Alert Group while another Alert Group of the call lives; the language stays (`gateway_calls_text_check`
+  relaxed in 0034, which is not on master yet).
 - Migration `0037` followed the story map; renumbered `0034`: merged out of story-map order after 0033 (S-167), a
   story merged out of that order renumbering its migration (S-167's Notes).
 

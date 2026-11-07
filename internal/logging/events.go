@@ -803,8 +803,10 @@ var GatewayCallNotDelivered = newEvent("gateway_call_not_delivered", LevelWarn, 
 	"A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: "+
 		"call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason "+
 		"call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, "+
-		"call_budget_used once delivery.transient_budget was used, or no_confirmed_contact when the person had no "+
-		"confirmed contact at the gateway, and error the gateway's answer, masked. Never carries the contact or the "+
+		"call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the "+
+		"gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or "+
+		"gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, "+
+		"and error the gateway's answer, masked. Never carries the contact or the "+
 		"text of the call.",
 	"call", "connection", "user", "reason", "error")
 

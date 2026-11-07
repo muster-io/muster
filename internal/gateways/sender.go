@@ -15,10 +15,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
@@ -227,15 +229,16 @@ func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 }
 
 // call is a claimed call that its preparation found due: the row as it was read under its lease, the Alert Groups it
-// is about, and what its attempt sends — its contact, none when the person has no confirmed contact at the gateway,
-// and its text and language.
+// is about, and what its attempt sends — its contact, and its text and language — or, when it cannot be sent, the
+// reason it ends Not delivered with: the gateway was deleted or is no Notification gateway any more, or the person
+// has no confirmed contact at it.
 type call struct {
-	row       dbgen.GetLeasedCallRow
-	groups    []dbgen.ListCallGroupsRow
-	contact   string
-	text      string
-	language  string
-	noContact bool
+	row      dbgen.GetLeasedCallRow
+	groups   []dbgen.ListCallGroupsRow
+	contact  string
+	text     string
+	language string
+	unsent   string
 }
 
 // key is the Idempotency-Key of the call, the same for each of its attempts.
@@ -249,9 +252,9 @@ func (s *Sender) attempt(ctx context.Context, r dbgen.ClaimDueCallsRow) {
 	case err != nil:
 	case c == nil:
 		logs.run(ctx)
-	case c.noContact:
+	case c.unsent != "":
 		logs.run(ctx)
-		err = s.notDelivered(ctx, c, groups.PageNoConfirmedContact, 0, delivery.Outcome{})
+		err = s.notDelivered(ctx, c, c.unsent, 0, delivery.Outcome{})
 	default:
 		logs.run(ctx)
 		err = s.send(ctx, c)
@@ -274,9 +277,10 @@ func (l logs) run(ctx context.Context) {
 // held, and returns it when it is due to be sent now. Before the first attempt it drops the Alert Groups that stopped
 // and ends a call left without any dropped, unsent; at the first attempt it keeps the person's confirmed contact, the
 // text in the language of their profile and the Alert Groups, and takes no more. A call being retried whose Alert
-// Groups all stopped ends dropped. Without a limiter token of the gateway's Connection the call waits until one is
-// due plus SenderTokenMargin, which is no attempt. A person without a confirmed contact is returned with noContact,
-// to end Not delivered. Nothing is returned when the lease ran out or the call ended.
+// Groups all stopped ends dropped. Without a limiter token of the gateway's Connection the call waits until one is due
+// plus SenderTokenMargin, which is no attempt. A call through a gateway deleted meanwhile, or that is no Notification
+// gateway any more, is returned to end Not delivered with gateway_deleted (C-30.FR-9), and one to a person without a
+// confirmed contact with no_confirmed_contact. Nothing is returned when the lease ran out or the call ended.
 func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, logs, error) {
 	var c *call
 	var after logs
@@ -333,23 +337,29 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 			kept = live
 		}
 		next := &call{row: row, groups: kept, contact: row.Contact.String, text: row.Text.String,
-			language: row.Language.String, noContact: !row.Contact.Valid}
+			language: row.Language.String}
+		if !row.Contact.Valid {
+			next.unsent = groups.PageNoConfirmedContact
+		}
 		var contactID pgtype.Int8
 		if row.State == CallWaiting {
 			k, err := q.CallContact(ctx, dbgen.CallContactParams{OrgID: s.OrgID, UserID: row.UserID,
 				ConnectionID: row.ConnectionID})
 			switch {
 			case errors.Is(err, pgx.ErrNoRows):
-				next.noContact = true
+				next.unsent = groups.PageNoConfirmedContact
 			case err != nil:
 				return fmt.Errorf("read the contact of the call %s: %w", row.PublicID, err)
 			default:
-				next.noContact, next.contact, contactID = false, k.Contact, pgtype.Int8{Int64: k.ID, Valid: true}
+				next.unsent, next.contact, contactID = "", k.Contact, pgtype.Int8{Int64: k.ID, Valid: true}
 			}
 			next.language = language(row.UserLanguage)
 			next.text = callText(next.language, live)
 		}
-		if !next.noContact {
+		if !row.Gateway {
+			next.unsent = groups.PageGatewayDeleted
+		}
+		if next.unsent == "" {
 			ok, due, err := s.limiter().ConnectionToken(ctx, tx, s.OrgID, row.ConnectionID, now)
 			if err != nil {
 				return err
@@ -451,11 +461,12 @@ func callOutcome(k delivery.OutcomeKind) string {
 }
 
 // record records the outcome out of an attempt of c (C-11.FR-8 applied to calls): ok, replayed or not, ends it
-// accepted; a RetryAfter waits exactly as asked, holds the gateway's limiter and counts no attempt; a Transient one is
-// an attempt of delivery.transient_budget, retried after delivery.transient_backoff and Not delivered with
-// call_budget_used once the budget is used; a Fatal answer — the gateway refused the call or its bridge, until S-149
-// makes the gateway Broken — and an invalid one end it Not delivered with call_refused; any other answer ends it Not
-// delivered with call_unknown.
+// accepted; a RetryAfter waits exactly as asked, holds the gateway's limiter and counts no attempt, but its time counts
+// toward the time budget of delivery.transient_budget, after which it ends Not delivered with call_budget_used; a
+// Transient one is an attempt of delivery.transient_budget, retried after delivery.transient_backoff and Not delivered
+// with call_budget_used once the budget is used; a Fatal answer — the gateway refused the call or its bridge, until
+// S-149 makes the gateway Broken — and an invalid one end it Not delivered with call_refused; any other answer ends it
+// Not delivered with call_unknown.
 func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) error {
 	now := s.Lease.Clocks.Business.Now().UTC()
 	switch out.Kind {
@@ -469,11 +480,16 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 			return err
 		})
 	case delivery.OutcomeRetryAfter:
+		// A wait counts no attempt, but its time counts toward the time budget of delivery.transient_budget: a gateway
+		// that keeps asking to wait ends the call Not delivered, and the Pages waiting behind it go.
+		if f := c.row.FirstFailedAt; f.Valid && now.Sub(f.Time) > delivery.TransientBudgetTime {
+			return s.notDelivered(ctx, c, groups.PageCallBudgetUsed, 0, out)
+		}
 		until := now.Add(out.RetryAfter)
 		return s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
 			n, err := q.RescheduleCall(ctx, dbgen.RescheduleCallParams{OrgID: s.OrgID, ID: c.row.ID,
 				Owner: s.Lease.Owner, At: until.Add(SenderTokenMargin), ErrorClass: nonEmpty(string(out.Kind)),
-				Error: nonEmpty(string(out.Error))})
+				Error: nonEmpty(string(out.Error)), FailedAt: pgtype.Timestamptz{Time: now, Valid: true}})
 			if err != nil || n == 0 {
 				return err
 			}
@@ -568,16 +584,39 @@ func (s *Sender) notDelivered(ctx context.Context, c *call, reason string, attem
 
 // callText is the text of a call in lang (C-30.FR-5, C-12.FR-3): how many Alert Groups need the person, each by its
 // number, title and Severity level, and how to acknowledge.
+//
+// The text stays within MaxCallText, so that the bridge client never cuts how to acknowledge: it lists as many Alert
+// Groups as fit, in order, then "and N more", and an Alert Group whose title alone is too long is cut.
 func callText(lang string, gs []dbgen.ListCallGroupsRow) string {
-	parts := make([]string, 0, len(gs)+2)
-	parts = append(parts, messages.N(lang, "gatewayCall.header", int64(len(gs)), nil))
-	for _, g := range gs {
-		parts = append(parts, messages.T(lang, "gatewayCall.item", messages.Args{
-			"number": strconv.FormatInt(g.Number, 10), "title": g.Title, "severity": g.SeverityLevel}))
+	header := messages.N(lang, "gatewayCall.header", int64(len(gs)), nil)
+	action := messages.T(lang, "gatewayCall.action", nil)
+	items := make([]string, len(gs))
+	for i, g := range gs {
+		items[i] = messages.T(lang, "gatewayCall.item", messages.Args{
+			"number": strconv.FormatInt(g.Number, 10), "title": g.Title, "severity": g.SeverityLevel})
 	}
-	parts = append(parts, messages.T(lang, "gatewayCall.action", nil))
-	return strings.Join(parts, " ")
+	join := func(listed []string, more int) string {
+		parts := append([]string{header}, listed...)
+		if more > 0 {
+			parts = append(parts, messages.N(lang, "gatewayCall.more", int64(more), nil))
+		}
+		return strings.Join(append(parts, action), " ")
+	}
+	for n := len(items); n > 0; n-- {
+		if t := join(items[:n], len(items)-n); utf8.RuneCountInString(t) <= MaxCallText {
+			return t
+		}
+	}
+	// Not even the first Alert Group fits: it is listed cut, with the others counted.
+	room := MaxCallText - utf8.RuneCountInString(join(nil, len(items)-1)) - 1
+	if len(items) == 0 || room < 2 {
+		return join(nil, len(items))
+	}
+	return join([]string{string([]rune(items[0])[:room-1]) + "…"}, len(items)-1)
 }
+
+// MaxCallText is the longest text of a call: the bridge client cuts a notification's text there (api/bridge.yaml).
+const MaxCallText = bridge.MaxNotificationText
 
 func nonEmpty(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: s != ""}

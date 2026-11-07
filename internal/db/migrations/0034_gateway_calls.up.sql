@@ -2,10 +2,11 @@
 -- Copyright The Muster Authors
 -- Migration 0034 adds the queue of calls through Notification gateways (C-30.FR-4): gateway_calls, one row per call to
 -- a person through a gateway, with its public_id, its state, its lease, its retries and, from its first attempt, the
--- contact, the text and the language it keeps; and gateway_call_items, the Alert Groups each call is about, an Alert
+-- contact, the text and the language it keeps, its text cleared when it ends; and gateway_call_items, the Alert Groups each call is about, an Alert
 -- Group dropped before the first attempt keeping its row with dropped_at. At most one call waits per person and
--- gateway, which the later Pages join. not_before, next_attempt_at, ended_at and the combine window are times of the
--- business clock; lease_until is on the real clock, as every row lease.
+-- gateway, which the later Pages join. An ended call goes once the Alert Group retention deleted all its items.
+-- not_before, next_attempt_at, ended_at and the combine window are times of the business clock; lease_until is on the
+-- real clock, as every row lease.
 -- The Timeline gains the kind escalation (C-32.FR-19) with every event of that kind in the L2 lifecycle event table —
 -- paged, page_not_delivered, escalation_step_skipped, assignees_changed, escalation_webhook — and the symbolic Mention
 -- paged, through _v4 CHECKs of its kinds, events, event kinds and Mentions; and the columns paged_user_ids, the people
@@ -53,8 +54,10 @@ CREATE TABLE gateway_calls (
     CONSTRAINT gateway_calls_lease_check CHECK ((lease_owner IS NULL) = (lease_until IS NULL)),
     CONSTRAINT gateway_calls_ended_check CHECK ((state IN ('waiting', 'sending')) = (ended_at IS NULL)),
     CONSTRAINT gateway_calls_reason_check CHECK ((state = 'not_delivered') = (reason IS NOT NULL)),
-    CONSTRAINT gateway_calls_text_check CHECK ((first_attempt_at IS NULL) = (text IS NULL)
-                                               AND (text IS NULL) = (language IS NULL)),
+    -- The text and the language from the first attempt; the text, which names the Alert Groups, cleared at the end.
+    CONSTRAINT gateway_calls_text_check CHECK ((first_attempt_at IS NULL) = (language IS NULL)
+                                               AND (text IS NULL OR first_attempt_at IS NOT NULL)
+                                               AND (state <> 'sending' OR text IS NOT NULL)),
     CONSTRAINT gateway_calls_sending_check CHECK (state <> 'sending'
                                                   OR (first_attempt_at IS NOT NULL AND next_attempt_at IS NOT NULL))
 );
@@ -65,6 +68,9 @@ CREATE UNIQUE INDEX gateway_calls_waiting_key ON gateway_calls (connection_id, u
 CREATE INDEX gateway_calls_due_idx ON gateway_calls (org_id, next_attempt_at) WHERE state IN ('waiting', 'sending');
 -- The previous call of a person through a gateway, whose end the combine window counts from.
 CREATE INDEX gateway_calls_person_idx ON gateway_calls (org_id, connection_id, user_id, id);
+-- The retention of ended calls whose Alert Groups were deleted (PruneEndedCalls).
+CREATE INDEX gateway_calls_ended_idx ON gateway_calls (org_id, id)
+    WHERE state IN ('accepted', 'not_delivered', 'dropped');
 -- The foreign keys: a removed contact sets theirs to null; users and connections are referenced by the calls.
 CREATE INDEX gateway_calls_contact_idx ON gateway_calls (contact_id);
 CREATE INDEX gateway_calls_user_idx ON gateway_calls (org_id, user_id);

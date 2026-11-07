@@ -260,8 +260,9 @@ never sent.
 `page_not_delivered`
 :   `notify`: false. A call through a Notification gateway about the Alert Group ended Not delivered: the gateway
     refused it (`call_refused`), answered what Muster cannot classify (`call_unknown`), kept failing until the retry
-    budget was used (`call_budget_used`), or the person had no confirmed contact at the gateway
-    (`no_confirmed_contact`); named in `page` ([Notification gateways](../messengers/notification-gateways.md)).
+    budget was used (`call_budget_used`), the person had no confirmed contact at the gateway
+    (`no_confirmed_contact`), or the gateway was deleted before the call was sent (`gateway_deleted`); named in
+    `page` ([Notification gateways](../messengers/notification-gateways.md)).
 
 The event `test` is sent only by a Destination test: it carries `test: true` and `sequence` 0 and belongs to no Alert
 Group's order.

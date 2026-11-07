@@ -122,6 +122,14 @@ None.
 - Suggested commit: `feat(gateways): acknowledge alert groups from a call through a notification gateway`.
 - Split from S-148 when the review added the Timeline read path and the SPA's switches there, which would have made it
   about 47 files; it follows S-148 in the story map.
+- Not guarded by S-148, to fix here: removing a button-signature key from the Keyring while a call that it signed is
+  outstanding. The gateway sender signs a call's action data with the active key at each attempt (`buttons.Sign` in
+  `internal/gateways/sender.go`, `send`) and stores no key id, and `CountOpenButtonKeys` (`internal/keyring/query.sql`)
+  counts only the Root messages of deliveries, so `muster secrets` may remove the key that signed the data a gateway
+  still holds, and a later `notification_acknowledged` of that call then verifies as expired. This story stores the
+  key id that signed the call's action data at `StartCall` (a column of `gateway_calls`, signing once and reusing it
+  for every retry) and counts the open calls — waiting or sending, or accepted while any of their Alert Groups is
+  open — by that key in `CountOpenButtonKeys`.
 
 ## Coverage
 

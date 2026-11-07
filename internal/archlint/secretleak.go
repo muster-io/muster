@@ -2405,7 +2405,7 @@ func (p *probeCallStore) LockCallPerson(context.Context, gwdb.LockCallPersonPara
 func (p *probeCallStore) GetLeasedCall(context.Context, gwdb.GetLeasedCallParams) (gwdb.GetLeasedCallRow, error) {
 	row := gwdb.GetLeasedCallRow{ID: 1, PublicID: "CAAAAAAAAAAAA1", ConnectionID: 1, UserID: 1, State: p.state,
 		Attempts: p.attempts, ConnectionPublicID: "CNAAAAAAAAAAG1", ConnectionName: "probe",
-		UserPublicID: "SRAAAAAAAAAAA1", UserName: "Petr", UserLogin: "petr"}
+		UserPublicID: "SRAAAAAAAAAAA1", UserName: "Petr", UserLogin: "petr", Gateway: true}
 	if p.state == gateways.CallSending {
 		row.Text, row.Language = pgtype.Text{String: p.text, Valid: true}, pgtype.Text{String: "en", Valid: true}
 		row.Contact = pgtype.Text{String: p.contact, Valid: true}

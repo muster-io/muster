@@ -24,8 +24,8 @@ import (
 // The queue of calls through Notification gateways (C-30.FR-4, ADR-0005): a call is a row of gateway_calls per person
 // and gateway, with the Alert Groups it is about in gateway_call_items, sent at least once by the gateway sender of any
 // replica (sender.go) under the Idempotency-Key calls/<public_id>, never reconciled: a call has no Root message and no
-// Desired state. The first call to a person through a gateway goes at once. A Page through the same gateway to the
-// same person that comes due while a call to them waits, is being retried, or within gateway.combine_window after the
+// Desired state. The first call to a person through a gateway goes at once. A Page through the same gateway to the same
+// person that comes due while a call to them waits, is being retried, or within gateway.combine_window after the
 // previous call ended — accepted or Not delivered — joins the one call that waits, which goes once that window after
 // the previous call has passed; until the previous call ends, the waiting call has no not_before and is never claimed.
 // From its first attempt a call keeps its Alert Groups, its contact and its text.
@@ -140,8 +140,15 @@ type pgCallStore struct {
 	pool Pool
 }
 
+// InCallTx runs f in a READ COMMITTED transaction, whatever the database's default: the lock order of calls relies on
+// each statement seeing what the holder of a lock committed before it (calls.go, Lock order).
 func (s pgCallStore) InCallTx(ctx context.Context, f func(tx DBTX, q CallQueries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return f(tx, dbgen.New(tx)) })
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"); err != nil {
+			return fmt.Errorf("set the isolation of the transaction: %w", err)
+		}
+		return f(tx, dbgen.New(tx))
+	})
 }
 
 // Calls queues the calls of an Organization: Page, in the transaction of its caller.
@@ -160,12 +167,14 @@ func NewCalls(orgID int64, business clock.Clock, log *logging.Logger) *Calls {
 }
 
 // Page queues the Page p in the transaction tx of its caller (C-30.FR-4): it joins the call to the person through the
-// gateway that waits for its first attempt, or creates one, due at once when the person had no call through the
-// gateway or the last one ended CombineWindow ago or longer, due CombineWindow after the last one ended otherwise, and
-// not due while the last one is still being sent, until it ends; the call becomes critical once a critical Alert
-// Group joins it, and stays critical even when that Alert Group is dropped from it before its first attempt: it is
-// claimed early, and its preparation then finds what is left. It takes the person's lock first (calls.go, Lock order) and wakes the senders once tx commits, and
-// returns what to log once tx committed.
+// gateway that waits for its first attempt, or creates one, due at once when the person had no call through the gateway
+// or the last one ended CombineWindow ago or longer, due CombineWindow after the last one ended otherwise, and not due
+// while the last one is still being sent, until it ends; the call becomes critical once a critical Alert Group joins
+// it, and stays critical even when that Alert Group is dropped from it before its first attempt: it is claimed early,
+// and its preparation then finds what is left. tx must be READ COMMITTED, PostgreSQL's default: the waiting call and
+// the previous call are read after the person's lock, and must show what its last holder committed. It takes the
+// person's lock first (calls.go, Lock order) and wakes the senders once tx commits, and returns what to log once tx
+// committed.
 func (c *Calls) Page(ctx context.Context, tx DBTX, p PageCall) (func(context.Context), error) {
 	if p.Stop != StopNotFiring {
 		return nil, fmt.Errorf("%w %q", ErrUnknownStop, p.Stop)

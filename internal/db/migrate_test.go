@@ -3453,6 +3453,13 @@ func TestIntegrationGatewayCalls(t *testing.T) {
 			"gateway_calls_state_check")
 		refused(t, "a text before the first attempt", call("CA0000000000A9", "dropped",
 			`ended_at, text, language|'2026-11-07', 'x', 'en'`), "gateway_calls_text_check")
+		refused(t, "a call being sent without its text", call("CA0000000000AA", "sending",
+			`contact_id, language, first_attempt_at, next_attempt_at|(SELECT id FROM gateway_contacts), 'en',
+			'2026-11-07', '2026-11-07'`), "gateway_calls_text_check")
+		if err := call("CA0000000000AB", "accepted", `language, first_attempt_at, ended_at|'en', '2026-11-07',
+			'2026-11-07'`); err != nil {
+			t.Errorf("an ended call without its text: %v", err)
+		}
 		e.exec(t, `INSERT INTO gateway_call_items (org_id, call_id, alert_group_id, queued_at)
 			SELECT c.org_id, c.id, g.id, '2026-11-07' FROM gateway_calls c, alert_groups g`)
 		e.exec(t, `DELETE FROM gateway_contacts`)

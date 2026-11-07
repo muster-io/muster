@@ -119,12 +119,19 @@ on its internal listener.
 - Every replica sends calls, critical ones first, through the limiter of the gateway's Connection, with the same
   `Idempotency-Key` `calls/<id of the call>` on every attempt: a gateway that keeps idempotency keys answers a repeated
   call `replayed`, which Muster counts as accepted, so a replica that restarts after a call never makes the person's
-  phone ring twice. An answer of the class `transient` is retried within the retry budget of deliveries; retries end
-  when every Alert Group of the call has stopped.
+  phone ring twice. An answer of the class `transient` is retried within the retry budget of deliveries; a gateway
+  that asks to wait (`rate_limited` with `Retry-After`) is waited for, and its waits count toward the time of that
+  budget. Retries end when every Alert Group of the call has stopped.
+- A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
+  more.", and always ends with how to acknowledge.
 - A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
-  delivered, as does one to a person without a confirmed contact. Each of its Alert Groups records
+  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`) and one through a gateway
+  deleted before the call went (`gateway_deleted`). Each of its Alert Groups records
   `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
   reason; outgoing webhooks in events mode receive it.
+
+The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
+Alert Group it is about is removed by `retention.alert_group_summaries`.
 
 `muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
 `gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and

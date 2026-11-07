@@ -150,7 +150,7 @@ The screenshot is of a development installation, whose test chat servers listen 
 :   Alerts inside Alert Groups, Timeline entries and delivery events. Never Notes.
 
 **Alert Group summaries (days)** (`retention.alert_group_summaries`, 730)
-:   The summary row of an Alert Group, with its Notes.
+:   The summary row of an Alert Group, with its Notes, and the calls through Notification gateways about it.
 
 **Audit log (days)** (`retention.audit_log`, 365)
 :   Who changed or did what.

@@ -2227,6 +2227,7 @@ const (
 	PageNotDeliveredReasonCallBudgetUsed     PageNotDeliveredReason = "call_budget_used"
 	PageNotDeliveredReasonCallRefused        PageNotDeliveredReason = "call_refused"
 	PageNotDeliveredReasonCallUnknown        PageNotDeliveredReason = "call_unknown"
+	PageNotDeliveredReasonGatewayDeleted     PageNotDeliveredReason = "gateway_deleted"
 	PageNotDeliveredReasonLessThannil        PageNotDeliveredReason = "<nil>"
 	PageNotDeliveredReasonNoConfirmedContact PageNotDeliveredReason = "no_confirmed_contact"
 )
@@ -2239,6 +2240,8 @@ func (e PageNotDeliveredReason) Valid() bool {
 	case PageNotDeliveredReasonCallRefused:
 		return true
 	case PageNotDeliveredReasonCallUnknown:
+		return true
+	case PageNotDeliveredReasonGatewayDeleted:
 		return true
 	case PageNotDeliveredReasonLessThannil:
 		return true
@@ -6748,7 +6751,7 @@ type OutgoingWebhookEvent struct {
 // OutgoingWebhookEventVersion defines model for OutgoingWebhookEvent.Version.
 type OutgoingWebhookEventVersion int
 
-// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); or the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 type PageNotDeliveredReason string
 
 // PasswordChange defines model for PasswordChange.
@@ -8920,7 +8923,7 @@ type TimelineEscalationEntry struct {
 	// PagedUsers The people the Page names.
 	PagedUsers []UserRef `json:"paged_users"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); or the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason,omitempty"`
 }
 
@@ -9403,7 +9406,7 @@ type WebhookPage struct {
 	// Gateway The Notification gateway of a call; null for a Page by Mention.
 	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); or the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason"`
 
 	// Users The people the Page names.

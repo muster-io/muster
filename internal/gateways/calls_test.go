@@ -334,7 +334,7 @@ func (f *fakeCalls) GetLeasedCall(_ context.Context, a dbgen.GetLeasedCallParams
 	row := dbgen.GetLeasedCallRow{ID: c.id, PublicID: c.publicID, ConnectionID: c.conn, UserID: c.user,
 		State: c.state, Critical: c.critical, Language: c.language, Text: c.text, Attempts: c.attempts,
 		FirstFailedAt: c.firstFailed, ConnectionPublicID: gw.publicID, ConnectionName: gw.name,
-		UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login, UserLanguage: u.language}
+		UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login, UserLanguage: u.language, Gateway: gw.gateway}
 	for _, k := range f.contacts {
 		if c.contactID.Valid && k.ID == c.contactID.Int64 {
 			row.Contact = pgtype.Text{String: k.Contact, Valid: true}
@@ -433,6 +433,9 @@ func (f *fakeCalls) RescheduleCall(_ context.Context, a dbgen.RescheduleCallPara
 	}
 	c.nextAttempt = pgtype.Timestamptz{Time: a.At, Valid: true}
 	f.release(c)
+	if !c.firstFailed.Valid {
+		c.firstFailed = a.FailedAt
+	}
 	if a.ErrorClass.Valid {
 		c.errorClass = a.ErrorClass
 	}
@@ -472,7 +475,7 @@ func (f *fakeCalls) EndCall(_ context.Context, a dbgen.EndCallParams) (bool, err
 	if c == nil || (c.state != CallWaiting && c.state != CallSending) || c.owner != a.Owner {
 		return false, pgx.ErrNoRows
 	}
-	c.state, c.reason, c.notification = a.State, a.Reason, a.NotificationID
+	c.state, c.reason, c.notification, c.text = a.State, a.Reason, a.NotificationID, pgtype.Text{}
 	c.attempts += a.Attempted
 	c.ended, c.nextAttempt = pgtype.Timestamptz{Time: a.Now, Valid: true}, pgtype.Timestamptz{}
 	if a.ErrorClass.Valid {

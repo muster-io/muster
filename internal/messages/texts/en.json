@@ -62,6 +62,8 @@
   "gatewayCall.header_one": "Muster: {count} Alert Group needs you.",
   "gatewayCall.header_other": "Muster: {count} Alert Groups need you.",
   "gatewayCall.item": "#{number} {title}, {severity}.",
+  "gatewayCall.more_one": "And {count} more.",
+  "gatewayCall.more_other": "And {count} more.",
   "gatewayContact.code_one": "Your Muster code: {code}. It is valid for {minutes} minute. Do not share it.",
   "gatewayContact.code_other": "Your Muster code: {code}. It is valid for {minutes} minutes. Do not share it.",
   "labels.values_one": "{count} value",

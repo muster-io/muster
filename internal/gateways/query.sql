@@ -295,12 +295,14 @@ WHERE c.org_id = @org_id AND c.id = due.id
 RETURNING c.id, c.public_id, c.connection_id, c.user_id, c.critical,
           c.next_attempt_at::timestamptz AS next_attempt_at;
 
--- GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway,
--- its User and, from its first attempt, its contact while that is still confirmed. No row when the lease ran out or
--- went to another replica, or the call ended.
+-- GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway
+-- and whether it is still a Notification gateway, not deleted, its User and, from its first attempt, its contact while
+-- that is still confirmed. No row when the lease ran out or went to another replica, or the call ended.
 -- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
        g.first_failed_at, c.public_id AS connection_public_id, c.name AS connection_name,
+       (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
+           AS gateway,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.language AS user_language,
        k.contact AS contact
 FROM gateway_calls g
@@ -351,10 +353,12 @@ SET lease_until = @lease_until::timestamptz
 WHERE org_id = @org_id AND id = @id AND state = 'sending' AND lease_owner = @owner::text;
 
 -- RescheduleCall makes a call due again at a later time without counting an attempt — no limiter token was free, or
--- the gateway asked to wait — and frees its lease.
+-- the gateway asked to wait — and frees its lease. A gateway's RetryAfter passes failed_at, which starts the time
+-- budget of delivery.transient_budget when no failure started it yet.
 -- name: RescheduleCall :execrows
 UPDATE gateway_calls
 SET next_attempt_at = @at::timestamptz, lease_owner = NULL, lease_until = NULL,
+    first_failed_at = coalesce(first_failed_at, sqlc.narg('failed_at')::timestamptz),
     last_error_class = coalesce(sqlc.narg('error_class')::text, last_error_class),
     last_error = coalesce(sqlc.narg('error')::text, last_error)
 WHERE org_id = @org_id AND id = @id AND state IN ('waiting', 'sending') AND lease_owner = @owner::text;
@@ -368,10 +372,11 @@ SET attempts = attempts + 1, first_failed_at = coalesce(first_failed_at, @now::t
 WHERE org_id = @org_id AND id = @id AND state = 'sending' AND lease_owner = @owner::text;
 
 -- EndCall ends a call — accepted, Not delivered with its reason, or dropped — counting the attempt that ended it, if
--- one did. It returns whether the call went, which starts the combine window of the next one.
+-- one did, and clears its text, which names its Alert Groups and is never sent again; the language stays. It returns
+-- whether the call went, which starts the combine window of the next one.
 -- name: EndCall :one
 UPDATE gateway_calls
-SET state = @state::text, reason = sqlc.narg('reason')::text, notification_id = sqlc.narg('notification_id')::text,
+SET state = @state::text, text = NULL, reason = sqlc.narg('reason')::text, notification_id = sqlc.narg('notification_id')::text,
     attempts = attempts + @attempted::bigint, ended_at = @now::timestamptz, next_attempt_at = NULL,
     lease_owner = NULL, lease_until = NULL,
     first_failed_at = CASE WHEN sqlc.narg('error_class')::text IS NULL THEN first_failed_at
@@ -397,3 +402,20 @@ SELECT coalesce(min(next_attempt_at) FILTER (WHERE lease_until IS NULL OR lease_
                 '0001-01-01 00:00:00+00')::timestamptz AS lease_end
 FROM gateway_calls
 WHERE org_id = @org_id AND state IN ('waiting', 'sending') AND next_attempt_at IS NOT NULL;
+
+-- PruneEndedCalls deletes up to batch_size calls that ended at or before @now and are about no Alert Group any more:
+-- the retention of Alert Groups deleted every one of theirs, and its cascade their items. The batch is chosen once, in
+-- a materialized CTE, as PruneCodes does; a call that another transaction holds is taken at the next run.
+-- name: PruneEndedCalls :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT c.id FROM gateway_calls c
+    WHERE c.org_id = @org_id AND c.state IN ('accepted', 'not_delivered', 'dropped')
+      AND c.ended_at <= @now::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM gateway_call_items i WHERE i.org_id = c.org_id AND i.call_id = c.id)
+    ORDER BY c.id
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM gateway_calls g
+USING doomed d
+WHERE g.org_id = @org_id AND g.id = d.id;

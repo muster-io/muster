@@ -446,7 +446,7 @@ func (q *Queries) DropCallItems(ctx context.Context, arg DropCallItemsParams) er
 
 const endCall = `-- name: EndCall :one
 UPDATE gateway_calls
-SET state = $1::text, reason = $2::text, notification_id = $3::text,
+SET state = $1::text, text = NULL, reason = $2::text, notification_id = $3::text,
     attempts = attempts + $4::bigint, ended_at = $5::timestamptz, next_attempt_at = NULL,
     lease_owner = NULL, lease_until = NULL,
     first_failed_at = CASE WHEN $6::text IS NULL THEN first_failed_at
@@ -471,7 +471,8 @@ type EndCallParams struct {
 }
 
 // EndCall ends a call — accepted, Not delivered with its reason, or dropped — counting the attempt that ended it, if
-// one did. It returns whether the call went, which starts the combine window of the next one.
+// one did, and clears its text, which names its Alert Groups and is never sent again; the language stays. It returns
+// whether the call went, which starts the combine window of the next one.
 func (q *Queries) EndCall(ctx context.Context, arg EndCallParams) (bool, error) {
 	row := q.db.QueryRow(ctx, endCall,
 		arg.State,
@@ -519,6 +520,8 @@ func (q *Queries) GetGateway(ctx context.Context, arg GetGatewayParams) (GetGate
 const getLeasedCall = `-- name: GetLeasedCall :one
 SELECT g.id, g.public_id, g.connection_id, g.user_id, g.state, g.critical, g.language, g.text, g.attempts,
        g.first_failed_at, c.public_id AS connection_public_id, c.name AS connection_name,
+       (c.deleted_at IS NULL AND c.type = 'bridge' AND coalesce(c.bridge_info->'roles' @> '["gateway"]'::jsonb, false))::boolean
+           AS gateway,
        u.public_id AS user_public_id, u.name AS user_name, u.login AS user_login, u.language AS user_language,
        k.contact AS contact
 FROM gateway_calls g
@@ -550,6 +553,7 @@ type GetLeasedCallRow struct {
 	FirstFailedAt      pgtype.Timestamptz
 	ConnectionPublicID string
 	ConnectionName     string
+	Gateway            bool
 	UserPublicID       string
 	UserName           string
 	UserLogin          string
@@ -557,9 +561,9 @@ type GetLeasedCallRow struct {
 	Contact            pgtype.Text
 }
 
-// GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway,
-// its User and, from its first attempt, its contact while that is still confirmed. No row when the lease ran out or
-// went to another replica, or the call ended.
+// GetLeasedCall reads, and locks, a call whose lease this replica still holds at the real time now, with its gateway
+// and whether it is still a Notification gateway, not deleted, its User and, from its first attempt, its contact while
+// that is still confirmed. No row when the lease ran out or went to another replica, or the call ended.
 func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (GetLeasedCallRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedCall,
 		arg.OrgID,
@@ -581,6 +585,7 @@ func (q *Queries) GetLeasedCall(ctx context.Context, arg GetLeasedCallParams) (G
 		&i.FirstFailedAt,
 		&i.ConnectionPublicID,
 		&i.ConnectionName,
+		&i.Gateway,
 		&i.UserPublicID,
 		&i.UserName,
 		&i.UserLogin,
@@ -1259,6 +1264,38 @@ func (q *Queries) PruneCodes(ctx context.Context, arg PruneCodesParams) (int64, 
 	return result.RowsAffected(), nil
 }
 
+const pruneEndedCalls = `-- name: PruneEndedCalls :execrows
+WITH doomed AS MATERIALIZED (
+    SELECT c.id FROM gateway_calls c
+    WHERE c.org_id = $1 AND c.state IN ('accepted', 'not_delivered', 'dropped')
+      AND c.ended_at <= $2::timestamptz
+      AND NOT EXISTS (SELECT 1 FROM gateway_call_items i WHERE i.org_id = c.org_id AND i.call_id = c.id)
+    ORDER BY c.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM gateway_calls g
+USING doomed d
+WHERE g.org_id = $1 AND g.id = d.id
+`
+
+type PruneEndedCallsParams struct {
+	OrgID     int64
+	Now       time.Time
+	BatchSize int32
+}
+
+// PruneEndedCalls deletes up to batch_size calls that ended at or before @now and are about no Alert Group any more:
+// the retention of Alert Groups deleted every one of theirs, and its cascade their items. The batch is chosen once, in
+// a materialized CTE, as PruneCodes does; a call that another transaction holds is taken at the next run.
+func (q *Queries) PruneEndedCalls(ctx context.Context, arg PruneEndedCallsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneEndedCalls, arg.OrgID, arg.Now, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recordCallRetry = `-- name: RecordCallRetry :execrows
 UPDATE gateway_calls
 SET attempts = attempts + 1, first_failed_at = coalesce(first_failed_at, $1::timestamptz),
@@ -1377,13 +1414,15 @@ func (q *Queries) RenewCallLease(ctx context.Context, arg RenewCallLeaseParams) 
 const rescheduleCall = `-- name: RescheduleCall :execrows
 UPDATE gateway_calls
 SET next_attempt_at = $1::timestamptz, lease_owner = NULL, lease_until = NULL,
-    last_error_class = coalesce($2::text, last_error_class),
-    last_error = coalesce($3::text, last_error)
-WHERE org_id = $4 AND id = $5 AND state IN ('waiting', 'sending') AND lease_owner = $6::text
+    first_failed_at = coalesce(first_failed_at, $2::timestamptz),
+    last_error_class = coalesce($3::text, last_error_class),
+    last_error = coalesce($4::text, last_error)
+WHERE org_id = $5 AND id = $6 AND state IN ('waiting', 'sending') AND lease_owner = $7::text
 `
 
 type RescheduleCallParams struct {
 	At         time.Time
+	FailedAt   pgtype.Timestamptz
 	ErrorClass pgtype.Text
 	Error      pgtype.Text
 	OrgID      int64
@@ -1392,10 +1431,12 @@ type RescheduleCallParams struct {
 }
 
 // RescheduleCall makes a call due again at a later time without counting an attempt — no limiter token was free, or
-// the gateway asked to wait — and frees its lease.
+// the gateway asked to wait — and frees its lease. A gateway's RetryAfter passes failed_at, which starts the time
+// budget of delivery.transient_budget when no failure started it yet.
 func (q *Queries) RescheduleCall(ctx context.Context, arg RescheduleCallParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rescheduleCall,
 		arg.At,
+		arg.FailedAt,
 		arg.ErrorClass,
 		arg.Error,
 		arg.OrgID,

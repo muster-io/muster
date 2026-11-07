@@ -258,6 +258,11 @@ func TestIntegrationCalls(t *testing.T) {
 			c0.Add(CombineWindow)); n != 1 {
 			t.Errorf("%d calls wait for the end of the window", n)
 		}
+		// An ended call keeps no text, which names its Alert Groups, and keeps its language.
+		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE state = 'accepted' AND text IS NULL
+			AND language = 'en' AND first_attempt_at IS NOT NULL`); n != 1 {
+			t.Errorf("%d accepted calls without their text", n)
+		}
 		e.ack(t, g2)
 		e.business.Advance(51 * time.Second)
 		e.round(t, s)
@@ -281,7 +286,7 @@ func TestIntegrationCalls(t *testing.T) {
 			AND call_id = (SELECT max(id) FROM gateway_calls)`, g3); n != 1 {
 			t.Error("the Alert Group Paged again after its drop is not queued again")
 		}
-		e.exec(t, `UPDATE gateway_calls SET state = 'accepted', first_attempt_at = $1, text = 't', language = 'en',
+		e.exec(t, `UPDATE gateway_calls SET state = 'accepted', first_attempt_at = $1, language = 'en',
 			ended_at = $1 WHERE id = (SELECT max(id) FROM gateway_calls)`, e.business.Now())
 
 		// All acknowledged before the first attempt: dropped, unsent.
@@ -312,7 +317,7 @@ func TestIntegrationCalls(t *testing.T) {
 		e.page(t, p1, g1)
 		e.round(t, s)
 		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE state = 'not_delivered' AND reason = 'call_refused'
-			AND last_error_class = 'unknown' AND attempts = 1`); n != 1 {
+			AND last_error_class = 'unknown' AND attempts = 1 AND text IS NULL`); n != 1 {
 			t.Errorf("%d calls refused", n)
 		}
 		if n := e.count(t, `SELECT count(*) FROM timeline_entries WHERE alert_group_id = $1 AND kind = 'escalation'
@@ -505,4 +510,56 @@ func TestNotDeliveredAgainstPageLockOrder(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestIntegrationCallRetention is the retention of calls on PostgreSQL (C-30.FR-4, C-09.FR-16): once the Alert Group
+// retention deletes an Alert Group resolved retention.alert_group_summaries ago, with its items by cascade, the ended
+// calls about it alone are deleted by the call retention of the same Leader task; a call about another Alert Group
+// too, and a call still waiting, stay; a second run deletes nothing more. A gateway that keeps asking to wait uses the
+// time budget of delivery.transient_budget and ends the call Not delivered with call_budget_used.
+func TestIntegrationCallRetention(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, srv dbtest.Server) {
+		e := setupCalls(t, srv, 2)
+		s := e.sender("r1", e.gateway)
+		old, kept := e.group(t, "Old", "warning"), e.group(t, "Kept", "warning")
+		e.page(t, e.users[0], old)
+		e.round(t, s)
+		e.business.Advance(2 * CombineWindow)
+		e.page(t, e.users[0], old)
+		e.page(t, e.users[0], kept)
+		e.round(t, s)
+		e.page(t, e.users[1], kept)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeRetryAfter, RetryAfter: 20 * time.Minute}}
+		e.round(t, s)
+		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE user_id = $1 AND state = 'sending'
+			AND first_failed_at = $2 AND attempts = 0`, e.users[1], e.business.Now()); n != 1 {
+			t.Fatalf("the wait did not start the budget: %d", n)
+		}
+		e.business.Advance(31 * time.Minute)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeRetryAfter, RetryAfter: time.Minute}}
+		e.round(t, s)
+		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE user_id = $1 AND state = 'not_delivered'
+			AND reason = 'call_budget_used'`, e.users[1]); n != 1 {
+			t.Errorf("the waits did not use the budget: %d", n)
+		}
+		e.page(t, e.users[0], kept)
+
+		e.exec(t, `UPDATE alert_groups SET status = 'resolved', resolved_at = $2, resolved_by_kind = 'system',
+			resolve_reason = 'resolved', firing_alert_count = 0 WHERE id = $1`, old, c0.AddDate(-3, 0, 0))
+		now := e.business.Now()
+		_, summaries, err := groups.RetentionTask(groups.NewStore(e.d.Pool))(t.Context(), e.orgID, now)
+		if err != nil || summaries != 1 {
+			t.Fatalf("the alert group retention deleted %d summaries, %v", summaries, err)
+		}
+		p := NewCallPruner(e.d.Pool)
+		if n, err := p.Calls(t.Context(), e.orgID, now); err != nil || n != 1 {
+			t.Errorf("Calls = %d, %v", n, err)
+		}
+		if n, err := p.Calls(t.Context(), e.orgID, now); err != nil || n != 0 {
+			t.Errorf("Calls again = %d, %v", n, err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM gateway_calls`); got != 3 {
+			t.Errorf("%d calls left, want the one about both, the one Not delivered and the waiting one", got)
+		}
+	})
 }
