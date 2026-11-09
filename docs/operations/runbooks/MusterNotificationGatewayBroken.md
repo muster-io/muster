@@ -2,9 +2,10 @@
 
 ## Meaning
 
-A [Notification gateway](../../messengers/notification-gateways.md) is **Broken**: a call through it was answered with
-a Fatal error — the bridge, or the provider behind it, refused the token or the credentials (`401` or `403`, the class
-`forbidden`) — or a call failed until its retry budget ran out (`delivery.transient_budget`, 10 attempts within 30
+A [Notification gateway](../../messengers/notification-gateways.md) is **Broken**: a call through it ended with a
+Fatal error — the bridge, or the provider behind it, refused the token or the credentials (`401` or `403`, the class
+`forbidden`), or the outbound address policy blocks the bridge's address — or a call failed until its retry budget ran
+out (`delivery.transient_budget`, 10 attempts within 30
 minutes). Muster then probes the gateway every `delivery.broken_probe_interval` (5 minutes) by reading its `info`, and
 ends the Broken state on the first success. A successful check of its Connection ends it too.
 
@@ -20,7 +21,9 @@ This alert has two sources with the same name, severity `critical` and this page
     max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1
     ```
 
-    It fires after 5 minutes with the label `connection`. `muster_notification_gateway_broken` is set by the Leader.
+    It fires after 5 minutes with the label `connection`. `muster_notification_gateway_broken` is set by the Leader
+    every 15 seconds, so the rule fires about 5 minutes after the gateway became Broken and resolves within 15 seconds
+    after the state ended.
 
 !!! warning "Route it around the gateway"
     A Broken gateway cannot call anybody about itself. Route the Internal alert to a messenger Destination, and send
@@ -60,13 +63,21 @@ This alert has two sources with the same name, severity `critical` and this page
   credentials. Replace the token on the Connection if it is Muster's that changed; otherwise fix the credentials or
   the account of the provider in the bridge's own configuration — an expired API key, a blocked account, a used-up
   balance.
+- `cause` `fatal` without a status, the reason naming the outbound address policy: Muster refused to reach the
+  bridge's address. Allow it in the **Outbound addresses** (`/admin/organization/outbound`), or fix the base URL of the
+  Connection.
 - `cause` `unavailable`: the bridge or its provider did not answer, or answered `transient` or asked to wait, until the
-  retry budget ran out. Fix the bridge, its provider or the network path to it, the proxy of the Connection or the
-  **Outbound addresses** (`/admin/organization/outbound`).
+  retry budget ran out. Fix the bridge, its provider, the network path to it or the proxy of the Connection.
 - Then press **Check connection** on the Connection page: a check whose step `info` passes ends the Broken state at
   once. Otherwise the next probe ends it by itself, within `delivery.broken_probe_interval`.
+- **A passing `info` does not prove that calls go through.** The check and the probe read only the bridge's `info`,
+  which a bridge answers also while its provider refuses the bridge's own credentials, so the state can end while
+  calls would still fail and make the gateway Broken again. Before you trust a recovery, run `muster bridge check <base
+  URL> --token-file <file> --contact <your contact>` against the bridge, with `--channel <id>` when it is also a
+  messenger: its step `notification` sends a real notification to your contact through the provider (see
+  [`muster bridge check`](../../messengers/write-a-bridge.md#muster-bridge-check)).
 - The Internal alert resolves and `gateway_recovered` (`connection`, `by` — `probe` or `check` — and
   `broken_for_s`) is logged when the Broken state ends; the chart rule resolves at the Leader's next update of
-  `muster_notification_gateway_broken`, within 5 minutes.
+  `muster_notification_gateway_broken`, within 15 seconds.
 - Calls that come due afterwards go as usual. Check the Alert Groups whose Timeline shows `page_not_delivered` with
   `gateway_broken`: their people were not called.

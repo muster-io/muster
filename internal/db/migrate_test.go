@@ -3625,12 +3625,17 @@ func TestIntegrationGatewayBroken(t *testing.T) {
 			AND indexdef LIKE '%(org_id, gateway_next_probe_at) WHERE (gateway_broken_since IS NOT NULL)%'`); got != 1 {
 			t.Errorf("the partial index of the probes: %d", got)
 		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'gateway_calls_failed_idx'
+			AND indexdef LIKE '%(org_id, connection_id, ended_at) WHERE (state = ''not_delivered''::text)%'`); got != 1 {
+			t.Errorf("the partial index of the failed calls: %d", got)
+		}
 		e.step(t, -1)
 		if got := e.count(t, `SELECT count(*) FROM information_schema.columns
 			WHERE table_name = 'connections' AND column_name LIKE 'gateway\_%'`); got != 0 {
 			t.Errorf("after down: %d columns left", got)
 		}
-		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'connections_gateway_probe_idx'`); got != 0 {
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname IN ('connections_gateway_probe_idx',
+			'gateway_calls_failed_idx')`); got != 0 {
 			t.Errorf("after down: the index is left")
 		}
 		if got := e.count(t, `SELECT count(*) FROM connections`); got != 1 {

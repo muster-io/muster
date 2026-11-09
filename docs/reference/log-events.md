@@ -276,7 +276,7 @@ The gateway sender could not attempt a call through a Notification gateway, or r
 
 WARN · fields: `call`, `connection`, `user`, `reason`, `error` · C-30
 
-A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, or gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, masked. Never carries the contact or the text of the call.
+A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, or when Muster refused the call at its attempt for that reason without reaching the gateway, or gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, masked. Never carries the contact or the text of the call.
 
 ### `gateway_call_queued`
 
@@ -301,6 +301,12 @@ A person asked for the confirmation code of their contact at a Notification gate
 INFO · fields: `connection`, `key`, `class` · C-30
 
 Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.
+
+### `gateway_probe_failed`
+
+WARN · fields: `connection`, `error` · C-30
+
+The outcome of a probe of a Broken Notification gateway through info could not be recorded because of error, such as a lost database connection: connection is the public_id of its Connection. The gateway stays Broken and is probed again after delivery.broken_probe_interval, by any replica.
 
 ### `gateway_recovered`
 

@@ -877,12 +877,22 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   NOT NULL`. `gateway_recovered_at` is when its last Broken state ended, kept after the state's other columns are
   cleared: a call whose due time (`gateway_calls.next_attempt_at`) lies before it came due while the gateway was Broken
   and ends `not_delivered` with `gateway_broken` too, also when a replica claimed it before another ended the state
-  (P-68). The comparison holds within the clock skew of the replicas: a Page made on a replica whose clock is behind by
+  (P-68). The partial index `gateway_calls_failed_idx` on `(org_id, connection_id, ended_at) WHERE state =
+  'not_delivered'` serves the reconciliation that the Leader runs in its task `delivery_queue`, every 15 s: a gateway
+  that is not Broken whose call ended `not_delivered` with `call_refused` and the class `fatal`, or with
+  `call_budget_used`, within twice `delivery.broken_probe_interval` and after `gateway_recovered_at`, becomes Broken,
+  as the replica that ended the call stopped before it did so; Muster's own refusals that never reached the gateway end
+  `gateway_deleted` and do not count. The same run resolves an open `MusterNotificationGatewayBroken` of a Connection
+  that is not Broken or is deleted, after locking its row. The comparison holds within the clock skew of the replicas: a Page made on a replica whose clock is behind by
   δ, within δ after the end, may get a due time before it and end so too. This is accepted without a margin, as NTP
   keeps δ to milliseconds and `MusterClockSkew` fires above 2 s. `gateway_broken_since`, `gateway_next_probe_at` and `gateway_recovered_at` are on the business clock, the
   lease on the real clock. The state
   is kept apart from the health of the Connection's Destinations: only the gateway sender's calls set it, and a
-  successful probe, a successful check of the Connection or its deletion clears it. It is not a change of the
+  successful probe, a successful check of the Connection or its deletion clears it. Every transaction of the state — a
+  Break, an end by a probe or a check, the record of a failed probe, the resolve of an orphan Internal alert — takes the
+  transaction advisory lock of class `0x6d75_000c` (`db.GatewayStateLockClass`, keyed by `hashint8` of the
+  Connection's id) first, then the Connection's row by a single update, so that none of them queues for the row behind
+  another; a change or the deletion of the Connection, which locks its row first, does not take it. It is not a change of the
   configuration: it does not bump `version` and writes no Audit log entry. These columns are written only by
   `gateways`.
   `UNIQUE (id, type)` is the target of type-checked foreign keys. A Connection cannot be deleted while a Destination
@@ -1684,7 +1694,9 @@ stored `info` declares the role `gateway`; it has no table of its own.
   ('accepted', 'not_delivered', 'dropped')` serves that batch. Written only by `gateways`.
 - A Notification gateway is **Broken** (migration 0036, C-30.FR-8) while its Connection has `gateway_broken_since`
   ([4.5](#45-connections-destinations-and-account-links)); a call that comes due then ends `not_delivered` with the
-  reason `gateway_broken`, unsent.
+  reason `gateway_broken`, unsent. A call that Muster refused at its attempt without reaching the gateway — its
+  Connection gone, or its info no longer declaring the role gateway — ends `not_delivered` with `gateway_deleted`,
+  which keeps it apart from a Fatal answer (`call_refused`, class `fatal`) for the reconciliation of the Broken state.
 - **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`

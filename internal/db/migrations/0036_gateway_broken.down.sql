@@ -1,12 +1,14 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- Copyright The Muster Authors
 -- Reverts 0036_gateway_broken.up.sql. A Broken Notification gateway forgets its state and its calls are sent again;
--- an open MusterNotificationGatewayBroken stays open, as no version before 0036 resolves it.
+-- an open MusterNotificationGatewayBroken stays open while no version before 0036 resolves it, and once 0036 is applied
+-- again the Leader's reconciliation resolves it, as it resolves that alert of every gateway that is not Broken.
 
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
+DROP INDEX gateway_calls_failed_idx;
 DROP INDEX connections_gateway_probe_idx;
 
 ALTER TABLE connections

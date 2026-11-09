@@ -444,13 +444,17 @@ WHERE g.org_id = @org_id AND g.connection_id = @connection_id AND g.public_id = 
 -- used up delivery.transient_budget, makes its gateway's Connection Broken; any replica probes it through info every
 -- delivery.broken_probe_interval, claimed with a lease, and a successful probe or Connection check ends the state.
 
--- BreakGateway makes the Connection of a Notification gateway Broken with reason, probed first at @next_probe. No row
--- when it is Broken already, deleted or not a Bridge Connection.
+-- BreakGateway makes the Connection of a Notification gateway Broken with reason, probed first at @next_probe. With
+-- @failed_at, the end of the call that failed, only when its last Broken state, if any, ended before it, so that the
+-- reconciliation never breaks it again for a call that the end of the state followed. No row when it is Broken
+-- already, deleted, not a Bridge Connection or recovered since the call failed.
 -- name: BreakGateway :one
 UPDATE connections
 SET gateway_broken_since = @now::timestamptz, gateway_broken_reason = @reason::text,
     gateway_next_probe_at = @next_probe::timestamptz
 WHERE org_id = @org_id AND id = @id AND type = 'bridge' AND deleted_at IS NULL AND gateway_broken_since IS NULL
+  AND (sqlc.narg('failed_at')::timestamptz IS NULL OR gateway_recovered_at IS NULL
+       OR gateway_recovered_at < sqlc.narg('failed_at')::timestamptz)
 RETURNING public_id, name;
 
 -- UpdateGatewayBrokenReason keeps a Broken gateway Broken with the error of its last failure as the reason; it
@@ -461,7 +465,8 @@ SET gateway_broken_reason = @reason::text
 WHERE org_id = @org_id AND id = @id AND gateway_broken_since IS NOT NULL;
 
 -- EndGatewayBroken ends the Broken state of a gateway at @recovered_at and frees the lease of its probe, and tells
--- when it became Broken and whether the Connection is deleted. A probe passes its owner: then only while this replica still holds
+-- when it became Broken and whether the Connection is deleted; it locks the row once, by the update, after the
+-- gateway's advisory lock (LockGatewayState). A probe passes its owner: then only while this replica still holds
 -- the probe's lease at the real time @now. No row when it is not Broken, or the probe's lease is not held.
 -- name: EndGatewayBroken :one
 UPDATE connections c
@@ -470,13 +475,12 @@ SET gateway_broken_since = NULL, gateway_broken_reason = NULL, gateway_next_prob
     gateway_recovered_at = @recovered_at::timestamptz
 FROM (SELECT x.id, x.gateway_broken_since
       FROM connections x
-      WHERE x.org_id = @org_id AND x.id = @id AND x.gateway_broken_since IS NOT NULL
-        AND (sqlc.narg('owner')::text IS NULL
-             OR (x.gateway_probe_lease_owner = sqlc.narg('owner')::text
-                 AND x.gateway_probe_lease_until > @now::timestamptz))
-      FOR NO KEY UPDATE OF x) AS old
-WHERE c.org_id = @org_id AND c.id = old.id
-RETURNING c.public_id, c.name, old.gateway_broken_since::timestamptz AS was_broken_since,
+      WHERE x.org_id = @org_id AND x.id = @id) AS old
+WHERE c.org_id = @org_id AND c.id = old.id AND c.gateway_broken_since IS NOT NULL
+  AND (sqlc.narg('owner')::text IS NULL
+       OR (c.gateway_probe_lease_owner = sqlc.narg('owner')::text AND c.gateway_probe_lease_until > @now::timestamptz))
+RETURNING c.public_id, c.name,
+          coalesce(old.gateway_broken_since, @recovered_at::timestamptz)::timestamptz AS was_broken_since,
           (c.deleted_at IS NOT NULL)::boolean AS deleted;
 
 -- ClaimGatewayProbes leases the Broken gateways that are not deleted whose probe is due and whose lease is free or ran
@@ -528,3 +532,38 @@ FROM connections
 WHERE org_id = @org_id AND type = 'bridge' AND deleted_at IS NULL
   AND (coalesce(bridge_info->'roles' @> '["gateway"]'::jsonb, false) OR gateway_broken_since IS NOT NULL)
 ORDER BY id;
+
+-- ListUnmarkedFailures lists the Notification gateways that are not deleted and not Broken whose latest call that
+-- failed in a way that breaks a gateway — Not delivered with call_refused after a Fatal outcome that reached the
+-- gateway or the outbound policy (the class fatal; Muster's own refusals end gateway_deleted), or with
+-- call_budget_used — ended after @since and after the end of their last Broken state, with that call's reason, class,
+-- error and end. The Leader's reconciliation makes them Broken: the replica that ended the call stopped before it did.
+-- name: ListUnmarkedFailures :many
+SELECT c.id, c.public_id, f.reason, f.error_class, f.error, f.ended_at
+FROM connections c
+JOIN LATERAL (
+    SELECT g.reason::text AS reason, coalesce(g.last_error_class, '')::text AS error_class,
+           coalesce(g.last_error, '')::text AS error, g.ended_at::timestamptz AS ended_at
+    FROM gateway_calls g
+    WHERE g.org_id = c.org_id AND g.connection_id = c.id AND g.state = 'not_delivered'
+      AND ((g.reason = 'call_refused' AND g.last_error_class = 'fatal') OR g.reason = 'call_budget_used')
+      AND g.ended_at > @since::timestamptz
+      AND (c.gateway_recovered_at IS NULL OR g.ended_at > c.gateway_recovered_at)
+    ORDER BY g.ended_at DESC, g.id DESC
+    LIMIT 1
+) f ON true
+WHERE c.org_id = @org_id AND c.type = 'bridge' AND c.deleted_at IS NULL AND c.gateway_broken_since IS NULL
+ORDER BY c.id;
+
+-- LockGatewayState takes, until the transaction ends, the advisory lock of the Broken state of the gateway's
+-- Connection id (class db.GatewayStateLockClass), which every transaction of the state takes before the row.
+-- name: LockGatewayState :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@id::bigint));
+
+-- GetGatewayState reads the Connection public_id, deleted ones included, with whether it is a Broken gateway, for the
+-- resolve of an open MusterNotificationGatewayBroken of a gateway that is not Broken, under the gateway's advisory
+-- lock. No row when no Connection of the Organization has the public_id.
+-- name: GetGatewayState :one
+SELECT id, (gateway_broken_since IS NOT NULL)::boolean AS broken
+FROM connections
+WHERE org_id = @org_id AND public_id = @public_id;

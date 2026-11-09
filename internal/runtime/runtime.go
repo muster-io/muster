@@ -1315,12 +1315,6 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		ScheduleGapScan:   gapScan.Scan,
 		ScheduleGapForget: gapScan.Forget,
-		GatewayBrokenGauge: func(ctx context.Context, orgID int64) error {
-			if orgID != p.orgID {
-				return nil
-			}
-			return p.gatewayBroken.Export(ctx)
-		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -1345,12 +1339,15 @@ func (p *process) newKeeper() *leader.Keeper {
 }
 
 // deliveryQueue is the Leader task delivery_queue for the Organization orgID, which this process serves:
-// muster_delivery_queue, muster_destination_broken and muster_storm_active.
+// muster_delivery_queue, muster_destination_broken, muster_storm_active and muster_notification_gateway_broken, and
+// the reconciliation of the Broken state of the Notification gateways with their calls and their Internal alerts
+// (C-30.FR-8), which goes before the gauge so that the gauge shows it.
 func (p *process) deliveryQueue(ctx context.Context, orgID int64) error {
 	if orgID != p.orgID {
 		return nil
 	}
-	return errors.Join(p.delivery.ExportQueue(ctx), p.delivery.ExportBroken(ctx), p.delivery.ExportStorms(ctx))
+	return errors.Join(p.delivery.ExportQueue(ctx), p.delivery.ExportBroken(ctx), p.delivery.ExportStorms(ctx),
+		p.gatewayBroken.Reconcile(ctx), p.gatewayBroken.Export(ctx))
 }
 
 // rerenderAfterRotation is the Leader task rerender_after_rotation for the Organization orgID: this replica switches

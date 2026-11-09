@@ -29,7 +29,9 @@ const BacklogInterval = 15 * time.Second
 const AlertGroupGaugeInterval = 15 * time.Second
 
 // DeliveryQueueInterval is how often the Leader counts the pending deliveries for muster_delivery_queue, reads the
-// health of the Destinations for muster_destination_broken and the Storms of the Routes for muster_storm_active.
+// health of the Destinations for muster_destination_broken, the Storms of the Routes for muster_storm_active and the
+// state of the Notification gateways for muster_notification_gateway_broken, and reconciles that state with the calls
+// and its Internal alerts (C-30.FR-8).
 const DeliveryQueueInterval = 15 * time.Second
 
 // HeartbeatCheckInterval is how often the Leader runs the Heartbeat check, and StaleScanInterval the Stale scan.
@@ -64,10 +66,6 @@ const RequestLogPruningInterval = time.Minute
 // ScheduleGapScanInterval is schedule.gap_scan_interval (P-80): how often the Leader looks for the gaps of the
 // Schedules and raises and resolves MusterScheduleGap (C-27.FR-7).
 const ScheduleGapScanInterval = 5 * time.Minute
-
-// GatewayBrokenGaugeInterval is delivery.broken_probe_interval: how often the Leader exports
-// muster_notification_gateway_broken (C-30.FR-8), as often as a Broken gateway is probed.
-const GatewayBrokenGaugeInterval = 5 * time.Minute
 
 // PruneBatch is the most rows one delete of short-lived pruning removes, so that a large backlog is deleted in short
 // statements that hold their row locks briefly.
@@ -167,8 +165,9 @@ type Work struct {
 	// Organization orgID past their retention periods at now (C-09.FR-16) and returns how many of each it deleted.
 	AlertGroupRetention func(ctx context.Context, orgID int64, now time.Time) (details, summaries int64, err error)
 	// DeliveryQueue sets muster_delivery_queue from the pending deliveries and due Thread replies of the Organization
-	// orgID, muster_destination_broken from the health of its Destinations and muster_storm_active from the Storms of
-	// its Routes (C-11.FR-6, FR-9, FR-17).
+	// orgID, muster_destination_broken from the health of its Destinations, muster_storm_active from the Storms of
+	// its Routes (C-11.FR-6, FR-9, FR-17) and muster_notification_gateway_broken from the state of its Notification
+	// gateways, which it reconciles with their calls and MusterNotificationGatewayBroken (C-30.FR-8).
 	DeliveryQueue func(ctx context.Context, orgID int64) error
 	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
 	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
@@ -206,13 +205,10 @@ type Work struct {
 	ScheduleGapScan func(ctx context.Context, orgID int64) error
 	// ScheduleGapForget removes the muster_schedule_gap series once the gap scan stops with the lock.
 	ScheduleGapForget func()
-	// GatewayBrokenGauge sets muster_notification_gateway_broken from the state of the Notification gateways of the
-	// Organization orgID and removes the series of those deleted (C-30.FR-8).
-	GatewayBrokenGauge func(ctx context.Context, orgID int64) error
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
-	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
-	// secret expiry check, the outgoing heartbeat, the pruning of the Request log, the gap scan of the Schedules and the
-	// gauge of Broken Notification gateways when the development clock moved, so that the alive mark keeps up with the business clock and the Leader is not taken
+	// retention, the count of pending deliveries, the retention of Thread replies and of outgoing webhook events, the
+	// short-lived pruning, the OIDC client secret expiry check, the outgoing heartbeat, the pruning of the Request log
+	// and the gap scan of the Schedules when the development clock moved, so that the alive mark keeps up with the business clock and the Leader is not taken
 	// for absent; nil otherwise.
 	ClockMoved *Wakes
 }
@@ -277,8 +273,8 @@ func pruneTable(ctx context.Context, t PruneTable, orgID int64, now time.Time) (
 // Connections, the OIDC client secret expiry check, the outgoing heartbeat (C-02.FR-10), the re-render of the open Root
 // messages after a key rotation (C-20.FR-7), which also runs when a key was activated, the polling of the events of
 // Bridge Connections in poll mode (C-22.FR-11), the pruning of the Request log (C-23.FR-4), the Socket Mode
-// connections of Slack Connections (C-24.FR-9), the gap scan of the Schedules (C-27.FR-7) and the gauge of Broken
-// Notification gateways (C-30.FR-8). Later capabilities add theirs at the end of the list. The Keeper calls
+// connections of Slack Connections (C-24.FR-9) and the gap scan of the Schedules (C-27.FR-7). Later capabilities add
+// theirs at the end of the list. The Keeper calls
 // the result at every leadership, so each one starts with a takeover; the Heartbeat check waits for it, so that it
 // measures the timeouts from the end of a downtime the takeover records (C-07.FR-4).
 func Tasks(w Work) func() []Task {
@@ -287,7 +283,7 @@ func Tasks(w Work) func() []Task {
 	shortLivedWake := w.ClockMoved.channel()
 	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	aliveWake, requestLogWake, gapScanWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
-	gatewayGaugeWake := w.ClockMoved.channel()
+	deliveryWake := w.ClockMoved.channel()
 	keyringWake := w.KeyringChanged.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
@@ -321,7 +317,7 @@ func Tasks(w Work) func() []Task {
 			{Name: "alert_group_gauges", Every: AlertGroupGaugeInterval, Run: w.alertGroupGauges},
 			{Name: "alert_group_retention", Every: MaintenanceInterval, Wake: retentionWake,
 				Run: w.alertGroupRetention},
-			{Name: "delivery_queue", Every: DeliveryQueueInterval, Run: w.deliveryQueue},
+			{Name: "delivery_queue", Every: DeliveryQueueInterval, Wake: deliveryWake, Run: w.deliveryQueue},
 			{Name: "thread_reply_retention", Every: MaintenanceInterval, Wake: replyRetentionWake,
 				Run: w.threadReplyRetention},
 			{Name: "webhook_event_retention", Every: MaintenanceInterval, Wake: eventRetentionWake,
@@ -346,10 +342,6 @@ func Tasks(w Work) func() []Task {
 			{Name: "schedule_gap_scan", Every: ScheduleGapScanInterval, Wake: gapScanWake, Stop: w.ScheduleGapForget,
 				Run: func(ctx context.Context) error {
 					return w.perOrganization(ctx, "the schedule gap scan", w.ScheduleGapScan)
-				}},
-			{Name: "gateway_broken_gauge", Every: GatewayBrokenGaugeInterval, Wake: gatewayGaugeWake,
-				Run: func(ctx context.Context) error {
-					return w.perOrganization(ctx, "the gauge of broken notification gateways", w.GatewayBrokenGauge)
 				}},
 		}
 	}

@@ -44,6 +44,8 @@ UPDATE connections
 SET gateway_broken_since = $1::timestamptz, gateway_broken_reason = $2::text,
     gateway_next_probe_at = $3::timestamptz
 WHERE org_id = $4 AND id = $5 AND type = 'bridge' AND deleted_at IS NULL AND gateway_broken_since IS NULL
+  AND ($6::timestamptz IS NULL OR gateway_recovered_at IS NULL
+       OR gateway_recovered_at < $6::timestamptz)
 RETURNING public_id, name
 `
 
@@ -53,6 +55,7 @@ type BreakGatewayParams struct {
 	NextProbe time.Time
 	OrgID     int64
 	ID        int64
+	FailedAt  pgtype.Timestamptz
 }
 
 type BreakGatewayRow struct {
@@ -63,8 +66,10 @@ type BreakGatewayRow struct {
 // The Broken state of Notification gateways (C-30.FR-8, broken.go): a call answered with a Fatal error, or one that
 // used up delivery.transient_budget, makes its gateway's Connection Broken; any replica probes it through info every
 // delivery.broken_probe_interval, claimed with a lease, and a successful probe or Connection check ends the state.
-// BreakGateway makes the Connection of a Notification gateway Broken with reason, probed first at @next_probe. No row
-// when it is Broken already, deleted or not a Bridge Connection.
+// BreakGateway makes the Connection of a Notification gateway Broken with reason, probed first at @next_probe. With
+// @failed_at, the end of the call that failed, only when its last Broken state, if any, ended before it, so that the
+// reconciliation never breaks it again for a call that the end of the state followed. No row when it is Broken
+// already, deleted, not a Bridge Connection or recovered since the call failed.
 func (q *Queries) BreakGateway(ctx context.Context, arg BreakGatewayParams) (BreakGatewayRow, error) {
 	row := q.db.QueryRow(ctx, breakGateway,
 		arg.Now,
@@ -72,6 +77,7 @@ func (q *Queries) BreakGateway(ctx context.Context, arg BreakGatewayParams) (Bre
 		arg.NextProbe,
 		arg.OrgID,
 		arg.ID,
+		arg.FailedAt,
 	)
 	var i BreakGatewayRow
 	err := row.Scan(&i.PublicID, &i.Name)
@@ -605,22 +611,21 @@ SET gateway_broken_since = NULL, gateway_broken_reason = NULL, gateway_next_prob
     gateway_recovered_at = $1::timestamptz
 FROM (SELECT x.id, x.gateway_broken_since
       FROM connections x
-      WHERE x.org_id = $2 AND x.id = $3 AND x.gateway_broken_since IS NOT NULL
-        AND ($4::text IS NULL
-             OR (x.gateway_probe_lease_owner = $4::text
-                 AND x.gateway_probe_lease_until > $5::timestamptz))
-      FOR NO KEY UPDATE OF x) AS old
-WHERE c.org_id = $2 AND c.id = old.id
-RETURNING c.public_id, c.name, old.gateway_broken_since::timestamptz AS was_broken_since,
+      WHERE x.org_id = $2 AND x.id = $5) AS old
+WHERE c.org_id = $2 AND c.id = old.id AND c.gateway_broken_since IS NOT NULL
+  AND ($3::text IS NULL
+       OR (c.gateway_probe_lease_owner = $3::text AND c.gateway_probe_lease_until > $4::timestamptz))
+RETURNING c.public_id, c.name,
+          coalesce(old.gateway_broken_since, $1::timestamptz)::timestamptz AS was_broken_since,
           (c.deleted_at IS NOT NULL)::boolean AS deleted
 `
 
 type EndGatewayBrokenParams struct {
 	RecoveredAt time.Time
 	OrgID       int64
-	ID          int64
 	Owner       pgtype.Text
 	Now         time.Time
+	ID          int64
 }
 
 type EndGatewayBrokenRow struct {
@@ -631,15 +636,16 @@ type EndGatewayBrokenRow struct {
 }
 
 // EndGatewayBroken ends the Broken state of a gateway at @recovered_at and frees the lease of its probe, and tells
-// when it became Broken and whether the Connection is deleted. A probe passes its owner: then only while this replica still holds
+// when it became Broken and whether the Connection is deleted; it locks the row once, by the update, after the
+// gateway's advisory lock (LockGatewayState). A probe passes its owner: then only while this replica still holds
 // the probe's lease at the real time @now. No row when it is not Broken, or the probe's lease is not held.
 func (q *Queries) EndGatewayBroken(ctx context.Context, arg EndGatewayBrokenParams) (EndGatewayBrokenRow, error) {
 	row := q.db.QueryRow(ctx, endGatewayBroken,
 		arg.RecoveredAt,
 		arg.OrgID,
-		arg.ID,
 		arg.Owner,
 		arg.Now,
+		arg.ID,
 	)
 	var i EndGatewayBrokenRow
 	err := row.Scan(
@@ -750,6 +756,32 @@ func (q *Queries) GetGateway(ctx context.Context, arg GetGatewayParams) (GetGate
 	row := q.db.QueryRow(ctx, getGateway, arg.OrgID, arg.PublicID)
 	var i GetGatewayRow
 	err := row.Scan(&i.ID, &i.PublicID, &i.Name)
+	return i, err
+}
+
+const getGatewayState = `-- name: GetGatewayState :one
+SELECT id, (gateway_broken_since IS NOT NULL)::boolean AS broken
+FROM connections
+WHERE org_id = $1 AND public_id = $2
+`
+
+type GetGatewayStateParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetGatewayStateRow struct {
+	ID     int64
+	Broken bool
+}
+
+// GetGatewayState reads the Connection public_id, deleted ones included, with whether it is a Broken gateway, for the
+// resolve of an open MusterNotificationGatewayBroken of a gateway that is not Broken, under the gateway's advisory
+// lock. No row when no Connection of the Organization has the public_id.
+func (q *Queries) GetGatewayState(ctx context.Context, arg GetGatewayStateParams) (GetGatewayStateRow, error) {
+	row := q.db.QueryRow(ctx, getGatewayState, arg.OrgID, arg.PublicID)
+	var i GetGatewayStateRow
+	err := row.Scan(&i.ID, &i.Broken)
 	return i, err
 }
 
@@ -1213,6 +1245,70 @@ func (q *Queries) ListGateways(ctx context.Context, orgID int64) ([]ListGateways
 	return items, nil
 }
 
+const listUnmarkedFailures = `-- name: ListUnmarkedFailures :many
+SELECT c.id, c.public_id, f.reason, f.error_class, f.error, f.ended_at
+FROM connections c
+JOIN LATERAL (
+    SELECT g.reason::text AS reason, coalesce(g.last_error_class, '')::text AS error_class,
+           coalesce(g.last_error, '')::text AS error, g.ended_at::timestamptz AS ended_at
+    FROM gateway_calls g
+    WHERE g.org_id = c.org_id AND g.connection_id = c.id AND g.state = 'not_delivered'
+      AND ((g.reason = 'call_refused' AND g.last_error_class = 'fatal') OR g.reason = 'call_budget_used')
+      AND g.ended_at > $1::timestamptz
+      AND (c.gateway_recovered_at IS NULL OR g.ended_at > c.gateway_recovered_at)
+    ORDER BY g.ended_at DESC, g.id DESC
+    LIMIT 1
+) f ON true
+WHERE c.org_id = $2 AND c.type = 'bridge' AND c.deleted_at IS NULL AND c.gateway_broken_since IS NULL
+ORDER BY c.id
+`
+
+type ListUnmarkedFailuresParams struct {
+	Since time.Time
+	OrgID int64
+}
+
+type ListUnmarkedFailuresRow struct {
+	ID         int64
+	PublicID   string
+	Reason     string
+	ErrorClass string
+	Error      string
+	EndedAt    time.Time
+}
+
+// ListUnmarkedFailures lists the Notification gateways that are not deleted and not Broken whose latest call that
+// failed in a way that breaks a gateway — Not delivered with call_refused after a Fatal outcome that reached the
+// gateway or the outbound policy (the class fatal; Muster's own refusals end gateway_deleted), or with
+// call_budget_used — ended after @since and after the end of their last Broken state, with that call's reason, class,
+// error and end. The Leader's reconciliation makes them Broken: the replica that ended the call stopped before it did.
+func (q *Queries) ListUnmarkedFailures(ctx context.Context, arg ListUnmarkedFailuresParams) ([]ListUnmarkedFailuresRow, error) {
+	rows, err := q.db.Query(ctx, listUnmarkedFailures, arg.Since, arg.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnmarkedFailuresRow{}
+	for rows.Next() {
+		var i ListUnmarkedFailuresRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Reason,
+			&i.ErrorClass,
+			&i.Error,
+			&i.EndedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCallPerson = `-- name: LockCallPerson :exec
 SELECT pg_advisory_xact_lock($1::int, hashtext(format('%s/%s/%s', $2::bigint, $3::bigint,
                                                                 $4::bigint)))
@@ -1341,6 +1437,22 @@ func (q *Queries) LockContactUser(ctx context.Context, arg LockContactUserParams
 		&i.Status,
 	)
 	return i, err
+}
+
+const lockGatewayState = `-- name: LockGatewayState :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockGatewayStateParams struct {
+	LockClass int32
+	ID        int64
+}
+
+// LockGatewayState takes, until the transaction ends, the advisory lock of the Broken state of the gateway's
+// Connection id (class db.GatewayStateLockClass), which every transaction of the state takes before the row.
+func (q *Queries) LockGatewayState(ctx context.Context, arg LockGatewayStateParams) error {
+	_, err := q.db.Exec(ctx, lockGatewayState, arg.LockClass, arg.ID)
+	return err
 }
 
 const lockNewestCode = `-- name: LockNewestCode :one

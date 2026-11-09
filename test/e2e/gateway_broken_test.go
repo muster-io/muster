@@ -71,7 +71,7 @@ func (e *contactsEnv) gauge(id string) string {
 }
 
 // gaugeIs waits until the Leader's gauge of the Connection id is want, moving the development clock by a second at
-// each look, which runs the Leader task gateway_broken_gauge.
+// each look, which runs the Leader task delivery_queue.
 func (e *contactsEnv) gaugeIs(r *Replica, id, want string) {
 	e.t.Helper()
 	eventually(e.t, "muster_notification_gateway_broken "+want, func() bool {

@@ -343,6 +343,7 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 		}
 		close(slow.release)
 		wg.Wait()
+		a.Broken.Wait()
 		if slow.probes != 1 || !strings.Contains(e.state(t), " still down ") {
 			t.Fatalf("%d probes, the state %q", slow.probes, e.state(t))
 		}
@@ -398,7 +399,11 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 			Business: e.business, Log: logging.New(&syncWriter{w: e.log}, logging.LevelInfo)})
 		by := connections.Requester{Actor: audit.User(e.users[0], "SR00000000000001"), Transport: audit.TransportAPI}
 		storm := func(withDelete bool) {
-			run("page", func(i int) error { return gone(page(i)) })
+			var pages atomic.Int32
+			run("page", func(i int) error {
+				pages.Add(1)
+				return gone(page(i))
+			})
 			run("page2", func(i int) error { return gone(page(i + 1)) })
 			run("r1", func(int) error {
 				e.business.Advance(CombineWindow)
@@ -414,6 +419,8 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 				return b.Broken.Break(ctx, brokenGateway{id: e.gw, publicID: "CN0000000000G1"}, causeFatal, "401")
 			})
 			run("gauge", func(int) error { return a.Broken.Export(ctx) })
+			// The Leader's reconciliation, which locks the Connection's row before it resolves an orphan alert.
+			run("reconcile", func(int) error { return b.Broken.Reconcile(ctx) })
 			run("rename", func(i int) error {
 				_, err := conns.Update(ctx, by, "CN0000000000G1", nil, connections.Input{Type: connections.TypeBridge,
 					Name: fmt.Sprintf("Gateway %d", i), BridgeBaseURL: "http://gw", EventDelivery: "poll",
@@ -440,9 +447,9 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 				})
 			})
 			if withDelete {
-				calls := e.count(t, `SELECT count(*) FROM gateway_calls`)
 				wg.Go(func() {
-					for e.count(t, `SELECT count(*) FROM gateway_calls`) < calls+10 && ctx.Err() == nil {
+					// Mid-storm: after a third of the Pages of one runner, which always makes all of its.
+					for pages.Load() < 10 && ctx.Err() == nil {
 						time.Sleep(10 * time.Millisecond)
 					}
 					e.exec(t, `UPDATE destinations SET deleted_at = $2 WHERE id = $1`, e.dest, c0)
@@ -455,6 +462,8 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 			// Pages and the sender's rounds take the deletion as their gateway being gone.
 			run("page3", func(i int) error { return gone(page(i + 2)) })
 			wg.Wait()
+			a.Broken.Wait()
+			b.Broken.Wait()
 			if ctx.Err() != nil {
 				t.Fatal("the transactions did not finish: a lock wait that never ends")
 			}
@@ -486,7 +495,7 @@ func TestIntegrationGatewayBrokenConcurrency(t *testing.T) {
 		errs.Range(func(k, v any) bool {
 			var pe *pgconn.PgError
 			if err := v.(error); errors.As(err, &pe) && pe.Code == "40P01" {
-				t.Errorf("%s: a deadlock: %v", k, err)
+				t.Errorf("%s: a deadlock: %v; %s", k, err, pe.Detail)
 			} else {
 				t.Errorf("%s: %v", k, err)
 			}
@@ -568,7 +577,9 @@ func TestIntegrationGatewayBrokenEndedWhilePrepared(t *testing.T) {
 			t.Fatal(rows, err)
 		}
 		e.business.Advance(BrokenProbeInterval)
-		if err := a.Broken.Probe(t.Context()); err != nil || !strings.HasPrefix(e.state(t), "- - -") {
+		err = a.Broken.Probe(t.Context())
+		a.Broken.Wait()
+		if err != nil || !strings.HasPrefix(e.state(t), "- - -") {
 			t.Fatalf("the probe %q, %v", e.state(t), err)
 		}
 		b.attempt(t.Context(), rows[0])
@@ -581,6 +592,108 @@ func TestIntegrationGatewayBrokenEndedWhilePrepared(t *testing.T) {
 		e.round(t, b)
 		if len(e.gateway.sentTexts()) != 1 {
 			t.Errorf("the call due after the end: %d sent", len(e.gateway.sentTexts()))
+		}
+	})
+}
+
+// TestIntegrationGatewayBrokenReconcile is C-30.FR-8 and ADR-0007 on PostgreSQL: a replica that ended a call Not
+// delivered after a 401 and stopped before it made the gateway Broken, which a sender without the Broken state stands
+// for, leaves it to the Leader's reconciliation, which makes the gateway Broken with the call's error, once however
+// often it runs; after the state ended, the old failure breaks nothing; neither do a refusal of Muster that never
+// reached the gateway nor a used budget older than ReconcileWindow, while a recent one does; and an open
+// MusterNotificationGatewayBroken of a gateway in order, and of a deleted Connection, is resolved.
+func TestIntegrationGatewayBrokenReconcile(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, srv dbtest.Server) {
+		e := setupBroken(t, srv, 2)
+		ctx := t.Context()
+		crashed := e.sender("r1", e.gateway)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeFatal, Status: 401,
+			Error: "POST notifications: 401 Unauthorized"}}
+		e.page(t, e.users[0], e.group(t, "Disk1", "warning"))
+		e.round(t, crashed)
+		if got := e.state(t); got != "- - -" {
+			t.Fatalf("Broken without the reconciliation: %q", got)
+		}
+		leader := e.brokenSender("r2", e.gateway).Broken
+		for range 2 {
+			if err := leader.Reconcile(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := e.state(t); !strings.Contains(got, " POST notifications: 401 Unauthorized ") ||
+			e.raises(t, "firing") != 1 {
+			t.Fatalf("after the reconciliation %q, %d raises", got, e.raises(t, "firing"))
+		}
+		e.business.Advance(time.Second)
+		if err := leader.EndBroken(ctx, e.gw); err != nil {
+			t.Fatal(err)
+		}
+		if err := leader.Reconcile(ctx); err != nil || e.state(t) != "- - -" {
+			t.Fatalf("broken again for the old failure: %q, %v", e.state(t), err)
+		}
+
+		// A refusal of Muster that never reached the gateway ends gateway_deleted and breaks nothing.
+		e.business.Advance(2 * CombineWindow)
+		e.gateway.fail = []delivery.Outcome{{Kind: delivery.OutcomeFatal, Error: "the bridge does not declare the role " +
+			"gateway", NotSent: true}}
+		e.page(t, e.users[1], e.group(t, "Disk2", "warning"))
+		e.round(t, crashed)
+		if n := e.count(t, `SELECT count(*) FROM gateway_calls WHERE reason = 'gateway_deleted'`); n != 1 {
+			t.Fatalf("%d calls ended gateway_deleted", n)
+		}
+		if err := leader.Reconcile(ctx); err != nil || e.state(t) != "- - -" {
+			t.Fatalf("a refusal of Muster broke the gateway: %q, %v", e.state(t), err)
+		}
+		// A used budget older than the window breaks nothing; a recent one does.
+		budget := func(id string, ended time.Time) {
+			e.exec(t, `INSERT INTO gateway_calls (org_id, public_id, connection_id, user_id, state, language,
+				first_attempt_at, ended_at, reason, attempts, last_error_class, last_error, created_at)
+				VALUES ($1, $2, $3, $4, 'not_delivered', 'en', $5, $5, 'call_budget_used', 10, 'transient', 'busy', $5)`,
+				e.orgID, id, e.gw, e.users[0], ended)
+		}
+		budget("CA00000000AAA1", e.business.Now().Add(-ReconcileWindow-time.Second))
+		if err := leader.Reconcile(ctx); err != nil || e.state(t) != "- - -" {
+			t.Fatalf("an old used budget broke the gateway: %q, %v", e.state(t), err)
+		}
+		budget("CA00000000BBB1", e.business.Now())
+		if err := leader.Reconcile(ctx); err != nil ||
+			!strings.Contains(e.state(t), " unavailable after repeated failures: busy ") {
+			t.Fatalf("a recent used budget: %q, %v", e.state(t), err)
+		}
+		if err := leader.EndBroken(ctx, e.gw); err != nil {
+			t.Fatal(err)
+		}
+
+		// Orphan alerts, as a down and up migration leaves them: of the gateway in order, and of a deleted Connection.
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at, deleted_at)
+			VALUES ($1, 'CN0000000000G2', 'bridge', 'gone', 'http://gw2', 'poll', '\x00', 'k1', $2, 1, 1, $2, $2, $2)`,
+			e.orgID, c0)
+		raiser := internalalerts.NewRaiser(e.orgID, "")
+		for _, id := range []string{"CN0000000000G1", "CN0000000000G2"} {
+			if err := pgx.BeginFunc(ctx, e.d.Pool, func(tx pgx.Tx) error {
+				return raiser.Raise(ctx, internalalerts.NewStore(tx), e.business.Now(),
+					internalalerts.NotificationGatewayBroken, internalalerts.Entity{ID: id, Name: "x"}, nil)
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resolves := func(id string) int {
+			return e.count(t, `SELECT count(*) FROM stored_snapshots s
+				JOIN snapshot_bodies b ON b.body_sha256 = s.body_sha256 AND b.body_day = s.body_day
+				WHERE s.source = 'internal' AND convert_from(b.body, 'UTF8')::jsonb->>'status' = 'resolved'
+				  AND convert_from(b.body, 'UTF8')::jsonb->'alerts'->0->'labels'->>'connection' = $1`, id)
+		}
+		g1, g2 := resolves("CN0000000000G1"), resolves("CN0000000000G2")
+		for range 2 {
+			if err := leader.Reconcile(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if resolves("CN0000000000G1") != g1+1 || resolves("CN0000000000G2") != g2+1 {
+			t.Errorf("the orphan alerts: %d and %d resolves, before %d and %d", resolves("CN0000000000G1"),
+				resolves("CN0000000000G2"), g1, g2)
 		}
 	})
 }

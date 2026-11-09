@@ -527,7 +527,9 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     leaves nothing of it, but the schema recorded as dirty at version 36. To recover, with the same database role as
     Muster, run `UPDATE schema_migrations SET version = 35, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0036 forgets which gateways are Broken, and an open
-    `MusterNotificationGatewayBroken` then stays open.
+    `MusterNotificationGatewayBroken` stays open while a version before 0036 runs; once 0036 is back, the Leader
+    resolves it within 15 seconds, as it resolves every `MusterNotificationGatewayBroken` of a gateway that is not Broken,
+    and a gateway whose calls still fail becomes Broken again with its next failed call.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

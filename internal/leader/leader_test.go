@@ -326,7 +326,7 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		"ingest_backlog", "alert_retention", "heartbeat_check", "stale_scan", "alert_group_gauges",
 		"alert_group_retention", "delivery_queue", "thread_reply_retention", "webhook_event_retention",
 		"telegram_polling", "oidc_secret_expiry", "outgoing_heartbeat", "rerender_after_rotation", "bridge_polling",
-		"request_log_pruning", "slack_socket_mode", "schedule_gap_scan", "gateway_broken_gauge"}
+		"request_log_pruning", "slack_socket_mode", "schedule_gap_scan"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("Leader tasks %v, want %v", names, want)
 	}
@@ -384,14 +384,9 @@ func TestTasksAreTheClosedList(t *testing.T) {
 		t.Errorf("slack socket mode without the sockets")
 	}
 	// Without a gap scan the task does nothing, and outside development mode nothing wakes it.
-	if gaps := tasks[20]; gaps.Every != ScheduleGapScanInterval || gaps.Wake != nil ||
+	if gaps := tasks[len(tasks)-1]; gaps.Every != ScheduleGapScanInterval || gaps.Wake != nil ||
 		gaps.Run(t.Context()) != nil {
 		t.Errorf("the gap scan without a scan")
-	}
-	// Without a gauge of Broken gateways the task does nothing, and outside development mode nothing wakes it.
-	if gauge := tasks[len(tasks)-1]; gauge.Every != GatewayBrokenGaugeInterval || gauge.Wake != nil ||
-		gauge.Run(t.Context()) != nil {
-		t.Errorf("the gauge of broken gateways without a gauge")
 	}
 }
 
@@ -575,6 +570,19 @@ func TestDeliveryTasks(t *testing.T) {
 	tasks = Tasks(Work{})()
 	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil || tasks[12].Run(t.Context()) != nil {
 		t.Error("unwired delivery tasks did something")
+	}
+	if tasks[10].Wake != nil {
+		t.Error("the count of pending deliveries is woken outside development mode")
+	}
+	// In development mode a move of the development clock runs it at once, so that the gauges of Broken Notification
+	// gateways and Destinations, and the reconciliation of the gateways, follow the clock (C-30.FR-8).
+	moved := &Wakes{}
+	tasks = Tasks(Work{ClockMoved: moved})()
+	moved.Wake()
+	select {
+	case <-tasks[10].Wake:
+	default:
+		t.Error("a move of the development clock did not wake the count of pending deliveries")
 	}
 }
 
@@ -1330,7 +1338,7 @@ func TestReregisterAfterIsTheAbsenceNotice(t *testing.T) {
 	}
 }
 
-// TestScheduleGapScanTask covers C-27.FR-7 and ADR-0007: the gap scan of the Schedules is a Leader task that runs
+// TestScheduleGapScanTask covers C-27.FR-7 and ADR-0007: the gap scan of the Schedules is the last Leader task, runs
 // every schedule.gap_scan_interval per Organization, goes on past one that fails, does nothing when unwired, and in
 // development mode a move of the development clock wakes it.
 func TestScheduleGapScanTask(t *testing.T) {
@@ -1349,7 +1357,7 @@ func TestScheduleGapScanTask(t *testing.T) {
 		ClockMoved: moved,
 	}
 	tasks := Tasks(w)()
-	last := len(tasks) - 2
+	last := len(tasks) - 1
 	task := tasks[last]
 	if task.Name != "schedule_gap_scan" || task.Every != 5*time.Minute || task.Wake == nil {
 		t.Fatalf("task %s every %v", task.Name, task.Every)
@@ -1397,61 +1405,12 @@ func TestTaskStop(t *testing.T) {
 	}
 	forgot := 0
 	tasks := Tasks(Work{ScheduleGapForget: func() { forgot++ }})()
-	if last := tasks[len(tasks)-2]; last.Name != "schedule_gap_scan" || last.Stop == nil {
+	if last := tasks[len(tasks)-1]; last.Name != "schedule_gap_scan" || last.Stop == nil {
 		t.Fatalf("the gap scan task %+v", last)
 	} else {
 		last.Stop()
 	}
 	if forgot != 1 {
 		t.Errorf("forgot %d times", forgot)
-	}
-}
-
-// TestGatewayBrokenGaugeTask covers C-30.FR-8 and ADR-0007: the gauge of Broken Notification gateways is the last Leader
-// task, runs every delivery.broken_probe_interval per Organization, goes on past one that fails, does nothing when
-// unwired, sets the same values when it runs twice, and in development mode a move of the development clock wakes it.
-func TestGatewayBrokenGaugeTask(t *testing.T) {
-	failed := errors.New("failed")
-	var exported []int64
-	moved := &Wakes{}
-	w := Work{
-		Organizations: func(context.Context) ([]int64, error) { return []int64{1, 2}, nil },
-		GatewayBrokenGauge: func(_ context.Context, org int64) error {
-			exported = append(exported, org)
-			if org == 1 {
-				return failed
-			}
-			return nil
-		},
-		ClockMoved: moved,
-	}
-	tasks := Tasks(w)()
-	last := len(tasks) - 1
-	task := tasks[last]
-	if task.Name != "gateway_broken_gauge" || task.Every != 5*time.Minute || task.Wake == nil || task.Stop != nil {
-		t.Fatalf("task %s every %v", task.Name, task.Every)
-	}
-	for range 2 {
-		if err := task.Run(t.Context()); !errors.Is(err, failed) {
-			t.Errorf("err %v", err)
-		}
-	}
-	if !slices.Equal(exported, []int64{1, 2, 1, 2}) {
-		t.Errorf("exported %v", exported)
-	}
-	moved.Wake()
-	select {
-	case <-task.Wake:
-	default:
-		t.Error("a move of the development clock did not wake the gauge")
-	}
-	orgsErr := errors.New("down")
-	w.Organizations = func(context.Context) ([]int64, error) { return nil, orgsErr }
-	if err := Tasks(w)()[last].Run(t.Context()); !errors.Is(err, orgsErr) ||
-		err.Error() != "list the organizations for the gauge of broken notification gateways: down" {
-		t.Errorf("organizations = %v", err)
-	}
-	if task := Tasks(Work{})()[last]; task.Run(t.Context()) != nil || task.Wake != nil {
-		t.Error("an unwired gauge did something")
 	}
 }

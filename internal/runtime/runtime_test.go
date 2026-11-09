@@ -1753,8 +1753,12 @@ func TestGroupTimer(t *testing.T) {
 
 // TestDeliveryLeaderTasks: the Leader tasks of delivery act on this process's Organization only.
 func TestDeliveryLeaderTasks(t *testing.T) {
+	business := clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
 	p := &process{orgID: 1, delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
-		Business: clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))})}
+		Business: business}),
+		// The gauge of Broken Notification gateways and their reconciliation run in delivery_queue (C-30.FR-8).
+		gatewayBroken: &gateways.Broken{OrgID: 1, Store: gateways.NewBrokenStore(noDB{}),
+			Lease: db.Lease{Clocks: clock.Clocks{Business: business, Real: business}}}}
 	if err := p.deliveryQueue(t.Context(), 2); err != nil {
 		t.Errorf("another organization = %v", err)
 	}

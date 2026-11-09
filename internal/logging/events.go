@@ -815,7 +815,8 @@ var GatewayCallNotDelivered = newEvent("gateway_call_not_delivered", LevelWarn, 
 		"call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the "+
 		"gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or "+
 		"gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, "+
-		"or gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, "+
+		"or when Muster refused the call at its attempt for that reason without reaching the gateway, or "+
+		"gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, "+
 		"masked. Never carries the contact or the text of the call.",
 	"call", "connection", "user", "reason", "error")
 
@@ -856,6 +857,14 @@ var GatewayBroken = newEvent("gateway_broken", LevelWarn, "C-30",
 		"fires and a probe through info runs every delivery.broken_probe_interval. The Destinations of the same "+
 		"bridge are not affected.",
 	"connection", "cause", "reason")
+
+// GatewayProbeFailed is logged when the outcome of a probe of a Broken Notification gateway could not be recorded
+// (C-30.FR-8).
+var GatewayProbeFailed = newEvent("gateway_probe_failed", LevelWarn, "C-30",
+	"The outcome of a probe of a Broken Notification gateway through info could not be recorded because of error, "+
+		"such as a lost database connection: connection is the public_id of its Connection. The gateway stays Broken "+
+		"and is probed again after delivery.broken_probe_interval, by any replica.",
+	"connection", "error")
 
 // GatewayRecovered is logged when a Broken Notification gateway is in order again (C-30.FR-8).
 var GatewayRecovered = newEvent("gateway_recovered", LevelInfo, "C-30",

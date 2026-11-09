@@ -64,7 +64,8 @@ const MessageNotGateway = "the bridge does not declare the role gateway"
 
 // Notify sends n through sendNotification of its Connection in the client class of c, with the idempotency key of c,
 // once the Connection's info, read again past bridge.info_max_age, declares the role gateway; a bridge that does not is
-// Fatal without a call, as is an id that names no Bridge Connection (C-30.FR-2). The outcome is classified as a
+// Fatal without a call, as is an id that names no Bridge Connection (C-30.FR-2), both NotSent, as they never reached
+// the gateway (C-30.FR-8). The outcome is classified as a
 // delivery's, names the notification in MessageID and says whether the answer was Replayed; its error, the bridge's
 // text, has the contact and the text masked, and so has the Request log's record of the request and its answer
 // (outbound.WithSecrets). It logs gateway_notification_sent with the Connection, the key and the class of the answer,
@@ -73,7 +74,8 @@ func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notifi
 	conn, err := a.Targets.BridgeConnection(ctx, n.Connection)
 	switch {
 	case errors.Is(err, ErrNoTarget):
-		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(ErrNoTarget.Error())}
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(ErrNoTarget.Error()),
+			NotSent: true}
 	case err != nil:
 		return delivery.Outcome{Kind: delivery.OutcomeTransient,
 			Error: "the connection of the gateway could not be read"}
@@ -84,7 +86,7 @@ func (a *Adapter) Notify(ctx context.Context, c delivery.Call, n delivery.Notifi
 		return *fail
 	}
 	if !i.HasRole(RoleGateway) {
-		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: MessageNotGateway}
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: MessageNotGateway, NotSent: true}
 	}
 	in := gen.NotificationInput{Contact: n.Contact, Text: n.Text, Language: gen.NotificationInputLanguage(n.Language)}
 	if n.Action != nil {

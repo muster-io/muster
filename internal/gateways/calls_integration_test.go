@@ -230,6 +230,9 @@ func (e *callEnv) round(t *testing.T, s *Sender) {
 	if _, err := s.Round(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	if s.Broken != nil {
+		s.Broken.Wait() // the probes it started
+	}
 }
 
 // TestIntegrationCalls is C-30.AC-3, AC-7 and FR-4, FR-7 on PostgreSQL, through the queries of query.sql, the delivery

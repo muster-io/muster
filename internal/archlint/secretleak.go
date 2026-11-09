@@ -2390,6 +2390,7 @@ func probeGatewayCalls(ctx context.Context, secrets []string, log io.Writer) err
 		if _, err := s.Round(ctx); err != nil {
 			errs = append(errs, err)
 		}
+		s.Broken.Wait()
 		business.Advance(delivery.TransientBackoffMax)
 		realClock.Advance(time.Second)
 	}
@@ -2398,6 +2399,7 @@ func probeGatewayCalls(ctx context.Context, secrets []string, log io.Writer) err
 	if _, err := s.Round(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	s.Broken.Wait()
 	errs = append(errs, errors.New(store.lastError))
 	for _, r := range broken.reasons {
 		errs = append(errs, errors.New(r))
@@ -2477,6 +2479,20 @@ func (b *probeBrokenStore) NextGatewayProbe(context.Context, gwdb.NextGatewayPro
 
 func (b *probeBrokenStore) ListGatewayHealth(context.Context, int64) ([]gwdb.ListGatewayHealthRow, error) {
 	return nil, nil
+}
+
+func (b *probeBrokenStore) ListUnmarkedFailures(context.Context, gwdb.ListUnmarkedFailuresParams) (
+	[]gwdb.ListUnmarkedFailuresRow, error) {
+	return nil, nil
+}
+
+func (b *probeBrokenStore) LockGatewayState(context.Context, gwdb.LockGatewayStateParams) error {
+	return nil
+}
+
+func (b *probeBrokenStore) GetGatewayState(context.Context, gwdb.GetGatewayStateParams) (gwdb.GetGatewayStateRow,
+	error) {
+	return gwdb.GetGatewayStateRow{ID: 1, Broken: b.broken}, nil
 }
 
 func (b *probeBrokenStore) Notify(context.Context, db.Hint) error { return nil }

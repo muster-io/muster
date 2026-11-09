@@ -86,6 +86,13 @@ const GatewayContactLockClass int32 = 0x6d75_000a
 // whose combine window it sets (gateways' calls.go, sender.go).
 const GatewayCallLockClass int32 = 0x6d75_000b
 
+// GatewayStateLockClass is the first key of the transaction advisory lock of the Broken state of one Notification
+// gateway, whose second key is hashint8 of the gateway's Connection id: the transactions that make the gateway Broken,
+// end the state, record a probe or resolve its orphan Internal alert take it first, before the Connection's row, so
+// that they never queue for that row behind one another (gateways' broken.go). A change or the deletion of the
+// Connection, which locks its row first, does not take it.
+const GatewayStateLockClass int32 = 0x6d75_000c
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

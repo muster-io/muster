@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -18,12 +19,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/gateways/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/internalalerts"
 	idb "github.com/muster-io/muster/internal/internalalerts/dbgen"
 	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/outbound"
@@ -41,15 +44,17 @@ type fakeBroken struct {
 // transaction that fails is rolled back. deleted marks Connections deleted, notGateway those whose info no longer
 // declares the role gateway; internal records the synthetic Stored Snapshots of the Internal alerts, hints the hints.
 type brokenFake struct {
-	f          *fakeCalls
-	mu         sync.Mutex
-	deleted    map[int64]bool
-	internal   []raised
-	bodies     [][]byte
-	hints      []db.Hint
-	fail       map[string]error
-	txs        int
-	onEndQuery func()
+	f           *fakeCalls
+	mu          sync.Mutex
+	deleted     map[int64]bool
+	internal    []raised
+	bodies      [][]byte
+	hints       []db.Hint
+	fail        map[string]error
+	beforeBreak func()
+	locks       []int64
+	txs         int
+	onEndQuery  func()
 }
 
 // raised is a raise or a resolve of an Internal alert.
@@ -94,6 +99,10 @@ func (b *brokenFake) InBrokenTx(_ context.Context, fn func(BrokenQueries) error)
 func (b *brokenFake) Over(DBTX) BrokenQueries { return b }
 
 func (b *brokenFake) BreakGateway(_ context.Context, a dbgen.BreakGatewayParams) (dbgen.BreakGatewayRow, error) {
+	if f := b.beforeBreak; f != nil {
+		b.beforeBreak = nil
+		f()
+	}
 	if err := b.err("BreakGateway"); err != nil {
 		return dbgen.BreakGatewayRow{}, err
 	}
@@ -101,6 +110,9 @@ func (b *brokenFake) BreakGateway(_ context.Context, a dbgen.BreakGatewayParams)
 	defer b.f.mu.Unlock()
 	gw, ok := b.f.gateways[a.ID]
 	if a.OrgID != 1 || !ok || b.deleted[a.ID] || b.f.broken[a.ID] != nil {
+		return dbgen.BreakGatewayRow{}, pgx.ErrNoRows
+	}
+	if r, ok := b.f.recovered[a.ID]; ok && a.FailedAt.Valid && !r.Before(a.FailedAt.Time) {
 		return dbgen.BreakGatewayRow{}, pgx.ErrNoRows
 	}
 	b.f.broken[a.ID] = &fakeBroken{since: a.Now, nextProbe: a.NextProbe, reason: a.Reason}
@@ -228,6 +240,69 @@ func (b *brokenFake) ListGatewayHealth(_ context.Context, orgID int64) ([]dbgen.
 	return out, nil
 }
 
+func (b *brokenFake) ListUnmarkedFailures(_ context.Context, a dbgen.ListUnmarkedFailuresParams) (
+	[]dbgen.ListUnmarkedFailuresRow, error) {
+	if err := b.err("ListUnmarkedFailures"); err != nil {
+		return nil, err
+	}
+	b.f.mu.Lock()
+	defer b.f.mu.Unlock()
+	out := []dbgen.ListUnmarkedFailuresRow{}
+	for _, id := range slices.Sorted(maps.Keys(b.f.gateways)) {
+		if a.OrgID != 1 || b.deleted[id] || b.f.broken[id] != nil {
+			continue
+		}
+		var last *fakeCall
+		for i := range b.f.calls {
+			c := &b.f.calls[i]
+			r, recovered := b.f.recovered[id]
+			breaks := (c.reason.String == groups.PageCallRefused && c.errorClass.String == "fatal") ||
+				c.reason.String == groups.PageCallBudgetUsed
+			if c.conn != id || c.state != CallNotDelivered || !c.ended.Valid || !c.ended.Time.After(a.Since) ||
+				(recovered && !c.ended.Time.After(r)) || !breaks {
+				continue
+			}
+			if last == nil || !c.ended.Time.Before(last.ended.Time) {
+				last = c
+			}
+		}
+		if last != nil {
+			out = append(out, dbgen.ListUnmarkedFailuresRow{ID: id, PublicID: b.f.gateways[id].publicID,
+				Reason: last.reason.String, ErrorClass: last.errorClass.String, Error: last.errorText.String,
+				EndedAt: last.ended.Time})
+		}
+	}
+	return out, nil
+}
+
+func (b *brokenFake) LockGatewayState(_ context.Context, a dbgen.LockGatewayStateParams) error {
+	if err := b.err("LockGatewayState"); err != nil {
+		return err
+	}
+	if a.LockClass != db.GatewayStateLockClass {
+		return errors.New("the wrong lock class")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.locks = append(b.locks, a.ID)
+	return nil
+}
+
+func (b *brokenFake) GetGatewayState(_ context.Context, a dbgen.GetGatewayStateParams) (dbgen.GetGatewayStateRow,
+	error) {
+	if err := b.err("GetGatewayState"); err != nil {
+		return dbgen.GetGatewayStateRow{}, err
+	}
+	b.f.mu.Lock()
+	defer b.f.mu.Unlock()
+	for id, gw := range b.f.gateways {
+		if a.OrgID == 1 && gw.publicID == a.PublicID {
+			return dbgen.GetGatewayStateRow{ID: id, Broken: b.f.broken[id] != nil}, nil
+		}
+	}
+	return dbgen.GetGatewayStateRow{}, pgx.ErrNoRows
+}
+
 func (b *brokenFake) Notify(_ context.Context, h db.Hint) error {
 	if err := b.err("Notify"); err != nil {
 		return err
@@ -313,6 +388,8 @@ type prober struct {
 	outcomes []delivery.Outcome
 	during   func()
 	checks   []string
+	// hold makes the probe of a gateway wait until its channel is closed, as an info that hangs.
+	hold map[int64]chan struct{}
 }
 
 func (p *prober) ProbeGateway(ctx context.Context, id int64) delivery.Outcome {
@@ -325,10 +402,13 @@ func (p *prober) ProbeGateway(ctx context.Context, id int64) delivery.Outcome {
 	} else {
 		o = delivery.Outcome{Kind: delivery.OutcomeOK}
 	}
-	during := p.during
+	during, hold := p.during, p.hold[id]
 	p.mu.Unlock()
 	if during != nil {
 		during()
+	}
+	if hold != nil {
+		<-hold
 	}
 	return o
 }
@@ -347,6 +427,14 @@ func newBrokenSender(t *testing.T) *brokenEnv {
 	p := &prober{}
 	e.s.Broken = &Broken{OrgID: 1, Store: b, Lease: e.s.Lease, Prober: p, Log: e.s.Log}
 	return &brokenEnv{senderEnv: e, b: b, prober: p}
+}
+
+// round runs one round of the sender and waits for the probes it started.
+func (e *brokenEnv) round(t *testing.T) time.Duration {
+	t.Helper()
+	next := e.senderEnv.round(t)
+	e.s.Broken.Wait()
+	return next
 }
 
 // scrape is what /metrics serves, the Leader's metrics included.
@@ -692,14 +780,16 @@ func TestProbeLease(t *testing.T) {
 		"401"); err != nil {
 		t.Fatal(err)
 	}
-	other := *e.s.Broken
-	other.Lease.Owner = "r2"
+	lease := e.s.Lease
+	lease.Owner = "r2"
+	other := &Broken{OrgID: 1, Store: e.b, Lease: lease, Prober: e.prober, Log: e.s.Log}
 	e.advance(BrokenProbeInterval)
 	// While r1 probes, r2 claims nothing: the lease is live and the next probe moved on.
 	e.prober.during = func() {
 		if err := other.Probe(t.Context()); err != nil {
 			t.Error(err)
 		}
+		other.Wait()
 	}
 	e.prober.outcomes = []delivery.Outcome{{Kind: delivery.OutcomeTransient, Error: "down"}}
 	e.round(t)
@@ -730,8 +820,9 @@ func TestProbeLease(t *testing.T) {
 	e.advance(BrokenProbeInterval)
 	e.prober.outcomes = []delivery.Outcome{{Kind: delivery.OutcomeFatal, Status: 401, Error: "401"}}
 	e.b.fail["FailGatewayProbe"] = errors.New("down")
-	if _, err := e.s.Round(t.Context()); err == nil {
-		t.Error("a failed record of the probe was ignored")
+	e.round(t)
+	if !strings.Contains(e.log.String(), `"event":"gateway_probe_failed","connection":"CN00000000GW10"`) {
+		t.Errorf("a failed record of the probe was not logged:\n%s", e.log)
 	}
 	delete(e.b.fail, "FailGatewayProbe")
 	for _, q := range []string{"ClaimGatewayProbes", "NextGatewayProbe"} {
@@ -745,13 +836,12 @@ func TestProbeLease(t *testing.T) {
 		t.Context()); err != nil || ok || d != 0 {
 		t.Errorf("next without a Broken gateway %v %v %v", d, ok, err)
 	}
-	// A Batch of one claims them all, one at a time.
+	// Each probe is claimed on its own, and they all run in one round.
 	if err := e.s.Broken.Break(t.Context(), brokenGateway{id: 11, publicID: "CN00000000GW11"}, causeFatal,
 		"x"); err != nil {
 		t.Fatal(err)
 	}
 	e.advance(time.Hour)
-	e.s.Broken.Batch = 1
 	e.prober.outcomes = nil
 	e.round(t)
 	if e.b.state(10) != nil || e.b.state(11) != nil {
@@ -767,20 +857,24 @@ func TestProbeLease(t *testing.T) {
 }
 
 // TestBrokenOnlyByTheGateway is C-30.FR-8 on what breaks a gateway: Muster's own refusals that never reach the
-// gateway — its Connection is gone, its info no longer declares the role gateway — end the call Not delivered with
-// call_refused and leave the gateway in order, without MusterNotificationGatewayBroken; an address the outbound policy
-// blocks, a lasting failure without an answer, makes it Broken, as a Fatal answer of the gateway does.
+// gateway — NotSent: its Connection is gone, its info no longer declares the role gateway — end the call Not delivered
+// with gateway_deleted and leave the gateway in order, without MusterNotificationGatewayBroken, also after the
+// Leader's reconciliation; an address the outbound policy blocks, a lasting failure without an answer, makes it Broken,
+// as a Fatal answer of the gateway does.
 func TestBrokenOnlyByTheGateway(t *testing.T) {
 	e := newBrokenSender(t)
 	for i, out := range []delivery.Outcome{
-		{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(bridge.ErrNoTarget.Error())},
-		{Kind: delivery.OutcomeFatal, Error: bridge.MessageNotGateway},
+		{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(bridge.ErrNoTarget.Error()), NotSent: true},
+		{Kind: delivery.OutcomeFatal, Error: bridge.MessageNotGateway, NotSent: true},
 	} {
 		e.gw.script(out)
 		e.page(t, 1, 10, 1)
 		e.round(t)
+		if err := e.s.Broken.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		call := e.f.calls[len(e.f.calls)-1]
-		if call.state != CallNotDelivered || call.reason.String != groups.PageCallRefused || e.b.state(10) != nil ||
+		if call.state != CallNotDelivered || call.reason.String != groups.PageGatewayDeleted || e.b.state(10) != nil ||
 			len(e.b.alerts()) != 0 || len(e.b.hints) != 0 {
 			t.Fatalf("%d %q: the call %+v, the state %+v, alerts %v", i, out.Error, call, e.b.state(10),
 				e.b.alerts())
@@ -862,5 +956,301 @@ func TestBrokenEndedWhilePrepared(t *testing.T) {
 	e.round(t)
 	if e.gw.count() != 1 || e.f.calls[1].state != CallAccepted {
 		t.Errorf("the call due after the end %+v", e.f.calls[1])
+	}
+}
+
+// TestProbeHangs is C-30.FR-8 and NFR-2 on the probes: a probe whose info hangs holds one slot of its own, so that the
+// calls through a gateway in order go in the same round and the probe of another Broken gateway ends its state; once
+// the hanging info answers, its gateway recovers too.
+func TestProbeHangs(t *testing.T) {
+	e := newBrokenSender(t)
+	for _, g := range []brokenGateway{{id: 10, publicID: "CN00000000GW10"}, {id: 12, publicID: "CN00000000BR12"}} {
+		if err := e.s.Broken.Break(t.Context(), g, causeFatal, "401"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := make(chan struct{})
+	e.prober.hold = map[int64]chan struct{}{10: release}
+	e.advance(BrokenProbeInterval)
+	e.page(t, 1, 11, 1)
+	e.senderEnv.round(t)
+	if e.gw.count() != 1 || e.f.calls[0].state != CallAccepted {
+		t.Fatalf("the call through the gateway in order waited for the probe: %+v", e.f.calls[0])
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for e.b.state(12) != nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if e.b.state(12) != nil || e.b.state(10) == nil {
+		t.Fatalf("while one probe hangs: %+v %+v", e.b.state(10), e.b.state(12))
+	}
+	close(release)
+	e.s.Broken.Wait()
+	if e.b.state(10) != nil {
+		t.Errorf("the hanging probe lost its result: %+v", e.b.state(10))
+	}
+	// More due probes than slots: the rest wait for a later round.
+	e.prober.hold = nil
+	block := make(chan struct{})
+	e.prober.during = func() { <-block }
+	for id := range int64(ProbeConcurrency + 1) {
+		e.f.mu.Lock()
+		e.f.gateways[100+id] = fakeGateway{publicID: fmt.Sprintf("CN0000000G%04d", id), name: "g", gateway: true}
+		e.f.mu.Unlock()
+		if err := e.s.Broken.Break(t.Context(), brokenGateway{id: 100 + id}, causeFatal, "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.advance(BrokenProbeInterval)
+	if err := e.s.Broken.Probe(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waiting := 0
+	for id := range int64(ProbeConcurrency + 1) {
+		if st := e.b.state(100 + id); st != nil && st.owner == "" {
+			waiting++
+		}
+	}
+	close(block)
+	e.s.Broken.Wait()
+	if waiting != 1 {
+		t.Errorf("%d probes wait for a slot, want 1", waiting)
+	}
+	if err := e.s.Broken.Probe(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	e.s.Broken.Wait()
+	for id := range int64(ProbeConcurrency + 1) {
+		if e.b.state(100+id) != nil {
+			t.Errorf("gateway %d is still Broken", 100+id)
+		}
+	}
+}
+
+// TestReconcile is C-30.FR-8 and ADR-0007 on the Leader's reconciliation: a call that ended Not delivered by a Fatal
+// answer, or by a used budget, without making its gateway Broken — the replica stopped in between — makes it Broken at
+// the next run, with the call's error as the reason; running it twice changes nothing more; a failure that the end of
+// the gateway's last Broken state followed, one older than ReconcileWindow, an invalid answer and a refusal of Muster
+// that never reached the gateway break nothing; an open MusterNotificationGatewayBroken of a gateway in order, as a
+// down migration leaves it, and of a deleted or unknown Connection, is resolved, and one of a Broken gateway stays.
+func TestReconcile(t *testing.T) {
+	e := newBrokenSender(t)
+	e.s.Broken = nil // the replica stops between the end of the call and the Broken state
+	e.gw.script(forbidden)
+	e.page(t, 1, 10, 1)
+	e.senderEnv.round(t)
+	broken := &Broken{OrgID: 1, Store: e.b, Lease: e.s.Lease, Prober: e.prober, Log: e.s.Log}
+	if e.b.state(10) != nil {
+		t.Fatal("Broken without the reconciliation")
+	}
+	for range 2 {
+		if err := broken.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st := e.b.state(10); st == nil || st.reason != "POST notifications: 401 Unauthorized" ||
+		len(e.b.alerts()) != 1 || strings.Count(e.log.String(), `"event":"gateway_broken"`) != 1 {
+		t.Fatalf("after the reconciliation %+v, alerts %v", st, e.b.alerts())
+	}
+	// The end of the state follows the failure: it is not made Broken again for it.
+	e.advance(time.Second)
+	if err := broken.EndBroken(t.Context(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := broken.Reconcile(t.Context()); err != nil || e.b.state(10) != nil {
+		t.Fatalf("broken again for an old failure: %+v, %v", e.b.state(10), err)
+	}
+
+	// A used budget, through gateway 11; then failures that break nothing.
+	e.advance(2 * CombineWindow)
+	e.f.mu.Lock()
+	e.f.calls = append(e.f.calls,
+		fakeCall{id: 900, publicID: "CA000000000900", conn: 11, user: 2, state: CallNotDelivered,
+			reason:     pgtype.Text{String: groups.PageCallBudgetUsed, Valid: true},
+			errorClass: pgtype.Text{String: "transient", Valid: true}, errorText: pgtype.Text{String: "busy", Valid: true},
+			ended: pgtype.Timestamptz{Time: e.business.Now(), Valid: true}},
+		fakeCall{id: 901, publicID: "CA000000000901", conn: 10, user: 2, state: CallNotDelivered,
+			reason:     pgtype.Text{String: groups.PageCallRefused, Valid: true},
+			errorClass: pgtype.Text{String: "unknown", Valid: true},
+			ended:      pgtype.Timestamptz{Time: e.business.Now(), Valid: true}},
+		fakeCall{id: 902, publicID: "CA000000000902", conn: 10, user: 2, state: CallNotDelivered,
+			reason:     pgtype.Text{String: groups.PageGatewayDeleted, Valid: true},
+			errorClass: pgtype.Text{String: "fatal", Valid: true},
+			ended:      pgtype.Timestamptz{Time: e.business.Now(), Valid: true}},
+		fakeCall{id: 903, publicID: "CA000000000903", conn: 12, user: 2, state: CallNotDelivered,
+			reason:     pgtype.Text{String: groups.PageCallRefused, Valid: true},
+			errorClass: pgtype.Text{String: "fatal", Valid: true},
+			ended:      pgtype.Timestamptz{Time: e.business.Now().Add(-ReconcileWindow), Valid: true}})
+	e.f.mu.Unlock()
+	if err := broken.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.b.state(11); st == nil || st.reason != "unavailable after repeated failures: busy" ||
+		e.b.state(10) != nil || e.b.state(12) != nil {
+		t.Fatalf("after the second reconciliation %+v %+v %+v", e.b.state(10), st, e.b.state(12))
+	}
+
+	// Orphan alerts: gateway 11 is Broken and keeps its alert; 10's, a deleted one's and an unknown one's resolve.
+	raiser := internalalerts.NewRaiser(1, "")
+	for _, id := range []string{"CN00000000GW10", "CN00000000BR12", "CN0000000000XX"} {
+		if err := raiser.Raise(t.Context(), e.b, e.business.Now(), internalalerts.NotificationGatewayBroken,
+			internalalerts.Entity{ID: id, Name: "x"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.b.deleted[12] = true
+	for range 2 {
+		if err := broken.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved := map[string]int{}
+	for _, a := range e.b.alerts() {
+		if strings.HasPrefix(a, "resolved/") {
+			resolved[strings.Split(a, "/")[2]]++
+		}
+	}
+	if len(resolved) != 3 || resolved["CN00000000GW10"] != 2 || resolved["CN00000000BR12"] != 1 ||
+		resolved["CN0000000000XX"] != 1 || resolved["CN00000000GW11"] != 0 {
+		t.Errorf("resolved %v", resolved)
+	}
+	for _, q := range []string{"ListUnmarkedFailures", "GetGatewayState", "LockGatewayState", "InsertInternalBody"} {
+		if err := raiser.Raise(t.Context(), e.b, e.business.Now(), internalalerts.NotificationGatewayBroken,
+			internalalerts.Entity{ID: "CN00000000GW10", Name: "x"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		e.b.fail[q] = errors.New("down")
+		if err := broken.Reconcile(t.Context()); err == nil {
+			t.Errorf("a failed %s was ignored", q)
+		}
+		delete(e.b.fail, q)
+		if err := broken.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestBrokenLocksFirst is the lock order of broken.go: every transaction of the Broken state — a Break, an end by a
+// check or a probe, a failed probe, the resolve of an orphan alert — takes the advisory lock of the gateway's state;
+// the deletion of the Connection, whose transaction locked its row first, does not.
+func TestBrokenLocksFirst(t *testing.T) {
+	e := newBrokenSender(t)
+	gw := brokenGateway{id: 10, publicID: "CN00000000GW10"}
+	if err := e.s.Broken.Break(t.Context(), gw, causeFatal, "401"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Broken.EndBroken(t.Context(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Broken.Break(t.Context(), gw, causeFatal, "401"); err != nil {
+		t.Fatal(err)
+	}
+	e.prober.outcomes = []delivery.Outcome{{Kind: delivery.OutcomeTransient, Error: "down"}, {Kind: delivery.OutcomeOK}}
+	for range 2 {
+		e.advance(BrokenProbeInterval)
+		e.round(t)
+	}
+	if !slices.Equal(e.b.locks, []int64{10, 10, 10, 10, 10}) {
+		t.Fatalf("locks %v", e.b.locks)
+	}
+	if err := e.s.Broken.Break(t.Context(), gw, causeFatal, "401"); err != nil {
+		t.Fatal(err)
+	}
+	e.b.deleted[10] = true
+	if err := e.s.Broken.Deleted(t.Context(), nil, 10); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.b.locks) != 6 {
+		t.Errorf("the deletion took the lock: %v", e.b.locks)
+	}
+	if err := internalalerts.NewRaiser(1, "").Raise(t.Context(), e.b, e.business.Now(),
+		internalalerts.NotificationGatewayBroken, internalalerts.Entity{ID: "CN00000000GW11", Name: "x"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.Broken.Reconcile(t.Context()); err != nil || e.b.locks[len(e.b.locks)-1] != 11 {
+		t.Errorf("the resolve of an orphan alert: locks %v, %v", e.b.locks, err)
+	}
+	e.b.fail["LockGatewayState"] = errors.New("down")
+	if err := e.s.Broken.Break(t.Context(), brokenGateway{id: 11, publicID: "CN00000000GW11"}, causeFatal,
+		"x"); err == nil || e.b.state(11) != nil {
+		t.Errorf("a failed lock: %v", err)
+	}
+}
+
+// TestBreakSupersededByEnd is C-30.FR-8 on the live path, as on the reconciliation: when an end of the Broken state
+// by a probe or a check lands between the end of a call that the gateway refused and that call's Break, which waited
+// for the gateway's lock, the failure is superseded and the gateway stays in order; a call refused after the end
+// breaks it.
+func TestBreakSupersededByEnd(t *testing.T) {
+	e := newBrokenSender(t)
+	gw := brokenGateway{id: 10, publicID: "CN00000000GW10"}
+	e.b.beforeBreak = func() {
+		// Another call broke the gateway, and a probe ended the state a second later.
+		if err := e.s.Broken.Break(t.Context(), gw, causeFatal, "earlier"); err != nil {
+			t.Error(err)
+		}
+		e.advance(time.Second)
+		if err := e.s.Broken.EndBroken(t.Context(), 10); err != nil {
+			t.Error(err)
+		}
+	}
+	e.gw.script(forbidden)
+	e.page(t, 1, 10, 1)
+	e.round(t)
+	if call := e.f.calls[0]; call.reason.String != groups.PageCallRefused || e.b.state(10) != nil ||
+		len(e.b.alerts()) != 2 {
+		t.Fatalf("a failure the end superseded: the call %+v, the state %+v, alerts %v", call, e.b.state(10),
+			e.b.alerts())
+	}
+	e.advance(2 * CombineWindow)
+	e.gw.script(forbidden)
+	e.page(t, 1, 10, 2)
+	e.round(t)
+	if st := e.b.state(10); st == nil || st.reason != "POST notifications: 401 Unauthorized" {
+		t.Errorf("a failure after the end: %+v", st)
+	}
+}
+
+// TestProbeSlotsFull is C-30.FR-8 on the sender's waits: while every probe slot holds a probe and more probes are due,
+// a round waits for a lease to end or for a slot, not SenderMinWait, so the sender does not poll; a probe that frees
+// its slot wakes the sender, whose next round claims the probe that waited.
+func TestProbeSlotsFull(t *testing.T) {
+	e := newBrokenSender(t)
+	for id := range int64(ProbeConcurrency + 1) {
+		e.f.mu.Lock()
+		e.f.gateways[100+id] = fakeGateway{publicID: fmt.Sprintf("CN0000000G%04d", id), name: "g", gateway: true}
+		e.f.mu.Unlock()
+		if err := e.s.Broken.Break(t.Context(), brokenGateway{id: 100 + id}, causeFatal, "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block := make(chan struct{})
+	e.prober.during = func() { <-block }
+	e.s.MaxWait = time.Hour
+	e.advance(BrokenProbeInterval)
+	if next := e.senderEnv.round(t); next <= SenderMinWait || next != SenderLease {
+		t.Errorf("with every slot busy the next round is in %v, want the end of a lease, %v", next, SenderLease)
+	}
+	select {
+	case <-e.s.wake:
+		t.Fatal("woken while every slot probes")
+	default:
+	}
+	close(block)
+	e.s.Broken.Wait()
+	select {
+	case <-e.s.wake:
+	default:
+		t.Fatal("a freed slot did not wake the sender")
+	}
+	e.prober.during = nil
+	e.round(t)
+	for id := range int64(ProbeConcurrency + 1) {
+		if e.b.state(100+id) != nil {
+			t.Errorf("gateway %d is still Broken", 100+id)
+		}
+	}
+	if next := e.round(t); next != time.Hour {
+		t.Errorf("without a due probe the next round is in %v", next)
 	}
 }
