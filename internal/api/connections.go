@@ -550,11 +550,37 @@ func (s *Server) bridgeConnectionOf(c connections.Connection) (gen.Connection, e
 	} else {
 		b.InfoReadAt.SetNull()
 	}
+	b.Gateway = gatewayStateOf(c.Gateway)
 	var out gen.Connection
 	if err := out.FromBridgeConnection(b); err != nil {
 		return gen.Connection{}, err
 	}
 	return out, nil
+}
+
+// gatewayStateOf is the state of a Notification gateway in the API form (C-30.FR-8): Broken while it has a broken_since,
+// with its masked reason and next probe; null for a Connection that is no Notification gateway.
+func gatewayStateOf(g *connections.GatewayState) nullable.Nullable[gen.GatewayState] {
+	var out nullable.Nullable[gen.GatewayState]
+	if g == nil {
+		out.SetNull()
+		return out
+	}
+	st := gen.GatewayState{Broken: g.BrokenSince != nil}
+	st.BrokenSince.SetNull()
+	st.Reason.SetNull()
+	st.NextProbeAt.SetNull()
+	if g.BrokenSince != nil {
+		st.BrokenSince.Set(*g.BrokenSince)
+	}
+	if g.Reason != nil {
+		st.Reason.Set(*g.Reason)
+	}
+	if g.NextProbeAt != nil {
+		st.NextProbeAt.Set(*g.NextProbeAt)
+	}
+	out.Set(st)
+	return out
 }
 
 // bridgeInfoOf is a bridge's info as Muster stored it, in the API form: the fields of BridgeInfo; null without one,

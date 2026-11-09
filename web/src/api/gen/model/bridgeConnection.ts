@@ -6,6 +6,7 @@ import type { BridgeConnectionBase } from './bridgeConnectionBase';
 import type { BridgeConnectionType } from './bridgeConnectionType';
 import type { BridgeInfo } from './bridgeInfo';
 import type { BridgeInfoRole } from './bridgeInfoRole';
+import type { GatewayState } from './gatewayState';
 import type { ProxyConfig } from './proxyConfig';
 import type { PublicId } from './publicId';
 import type { SecretStatus } from './secretStatus';
@@ -29,6 +30,8 @@ export type BridgeConnection = BridgeConnectionBase & ({
      * @minItems 1
      */
   readonly roles: readonly BridgeInfoRole[];
+  /** The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken. */
+  readonly gateway: GatewayState | null;
   proxy: ProxyConfig;
   /** A Connection used by Destinations cannot be deleted. */
   destination_count: number;

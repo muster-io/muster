@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterNotificationGatewayBroken fires when a Notification gateway has been Broken for 5 minutes.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a Broken gateway fires after 5 minutes, one in order stays silent
+    interval: 1m
+    input_series:
+      - series: 'muster_notification_gateway_broken{job="muster",instance="10.0.0.1:8082",connection="CN0000000000G1"}'
+        values: '1x10'
+      - series: 'muster_notification_gateway_broken{job="muster",instance="10.0.0.1:8082",connection="CN0000000000G2"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MusterNotificationGatewayBroken
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MusterNotificationGatewayBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              connection: CN0000000000G1
+            exp_annotations:
+              summary: A Notification gateway is Broken
+              description: >-
+                Muster stopped calling through the Notification gateway in the label connection after a Fatal answer or
+                when a call's retry budget ran out, and probes it until it answers; calls due meanwhile were not sent.
+                First read the reason on the Connection page and in the Request log.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken/
+  - name: gateways in order, a gateway that recovered, and another job's Broken one, stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_notification_gateway_broken{job="muster",instance="10.0.0.1:8082",connection="CN0000000000G1"}'
+        values: '0x10'
+      - series: 'muster_notification_gateway_broken{job="muster",instance="10.0.0.1:8082",connection="CN0000000000G2"}'
+        values: '1 1 1 0x7'
+      - series: 'muster_notification_gateway_broken{job="other",instance="10.0.0.9:8082",connection="CN0000000000G1"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MusterNotificationGatewayBroken
+        exp_alerts: []

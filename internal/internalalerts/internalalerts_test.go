@@ -91,9 +91,10 @@ func TestRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(defs) != 6 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost || defs[2] != OIDCSecretExpiring ||
-		defs[3] != ScheduleGap || defs[4] != SnapshotTruncated || defs[5] != TemplateError ||
-		Lookup("MusterScheduleGap") != ScheduleGap ||
+	if len(defs) != 7 || defs[0] != DestinationBroken || defs[1] != HeartbeatLost ||
+		defs[2] != NotificationGatewayBroken || defs[3] != OIDCSecretExpiring || defs[4] != ScheduleGap ||
+		defs[5] != SnapshotTruncated || defs[6] != TemplateError || Lookup("MusterScheduleGap") != ScheduleGap ||
+		Lookup("MusterNotificationGatewayBroken") != NotificationGatewayBroken ||
 		Lookup("MusterSnapshotTruncated") != SnapshotTruncated ||
 		Lookup("MusterHeartbeatLost") != HeartbeatLost || Lookup("MusterDestinationBroken") != DestinationBroken ||
 		Lookup("MusterTemplateError") != TemplateError || Lookup("MusterUnknown") != nil {
@@ -578,8 +579,7 @@ func TestFiring(t *testing.T) {
 
 // TestScheduleGap is C-27.FR-7 and C-25.FR-5 on the registry: MusterScheduleGap is a warning about a Schedule with its
 // Team's id and name, and the Team's slug under the Organization's Team label outside the fingerprint; the labels it
-// sets itself are reserved, the Team label is not, and the reserved list keeps the labels of the later Internal
-// alerts.
+// sets itself are reserved, the Team label is not, and so are those of MusterNotificationGatewayBroken.
 func TestScheduleGap(t *testing.T) {
 	d := ScheduleGap
 	if d.Severity != SeverityWarning || d.Capability != "C-27" || !d.TeamLabel || d.StaticLabels ||
@@ -676,5 +676,43 @@ func TestRaiseWithAnnotations(t *testing.T) {
 	q.fail["ListOpenInternalAlerts"] = errors.New("down")
 	if _, err := r.Open(ctx, q, ScheduleGap); err == nil {
 		t.Error("a failed read was ignored")
+	}
+}
+
+// TestNotificationGatewayBroken is C-30.FR-8 on the registry: MusterNotificationGatewayBroken is critical, about a
+// Connection by its public_id with its name in connection_name, raised by C-30 with its runbook; its fingerprint is
+// that of alertname and the Connection's id alone, so a rename keeps it, and its labels are reserved.
+func TestNotificationGatewayBroken(t *testing.T) {
+	d := NotificationGatewayBroken
+	if d.Severity != SeverityCritical || d.Capability != "C-30" || d.StaticLabels || d.TeamLabel ||
+		!slices.Equal(d.Labels(), []string{"connection", "connection_name"}) ||
+		d.Runbook() != "operations/runbooks/MusterNotificationGatewayBroken/" {
+		t.Errorf("MusterNotificationGatewayBroken = %+v", d)
+	}
+	labels := d.AlertLabels(Entity{ID: "CN0000000000GW", Name: "SMS"}, nil)
+	want := map[string]string{"alertname": "MusterNotificationGatewayBroken", "severity": "critical",
+		"connection": "CN0000000000GW", "connection_name": "SMS"}
+	if !mapsEqual(labels, want) {
+		t.Errorf("labels %v", labels)
+	}
+	renamed := d.AlertLabels(Entity{ID: "CN0000000000GW", Name: "Calls"}, nil)
+	if Fingerprint(d, labels) != Fingerprint(d, renamed) || Fingerprint(d, labels) == Fingerprint(d,
+		d.AlertLabels(Entity{ID: "CN0000000000G2", Name: "SMS"}, nil)) {
+		t.Error("the name reaches the fingerprint, or the id does not")
+	}
+	q := newFake()
+	r := NewRaiser(1, "")
+	if err := r.Raise(t.Context(), q, t0, d, Entity{ID: "CN0000000000GW", Name: "SMS"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	a := q.read(t, 0).Alerts[0]
+	if a.Annotations["summary"] != "Notification gateway SMS is Broken" ||
+		!strings.HasPrefix(a.Annotations["description"], "Muster cannot call or text through the Notification "+
+			"gateway SMS: ") ||
+		a.Annotations["runbook_url"] != DefaultRunbookBase+"/latest/operations/runbooks/MusterNotificationGatewayBroken/" {
+		t.Errorf("alert %+v", a)
+	}
+	if !slices.Contains(ReservedLabels(), "connection_name") {
+		t.Errorf("reserved %v", ReservedLabels())
 	}
 }

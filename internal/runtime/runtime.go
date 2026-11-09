@@ -582,6 +582,9 @@ type process struct {
 	// calls queues the calls through Notification gateways and gatewaySender sends them, on every replica (C-30.FR-4).
 	calls         *gateways.Calls
 	gatewaySender *gateways.Sender
+	// gatewayBroken keeps the Broken state of the Notification gateways: the sender breaks and probes them, a
+	// Connection check ends the state, and the Leader exports its gauge (C-30.FR-8).
+	gatewayBroken *gateways.Broken
 	// mattermost, telegram, bridge and slack are the adapters of the messenger Destinations, which the delivery worker
 	// and the Destination tests share; testPresses connect the bot's press of a Mattermost test message, reported by
 	// the callback of any replica, with the test that waits for it.
@@ -682,6 +685,7 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	p.openUpdates = &groups.UpdateWorker{Log: log}
 	p.deliverer = &delivery.Worker{Log: log}
 	p.gatewaySender = &gateways.Sender{Log: log}
+	p.gatewayBroken = &gateways.Broken{Log: log}
 	if opts.Development {
 		// The development clock comes before anything reads the business clock, the partitions among them. A move
 		// wakes the processing worker, the timer worker, the open Alert Group update worker and the delivery worker,
@@ -1023,12 +1027,24 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	// Connections and Mattermost and Telegram Destinations check their bot on the interactive path, which takes the tokens of the
 	// same limiters as the delivery worker (C-11.FR-2).
 	interactive := &delivery.Interactive{OrgID: orgID, Store: p.db.DeliveryStore(), Clocks: p.clocks}
+	// The Broken state of Notification gateways is kept on their Connections, apart from the Destinations' health; its
+	// lease owner is this replica, known once the worker is configured (C-30.FR-8).
+	p.gatewayBroken.OrgID, p.gatewayBroken.Store = orgID, gateways.NewBrokenStore(p.db.AccountLinksDB())
+	p.gatewayBroken.Lease = db.Lease{Duration: gateways.SenderLease, Clocks: p.clocks}
+	p.gatewayBroken.RunbookBase = p.cfg.RunbookBaseURL.String()
 	connsCfg := connections.Config{OrgID: orgID, Store: p.db.ConnectionsStore(), Keyring: p.keyring,
 		Audit: w, Clocks: p.clocks, Interactive: interactive, IngestURL: p.cfg.IngestURL, Log: p.log,
 		Network: mattermost.Network{Policy: p.policies, Log: p.log, Real: p.clocks.Real, Recorder: p.requestLog},
 		Abandon: func(ctx context.Context, tx connectionsdb.DBTX, id int64) (func(context.Context), error) {
 			return p.delivery.AbandonConnection(ctx, tx, id)
-		}}
+		},
+		Gateways: connections.Gateways{Checked: p.gatewayBroken.EndBroken,
+			Renamed: func(ctx context.Context, tx connectionsdb.DBTX, publicID, name string) error {
+				return p.gatewayBroken.Renamed(ctx, tx, publicID, name)
+			},
+			Deleted: func(ctx context.Context, tx connectionsdb.DBTX, id int64) error {
+				return p.gatewayBroken.Deleted(ctx, tx, id)
+			}}}
 	// Under muster dev a Slack Connection of the fake Slack server's published tokens calls the fake server instead of
 	// Slack (C-01.FR-13), and a Telegram, Mattermost or Bridge Connection on the realistic address of its route with a
 	// fake's published token calls that fake (C-21.FR-10); outside it every request goes where its Connection points.
@@ -1039,6 +1055,7 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	}
 	conns := connections.New(connsCfg)
 	p.connections, p.interactive, p.roles = conns, interactive, roles
+	p.gatewayBroken.Prober = conns
 	// Account links start in the profile and finish through the bots on the interactive path (C-18, ADR-0013,
 	// C-22.FR-15, C-24.FR-12).
 	p.links = accountlinks.New(accountlinks.Config{OrgID: orgID, Store: accountlinks.NewStore(p.db.AccountLinksDB()),
@@ -1298,6 +1315,12 @@ func (p *process) newKeeper() *leader.Keeper {
 		},
 		ScheduleGapScan:   gapScan.Scan,
 		ScheduleGapForget: gapScan.Forget,
+		GatewayBrokenGauge: func(ctx context.Context, orgID int64) error {
+			if orgID != p.orgID {
+				return nil
+			}
+			return p.gatewayBroken.Export(ctx)
+		},
 		PruneAuth: []leader.PruneTable{
 			{Name: "sessions", Delete: authPruner.Sessions},
 			{Name: "sign_in_throttles", Delete: authPruner.SignInThrottles},
@@ -1594,6 +1617,8 @@ func (p *process) configureWorker() {
 	p.gatewaySender.Gateway = p.bridge
 	p.gatewaySender.Keys = p.keyring
 	p.gatewaySender.Pages = p.groups
+	p.gatewayBroken.Lease.Owner = p.replica.ID()
+	p.gatewaySender.Broken = p.gatewayBroken
 	p.timers.Handlers = map[string]timers.Handler{
 		delivery.TimerStormCalmCheck: func(ctx context.Context, tx timersdb.DBTX, org int64, t timers.Timer) (
 			func(context.Context), error) {

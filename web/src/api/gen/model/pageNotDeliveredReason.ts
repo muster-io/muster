@@ -4,7 +4,7 @@
  */
 
 /**
- * Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+ * Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
  * @nullable
  */
 export type PageNotDeliveredReason = typeof PageNotDeliveredReason[keyof typeof PageNotDeliveredReason] | null;
@@ -16,4 +16,5 @@ export const PageNotDeliveredReason = {
   call_budget_used: 'call_budget_used',
   no_confirmed_contact: 'no_confirmed_contact',
   gateway_deleted: 'gateway_deleted',
+  gateway_broken: 'gateway_broken',
 } as const;

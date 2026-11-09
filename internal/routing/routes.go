@@ -459,6 +459,7 @@ type Queries interface {
 	ListAlertingIntegrations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingIntegrationsRow, error)
 	ListAlertingDestinations(ctx context.Context, orgID int64) ([]dbgen.ListAlertingDestinationsRow, error)
 	ListAlertingSchedules(ctx context.Context, orgID int64) ([]dbgen.ListAlertingSchedulesRow, error)
+	ListAlertingGateways(ctx context.Context, orgID int64) ([]dbgen.ListAlertingGatewaysRow, error)
 	HasOpenAlertGroups(ctx context.Context, arg dbgen.HasOpenAlertGroupsParams) (bool, error)
 	InsertOpenGroupUpdate(ctx context.Context, arg dbgen.InsertOpenGroupUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error

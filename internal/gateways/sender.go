@@ -101,7 +101,10 @@ type Sender struct {
 	// Keys sign the action data of calls with the button-signature key: the Keyring.
 	Keys  buttons.Keys
 	Pages PageRecorder
-	Log   *logging.Logger
+	// Broken keeps the Broken state of the gateways (broken.go): a Fatal answer or a used budget makes a gateway
+	// Broken, and each round probes the Broken gateways that are due; nil leaves the state alone.
+	Broken *Broken
+	Log    *logging.Logger
 	// Random is uniform in [0, 1) and jitters delivery.transient_backoff; nil is math/rand/v2.
 	Random func() float64
 	// MaxWait bounds the wait between rounds, and Batch the calls one claim takes; zero is the default.
@@ -185,8 +188,9 @@ func (s *Sender) limiter() Limiter {
 	return s.Limiter
 }
 
-// Round attempts every due call, Batch at a time, and returns how long until the next one can be claimed, at most
-// MaxWait. A call that fails is logged and attempted again once its lease runs out; the round goes on.
+// Round attempts every due call, Batch at a time, then probes the Broken gateways that are due, and returns how long
+// until the next call or probe can be claimed, at most MaxWait. A call that fails is logged and attempted again once
+// its lease runs out; the round goes on.
 func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 	for {
 		// One statement, which commits alone: it selects the due calls SKIP LOCKED and leases them.
@@ -215,12 +219,24 @@ func (s *Sender) Round(ctx context.Context) (time.Duration, error) {
 			break
 		}
 	}
+	d := s.maxWait()
+	if s.Broken != nil {
+		if err := s.Broken.Probe(ctx); err != nil {
+			return 0, err
+		}
+		next, ok, err := s.Broken.Next(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			d = min(d, next)
+		}
+	}
 	realNow := s.Lease.Clocks.Real.Now().UTC()
 	r, err := s.Store.NextCallWork(ctx, dbgen.NextCallWorkParams{OrgID: s.OrgID, Now: realNow})
 	if err != nil {
 		return 0, fmt.Errorf("read when the next call is due: %w", err)
 	}
-	d := s.maxWait()
 	if r.FreeAt.Year() > 1 {
 		d = min(d, r.FreeAt.Sub(s.Lease.Clocks.Business.Now()))
 	}
@@ -284,8 +300,9 @@ func (l logs) run(ctx context.Context) {
 // text in the language of their profile and the Alert Groups, and takes no more. A call being retried whose Alert
 // Groups all stopped ends dropped. Without a limiter token of the gateway's Connection the call waits until one is due
 // plus SenderTokenMargin, which is no attempt. A call through a gateway deleted meanwhile, or that is no Notification
-// gateway any more, is returned to end Not delivered with gateway_deleted (C-30.FR-9), and one to a person without a
-// confirmed contact with no_confirmed_contact. Nothing is returned when the lease ran out or the call ended.
+// gateway any more, is returned to end Not delivered with gateway_deleted (C-30.FR-9), one through a Broken gateway
+// with gateway_broken (C-30.FR-8), and one to a person without a confirmed contact with no_confirmed_contact. Nothing
+// is returned when the lease ran out or the call ended.
 func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, logs, error) {
 	var c *call
 	var after logs
@@ -361,8 +378,12 @@ func (s *Sender) prepare(ctx context.Context, r dbgen.ClaimDueCallsRow) (*call, 
 			next.language = language(row.UserLanguage)
 			next.text = callText(next.language, live)
 		}
-		if !row.Gateway {
+		switch {
+		case !row.Gateway:
 			next.unsent = groups.PageGatewayDeleted
+		case row.GatewayBroken:
+			// Never sent, also after the gateway recovers (C-30.FR-8, P-68).
+			next.unsent = groups.PageGatewayBroken
 		}
 		if next.unsent == "" {
 			ok, due, err := s.limiter().ConnectionToken(ctx, tx, s.OrgID, row.ConnectionID, now)
@@ -490,9 +511,12 @@ func callOutcome(k delivery.OutcomeKind) string {
 // accepted; a RetryAfter waits exactly as asked, holds the gateway's limiter and counts no attempt, but its time counts
 // toward the time budget of delivery.transient_budget, after which it ends Not delivered with call_budget_used; a
 // Transient one is an attempt of delivery.transient_budget, retried after delivery.transient_backoff and Not delivered
-// with call_budget_used once the budget is used; a Fatal answer — the gateway refused the call or its bridge, until
-// S-149 makes the gateway Broken — and an invalid one end it Not delivered with call_refused; any other answer ends it
-// Not delivered with call_unknown.
+// with call_budget_used once the budget is used; a Fatal answer — the gateway refused the call or its bridge — and an
+// invalid one end it Not delivered with call_refused; any other answer ends it Not delivered with call_unknown. A Fatal
+// outcome, an address the outbound policy blocks included, and a call that used up the budget, then make the gateway
+// Broken (C-30.FR-8), as any Fatal outcome makes a Destination Broken; Muster's own refusals that never reached the
+// gateway — its Connection is gone, or its info no longer declares the role gateway — and an invalid answer, which is
+// about the call, do not.
 func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) error {
 	now := s.Lease.Clocks.Business.Now().UTC()
 	switch out.Kind {
@@ -509,7 +533,7 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 		// A wait counts no attempt, but its time counts toward the time budget of delivery.transient_budget: a gateway
 		// that keeps asking to wait ends the call Not delivered, and the Pages waiting behind it go.
 		if f := c.row.FirstFailedAt; f.Valid && now.Sub(f.Time) > delivery.TransientBudgetTime {
-			return s.notDelivered(ctx, c, groups.PageCallBudgetUsed, 0, out)
+			return s.breakAfter(ctx, c, causeUnavailable, out, s.notDelivered(ctx, c, groups.PageCallBudgetUsed, 0, out))
 		}
 		until := now.Add(out.RetryAfter)
 		return s.Store.InCallTx(ctx, func(tx DBTX, q CallQueries) error {
@@ -528,7 +552,7 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 			first = pgtype.Timestamptz{Time: now, Valid: true}
 		}
 		if delivery.TransientExhausted(attempts, first, now) {
-			return s.notDelivered(ctx, c, groups.PageCallBudgetUsed, 1, out)
+			return s.breakAfter(ctx, c, causeUnavailable, out, s.notDelivered(ctx, c, groups.PageCallBudgetUsed, 1, out))
 		}
 		_, err := s.Store.RecordCallRetry(ctx, dbgen.RecordCallRetryParams{OrgID: s.OrgID, ID: c.row.ID,
 			Owner: s.Lease.Owner, At: now.Add(delivery.TransientBackoff(attempts, s.Random)), Now: now,
@@ -538,7 +562,7 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 		}
 		return nil
 	case delivery.OutcomeFatal:
-		return s.notDelivered(ctx, c, groups.PageCallRefused, 1, out)
+		return s.breakAfter(ctx, c, causeFatal, out, s.notDelivered(ctx, c, groups.PageCallRefused, 1, out))
 	case delivery.OutcomeUnknown:
 		if out.Status >= http.StatusBadRequest && out.Status < http.StatusInternalServerError && !out.Unanswered {
 			return s.notDelivered(ctx, c, groups.PageCallRefused, 1, out)
@@ -547,6 +571,28 @@ func (s *Sender) record(ctx context.Context, c *call, out delivery.Outcome) erro
 		delivery.OutcomeTemplateError, delivery.OutcomeEditWindowClosed:
 	}
 	return s.notDelivered(ctx, c, groups.PageCallUnknown, 1, out)
+}
+
+// breakAfter makes the gateway of the call c Broken with cause and the error of out, once the end of c, which ended
+// with err, was recorded; with an error, or without Broken, it returns err. The Fatal outcomes of Notify that never
+// reached the gateway say nothing about it and break nothing.
+func (s *Sender) breakAfter(ctx context.Context, c *call, cause string, out delivery.Outcome, err error) error {
+	if err != nil || s.Broken == nil || (cause == causeFatal && notReached(out)) {
+		return err
+	}
+	reason := reasonOf(out)
+	if cause == causeUnavailable {
+		reason = repeatedPrefix + reason
+	}
+	return s.Broken.Break(ctx, brokenGateway{id: c.row.ConnectionID, publicID: c.row.ConnectionPublicID}, cause, reason)
+}
+
+// notReached reports whether out is a Fatal outcome that the bridge adapter's Notify makes without a request: the
+// Connection of the gateway is gone (bridge.ErrNoTarget), or its info no longer declares the role gateway
+// (bridge.MessageNotGateway). A blocked address, or any answer, reached the policy or the gateway and is not one.
+func notReached(out delivery.Outcome) bool {
+	return out.Status == 0 && (out.Error == outbound.Untrusted(bridge.ErrNoTarget.Error()) ||
+		out.Error == bridge.MessageNotGateway)
 }
 
 // notDelivered ends the call c Not delivered with reason, counting attempted attempts, and records page_not_delivered

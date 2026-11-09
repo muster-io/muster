@@ -40,6 +40,9 @@ type fakeCalls struct {
 	locks    []string
 	notified int
 	nextID   int64
+	// broken is the Broken state of the gateways by id, and recovered when their last one ended (broken_test.go).
+	broken    map[int64]*fakeBroken
+	recovered map[int64]time.Time
 }
 
 type fakeCall struct {
@@ -336,7 +339,8 @@ func (f *fakeCalls) GetLeasedCall(_ context.Context, a dbgen.GetLeasedCallParams
 		State: c.state, Critical: c.critical, Language: c.language, Text: c.text, Attempts: c.attempts,
 		FirstFailedAt: c.firstFailed, ActionData: c.actionData, ConnectionPublicID: gw.publicID,
 		ConnectionName: gw.name, UserPublicID: u.publicID, UserName: u.name, UserLogin: u.login,
-		UserLanguage: u.language, Gateway: gw.gateway}
+		UserLanguage: u.language, Gateway: gw.gateway, GatewayBroken: f.broken[c.conn] != nil ||
+			(c.nextAttempt.Valid && c.nextAttempt.Time.Before(f.recovered[c.conn]))}
 	for _, k := range f.contacts {
 		if c.contactID.Valid && k.ID == c.contactID.Int64 {
 			row.Contact = pgtype.Text{String: k.Contact, Valid: true}

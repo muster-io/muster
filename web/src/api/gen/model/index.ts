@@ -175,6 +175,7 @@ export * from './gatewayContactConfirm';
 export * from './gatewayContactInput';
 export * from './gatewayContactList';
 export * from './gatewayRefusedResponse';
+export * from './gatewayState';
 export * from './getAlertGroupCountsParams';
 export * from './getAlertGroupStatisticsGroupBy';
 export * from './getAlertGroupStatisticsParams';

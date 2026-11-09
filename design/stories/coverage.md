@@ -1017,7 +1017,7 @@ S-150, S-154, S-172
 | C-27.FR-4 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-5 | S-131 (part), S-135 (part) | complete |  |
 | C-27.FR-6 | S-131 (part), S-135 (part) | complete |  |
-| C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 until the test environment; P-88 with S-149 |
+| C-27.FR-7 | S-133 (part), S-135 (part) | complete | P-80 until the test environment; P-88 until the maintainer confirms it |
 | C-27.FR-8 | S-132 (part), S-164 (part), S-135 (part), S-136 (part), S-150 (part), S-172 (part) | complete | the Destinations of the Team (S-164); whether a gateway call still reaches the person, in the API and on the pages (S-150); the Destinations of the chains that Page the Schedule (S-172) |
 | C-27.FR-9 | S-133 (part), S-164 (part), S-136 (part) | complete |  |
 | C-27.FR-10 | S-134 (part), S-136 (part) | complete | P-82 confirmed with S-134; P-81 stays provisional |
@@ -1102,7 +1102,7 @@ S-148, S-173, S-149, S-150, S-151, S-153, S-154, S-157, S-158
 | C-30.FR-5 | S-145 (part), S-148 (part) | complete |  |
 | C-30.FR-6 | S-173 | complete |  |
 | C-30.FR-7 | S-148 (part), S-157 (part) | complete |  |
-| C-30.FR-8 | S-149 (part), S-150 (part) | complete | P-88 confirmed with S-149, for the chart rules of C-27 and C-30 |
+| C-30.FR-8 | S-149 (part), S-150 (part) | complete | P-88, for the chart rules of C-27 and C-30, until the maintainer confirms it |
 | C-30.FR-9 | S-167 (part), S-150 (part), S-153 (part), S-154 (part), S-157 (part), S-158 (part) | complete | the profile (S-150), the rules (S-153), the steps (S-154, S-157) and the chain form (S-158) |
 | C-30.FR-10 | S-145 (part), S-167 (part), S-148 (part), S-173 (part) | complete |  |
 | C-30.FR-11 | S-151 | complete | until S-160 settles the push of Mentions, the page says that at night only a Notification gateway is reliable |

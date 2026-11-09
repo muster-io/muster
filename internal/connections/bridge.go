@@ -362,7 +362,33 @@ func (s *Service) checkBridge(ctx context.Context, row dbgen.GetConnectionRow, b
 	if stored != nil {
 		return CheckResult{}, stored
 	}
+	// The step info read the bridge as a probe of a Broken Notification gateway does: its success ends the state
+	// (C-30.FR-8), whatever the step event_delivery says.
+	if r.OK() && row.GatewayBrokenSince.Valid && s.cfg.Gateways.Checked != nil {
+		if err := s.cfg.Gateways.Checked(ctx, row.ID); err != nil {
+			return CheckResult{}, err
+		}
+	}
 	return bridgeResult(info, r, latency, c.Via(), row.BridgeEventDelivery.String), nil
+}
+
+// ProbeGateway is the probe of the Broken Notification gateway connectionID (gateways.Prober, C-30.FR-8): getInfo read
+// afresh through its client in the delivery client class, stored as a check's read is; its outcome is classified as a
+// delivery's. An id that names no Bridge Connection that is not deleted is Fatal, a failed read of it Transient, as a
+// failed store of the info.
+func (s *Service) ProbeGateway(ctx context.Context, connectionID int64) delivery.Outcome {
+	conn, err := s.BridgeConnection(ctx, connectionID)
+	switch {
+	case errors.Is(err, bridge.ErrNoTarget):
+		return delivery.Outcome{Kind: delivery.OutcomeFatal, Error: outbound.Untrusted(bridge.ErrNoTarget.Error())}
+	case err != nil:
+		return delivery.Outcome{Kind: delivery.OutcomeTransient, Error: "the connection of the gateway could not be read"}
+	}
+	_, r, stored := s.info.Refresh(ctx, conn, outbound.ClassDelivery)
+	if stored != nil {
+		return delivery.Outcome{Kind: delivery.OutcomeTransient, Error: "the info of the gateway could not be stored"}
+	}
+	return r.Outcome()
 }
 
 // bridgeResult is the result of the check of a Bridge Connection in the event delivery mode mode from its step info —

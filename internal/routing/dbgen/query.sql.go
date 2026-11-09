@@ -752,6 +752,40 @@ func (q *Queries) ListAlertingDestinations(ctx context.Context, orgID int64) ([]
 	return items, nil
 }
 
+const listAlertingGateways = `-- name: ListAlertingGateways :many
+SELECT public_id, name
+FROM connections
+WHERE org_id = $1 AND type = 'bridge' AND deleted_at IS NULL AND bridge_info->'roles' @> '["gateway"]'::jsonb
+ORDER BY id
+`
+
+type ListAlertingGatewaysRow struct {
+	PublicID string
+	Name     string
+}
+
+// ListAlertingGateways lists the Notification gateways — the Bridge Connections that are not deleted whose stored info
+// declares the role gateway — with what MusterNotificationGatewayBroken carries of them: the public_id and the name.
+func (q *Queries) ListAlertingGateways(ctx context.Context, orgID int64) ([]ListAlertingGatewaysRow, error) {
+	rows, err := q.db.Query(ctx, listAlertingGateways, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlertingGatewaysRow{}
+	for rows.Next() {
+		var i ListAlertingGatewaysRow
+		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAlertingIntegrations = `-- name: ListAlertingIntegrations :many
 SELECT public_id, name, static_labels
 FROM integrations

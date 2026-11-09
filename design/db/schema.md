@@ -519,6 +519,8 @@ erDiagram
         bytea slack_signing_secret_ciphertext "Secret"
         text slack_team_id
         jsonb proxy
+        timestamptz gateway_broken_since "a Broken Notification gateway"
+        timestamptz gateway_next_probe_at
     }
     destinations {
         bigint id PK
@@ -865,6 +867,24 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   those the Leader holds — written by the Leader from S-101 for the version its socket read, not a change of the
   configuration; a save that changes the Connection forgets both, since its socket starts again and counts at its next
   `hello`; a save without changes writes nothing and keeps them.
+  **Broken Notification gateway** (migration 0036, C-30.FR-8): a Bridge Connection that is a Notification gateway
+  ([4.17](#417-notification-gateways)) is Broken while `gateway_broken_since` is set, with `gateway_broken_reason`
+  (the masked error of the call that made it Broken or of its last probe) and `gateway_next_probe_at`, when any
+  replica probes it through `info` again; `connections_gateway_broken_check` keeps the three set or null together.
+  Its probe is leased by `gateway_probe_lease_owner` and `gateway_probe_lease_until`
+  (`connections_gateway_probe_lease_check`: both or neither), claimed like a call ([5](#5-queues-and-claims)) through
+  the partial index `connections_gateway_probe_idx` on `(org_id, gateway_next_probe_at) WHERE gateway_broken_since IS
+  NOT NULL`. `gateway_recovered_at` is when its last Broken state ended, kept after the state's other columns are
+  cleared: a call whose due time (`gateway_calls.next_attempt_at`) lies before it came due while the gateway was Broken
+  and ends `not_delivered` with `gateway_broken` too, also when a replica claimed it before another ended the state
+  (P-68). The comparison holds within the clock skew of the replicas: a Page made on a replica whose clock is behind by
+  δ, within δ after the end, may get a due time before it and end so too. This is accepted without a margin, as NTP
+  keeps δ to milliseconds and `MusterClockSkew` fires above 2 s. `gateway_broken_since`, `gateway_next_probe_at` and `gateway_recovered_at` are on the business clock, the
+  lease on the real clock. The state
+  is kept apart from the health of the Connection's Destinations: only the gateway sender's calls set it, and a
+  successful probe, a successful check of the Connection or its deletion clears it. It is not a change of the
+  configuration: it does not bump `version` and writes no Audit log entry. These columns are written only by
+  `gateways`.
   `UNIQUE (id, type)` is the target of type-checked foreign keys. A Connection cannot be deleted while a Destination
   that is not deleted uses it; deleting it abandons the final edits still pending for its deleted Destinations, whose
   deliveries end as `not_delivered`.
@@ -1662,6 +1682,9 @@ stored `info` declares the role `gateway`; it has no table of its own.
   already, is deleted once it has no item left, its Alert Groups deleted by the Alert Group retention
   ([6](#6-partitions-and-retention)), as its text names them; `gateway_calls_ended_idx` on `(org_id, id) WHERE state IN
   ('accepted', 'not_delivered', 'dropped')` serves that batch. Written only by `gateways`.
+- A Notification gateway is **Broken** (migration 0036, C-30.FR-8) while its Connection has `gateway_broken_since`
+  ([4.5](#45-connections-destinations-and-account-links)); a call that comes due then ends `not_delivered` with the
+  reason `gateway_broken`, unsent.
 - **`gateway_call_items`** (migration 0034) — the Alert Groups of a call, primary key `(call_id, alert_group_id)`, with
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`
@@ -1735,7 +1758,11 @@ SELECT e.id FROM webhook_events e
 **Timers**:
 `SELECT id FROM timers WHERE org_id = $1 AND deadline <= $business_now AND (lease_until IS NULL OR lease_until <= $real_now) ORDER BY deadline LIMIT $n FOR UPDATE SKIP LOCKED`.
 **Broken probes**: the same claim over `destinations WHERE org_id = $1 AND health = 'broken' AND next_probe_at <= $business_now`,
-bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **OIDC re-checks**: the timer claim over
+bumping `next_probe_at` by `delivery.broken_probe_interval` as the lease. **Probes of Broken Notification gateways**
+(C-30.FR-8): the gateway sender of every replica claims `connections WHERE org_id = $1 AND gateway_broken_since IS NOT
+NULL AND deleted_at IS NULL AND gateway_next_probe_at <= $business_now` whose `gateway_probe_lease_until` is free or ran
+out at `$real_now`, `FOR NO KEY UPDATE SKIP LOCKED`, setting the lease and bumping `gateway_next_probe_at` by
+`delivery.broken_probe_interval`; the outcome of its `getInfo` is recorded only while the lease is held. **OIDC re-checks**: the timer claim over
 `oidc_checks`, also with `org_id = $1`. All of these were checked to use their indexes (section 8).
 
 **Open Alert Group updates** (C-26.FR-9): a change of configuration that must reach the open Alert Groups of its scope

@@ -552,3 +552,14 @@ var GatewayCalls = newCounter(Definition{
 	},
 	Capability: "C-30",
 })
+
+// NotificationGatewayBroken is 1 while a Notification gateway is Broken and 0 while it is in order, exported by the
+// Leader (C-30.FR-8).
+var NotificationGatewayBroken = newGauge(Definition{
+	Name: "muster_notification_gateway_broken",
+	Help: "1 while the Notification gateway is Broken, 0 while it is in order, per gateway's Connection that is not " +
+		"deleted; set by the Leader.",
+	Labels:     []Label{entity("connection")},
+	Capability: "C-30",
+	LeaderOnly: true,
+})

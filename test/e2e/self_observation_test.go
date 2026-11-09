@@ -329,7 +329,7 @@ var metricLabelRe = regexp.MustCompile(`([a-z_]+)="`)
 
 // allowedMetricLabels is the label policy of C-19.AC-3: the entity ids, the closed sets, the name of the *_info
 // gauges, the version and commit of the build and le.
-var allowedMetricLabels = []string{"integration", "route", "destination", "client", "outcome", "state",
+var allowedMetricLabels = []string{"integration", "route", "destination", "connection", "client", "outcome", "state",
 	"route_pattern", "method", "code", "kind", "reason", "status", "by", "command", "transport", "template", "table",
 	"direction", "name", "version", "commit", "le"}
 

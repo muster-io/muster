@@ -156,12 +156,17 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
       signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
       image without it, writes neither column and signs each attempt of a call with the active key, as before.
+    - Migration 0036 adds the [Broken state of Notification gateways](../operations/runbooks/MusterNotificationGatewayBroken.md)
+      to the Connections; no data is migrated, and no gateway starts Broken. It is expand only: a 0.1 replica, or one of
+      a development image without it, writes none of the new columns; one of such an image sends the calls of a Broken
+      gateway, which then fail and end Not delivered as before.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
-    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule` —
-    so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team; without
-    them, the gaps of every Schedule share one Alert Group, which collects the Teams of all of them. When the Routes
+    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule`, then
+    `connection` — so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team,
+    and each Broken Notification gateway one of its own; without them, the gaps of every Schedule share one Alert
+    Group, which collects the Teams of all of them, and so do the Broken gateways. When the Routes
     can deliver to the Teams of their Alert Groups, the suggestion turns that on too, so that each gap reaches its own
     Team; turn it on for a Route accepted before.
 
@@ -517,6 +522,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 34, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0036 adds the Broken state of Notification gateways to the Connections in one transaction: a failure
+    leaves nothing of it, but the schema recorded as dirty at version 36. To recover, with the same database role as
+    Muster, run `UPDATE schema_migrations SET version = 35, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0036 forgets which gateways are Broken, and an open
+    `MusterNotificationGatewayBroken` then stays open.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

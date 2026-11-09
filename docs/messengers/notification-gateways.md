@@ -125,17 +125,25 @@ on its internal listener.
 - A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
   more.", and always ends with how to acknowledge.
 - A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
-  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`) and one through a gateway
-  deleted before the call went (`gateway_deleted`). Each of its Alert Groups records
+  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`), one through a gateway
+  deleted before the call went (`gateway_deleted`) and one that comes due while the gateway is Broken
+  (`gateway_broken`). Each of its Alert Groups records
   `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
   reason; outgoing webhooks in events mode receive it.
+- A gateway that answers a call with a Fatal error — it, or its provider, refuses the token or the credentials — or
+  whose call used up its retry budget becomes **Broken**: the calls that come due while it is Broken are not sent, not
+  even after it recovers, and `MusterNotificationGatewayBroken` is raised. Muster reads its `info` every 5 minutes
+  (`delivery.broken_probe_interval`), and the first success, or a check of the Connection whose step `info` passes,
+  ends the state. The Destinations of the same bridge are not affected. See the
+  [runbook](../operations/runbooks/MusterNotificationGatewayBroken.md).
 
 The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
 Alert Group it is about is removed by `retention.alert_group_summaries`.
 
-`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
-`gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
-`gateway_call_failed`, none with the contact or the text.
+`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, `muster_notification_gateway_broken`
+is 1 while a gateway is Broken, and the log has the events `gateway_call_queued`, `gateway_call_attempted`,
+`gateway_call_not_delivered`, `gateway_call_dropped`, `gateway_call_failed`, `gateway_broken` and
+`gateway_recovered`, none with the contact or the text.
 
 ## Acknowledge from a call
 

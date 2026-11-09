@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/fakes/fakebridge"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
@@ -1555,5 +1557,176 @@ func TestCheckDemoGateway(t *testing.T) {
 	e.store.fail["FindConnectionByName"] = errors.New("down")
 	if err := e.svc.CheckDemo(ctx, d.Name); err == nil {
 		t.Error("a failed lookup")
+	}
+}
+
+// brokenAt makes the Bridge Connection id a Broken Notification gateway in the store, as the gateway sender does.
+func (e *env) brokenAt(id int64, since time.Time, reason string) {
+	r := e.store.rows[id]
+	r.row.GatewayBrokenSince = pgtype.Timestamptz{Time: since, Valid: true}
+	r.row.GatewayBrokenReason = pgtype.Text{String: reason, Valid: true}
+	r.row.GatewayNextProbeAt = pgtype.Timestamptz{Time: since.Add(5 * time.Minute), Valid: true}
+}
+
+// TestGatewayState is C-30.FR-8 on the read of a Connection: a Bridge Connection whose stored info declares the role
+// gateway has a Gateway state, in order or Broken with its reason and next probe; a Broken Bridge Connection whose
+// info no longer declares the role keeps it; a messenger bridge in order and a Mattermost Connection have none.
+func TestGatewayState(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
+	br := e.createFakeBridge(t, f, "br", fakebridge.Token, connections.EventDeliveryPoll)
+	mm := e.create(t, "mm")
+	for _, c := range []connections.Connection{gw, br} {
+		if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || !res.OK {
+			t.Fatalf("check %s = %+v, %v", c.Name, res, err)
+		}
+	}
+	read := func(c connections.Connection) *connections.GatewayState {
+		t.Helper()
+		got, err := e.svc.Get(ctx, c.PublicID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Gateway
+	}
+	if g := read(gw); g == nil || g.BrokenSince != nil || g.Reason != nil || g.NextProbeAt != nil {
+		t.Errorf("a gateway in order %+v", g)
+	}
+	if read(br) != nil || read(mm) != nil {
+		t.Errorf("a messenger bridge %+v, Mattermost %+v", read(br), read(mm))
+	}
+	e.brokenAt(gw.ID, t0, "401 Unauthorized")
+	e.brokenAt(br.ID, t0, "forbidden")
+	if g := read(gw); g == nil || !g.BrokenSince.Equal(t0) || *g.Reason != "401 Unauthorized" ||
+		!g.NextProbeAt.Equal(t0.Add(5*time.Minute)) {
+		t.Errorf("a Broken gateway %+v", g)
+	}
+	if g := read(br); g == nil || g.BrokenSince == nil {
+		t.Errorf("a Broken bridge without the role %+v", g)
+	}
+	page, err := e.svc.List(ctx, connections.ListFilter{Limit: 10})
+	if err != nil || len(page.Connections) != 3 || page.Connections[0].Gateway == nil ||
+		page.Connections[0].Gateway.BrokenSince == nil {
+		t.Errorf("listed %+v, %v", page, err)
+	}
+}
+
+// TestCheckEndsGatewayBroken is C-30.FR-8 on the Connection check: a check of a Broken Notification gateway whose step
+// info passes ends the Broken state through internal/gateways, also when its step event_delivery fails; a check whose
+// info fails, and a check of a gateway in order, leave it; a failed end is the check's error.
+func TestCheckEndsGatewayBroken(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	c := e.createBridge(t, "gw", b.srv.URL, connections.EventDeliveryPoll)
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || len(e.gateways) != 0 {
+		t.Fatalf("a gateway in order: %v %v", e.gateways, err)
+	}
+	e.brokenAt(c.ID, t0, "401")
+	b.set(func(b *standIn) { b.status = http.StatusUnauthorized })
+	if res, err := e.svc.Check(ctx, c.PublicID, nil); err != nil || res.OK || len(e.gateways) != 0 {
+		t.Fatalf("a failed check %+v, %v, %v", res, err, e.gateways)
+	}
+	b.set(func(b *standIn) {
+		b.mutate = func(m map[string]any) { m["event_delivery"] = []string{"push"} }
+	})
+	res, err := e.svc.Check(ctx, c.PublicID, nil)
+	if err != nil || res.OK || !res.Steps[0].OK || !slices.Equal(e.gateways, []string{fmt.Sprintf("checked %d",
+		c.ID)}) {
+		t.Fatalf("a check whose info passes %+v, %v, %v", res, err, e.gateways)
+	}
+	b.set(func(*standIn) {})
+	e.gatewayE = errors.New("down")
+	if _, err := e.svc.Check(ctx, c.PublicID, nil); !errors.Is(err, e.gatewayE) {
+		t.Errorf("a failed end = %v", err)
+	}
+}
+
+// TestProbeGateway is the probe of a Broken Notification gateway (C-30.FR-8): getInfo read afresh in the delivery
+// client class and stored, ok when the bridge answers; a refused token is Fatal; a Connection that is not a Bridge
+// Connection is Fatal, a failed read of it or of the store Transient.
+func TestProbeGateway(t *testing.T) {
+	e := newEnv(t)
+	f := startFakeBridge(t)
+	ctx := t.Context()
+	gw := e.createFakeBridge(t, f, "gw", fakebridge.GatewayToken, connections.EventDeliveryPoll)
+	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeOK {
+		t.Fatalf("the probe %+v", out)
+	}
+	if reqs := f.Requests(); len(reqs) != 1 || reqs[0].Path != "/v1/info" {
+		t.Errorf("requests %+v", reqs)
+	}
+	if got, _ := e.svc.Get(ctx, gw.PublicID); !slices.Equal(got.BridgeRoles(), []string{bridge.RoleGateway}) ||
+		len(e.store.infos) != 1 {
+		t.Errorf("the info was not stored: %+v", got)
+	}
+	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeOK || len(f.Requests()) != 2 {
+		t.Errorf("a second probe read the copy: %+v, %d requests", out, len(f.Requests()))
+	}
+	if err := f.SetFault(fakeserver.Fault{Path: "/v1/info", Status: http.StatusUnauthorized}); err != nil {
+		t.Fatal(err)
+	}
+	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeFatal || out.Status != 401 {
+		t.Errorf("a refused token %+v", out)
+	}
+	f.ResetFaults()
+	mm := e.create(t, "mm")
+	if out := e.svc.ProbeGateway(ctx, mm.ID); out.Kind != delivery.OutcomeFatal {
+		t.Errorf("a Mattermost Connection %+v", out)
+	}
+	e.store.fail["SetBridgeInfo"] = errors.New("down")
+	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeTransient {
+		t.Errorf("a failed store %+v", out)
+	}
+	delete(e.store.fail, "SetBridgeInfo")
+	e.store.fail["GetConnection"] = errors.New("down")
+	if out := e.svc.ProbeGateway(ctx, gw.ID); out.Kind != delivery.OutcomeTransient {
+		t.Errorf("a failed read %+v", out)
+	}
+}
+
+// TestBrokenGatewayRenamedAndDeleted is C-30.FR-8 on the changes of a Broken Notification gateway's Connection: a
+// rename raises its Internal alert again with the new name, and a deletion ends the state, both through
+// internal/gateways in the transaction of the change; a gateway in order, and a save without a new name, call neither;
+// a failed hook fails the change.
+func TestBrokenGatewayRenamedAndDeleted(t *testing.T) {
+	e, b := newBridgeEnv(t)
+	ctx := t.Context()
+	c := e.createBridge(t, "gw", b.srv.URL, connections.EventDeliveryPoll)
+	in := bridgeInput("gw", b.srv.URL, connections.EventDeliveryPoll)
+	in.BotToken = keyring.SecretInput{}
+	in.Name = "Voice"
+	c, err := e.svc.Update(ctx, by, c.PublicID, &c.Version, in)
+	if err != nil || len(e.gateways) != 0 {
+		t.Fatalf("a rename in order: %v %v", e.gateways, err)
+	}
+	e.brokenAt(c.ID, t0, "401")
+	in.Name = "Calls"
+	if c, err = e.svc.Update(ctx, by, c.PublicID, &c.Version, in); err != nil ||
+		!slices.Equal(e.gateways, []string{"renamed " + c.PublicID + " Calls true"}) {
+		t.Fatalf("a rename of a Broken gateway: %v %v", e.gateways, err)
+	}
+	in.Limiter.Limit++
+	if c, err = e.svc.Update(ctx, by, c.PublicID, &c.Version, in); err != nil || len(e.gateways) != 1 {
+		t.Fatalf("a save without a new name: %v %v", e.gateways, err)
+	}
+	e.gatewayE = errors.New("down")
+	in.Name = "Again"
+	if _, err := e.svc.Update(ctx, by, c.PublicID, &c.Version, in); !errors.Is(err, e.gatewayE) {
+		t.Errorf("a failed rename = %v", err)
+	}
+	if err := e.svc.Delete(ctx, by, c.PublicID, nil); !errors.Is(err, e.gatewayE) || e.store.rows[c.ID].deleted {
+		t.Errorf("a failed deletion = %v", err)
+	}
+	e.gatewayE = nil
+	if err := e.svc.Delete(ctx, by, c.PublicID, nil); err != nil ||
+		e.gateways[len(e.gateways)-1] != fmt.Sprintf("deleted %d true", c.ID) {
+		t.Errorf("the deletion %v %v", e.gateways, err)
+	}
+	other := e.createBridge(t, "other", b.srv.URL, connections.EventDeliveryPoll)
+	n := len(e.gateways)
+	if err := e.svc.Delete(ctx, by, other.PublicID, nil); err != nil || len(e.gateways) != n {
+		t.Errorf("the deletion of a gateway in order %v %v", e.gateways, err)
 	}
 }

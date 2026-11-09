@@ -208,3 +208,17 @@ groups:
             On-call, then fill the gap with an Override or a change of its Rotation layers.
           runbook_url: {{ $runbooks }}/MusterScheduleGap/
 {{- end }}{{ end }}
+{{- with $r.MusterNotificationGatewayBroken }}{{ if .enabled }}
+      - alert: MusterNotificationGatewayBroken
+        expr: max by (connection) (muster_notification_gateway_broken{ {{- $j }}}) == 1
+        for: {{ .for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: A Notification gateway is Broken
+          description: >-
+            Muster stopped calling through the Notification gateway in the label connection after a Fatal answer or
+            when a call's retry budget ran out, and probes it until it answers; calls due meanwhile were not sent.
+            First read the reason on the Connection page and in the Request log.
+          runbook_url: {{ $runbooks }}/MusterNotificationGatewayBroken/
+{{- end }}{{ end }}

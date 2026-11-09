@@ -139,8 +139,8 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `delivery.interactive_budget` | 5 s | built in | C-11 | decided |
 | `delivery.transient_backoff` | exponential with jitter, from 2 s up to 5 min | built in | C-11 | decided |
-| `delivery.transient_budget` | 10 attempts within 30 min; then the Destination is Broken | built in | C-11 | decided |
-| `delivery.broken_probe_interval` | 5 min; the probe is the oldest waiting delivery, or the Destination check when nothing waits | built in | C-11 | decided |
+| `delivery.transient_budget` | 10 attempts within 30 min; then the Destination is Broken, or for a call the Notification gateway (C-30.FR-8) | built in | C-11 | decided |
+| `delivery.broken_probe_interval` | 5 min; the probe is the oldest waiting delivery, or the Destination check when nothing waits; a Broken Notification gateway is probed through `info` (C-30.FR-8) | built in | C-11 | decided |
 | `delivery.storm_calm_period` | 5 min below the threshold | built in | C-11 | decided |
 | `delivery.thread_alerts_listed` | first 10 new Alerts, then "…and K more" | built in | C-11 | decided |
 | `message.alerts_listed` | 10 lines; above that, the distinct values of each differing label, at most 10 per label; from 0.2.0 the default layout lists `message.compact_alerts_listed` values instead (C-29.FR-3) | built in | C-12 | decided |

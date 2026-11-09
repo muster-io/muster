@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
@@ -740,6 +741,9 @@ type env struct {
 	txs      []dbgen.DBTX
 	done     []bool
 	abandonE error
+	// gateways record the calls of the hooks of the Broken state of Notification gateways, which fail with gatewayE.
+	gateways []string
+	gatewayE error
 	keys     *keyring.Keyring
 	// slackBase is where the requests of a Slack Connection go instead of Slack, the fake Slack server once a test
 	// starts one.
@@ -775,7 +779,20 @@ func newEnv(t *testing.T) *env {
 			}
 			committed := e.store.committed
 			return func(context.Context) { e.done = append(e.done, e.store.committed == committed+1) }, nil
-		}})
+		},
+		Gateways: connections.Gateways{
+			Checked: func(_ context.Context, id int64) error {
+				e.gateways = append(e.gateways, fmt.Sprintf("checked %d", id))
+				return e.gatewayE
+			},
+			Renamed: func(_ context.Context, tx dbgen.DBTX, publicID, name string) error {
+				e.gateways = append(e.gateways, fmt.Sprintf("renamed %s %s %t", publicID, name, tx != nil))
+				return e.gatewayE
+			},
+			Deleted: func(_ context.Context, tx dbgen.DBTX, id int64) error {
+				e.gateways = append(e.gateways, fmt.Sprintf("deleted %d %t", id, tx != nil))
+				return e.gatewayE
+			}}})
 	t.Cleanup(func() {
 		for _, s := range []string{botToken, otherToken} {
 			if strings.Contains(log.String(), s) {

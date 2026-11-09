@@ -108,6 +108,7 @@ export function bridgeConnection(
     info: null,
     info_read_at: null,
     roles: ["messenger"],
+    gateway: null,
     proxy: { enabled: false },
     destination_count: 0,
     created_at: CREATED_AT,

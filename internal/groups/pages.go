@@ -40,18 +40,20 @@ type PageGateway struct {
 // The reasons of page_not_delivered for a call through a Notification gateway (C-30.FR-7, PageNotDeliveredReason):
 // the gateway refused it, answered what Muster cannot classify, kept failing until delivery.transient_budget was
 // used, or the person had no confirmed contact at the gateway at its first attempt, or the gateway was deleted, or is
-// no Notification gateway any more, before the call was sent (C-30.FR-9). S-149, S-155 and S-157 add theirs.
+// no Notification gateway any more, before the call was sent (C-30.FR-9), or it came due while the gateway was Broken
+// (C-30.FR-8). S-155 and S-157 add theirs.
 const (
 	PageCallRefused        = "call_refused"
 	PageCallUnknown        = "call_unknown"
 	PageCallBudgetUsed     = "call_budget_used"
 	PageNoConfirmedContact = "no_confirmed_contact"
 	PageGatewayDeleted     = "gateway_deleted"
+	PageGatewayBroken      = "gateway_broken"
 )
 
 // PageReasons are the reasons of page_not_delivered, a closed list.
 var PageReasons = []string{PageCallRefused, PageCallUnknown, PageCallBudgetUsed, PageNoConfirmedContact,
-	PageGatewayDeleted}
+	PageGatewayDeleted, PageGatewayBroken}
 
 func (p *Page) userIDs() []int64 {
 	out := make([]int64, len(p.Users))

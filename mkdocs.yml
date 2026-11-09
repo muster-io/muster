@@ -142,6 +142,7 @@ nav:
           - operations/runbooks/MusterDeliveryFailing.md
           - operations/runbooks/MusterDestinationBroken.md
           - operations/runbooks/MusterHeartbeatLost.md
+          - operations/runbooks/MusterNotificationGatewayBroken.md
           - operations/runbooks/MusterDeliverySlow.md
           - operations/runbooks/MusterDeliveryQueueGrowing.md
           - operations/runbooks/MusterIngestBacklog.md

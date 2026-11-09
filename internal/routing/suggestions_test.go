@@ -38,6 +38,13 @@ func (s *fakeStore) ListAlertingSchedules(_ context.Context, org int64) ([]dbgen
 	return s.schedules, nil
 }
 
+func (s *fakeStore) ListAlertingGateways(_ context.Context, org int64) ([]dbgen.ListAlertingGatewaysRow, error) {
+	if err := s.call("ListAlertingGateways"); err != nil || org != orgID {
+		return nil, err
+	}
+	return s.gateways, nil
+}
+
 // ListAlertingDestinations names each Destination by its public_id.
 func (s *fakeStore) ListAlertingDestinations(_ context.Context, org int64) ([]dbgen.ListAlertingDestinationsRow,
 	error) {
@@ -326,7 +333,8 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 	if list[0].ID != SuggestionInternalAlerts || in.Name != "Muster internal alerts" ||
 		!slices.Equal(in.Matchers, []Matcher{{Label: "alertname", Op: "=~", Value: "Muster.*"}}) ||
 		in.MinimumSeverity != nil ||
-		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route", "schedule"}) ||
+		!slices.Equal(in.GroupKey, []string{"alertname", "integration", "destination", "route", "schedule",
+			"connection"}) ||
 		in.DestinationIDs == nil || len(in.DestinationIDs) != 0 || !in.Policy.AckTimeout.Enabled ||
 		in.DeliverToTeams == nil || !*in.DeliverToTeams {
 		t.Errorf("suggested %+v", in)
@@ -354,6 +362,7 @@ func TestInternalAlertsSuggestion(t *testing.T) {
 		input("by-route", Matcher{Label: "template", Op: "=~", Value: ".+"}),
 		input("by-name", Matcher{Label: "alertname", Op: "=", Value: "MusterOIDCSecretExpiring"}),
 		input("by-schedule", Matcher{Label: "alertname", Op: "=", Value: "MusterScheduleGap"}),
+		input("by-gateway", Matcher{Label: "alertname", Op: "=", Value: "MusterNotificationGatewayBroken"}),
 	}
 	var ids []string
 	for _, c := range covering {
@@ -476,7 +485,7 @@ func TestAcceptInternalAlertsSuggestion(t *testing.T) {
 func TestInternalAlertsSuggestionFailures(t *testing.T) {
 	boom := errors.New("boom")
 	for _, name := range []string{"ListAlertingDestinations", "ListAlertingIntegrations", "GetRoutingStamp",
-		"ListRoutes", "ListAlertingSchedules"} {
+		"ListRoutes", "ListAlertingSchedules", "ListAlertingGateways"} {
 		svc, store, _ := newService(t)
 		store.dests["DSAAAAAAAAAAA1"] = 51
 		store.fail[name] = boom
@@ -537,5 +546,37 @@ func TestInternalAlertsSuggestionSchedules(t *testing.T) {
 	list, err := svc.Suggestions(ctx, nil)
 	if err != nil || len(list) != 1 || !slices.Contains(list[0].Route.GroupKey, "schedule") {
 		t.Errorf("suggested %+v, %v", list, err)
+	}
+}
+
+// TestInternalAlertsSuggestionGateways is C-30.FR-8 on the suggestion: each Notification gateway is an entity of
+// MusterNotificationGatewayBroken, so a Route that takes the alert of one gateway leaves the suggestion standing for
+// another; the Group key has connection after schedule, so that every Broken gateway makes an Alert Group of its own.
+func TestInternalAlertsSuggestionGateways(t *testing.T) {
+	svc, store, _ := newService(t)
+	ctx := t.Context()
+	store.dests["DSAAAAAAAAAAA1"] = 51
+	store.gateways = []dbgen.ListAlertingGatewaysRow{{PublicID: "CNAAAAAAAAAAGW", Name: "SMS"}}
+	for _, c := range []Input{
+		input("others", Matcher{Label: "alertname", Op: "!=", Value: "MusterNotificationGatewayBroken"}),
+		input("sms", Matcher{Label: "connection", Op: "=", Value: "CNAAAAAAAAAAGW"}),
+	} {
+		if _, err := svc.Create(ctx, by, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := suggestionIDs(t, svc, nil); len(got) != 0 {
+		t.Errorf("the Route of the gateway takes its alert: %v", got)
+	}
+	store.gateways = append(store.gateways, dbgen.ListAlertingGatewaysRow{PublicID: "CNBBBBBBBBBBGW", Name: "Voice"})
+	if got := suggestionIDs(t, svc, nil); !slices.Equal(got, []string{SuggestionInternalAlerts}) {
+		t.Errorf("another gateway: %v", got)
+	}
+	list, err := svc.Suggestions(ctx, nil)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("suggested %+v, %v", list, err)
+	}
+	if key := list[0].Route.GroupKey; !slices.Equal(key[len(key)-2:], []string{"schedule", "connection"}) {
+		t.Errorf("the Group key %v", key)
 	}
 }
