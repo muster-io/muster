@@ -8,28 +8,44 @@ depends_on: [S-148]
 covers: [C-30.FR-8, C-30.AC-5]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0038_gateway_broken.up.sql
-  - internal/db/migrations/0038_gateway_broken.down.sql
+  - internal/db/migrations/0036_gateway_broken.up.sql
+  - internal/db/migrations/0036_gateway_broken.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
+  - internal/db/checks.go
   - internal/db/migrate_test.go
   - internal/gateways/broken.go
   - internal/gateways/broken_test.go
   - internal/gateways/broken_integration_test.go
   - internal/gateways/sender.go
+  - internal/delivery/delivery.go
+  - internal/bridge/delivery.go
+  - internal/bridge/delivery_test.go
+  - internal/gateways/calls_test.go
+  - internal/gateways/calls_integration_test.go
   - internal/gateways/query.sql
+  - internal/groups/pages.go
   - internal/connections/bridge.go
   - internal/connections/bridge_test.go
+  - internal/connections/connections.go
+  - internal/connections/connections_test.go
+  - internal/connections/query.sql
+  - internal/api/connections.go
   - internal/internalalerts/registry.go
   - internal/internalalerts/internalalerts_test.go
   - internal/routing/suggestions.go
   - internal/routing/suggestions_test.go
   - internal/routing/query.sql
+  - internal/routing/routes.go
+  - internal/routing/routes_test.go
   - internal/leader/tasks.go
   - internal/leader/leader_test.go
   - internal/runtime/runtime.go
+  - internal/runtime/runtime_test.go
   - internal/metrics/catalogue.go
   - internal/logging/events.go
+  - internal/tools/refgen/main.go
+  - internal/tools/chartcheck/chartcheck_test.go
   - deploy/helm/muster/files/rules.yaml
   - deploy/helm/muster/values.yaml
   - deploy/helm/muster/values.schema.json
@@ -37,19 +53,22 @@ files_touched:
   - docs/operations/runbooks/MusterNotificationGatewayBroken.md
   - docs/operations/runbooks/index.md
   - docs/operations/monitoring.md
+  - docs/messengers/notification-gateways.md
   - mkdocs.yml
   - docs/install/versions.md
   - design/prd/l1/reference.md
   - design/prd/l1/defaults.md
-  - design/prd/L2.md
+  - design/stories/coverage.md
   - web/src/test/fixtures/connections.ts
   - test/e2e/gateway_broken_test.go
+  - test/e2e/self_observation_test.go
+  - internal/archlint/secretleak.go
 acceptance:
-  - "[C-30.FR-8, C-30.AC-5] A gateway whose call the fake answers `401` — `forbidden`, a Fatal answer — or whose call used up `delivery.transient_budget` becomes Broken: the Bridge Connection reads `gateway` {`broken` true, `broken_since`, `reason`}, `MusterNotificationGatewayBroken` is raised with `connection` and `connection_name`, and the next run of the Leader task `gateway_broken_gauge` sets `muster_notification_gateway_broken{connection}` to 1 (`broken_test.go`, `broken_integration_test.go`)."
+  - "[C-30.FR-8, C-30.AC-5] A gateway whose call the fake answers `401` — `forbidden`, a Fatal answer — or whose call used up `delivery.transient_budget` becomes Broken: the Bridge Connection reads `gateway` {`broken` true, `broken_since`, `reason`}, `MusterNotificationGatewayBroken` is raised with `connection` and `connection_name`, and the next run of the Leader task `delivery_queue` sets `muster_notification_gateway_broken{connection}` to 1 (`broken_test.go`, `broken_integration_test.go`)."
   - "[C-30.FR-8] The suggested Route \"Muster internal alerts\" groups by `connection` too — its Group key gains `connection` after `route` and after S-133's `schedule` if that has merged — so that two Broken gateways make two Alert Groups; the simulation of `Suggestions` counts each Notification gateway as an entity of `MusterNotificationGatewayBroken`; the upgrade notes of 0.2.0 name `connection` among the labels to add to a Route accepted in 0.1 (`suggestions_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] While a gateway is Broken, every call that comes due ends Not delivered with the reason `gateway_broken` and records `page_not_delivered`, and none of them is sent after it recovers; the sender probes it through `info` every `delivery.broken_probe_interval`, and a successful probe — or a successful Connection check — ends the state, resolves the alert and sets the gauge to 0 at the next run (`broken_integration_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] A Bridge Connection with both roles whose gateway is Broken keeps its Destinations healthy and delivering, and a Broken Destination of it leaves the gateway as it is (`broken_integration_test.go`)."
-  - "[C-30.FR-8] The chart renders the rule `MusterNotificationGatewayBroken` — `max by (connection) (muster_notification_gateway_broken{job=\"muster\"}) == 1`, `for` 5m, severity `critical` — with its threshold and `for` as chart values and its `runbook_url`; its rule unit test fires after 5 minutes at 1 and not at 0; reference.md moves the Internal alert, the chart rule and the metric into the main tables; P-88 is confirmed for both chart rules of L2; `make rules-test helm-check docs-check` pass."
+  - "[C-30.FR-8] The chart renders the rule `MusterNotificationGatewayBroken` — `max by (connection) (muster_notification_gateway_broken{job=\"muster\"}) == 1`, `for` 5m, severity `critical` — with its threshold and `for` as chart values and its `runbook_url`; its rule unit test fires after 5 minutes at 1 and not at 0; reference.md moves the Internal alert, the chart rule and the metric into the main tables; P-88 stays provisional for both chart rules of L2 until the maintainer confirms it; `make rules-test helm-check docs-check` pass."
   - "[C-30.FR-8] The runbook page MusterNotificationGatewayBroken says what the alert means, how to read the reason on the Connection page and in the Request log, how to fix the bridge's credentials or its provider, and that calls due meanwhile were not sent; it is in the runbook index and the monitoring page; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: true
@@ -80,14 +99,21 @@ issue: 438
 - **Spec** (`api/openapi.yaml`): `BridgeConnection` gains the required, read-only `gateway` (`GatewayState` {`broken`,
   `broken_since`, `reason` — a masked, untrusted text like a Destination's — and `next_probe_at`} or null when the
   Connection is not a gateway); `PageNotDeliveredReason` gains `gateway_broken`.
-- **Schema** (migration `0038_gateway_broken`, expand only; `schema.md` §4.5): `connections.gateway_broken_since
+- **Schema** (migration `0036_gateway_broken`, expand only; `schema.md` §4.5): `connections.gateway_broken_since
   timestamptz`, `connections.gateway_broken_reason text`, `connections.gateway_next_probe_at timestamptz`,
-  `connections.gateway_probe_lease_until timestamptz` and `gateway_probe_lease_owner text` (with the lease CHECK); a
-  partial index `(org_id, gateway_next_probe_at) WHERE gateway_broken_since IS NOT NULL`. The down migration drops them.
-- **Gateways** (`internal/gateways/broken.go`, `sender.go`): the sender marks the gateway Broken on a `forbidden` answer
-  or a call whose budget ran out, records `gateway_broken` (warn; the Connection, the reason) and raises the Internal
-  alert; while Broken, a call that comes due ends Not delivered with `gateway_broken` without being sent; the probe is
-  claimed like a call by any replica, with a lease, every `delivery.broken_probe_interval`, and calls `getInfo`; a
+  `connections.gateway_probe_lease_until timestamptz` and `gateway_probe_lease_owner text` (with the lease CHECK);
+  `connections.gateway_recovered_at timestamptz`, the end of the last Broken state, so that a call due before it is
+  never sent, whichever replica prepares it (P-68); a partial index `(org_id, gateway_next_probe_at) WHERE
+  gateway_broken_since IS NOT NULL`; and a partial index `gateway_calls (org_id, connection_id, ended_at) WHERE state =
+  'not_delivered'` for the reconciliation. The down migration drops them.
+- **Gateways** (`internal/gateways/broken.go`, `sender.go`): the sender marks the gateway Broken on a Fatal outcome —
+  a `forbidden` answer, or an address the outbound policy blocks — or a call whose budget ran out; a Fatal outcome that
+  the bridge adapter marks `NotSent` (`delivery.Outcome`, `internal/bridge/delivery.go`) — Muster refused the call
+  without reaching the gateway, its Connection being gone or its info no longer declaring the role gateway — ends the
+  call `gateway_deleted` and breaks nothing. The sender records `gateway_broken` (warn; the Connection, the reason)
+  and raises the Internal alert; while Broken, a call that comes due ends Not delivered with `gateway_broken` without
+  being sent; the probe is claimed like a call by any replica, each probe leased just before it runs, at most
+  `ProbeConcurrency` at once and apart from the calls, every `delivery.broken_probe_interval`, and calls `getInfo`; a
   successful probe, or a successful `checkConnection` of the Connection (`internal/connections/bridge.go`), clears the
   state, records `gateway_recovered` (info) and resolves the alert. Only calls set the state; deliveries to the bridge's
   Destinations never do, and the state never touches them.
@@ -102,18 +128,23 @@ issue: 438
   `route`; S-133 adds `schedule` and S-149 `connection`, always in that order — `schedule` before `connection` —
   whichever of the two merges first, since neither depends on the other; the second to merge adds its label to the Group
   key, to `suggestions_test.go` and to the upgrade note that the first wrote.
-- **Leader task** (`internal/leader/tasks.go`): `gateway_broken_gauge`, appended to the closed list, every
-  `delivery.broken_probe_interval`, sets `muster_notification_gateway_broken{connection}` to 1 for each Broken gateway
-  and to 0 for the others, and removes the series of a deleted Connection; safe to run twice (ADR-0007). The Leader
-  adds only this task; probes and calls run on every replica (NFR-2, NFR-4).
+- **Leader task** (`internal/leader/tasks.go`, `internal/runtime/runtime.go`): no new task. The existing
+  `delivery_queue`, every 15 s like `muster_destination_broken` and woken by the development clock, also sets
+  `muster_notification_gateway_broken{connection}` to 1 for each Broken gateway and to 0 for the others, removing the
+  series of a deleted Connection, and first reconciles the state (`Broken.Reconcile`): a gateway that is not Broken
+  whose call failed in a way that breaks it — `call_refused` with the class `fatal`, or `call_budget_used` — within
+  twice `delivery.broken_probe_interval` and after its last Broken state ended becomes Broken, since the replica that
+  ended the call stopped before it did so; and an open `MusterNotificationGatewayBroken` of a Connection that is not
+  Broken, deleted ones included, is resolved, as one that a down migration left. Both are safe to run twice
+  (ADR-0007). Probes and calls run on every replica (NFR-2, NFR-4).
 - **Metric** (`internal/metrics/catalogue.go`): `muster_notification_gateway_broken{connection}` (gauge, Leader), C-30.
 - **Chart** (`deploy/helm/muster/files/rules.yaml`, `values.yaml`, `values.schema.json`): the rule of reference.md with
   its threshold and `for` as chart values; `tests/rules/MusterNotificationGatewayBroken.yaml`.
 - **Shared tables**: reference.md moves `MusterNotificationGatewayBroken` from "Internal alerts added in L2" and "Chart
-  rules added in L2", and `muster_notification_gateway_broken` from "Metrics added in L2", into the main tables;
-  defaults.md marks the chart rules of L2 decided and L2.md §5.3 moves P-88 to "Decided since they were first listed".
+  rules added in L2", and `muster_notification_gateway_broken` from "Metrics added in L2", into the main tables; P-88
+  stays provisional — in defaults.md and in L2.md §5.3 — until the maintainer confirms it (see Notes).
 - **Web test fixtures** (`web/src/test/fixtures/connections.ts`): `gateway` null in the Bridge Connection builders.
-- **Log events**: `gateway_broken`, `gateway_recovered`, C-30.
+- **Log events**: `gateway_broken`, `gateway_recovered`, `gateway_probe_failed`, C-30.
 - **Settings**: `delivery.broken_probe_interval`, `delivery.transient_budget`; the chart values of the rule (P-88).
 - **Documentation**: the runbook page `docs/operations/runbooks/MusterNotificationGatewayBroken.md`, in the runbook
   index and the navigation; `docs/operations/monitoring.md` lists it among the Internal alerts with a chart rule and
@@ -171,7 +202,12 @@ None.
   the chart rules of L2 — `MusterScheduleGap` (S-133) and `MusterNotificationGatewayBroken` — as reference.md has them.
 - P-68 is decided (L2.md §5.3): calls due while Broken are not sent after recovery, as Pages that a Broken Destination
   could not deliver are not.
-- Migration `0038` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- Migration `0036`: the story map planned `0038`; the latest migration on `master` is `0035`, so this story takes the
+  next free number, as S-167's Notes describe for a story merged out of the map's order.
+- P-88 is not confirmed by this pull request: the chart renders `MusterScheduleGap` with `for` 0m and
+  `MusterNotificationGatewayBroken` with `for` 5m as chart values, reference.md keeps them marked provisional, and
+  defaults.md and L2.md §5.3 keep P-88 among the provisional values; the maintainer confirms or changes them, and the
+  pull request that does so moves P-88 to "Decided since they were first listed".
 
 ## Coverage
 

@@ -60,7 +60,7 @@ func suggested(id string) (Input, error) {
 			Name:     InternalAlertsRouteName,
 			Matchers: []Matcher{{Label: "alertname", Op: string(matchers.Regexp), Value: "Muster.*"}},
 			GroupKey: []string{"alertname", internalalerts.EntityIntegration, internalalerts.EntityDestination,
-				internalalerts.EntityRoute, internalalerts.EntitySchedule},
+				internalalerts.EntityRoute, internalalerts.EntitySchedule, internalalerts.EntityConnection},
 			DestinationIDs: []string{}, DeliverToTeams: new(true), Policy: paging().Policy,
 		}, nil
 	default:
@@ -212,8 +212,8 @@ var routeTemplates = []string{TemplateRootMessage, TemplateLine, TemplateAckTime
 // exists, and some Internal alert of the registry, with the labels it is raised with, would be taken by no Route other
 // than the Default route in the current evaluation order. The labels are those of each entity of its kind — every
 // Integration that is not deleted with its Static labels, every Destination that is not deleted, every Route, each
-// with every template of a Route, every Schedule with its Team's id and name and, under the Team label, its slug — or
-// of no entity when it has none. It also returns the last Route other than the Default route that takes one of them,
+// with every template of a Route, every Schedule with its Team's id and name and, under the Team label, its slug, and
+// every Notification gateway — or of no entity when it has none. It also returns the last Route other than the Default route that takes one of them,
 // 0 for none.
 func (s *Service) internalAlertsApply(ctx context.Context, q Queries, fresh bool) (bool, int64, error) {
 	dests, err := q.ListAlertingDestinations(ctx, s.orgID)
@@ -260,6 +260,14 @@ func (s *Service) internalAlertsApply(ctx context.Context, q Queries, fresh bool
 		entities[internalalerts.EntitySchedule] = append(entities[internalalerts.EntitySchedule],
 			about{internalalerts.Entity{ID: row.PublicID, Name: row.Name}, internalalerts.TeamExtra(row.TeamPublicID,
 				row.TeamName, row.TeamLabel, row.TeamSlug)})
+	}
+	gws, err := q.ListAlertingGateways(ctx, s.orgID)
+	if err != nil {
+		return false, 0, fmt.Errorf("list the notification gateways: %w", err)
+	}
+	for _, row := range gws {
+		entities[internalalerts.EntityConnection] = append(entities[internalalerts.EntityConnection],
+			about{entity: internalalerts.Entity{ID: row.PublicID, Name: row.Name}})
 	}
 	for _, r := range o.routes {
 		for _, t := range routeTemplates {

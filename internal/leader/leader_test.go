@@ -571,6 +571,19 @@ func TestDeliveryTasks(t *testing.T) {
 	if tasks[10].Run(t.Context()) != nil || tasks[11].Run(t.Context()) != nil || tasks[12].Run(t.Context()) != nil {
 		t.Error("unwired delivery tasks did something")
 	}
+	if tasks[10].Wake != nil {
+		t.Error("the count of pending deliveries is woken outside development mode")
+	}
+	// In development mode a move of the development clock runs it at once, so that the gauges of Broken Notification
+	// gateways and Destinations, and the reconciliation of the gateways, follow the clock (C-30.FR-8).
+	moved := &Wakes{}
+	tasks = Tasks(Work{ClockMoved: moved})()
+	moved.Wake()
+	select {
+	case <-tasks[10].Wake:
+	default:
+		t.Error("a move of the development clock did not wake the count of pending deliveries")
+	}
 }
 
 // TestTelegramPollingTask covers C-14.FR-1 and C-02.FR-10: the Leader polls the Telegram Connections of every

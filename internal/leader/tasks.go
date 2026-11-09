@@ -29,7 +29,9 @@ const BacklogInterval = 15 * time.Second
 const AlertGroupGaugeInterval = 15 * time.Second
 
 // DeliveryQueueInterval is how often the Leader counts the pending deliveries for muster_delivery_queue, reads the
-// health of the Destinations for muster_destination_broken and the Storms of the Routes for muster_storm_active.
+// health of the Destinations for muster_destination_broken, the Storms of the Routes for muster_storm_active and the
+// state of the Notification gateways for muster_notification_gateway_broken, and reconciles that state with the calls
+// and its Internal alerts (C-30.FR-8).
 const DeliveryQueueInterval = 15 * time.Second
 
 // HeartbeatCheckInterval is how often the Leader runs the Heartbeat check, and StaleScanInterval the Stale scan.
@@ -163,8 +165,9 @@ type Work struct {
 	// Organization orgID past their retention periods at now (C-09.FR-16) and returns how many of each it deleted.
 	AlertGroupRetention func(ctx context.Context, orgID int64, now time.Time) (details, summaries int64, err error)
 	// DeliveryQueue sets muster_delivery_queue from the pending deliveries and due Thread replies of the Organization
-	// orgID, muster_destination_broken from the health of its Destinations and muster_storm_active from the Storms of
-	// its Routes (C-11.FR-6, FR-9, FR-17).
+	// orgID, muster_destination_broken from the health of its Destinations, muster_storm_active from the Storms of
+	// its Routes (C-11.FR-6, FR-9, FR-17) and muster_notification_gateway_broken from the state of its Notification
+	// gateways, which it reconciles with their calls and MusterNotificationGatewayBroken (C-30.FR-8).
 	DeliveryQueue func(ctx context.Context, orgID int64) error
 	// ThreadReplyRetention deletes, in batches, the Thread replies of the Organization orgID that are sent, dropped or
 	// not delivered and older than retention.alert_details at now, and returns how many it deleted.
@@ -203,9 +206,9 @@ type Work struct {
 	// ScheduleGapForget removes the muster_schedule_gap series once the gap scan stops with the lock.
 	ScheduleGapForget func()
 	// ClockMoved, in development mode, wakes the alive mark, the Heartbeat check, the Stale scan, the Alert Group
-	// retention, the retention of Thread replies and of outgoing webhook events, the short-lived pruning, the OIDC client
-	// secret expiry check, the outgoing heartbeat, the pruning of the Request log and the gap scan of the Schedules when
-	// the development clock moved, so that the alive mark keeps up with the business clock and the Leader is not taken
+	// retention, the count of pending deliveries, the retention of Thread replies and of outgoing webhook events, the
+	// short-lived pruning, the OIDC client secret expiry check, the outgoing heartbeat, the pruning of the Request log
+	// and the gap scan of the Schedules when the development clock moved, so that the alive mark keeps up with the business clock and the Leader is not taken
 	// for absent; nil otherwise.
 	ClockMoved *Wakes
 }
@@ -280,6 +283,7 @@ func Tasks(w Work) func() []Task {
 	shortLivedWake := w.ClockMoved.channel()
 	oidcExpiryWake, outgoingHeartbeatWake := w.ClockMoved.channel(), w.ClockMoved.channel()
 	aliveWake, requestLogWake, gapScanWake := w.ClockMoved.channel(), w.ClockMoved.channel(), w.ClockMoved.channel()
+	deliveryWake := w.ClockMoved.channel()
 	keyringWake := w.KeyringChanged.channel()
 	return func() []Task {
 		var takenOver atomic.Bool
@@ -313,7 +317,7 @@ func Tasks(w Work) func() []Task {
 			{Name: "alert_group_gauges", Every: AlertGroupGaugeInterval, Run: w.alertGroupGauges},
 			{Name: "alert_group_retention", Every: MaintenanceInterval, Wake: retentionWake,
 				Run: w.alertGroupRetention},
-			{Name: "delivery_queue", Every: DeliveryQueueInterval, Run: w.deliveryQueue},
+			{Name: "delivery_queue", Every: DeliveryQueueInterval, Wake: deliveryWake, Run: w.deliveryQueue},
 			{Name: "thread_reply_retention", Every: MaintenanceInterval, Wake: replyRetentionWake,
 				Run: w.threadReplyRetention},
 			{Name: "webhook_event_retention", Every: MaintenanceInterval, Wake: eventRetentionWake,

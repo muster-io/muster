@@ -195,6 +195,9 @@ alerting:
     MusterScheduleGap:
       enabled: true
       for: 0m
+    MusterNotificationGatewayBroken:
+      enabled: true
+      for: 5m
 
 dashboard:
   configMap:

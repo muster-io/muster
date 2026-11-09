@@ -14515,15 +14515,17 @@ components:
       description: 'Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the
         call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry
         budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt
-        (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call
-        was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show
-        an unknown one as it is.'
+        (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call
+        was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent
+        (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown
+        one as it is.'
       enum:
       - call_refused
       - call_unknown
       - call_budget_used
       - no_confirmed_contact
       - gateway_deleted
+      - gateway_broken
       - null
     TimelineEscalationEntry:
       description: An event of Escalation chains and Pages (C-32), such as `page_not_delivered` for a call through a
@@ -15177,6 +15179,7 @@ components:
         - info
         - info_read_at
         - roles
+        - gateway
         - proxy
         - destination_count
         - created_at
@@ -15219,6 +15222,14 @@ components:
             uniqueItems: true
             items:
               $ref: '#/components/schemas/BridgeInfoRole'
+          gateway:
+            readOnly: true
+            description: The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of
+              its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor
+              Broken.
+            oneOf:
+            - $ref: '#/components/schemas/GatewayState'
+            - type: 'null'
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:
@@ -15232,6 +15243,39 @@ components:
             readOnly: true
             description: The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update
               an item of a list without reading it again.
+    GatewayState:
+      type: object
+      description: The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error,
+        or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not
+        delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every
+        `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.
+      required:
+      - broken
+      - broken_since
+      - reason
+      - next_probe_at
+      properties:
+        broken:
+          type: boolean
+        broken_since:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When it became Broken; null while it is in order.
+        reason:
+          type:
+          - string
+          - 'null'
+          description: 'The error of the call that made it Broken, or of the last probe, or "unavailable after repeated
+            failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of
+            calls are masked. Null while it is in order.'
+        next_probe_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: When Muster probes it through `info` next; null while it is in order.
     BridgeConnectionInput:
       allOf:
       - $ref: '#/components/schemas/BridgeConnectionBase'

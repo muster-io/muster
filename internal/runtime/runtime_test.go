@@ -1753,8 +1753,12 @@ func TestGroupTimer(t *testing.T) {
 
 // TestDeliveryLeaderTasks: the Leader tasks of delivery act on this process's Organization only.
 func TestDeliveryLeaderTasks(t *testing.T) {
+	business := clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
 	p := &process{orgID: 1, delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
-		Business: clock.NewManual(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))})}
+		Business: business}),
+		// The gauge of Broken Notification gateways and their reconciliation run in delivery_queue (C-30.FR-8).
+		gatewayBroken: &gateways.Broken{OrgID: 1, Store: gateways.NewBrokenStore(noDB{}),
+			Lease: db.Lease{Clocks: clock.Clocks{Business: business, Real: business}}}}
 	if err := p.deliveryQueue(t.Context(), 2); err != nil {
 		t.Errorf("another organization = %v", err)
 	}
@@ -1789,10 +1793,15 @@ func TestConfigureWorker(t *testing.T) {
 		replica: keyring.NewRecorder(nil, nil, business, log, "r-1", "host", "v1"),
 		worker:  &ingest.Worker{Log: log}, timers: &timers.Worker{Log: log}, deliverer: &delivery.Worker{Log: log},
 		openUpdates: &groups.UpdateWorker{Log: log}, gatewaySender: &gateways.Sender{Log: log},
-		groups: groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
+		gatewayBroken: &gateways.Broken{Log: log},
+		groups:        groups.New(groups.Config{OrgID: 1, Business: business, Log: log}),
 		delivery: delivery.New(delivery.Config{OrgID: 1, Store: delivery.NewStore(noDB{}, noDB{}),
 			Business: business})}
 	p.configureWorker()
+	// The sender keeps the Broken state of the gateways, whose probes this replica leases (C-30.FR-8).
+	if b := p.gatewaySender.Broken; b != p.gatewayBroken || b.Lease.Owner != "r-1" {
+		t.Errorf("broken gateways = %+v", b)
+	}
 	// The gateway sender of every replica sends through the Bridge adapter and records page_not_delivered through
 	// the dispatcher (C-30.FR-4).
 	if s := p.gatewaySender; s.OrgID != 1 || s.Lease.Owner != "r-1" || s.Lease.Duration != gateways.SenderLease ||

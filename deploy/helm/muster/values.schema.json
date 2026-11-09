@@ -764,6 +764,23 @@
                   "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
                 }
               }
+            },
+            "MusterNotificationGatewayBroken": {
+              "description": "A Notification gateway is Broken (critical).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the Notification gateway is Broken before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                }
+              }
             }
           }
         }

@@ -406,15 +406,13 @@ such as `schedule` or `team_id`, and setting it to one is refused with `422` (C-
 | `MusterTemplateError` | warning | a template of a Route or Destination keeps failing | `route` and `route_name`, or `destination` and `destination_name`; `template` | C-12, C-15 |
 | `MusterOIDCSecretExpiring` | warning | the OIDC client secret expires within `oidc.secret_expiry_lead` | — | C-19 |
 | `MusterScheduleGap` | warning | a Schedule whose gap alert is active — `schedule.gap_alert` on, or by default while it is its Team's main Schedule — has a gap now or one that starts within `schedule.gap_alert_horizon`; the annotation `gap_start` says when the nearest gap starts | `schedule`, `schedule_name`, `team_id`, `team_name`, and the Team's slug under the Organization's Team label, outside the fingerprint, so that the alert belongs to its Team (C-25.FR-5) | C-27 |
+| `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken: a call through it was answered with a Fatal error or used up `delivery.transient_budget`; it resolves with a successful probe through `info` or Connection check, or when the Connection is deleted | `connection`, `connection_name` | C-30 |
 
 ### Internal alerts added in L2
 
 Each joins the registry, with a chart rule of the same name ([below](#chart-rules-added-in-l2)) and a runbook page, in
-the story that implements it.
-
-| Internal alert | Severity | Raised while | Labels besides `alertname` and `severity` | Raised by |
-|---|---|---|---|---|
-| `MusterNotificationGatewayBroken` | critical | a Notification gateway is Broken | `connection`, `connection_name` | C-30 |
+the story that implements it. `MusterScheduleGap` (S-133) and `MusterNotificationGatewayBroken` (S-149) have moved into
+the table above.
 
 ## Metrics catalogue
 
@@ -475,6 +473,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
 | `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while the Schedule, whose gap alert is active, has a gap now or one that starts within `schedule.gap_alert_horizon`, 0 for every other Schedule, those whose gap alert is not active included | C-27 |
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) — every attempt of a call through a Notification gateway that ended, a replayed answer counted as accepted | C-30 |
+| `muster_notification_gateway_broken` | gauge (Leader) | `connection` — 1 while the Notification gateway is Broken, 0 for every other Notification gateway | C-30 |
 
 ## Chart rules
 
@@ -499,16 +498,14 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2` | 5m | a replica's clock is off |
 | `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20` | 0m | a burst of failed sign-ins |
 | `MusterScheduleGap` | warning | `max by (schedule) (muster_schedule_gap{job="muster"}) == 1` | 0m | a Schedule whose gap alert is active has a gap now or within `schedule.gap_alert_horizon`; the backup for the Internal alert |
+| `MusterNotificationGatewayBroken` | critical | `max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1` | 5m | a Notification gateway is Broken; the backup for the Internal alert |
 
 ### Chart rules added in L2
 
 Each joins the table above, the chart and the rule unit tests in the story that implements it; their thresholds and
-windows are _provisional_ (P-88), as those of L1 were.
-`MusterScheduleGap` has moved into the table above with S-133; its `for` is part of P-88, which S-149 confirms.
-
-| Rule | Severity | Default expression | For | Meaning |
-|---|---|---|---|---|
-| `MusterNotificationGatewayBroken` | critical | `max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1` | 5m | a Notification gateway is Broken |
+windows are _provisional_ (P-88), as those of L1 were. `MusterScheduleGap` (S-133) and
+`MusterNotificationGatewayBroken` (S-149) have moved into the table above; their `for` values, 0m and 5m, stay
+provisional until the maintainer confirms P-88.
 
 ## Metrics added in L2
 
@@ -518,6 +515,5 @@ holds them, outside the catalogue that the code checks.
 
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|
-| `muster_notification_gateway_broken` | gauge (Leader) | `connection` | C-30 |
 | `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
 | `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) | C-32 |

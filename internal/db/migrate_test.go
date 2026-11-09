@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (35)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (36)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":35`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":36`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":35`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":36`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (35)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (36)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":35`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":36`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3582,6 +3582,66 @@ func TestIntegrationGatewayCallSignature(t *testing.T) {
 			t.Errorf("after down: %d calls", got)
 		}
 		if err := e.mm.Migrate(35); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationGatewayBroken runs 0036 over a database at 35 with a Bridge Connection: it keeps the Connection, not
+// Broken; the CHECKs refuse a Broken state without its reason or next probe and a lease without its owner, and the
+// partial index takes a Broken gateway; down drops the columns, the CHECKs and the index and keeps the Connection; up
+// again works.
+func TestIntegrationGatewayBroken(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 35)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CN0000000000G1', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', now(), 1, 1, now(), now()
+			FROM organizations`)
+		if err := e.mm.Migrate(36); err != nil {
+			t.Fatalf("up to 36: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM connections WHERE public_id = 'CN0000000000G1'
+			AND gateway_broken_since IS NULL AND gateway_broken_reason IS NULL AND gateway_next_probe_at IS NULL
+			AND gateway_probe_lease_owner IS NULL AND gateway_probe_lease_until IS NULL
+			AND gateway_recovered_at IS NULL`); got != 1 {
+			t.Errorf("the Connection of an earlier version: %d rows", got)
+		}
+		for name, set := range map[string]string{
+			"no reason":     `gateway_broken_since = now(), gateway_next_probe_at = now()`,
+			"no next probe": `gateway_broken_since = now(), gateway_broken_reason = 'x'`,
+			"a reason only": `gateway_broken_reason = 'x'`,
+			"no lease end":  `gateway_probe_lease_owner = 'r1'`,
+			"no owner":      `gateway_probe_lease_until = now()`,
+		} {
+			if _, err := e.d.Pool.Exec(t.Context(), `UPDATE connections SET `+set); err == nil {
+				t.Errorf("%s: no CHECK refused it", name)
+			}
+		}
+		e.exec(t, `UPDATE connections SET gateway_broken_since = now(), gateway_broken_reason = '401 Unauthorized',
+			gateway_next_probe_at = now(), gateway_probe_lease_owner = 'r1', gateway_probe_lease_until = now()`)
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'connections_gateway_probe_idx'
+			AND indexdef LIKE '%(org_id, gateway_next_probe_at) WHERE (gateway_broken_since IS NOT NULL)%'`); got != 1 {
+			t.Errorf("the partial index of the probes: %d", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'gateway_calls_failed_idx'
+			AND indexdef LIKE '%(org_id, connection_id, ended_at) WHERE (state = ''not_delivered''::text)%'`); got != 1 {
+			t.Errorf("the partial index of the failed calls: %d", got)
+		}
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.columns
+			WHERE table_name = 'connections' AND column_name LIKE 'gateway\_%'`); got != 0 {
+			t.Errorf("after down: %d columns left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname IN ('connections_gateway_probe_idx',
+			'gateway_calls_failed_idx')`); got != 0 {
+			t.Errorf("after down: the index is left")
+		}
+		if got := e.count(t, `SELECT count(*) FROM connections`); got != 1 {
+			t.Errorf("after down: %d connections", got)
+		}
+		if err := e.mm.Migrate(36); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

@@ -76,10 +76,10 @@ const logEventsIntro = "# Log events\n\n" +
 const metricsIntro = "# Metrics\n\n" +
 	"Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes\n" +
 	"them; the endpoint also serves the process (`process_*`) and Go runtime (`go_*`) metrics. Configuration entities\n" +
-	"appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`); the labels of an\n" +
-	"`*_info` metric carry what it describes, such as a name or the version; every other label takes its values from the\n" +
-	"closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported\n" +
-	"only by the replica that is the Leader. The capability is the one that exports the metric.\n"
+	"appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`, `connection`); the\n" +
+	"labels of an `*_info` metric carry what it describes, such as a name or the version; every other label takes its\n" +
+	"values from the closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only\n" +
+	"metric is exported only by the replica that is the Leader. The capability is the one that exports the metric.\n"
 
 const internalAlertsIntro = "# Internal alerts\n\n" +
 	"Muster reports problems it can still report through its own pipeline as Internal alerts: Alerts of the built-in\n" +
@@ -87,11 +87,11 @@ const internalAlertsIntro = "# Internal alerts\n\n" +
 	"synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with\n" +
 	"them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or\n" +
 	"Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,\n" +
-	"`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from\n" +
-	"`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new\n" +
-	"one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,\n" +
-	"outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,\n" +
-	"`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
+	"`route`, `destination`, `schedule`, `connection`) with its current name in a `*_name` label; the fingerprint is\n" +
+	"computed from `alertname` and the id label only, so renaming the entity updates the open Internal alert instead\n" +
+	"of raising a new one. An Internal alert about a Team's object also carries the Team's slug under the\n" +
+	"Organization's Team label, outside the fingerprint, so that it belongs to the Team. Every Internal alert carries\n" +
+	"the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the\n" +
 	"`major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,\n" +
 	"joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.\n"
 

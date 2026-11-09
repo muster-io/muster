@@ -206,6 +206,17 @@ type Connection struct {
 	DestinationCount   int64
 	CreatedAt          time.Time
 	Version            int64
+	// Gateway is the state of a Notification gateway (C-30.FR-8), nil for a Connection that is none: a Bridge
+	// Connection whose stored info declares the role gateway, or that is Broken.
+	Gateway *GatewayState
+}
+
+// GatewayState is the state of a Notification gateway: Broken since BrokenSince with the masked Reason, which a probe
+// through info checks again at NextProbeAt, all three nil while it is in order (C-30.FR-8).
+type GatewayState struct {
+	BrokenSince *time.Time
+	Reason      *string
+	NextProbeAt *time.Time
 }
 
 // Input is what createConnection and updateConnection write. An omitted bot token keeps the stored one on an update and
@@ -331,6 +342,16 @@ type Interactive interface {
 // edits still pending for its deleted Destinations end as Not delivered. The returned function runs once tx committed.
 type Abandon func(ctx context.Context, tx dbgen.DBTX, connectionID int64) (func(context.Context), error)
 
+// Gateways are the hooks of internal/gateways for the Broken state of Notification gateways (C-30.FR-8): Checked ends
+// it after a successful check of the Connection connectionID, in a transaction of its own; Renamed renames its open
+// Internal alert, and Deleted ends it and resolves the alert, in the transaction tx of the change, which locked the
+// Connection's row. A nil hook does nothing.
+type Gateways struct {
+	Checked func(ctx context.Context, connectionID int64) error
+	Renamed func(ctx context.Context, tx dbgen.DBTX, publicID, name string) error
+	Deleted func(ctx context.Context, tx dbgen.DBTX, connectionID int64) error
+}
+
 // Config is what a Service needs.
 type Config struct {
 	OrgID   int64
@@ -356,7 +377,9 @@ type Config struct {
 	// IngestURL is MUSTER_INGEST_URL, the base of the callback address and of the webhook of a Telegram Connection.
 	IngestURL *url.URL
 	Abandon   Abandon
-	Log       *logging.Logger
+	// Gateways keep the Broken state of the Bridge Connections that are Notification gateways.
+	Gateways Gateways
+	Log      *logging.Logger
 }
 
 // Service holds the Connections of the Organization, and the clients the adapter posts through, built once per
@@ -795,6 +818,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		if out, err = connectionOf(row); err != nil {
 			return err
 		}
+		if s.cfg.Gateways.Renamed != nil && row.GatewayBrokenSince.Valid && out.Name != before.Name {
+			if err := s.cfg.Gateways.Renamed(ctx, q.DB(), out.PublicID, out.Name); err != nil {
+				return err
+			}
+		}
 		if secret != "" {
 			if hooked, err = s.setWebhook(ctx, q, out.PublicID, secret, false); err != nil {
 				return err
@@ -857,6 +885,11 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if s.cfg.Abandon != nil {
 			if done, err = s.cfg.Abandon(ctx, q.DB(), lock.ID); err != nil {
 				return fmt.Errorf("abandon the final edits of the connection %s: %w", id, err)
+			}
+		}
+		if s.cfg.Gateways.Deleted != nil && row.GatewayBrokenSince.Valid {
+			if err := s.cfg.Gateways.Deleted(ctx, q.DB(), lock.ID); err != nil {
+				return fmt.Errorf("end the broken state of the connection %s: %w", id, err)
 			}
 		}
 		return s.record(ctx, q, r, ActionDeleted, c, []audit.Change{{Pointer: "/deleted_at", After: now}})
@@ -1379,7 +1412,26 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 		c.BridgeInfo, c.BridgeInfoReadAt = json.RawMessage(r.BridgeInfo), &at
 	}
 	c.SlackSocket = slackSocketOf(r)
+	c.Gateway = gatewayOf(r)
 	return c, nil
+}
+
+// gatewayOf is the state of the Connection of r as a Notification gateway, nil when it is none.
+func gatewayOf(r dbgen.GetConnectionRow) *GatewayState {
+	if r.Type != TypeBridge || (!r.GatewayBrokenSince.Valid && !slices.Contains(bridge.StoredRoles(r.BridgeInfo),
+		bridge.RoleGateway)) {
+		return nil
+	}
+	g := &GatewayState{Reason: textOf(r.GatewayBrokenReason)}
+	if r.GatewayBrokenSince.Valid {
+		since := r.GatewayBrokenSince.Time.UTC()
+		g.BrokenSince = &since
+	}
+	if r.GatewayNextProbeAt.Valid {
+		next := r.GatewayNextProbeAt.Time.UTC()
+		g.NextProbeAt = &next
+	}
+	return g
 }
 
 func storedToken(r dbgen.GetConnectionRow) keyring.StoredSecret {

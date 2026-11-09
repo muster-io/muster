@@ -815,8 +815,9 @@ var GatewayCallNotDelivered = newEvent("gateway_call_not_delivered", LevelWarn, 
 		"call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the "+
 		"gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or "+
 		"gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, "+
-		"and error the gateway's answer, masked. Never carries the contact or the "+
-		"text of the call.",
+		"or when Muster refused the call at its attempt for that reason without reaching the gateway, or "+
+		"gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, "+
+		"masked. Never carries the contact or the text of the call.",
 	"call", "connection", "user", "reason", "error")
 
 // GatewayCallDropped is logged when a call through a Notification gateway ended without being sent again because the
@@ -846,6 +847,32 @@ var GatewayAcknowledgeRefused = newEvent("gateway_acknowledge_refused", LevelInf
 		"Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the "+
 		"Commands themselves are logged as command_refused.",
 	"call", "connection", "reason")
+
+// GatewayBroken is logged when a Notification gateway becomes Broken (C-30.FR-8).
+var GatewayBroken = newEvent("gateway_broken", LevelWarn, "C-30",
+	"A Notification gateway became Broken: connection is the public_id of its Connection, cause fatal after a call "+
+		"it answered with a Fatal error, such as a refused token, or unavailable after a call used up "+
+		"delivery.transient_budget, and reason the masked error it answered. Calls that come due while it is Broken "+
+		"end Not delivered with gateway_broken and are never sent after it recovers; MusterNotificationGatewayBroken "+
+		"fires and a probe through info runs every delivery.broken_probe_interval. The Destinations of the same "+
+		"bridge are not affected.",
+	"connection", "cause", "reason")
+
+// GatewayProbeFailed is logged when the outcome of a probe of a Broken Notification gateway could not be recorded
+// (C-30.FR-8).
+var GatewayProbeFailed = newEvent("gateway_probe_failed", LevelWarn, "C-30",
+	"The outcome of a probe of a Broken Notification gateway through info could not be recorded because of error, "+
+		"such as a lost database connection: connection is the public_id of its Connection. The gateway stays Broken "+
+		"and is probed again after delivery.broken_probe_interval, by any replica.",
+	"connection", "error")
+
+// GatewayRecovered is logged when a Broken Notification gateway is in order again (C-30.FR-8).
+var GatewayRecovered = newEvent("gateway_recovered", LevelInfo, "C-30",
+	"A Broken Notification gateway is in order again after a successful probe through info or a successful check "+
+		"of its Connection: connection is the public_id of its Connection, by probe or check, and broken_for_s how "+
+		"long it was Broken, in seconds. MusterNotificationGatewayBroken resolves; the calls that came due meanwhile "+
+		"are not sent.",
+	"connection", "by", "broken_for_s")
 
 // GatewayContactCodeRejected is logged when a code typed for a contact at a Notification gateway did not confirm it
 // (C-30.FR-3).

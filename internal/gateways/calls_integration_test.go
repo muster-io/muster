@@ -142,15 +142,18 @@ func setupCalls(t *testing.T, s dbtest.Server, n int) *callEnv {
 	return e
 }
 
-// syncWriter serializes the writes of the senders of several goroutines into one buffer.
+// syncWriter serializes the writes of the senders of several goroutines into one buffer; every syncWriter of the
+// buffer shares one lock.
 type syncWriter struct {
-	mu sync.Mutex
-	w  *bytes.Buffer
+	w *bytes.Buffer
 }
 
+// syncWrites is the lock of the writes of every syncWriter.
+var syncWrites sync.Mutex
+
 func (s *syncWriter) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	syncWrites.Lock()
+	defer syncWrites.Unlock()
 	return s.w.Write(p)
 }
 
@@ -187,7 +190,7 @@ func (e *callEnv) group(t *testing.T, title, severity string) int64 {
 		group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
 		created_at, last_changed_at)
 		SELECT $1, $2, $3, $4, '{alertname}', '{}', sha256(convert_to($2, 'UTF8')), $5, '{}', '{}',
-			ARRAY[(SELECT id FROM integrations)],
+			ARRAY[(SELECT id FROM integrations WHERE NOT builtin)],
 			'firing', $6, false, $7, $7
 		RETURNING id`, e.orgID, fmt.Sprintf("AG00000000%04d", e.number), e.number, e.route, title, severity, c0)
 }
@@ -226,6 +229,9 @@ func (e *callEnv) round(t *testing.T, s *Sender) {
 	t.Helper()
 	if _, err := s.Round(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if s.Broken != nil {
+		s.Broken.Wait() // the probes it started
 	}
 }
 

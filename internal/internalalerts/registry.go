@@ -30,6 +30,7 @@ const (
 	EntityRoute       = "route"
 	EntityDestination = "destination"
 	EntitySchedule    = "schedule"
+	EntityConnection  = "connection"
 )
 
 // The labels of the Team an Internal alert with TeamLabel is about: its immutable id and its current name.
@@ -176,19 +177,14 @@ func Lookup(name string) *Definition {
 	return nil
 }
 
-// laterLabels are the entity and name labels of the Internal alerts of L2 that later capabilities register — about a
-// Connection (C-30) — which the Team label may not take before they exist (C-25.FR-5).
-var laterLabels = []string{"connection", "connection_name"}
-
-// ReservedLabels are the labels that an Internal alert sets itself, sorted: alertname, severity, every label of the
-// registry and those of the later Internal alerts. The Team label may not be one of them (C-25.FR-5, C-20.FR-1), so a
-// new Internal alert extends the list by registering.
+// ReservedLabels are the labels that an Internal alert sets itself, sorted: alertname, severity and every label of the
+// registry. The Team label may not be one of them (C-25.FR-5, C-20.FR-1), so a new Internal alert extends the list by
+// registering.
 func ReservedLabels() []string {
 	out := []string{"alertname", "severity"}
 	for _, d := range registry {
 		out = append(out, d.Labels()...)
 	}
-	out = append(out, laterLabels...)
 	slices.Sort(out)
 	return slices.Compact(out)
 }
@@ -214,7 +210,7 @@ func Definitions() ([]*Definition, error) {
 			if d.NameLabel != "" {
 				errs = append(errs, fmt.Errorf("internal alert %q: a name label without an entity", d.Name))
 			}
-		case EntityIntegration, EntityRoute, EntityDestination, EntitySchedule:
+		case EntityIntegration, EntityRoute, EntityDestination, EntitySchedule, EntityConnection:
 			if d.NameLabel != d.Entity+"_name" {
 				errs = append(errs, fmt.Errorf("internal alert %q: the name label of %s is %s_name", d.Name, d.Entity,
 					d.Entity))
@@ -327,4 +323,21 @@ var ScheduleGap = register(&Definition{
 		"Shift with a person who may be Paged, so nobody is On-call then. Fill it with an Override or a change of the " +
 		"Rotation layers on the Schedule page, as the runbook describes.",
 	Capability: "C-27",
+})
+
+// NotificationGatewayBroken is raised while a Notification gateway is Broken (C-30.FR-8).
+var NotificationGatewayBroken = register(&Definition{
+	Name:      "MusterNotificationGatewayBroken",
+	Severity:  SeverityCritical,
+	Entity:    EntityConnection,
+	NameLabel: "connection_name",
+	Condition: "A Notification gateway is Broken: a call through it was answered with a Fatal error, such as a refused " +
+		"token, or failed until delivery.transient_budget was used, so the calls that come due end Not delivered. It " +
+		"resolves when a probe through info or a check of the Connection succeeds, or when the Connection is deleted.",
+	Summary: "Notification gateway {name} is Broken",
+	Description: "Muster cannot call or text through the Notification gateway {name}: the bridge or its provider " +
+		"refuses or does not answer, and calls that come due end Not delivered and are not sent later. The Connection " +
+		"page and the Request log show the reason. Muster probes it every delivery.broken_probe_interval; fix the " +
+		"bridge's credentials or its provider as the runbook describes.",
+	Capability: "C-30",
 })

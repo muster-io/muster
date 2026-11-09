@@ -259,6 +259,14 @@ JOIN organizations o ON o.id = s.org_id
 WHERE s.org_id = @org_id
 ORDER BY s.id;
 
+-- ListAlertingGateways lists the Notification gateways — the Bridge Connections that are not deleted whose stored info
+-- declares the role gateway — with what MusterNotificationGatewayBroken carries of them: the public_id and the name.
+-- name: ListAlertingGateways :many
+SELECT public_id, name
+FROM connections
+WHERE org_id = @org_id AND type = 'bridge' AND deleted_at IS NULL AND bridge_info->'roles' @> '["gateway"]'::jsonb
+ORDER BY id;
+
 -- ListRouteSuggestionDismissals lists the Route suggestions a User dismissed.
 -- name: ListRouteSuggestionDismissals :many
 SELECT suggestion

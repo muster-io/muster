@@ -2229,6 +2229,7 @@ const (
 	PageNotDeliveredReasonCallBudgetUsed     PageNotDeliveredReason = "call_budget_used"
 	PageNotDeliveredReasonCallRefused        PageNotDeliveredReason = "call_refused"
 	PageNotDeliveredReasonCallUnknown        PageNotDeliveredReason = "call_unknown"
+	PageNotDeliveredReasonGatewayBroken      PageNotDeliveredReason = "gateway_broken"
 	PageNotDeliveredReasonGatewayDeleted     PageNotDeliveredReason = "gateway_deleted"
 	PageNotDeliveredReasonLessThannil        PageNotDeliveredReason = "<nil>"
 	PageNotDeliveredReasonNoConfirmedContact PageNotDeliveredReason = "no_confirmed_contact"
@@ -2242,6 +2243,8 @@ func (e PageNotDeliveredReason) Valid() bool {
 	case PageNotDeliveredReasonCallRefused:
 		return true
 	case PageNotDeliveredReasonCallUnknown:
+		return true
+	case PageNotDeliveredReasonGatewayBroken:
 		return true
 	case PageNotDeliveredReasonGatewayDeleted:
 		return true
@@ -4514,6 +4517,9 @@ type BridgeConnection struct {
 	// EventDelivery How a Bridge Connection receives events (`connection.bridge.event_delivery`): `poll` — Muster polls the bridge from the Leader; `push` — the bridge posts each event to the Connection's `callback_url`, signed with the push secret.
 	EventDelivery BridgeEventDelivery `json:"event_delivery"`
 
+	// Gateway The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken.
+	Gateway nullable.Nullable[GatewayState] `json:"gateway,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
@@ -5334,6 +5340,20 @@ type GatewayContactInput struct {
 // GatewayContactList defines model for GatewayContactList.
 type GatewayContactList struct {
 	Items []GatewayContact `json:"items"`
+}
+
+// GatewayState The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error, or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.
+type GatewayState struct {
+	Broken bool `json:"broken"`
+
+	// BrokenSince When it became Broken; null while it is in order.
+	BrokenSince nullable.Nullable[time.Time] `json:"broken_since"`
+
+	// NextProbeAt When Muster probes it through `info` next; null while it is in order.
+	NextProbeAt nullable.Nullable[time.Time] `json:"next_probe_at"`
+
+	// Reason The error of the call that made it Broken, or of the last probe, or "unavailable after repeated failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of calls are masked. Null while it is in order.
+	Reason nullable.Nullable[string] `json:"reason"`
 }
 
 // GroupKeyPreview Covers the Alerts reported firing in the Stored Snapshots of the period that the Route would take at its place in the current evaluation order (Matchers without a saved Route stand for a new Route just before the Default route), each Alert once with its Integration's Static labels, read from the newest Snapshot back and at most `routing.group_key_preview_max_alerts` of them.
@@ -6756,7 +6776,7 @@ type OutgoingWebhookEvent struct {
 // OutgoingWebhookEventVersion defines model for OutgoingWebhookEvent.Version.
 type OutgoingWebhookEventVersion int
 
-// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+// PageNotDeliveredReason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 type PageNotDeliveredReason string
 
 // PasswordChange defines model for PasswordChange.
@@ -8928,7 +8948,7 @@ type TimelineEscalationEntry struct {
 	// PagedUsers The people the Page names.
 	PagedUsers []UserRef `json:"paged_users"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason,omitempty"`
 }
 
@@ -9414,7 +9434,7 @@ type WebhookPage struct {
 	// Gateway The Notification gateway of a call; null for a Page by Mention.
 	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
 
-	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); or the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
+	// Reason Why a Page reached its person nowhere (`page_not_delivered`): the Notification gateway refused the call (`call_refused`), answered what Muster cannot classify (`call_unknown`), or kept failing until the retry budget was used (`call_budget_used`); the person had no confirmed contact at the gateway at the first attempt (`no_confirmed_contact`); the gateway was deleted, or is no Notification gateway any more, before the call was sent (`gateway_deleted`); or the call came due while the gateway was Broken, and is never sent (`gateway_broken`). Null for the other events of the kind. Later versions add reasons; clients show an unknown one as it is.
 	Reason nullable.Nullable[PageNotDeliveredReason] `json:"reason"`
 
 	// Users The people the Page names.

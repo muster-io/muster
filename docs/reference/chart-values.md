@@ -894,6 +894,24 @@ string · default: `0m`
 
 How long the Schedule has a gap now or within the horizon before the rule fires.
 
+### `alerting.rules.MusterNotificationGatewayBroken`
+
+object
+
+A Notification gateway is Broken (critical).
+
+### `alerting.rules.MusterNotificationGatewayBroken.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterNotificationGatewayBroken.for`
+
+string · default: `5m`
+
+How long the Notification gateway is Broken before the rule fires.
+
 ### `dashboard`
 
 object

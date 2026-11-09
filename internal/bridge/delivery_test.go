@@ -1241,3 +1241,46 @@ func TestNotificationMaskingShortMember(t *testing.T) {
 		t.Errorf("the error of the outcome: %s", o.Error)
 	}
 }
+
+// TestNotifyNotSent is C-30.FR-8 on the outcomes of Notify: the two refusals of Muster that never reach the gateway —
+// info that does not declare the role gateway, and an id that names no Bridge Connection — are NotSent; a request that
+// the outbound address policy blocks, and a Fatal answer of the gateway, are not, so that they make it Broken.
+func TestNotifyNotSent(t *testing.T) {
+	e := newAdapterEnv(t)
+	c := delivery.Call{Class: outbound.ClassDelivery, Key: "notify-3"}
+	if o := e.adapter.Notify(t.Context(), c, notification()); o.Kind != delivery.OutcomeFatal || !o.NotSent {
+		t.Errorf("a messenger: %+v", o)
+	}
+	n := notification()
+	n.Connection = 9
+	if o := e.adapter.Notify(t.Context(), c, n); o.Kind != delivery.OutcomeFatal || !o.NotSent {
+		t.Errorf("no connection: %+v", o)
+	}
+
+	e = newAdapterEnv(t, gatewayInfo)
+	e.bridge.answer("notify", answerJSON(http.StatusUnauthorized, "application/problem+json",
+		`{"title":"refused","class":"forbidden"}`))
+	if o := e.adapter.Notify(t.Context(), c, notification()); o.Kind != delivery.OutcomeFatal || o.NotSent ||
+		o.Status != http.StatusUnauthorized {
+		t.Errorf("a refused token: %+v", o)
+	}
+
+	strict, err := outbound.ParsePolicy("standard", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := network(t, nil)
+	blocked.Policy = outbound.StaticPolicy(strict)
+	info, r := e.client.GetInfo(t.Context(), outbound.ClassDelivery)
+	if !r.OK() {
+		t.Fatalf("info %+v", r)
+	}
+	e.targets.byID[1] = Target{Conn: Conn{ID: 1, PublicID: "CB0123456789AB", Version: 1,
+		Client: newClient(t, blocked, Settings{BaseURL: e.bridge.srv.URL, Token: testToken})}}
+	e.targets.fixed = &info
+	before := len(e.bridge.requests("notify"))
+	if o := e.adapter.Notify(t.Context(), c, notification()); o.Kind != delivery.OutcomeFatal || o.NotSent ||
+		len(e.bridge.requests("notify")) != before {
+		t.Errorf("a blocked address: %+v", o)
+	}
+}

@@ -202,6 +202,12 @@ export const ListConnectionsResponse = zod.object({
   BridgeInfoRoleMessenger: 'messenger',
   BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
+  "gateway": zod.union([zod.object({
+  "broken": zod.boolean(),
+  "broken_since": zod.iso.datetime({"offset":true}).nullable().describe('When it became Broken; null while it is in order.'),
+  "reason": zod.string().nullable().describe('The error of the call that made it Broken, or of the last probe, or "unavailable after repeated failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of calls are masked. Null while it is in order.'),
+  "next_probe_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster probes it through `info` next; null while it is in order.')
+}).describe('The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error, or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.'),zod.null()]).describe('The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -547,6 +553,12 @@ export const CreateConnectionResponse = zod.union([zod.object({
   BridgeInfoRoleMessenger: 'messenger',
   BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
+  "gateway": zod.union([zod.object({
+  "broken": zod.boolean(),
+  "broken_since": zod.iso.datetime({"offset":true}).nullable().describe('When it became Broken; null while it is in order.'),
+  "reason": zod.string().nullable().describe('The error of the call that made it Broken, or of the last probe, or "unavailable after repeated failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of calls are masked. Null while it is in order.'),
+  "next_probe_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster probes it through `info` next; null while it is in order.')
+}).describe('The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error, or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.'),zod.null()]).describe('The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -960,6 +972,12 @@ export const GetConnectionResponse = zod.union([zod.object({
   BridgeInfoRoleMessenger: 'messenger',
   BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
+  "gateway": zod.union([zod.object({
+  "broken": zod.boolean(),
+  "broken_since": zod.iso.datetime({"offset":true}).nullable().describe('When it became Broken; null while it is in order.'),
+  "reason": zod.string().nullable().describe('The error of the call that made it Broken, or of the last probe, or "unavailable after repeated failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of calls are masked. Null while it is in order.'),
+  "next_probe_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster probes it through `info` next; null while it is in order.')
+}).describe('The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error, or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.'),zod.null()]).describe('The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -1314,6 +1332,12 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   BridgeInfoRoleMessenger: 'messenger',
   BridgeInfoRoleGateway: 'gateway',
 }).describe('`messenger`: a bridge to a messenger, whose channels are Destinations; `gateway`: a Notification gateway, which reaches people outside messengers.')).min(1).describe('The roles of the bridge from the stored `info`, `["messenger"]` while `info` is null or declares none. A Connection whose only role is `gateway` is a Notification gateway and cannot be a Destination.'),
+  "gateway": zod.union([zod.object({
+  "broken": zod.boolean(),
+  "broken_since": zod.iso.datetime({"offset":true}).nullable().describe('When it became Broken; null while it is in order.'),
+  "reason": zod.string().nullable().describe('The error of the call that made it Broken, or of the last probe, or "unavailable after repeated failures: {last error}". Untrusted, from the remote side; Secrets, tokens and the contacts and texts of calls are masked. Null while it is in order.'),
+  "next_probe_at": zod.iso.datetime({"offset":true}).nullable().describe('When Muster probes it through `info` next; null while it is in order.')
+}).describe('The state of a Notification gateway (C-30.FR-8). A call that the gateway answered with a Fatal error, or that used up `delivery.transient_budget`, makes it Broken; calls that come due while it is Broken end Not delivered with `gateway_broken` and are never sent after it recovers. Muster probes it through `info` every `delivery.broken_probe_interval`, and a successful probe or Connection check ends the state.'),zod.null()]).describe('The state of the Connection as a Notification gateway (C-30.FR-8), kept apart from the health of its Destinations; null when it is not one, neither declaring the role `gateway` in its stored `info` nor Broken.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),

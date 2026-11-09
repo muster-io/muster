@@ -43,8 +43,8 @@ What you can tune:
 The defaults are in the [chart values reference](../reference/chart-values.md), and the expression of each rule is on
 its [runbook](runbooks/index.md) page. The rules are covered by unit tests in CI.
 
-The five rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
-`MusterDestinationBroken` and `MusterHeartbeatLost`. The others are `warning`.
+The six rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
+`MusterDestinationBroken`, `MusterHeartbeatLost` and `MusterNotificationGatewayBroken`. The others are `warning`.
 
 ### Send the critical rules around Muster
 
@@ -106,7 +106,8 @@ Platform. You enable it in either or both ways, each behind its own flag:
 ## Internal alerts
 
 Muster raises its own problems as **Internal alerts**: `MusterSnapshotTruncated`, `MusterHeartbeatLost`,
-`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring` and `MusterScheduleGap`. They are Alerts
+`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring`, `MusterScheduleGap` and
+`MusterNotificationGatewayBroken`. They are Alerts
 of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
 Alert, and they reach nobody until a Route sends them to a Destination. The
 [Internal alerts reference](../reference/internal-alerts.md) lists them with their labels.
@@ -116,20 +117,23 @@ Give them a Route:
 1. Open **Routes**. At the top of the list, Muster suggests *Send Muster's own alerts to a Destination* when no Route
    other than the Default route matches them.
 2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"` and groups by
-   `alertname`, `integration`, `destination`, `route` and `schedule`: one Alert Group per Internal alert and what it is
-   about, so that the gaps of two Schedules make two Alert Groups, each with its own Team.
+   `alertname`, `integration`, `destination`, `route`, `schedule` and `connection`: one Alert Group per Internal alert
+   and what it is about, so that the gaps of two Schedules make two Alert Groups, each with its own Team, and two
+   Broken Notification gateways two Alert Groups.
 
-Use a Destination that does not depend on what the alert reports: not the one that is Broken. A second messenger, or an
+Use a Destination that does not depend on what the alert reports: not the one that is Broken, and a messenger rather
+than a call for a Broken Notification gateway. A second messenger, or an
 [outgoing webhook](../outgoing-webhooks/events.md) to a chat of your own, serves well. When a Route for
 `MusterHeartbeatLost` exists, the Internal alerts Route goes directly below it. Every Internal alert has a
 [runbook](runbooks/index.md), and `MUSTER_RUNBOOK_BASE_URL` (set by the chart from `alerting.runbookBaseURL`) is the base
 of its link.
 
-Four Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
-`MusterTemplateError` and `MusterScheduleGap`. The rule is the backup for when Muster cannot deliver; the Internal alert
-carries the labels of what it is about: the Integration, with its Static labels, for `MusterHeartbeatLost`, the
-Destination for `MusterDestinationBroken`, and the Schedule with its Team for `MusterScheduleGap`, whose Team's slug
-under the Team label makes the alert belong to the Team, so that a Route can pick it by the Team label.
+Five Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
+`MusterTemplateError`, `MusterScheduleGap` and `MusterNotificationGatewayBroken`. The rule is the backup for when
+Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration, with its Static
+labels, for `MusterHeartbeatLost`, the Destination for `MusterDestinationBroken`, the Schedule with its Team for
+`MusterScheduleGap`, whose Team's slug under the Team label makes the alert belong to the Team, so that a Route can
+pick it by the Team label, and the gateway's Connection for `MusterNotificationGatewayBroken`.
 
 ## Watching that Muster is alive
 
