@@ -2038,6 +2038,8 @@
       
         
       
+        
+      
     
     
     
@@ -2211,6 +2213,33 @@
     
   
   MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNotificationGatewayBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNotificationGatewayBroken
 
     
   </span>
@@ -3125,6 +3154,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#gateway_broken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_broken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway_call_attempted" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3206,6 +3246,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>gateway_notification_sent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_probe_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_probe_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_recovered" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_recovered</code>
       </span>
     </span>
   </a>
@@ -4769,6 +4831,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#gateway_broken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_broken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#gateway_call_attempted" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -4850,6 +4923,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>gateway_notification_sent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_probe_failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_probe_failed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gateway_recovered" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>gateway_recovered</code>
       </span>
     </span>
   </a>
@@ -5928,6 +6023,9 @@ the event.</p>
 <h3 id="gateway_acknowledge_refused"><code>gateway_acknowledge_refused</code><a class="headerlink" href="#gateway_acknowledge_refused" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>call</code>, <code>connection</code>, <code>reason</code> · C-30</p>
 <p>A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.</p>
+<h3 id="gateway_broken"><code>gateway_broken</code><a class="headerlink" href="#gateway_broken" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>cause</code>, <code>reason</code> · C-30</p>
+<p>A Notification gateway became Broken: connection is the public_id of its Connection, cause fatal after a call it answered with a Fatal error, such as a refused token, or unavailable after a call used up delivery.transient_budget, and reason the masked error it answered. Calls that come due while it is Broken end Not delivered with gateway_broken and are never sent after it recovers; MusterNotificationGatewayBroken fires and a probe through info runs every delivery.broken_probe_interval. The Destinations of the same bridge are not affected.</p>
 <h3 id="gateway_call_attempted"><code>gateway_call_attempted</code><a class="headerlink" href="#gateway_call_attempted" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>call</code>, <code>connection</code>, <code>attempt</code>, <code>outcome</code>, <code>replayed</code> · C-30</p>
 <p>An attempt of a call through a Notification gateway ended: call is the public_id of the call, connection of the gateway's Connection, attempt its number, and outcome accepted — a replayed answer to its Idempotency-Key included, with replayed true — or the error class of the answer, retry_after, transient, fatal or unknown, as muster_gateway_calls_total counts it. Never carries the contact or the text of the call.</p>
@@ -5939,7 +6037,7 @@ the event.</p>
 <p>The gateway sender could not attempt a call through a Notification gateway, or record how its attempt ended, because of error, such as a lost database connection: call is the public_id of the call. Any replica attempts it again once its lease runs out, with the same Idempotency-Key, so that a gateway that already accepted it answers replayed. Never carries the contact or the text of the call.</p>
 <h3 id="gateway_call_not_delivered"><code>gateway_call_not_delivered</code><a class="headerlink" href="#gateway_call_not_delivered" title="Permanent link">&para;</a></h3>
 <p>WARN · fields: <code>call</code>, <code>connection</code>, <code>user</code>, <code>reason</code>, <code>error</code> · C-30</p>
-<p>A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, and error the gateway's answer, masked. Never carries the contact or the text of the call.</p>
+<p>A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, or when Muster refused the call at its attempt for that reason without reaching the gateway, or gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, masked. Never carries the contact or the text of the call.</p>
 <h3 id="gateway_call_queued"><code>gateway_call_queued</code><a class="headerlink" href="#gateway_call_queued" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>call</code>, <code>connection</code>, <code>user</code>, <code>group</code>, <code>joined</code>, <code>not_before</code> · C-30</p>
 <p>A Page through a Notification gateway joined the call that waits for its first attempt, or started one: call is the public_id of the call, connection of the gateway's Connection, user of the User called, group the #N of the Alert Group, joined true when the call was waiting already, and not_before when it may go, empty while the previous call to the person through that gateway is still being sent. Never carries the contact or the text of the call.</p>
@@ -5952,6 +6050,12 @@ the event.</p>
 <h3 id="gateway_notification_sent"><code>gateway_notification_sent</code><a class="headerlink" href="#gateway_notification_sent" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>connection</code>, <code>key</code>, <code>class</code> · C-30</p>
 <p>Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.</p>
+<h3 id="gateway_probe_failed"><code>gateway_probe_failed</code><a class="headerlink" href="#gateway_probe_failed" title="Permanent link">&para;</a></h3>
+<p>WARN · fields: <code>connection</code>, <code>error</code> · C-30</p>
+<p>The outcome of a probe of a Broken Notification gateway through info could not be recorded because of error, such as a lost database connection: connection is the public_id of its Connection. The gateway stays Broken and is probed again after delivery.broken_probe_interval, by any replica.</p>
+<h3 id="gateway_recovered"><code>gateway_recovered</code><a class="headerlink" href="#gateway_recovered" title="Permanent link">&para;</a></h3>
+<p>INFO · fields: <code>connection</code>, <code>by</code>, <code>broken_for_s</code> · C-30</p>
+<p>A Broken Notification gateway is in order again after a successful probe through info or a successful check of its Connection: connection is the public_id of its Connection, by probe or check, and broken_for_s how long it was Broken, in seconds. MusterNotificationGatewayBroken resolves; the calls that came due meanwhile are not sent.</p>
 <h3 id="group_key_previewed"><code>group_key_previewed</code><a class="headerlink" href="#group_key_previewed" title="Permanent link">&para;</a></h3>
 <p>INFO · fields: <code>route</code>, <code>period_seconds</code>, <code>snapshots_read</code>, <code>truncated</code>, <code>duration_ms</code> · C-08</p>
 <p>A Group key preview read the Stored Snapshots of a period: route is the public_id of the saved Route it previewed, empty for a Route that is not saved yet, period_seconds the period, snapshots_read how many distinct bodies it read, truncated whether routing.group_key_preview_max_alerts stopped it with Stored Snapshots of the period, or Alerts the Route takes, left unread, and duration_ms how long it took.</p>

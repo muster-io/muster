@@ -2181,6 +2181,8 @@
       
         
       
+        
+      
     
     
     
@@ -2354,6 +2356,33 @@
     
   
   MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNotificationGatewayBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNotificationGatewayBroken
 
     
   </span>
@@ -3189,16 +3218,24 @@ on its internal listener.</p>
 <li>A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
   more.", and always ends with how to acknowledge.</li>
 <li>A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
-  delivered, as does one to a person without a confirmed contact (<code>no_confirmed_contact</code>) and one through a gateway
-  deleted before the call went (<code>gateway_deleted</code>). Each of its Alert Groups records
+  delivered, as does one to a person without a confirmed contact (<code>no_confirmed_contact</code>), one through a gateway
+  deleted before the call went (<code>gateway_deleted</code>) and one that comes due while the gateway is Broken
+  (<code>gateway_broken</code>). Each of its Alert Groups records
   <code>page_not_delivered</code> in its Timeline, of the kind <strong>Escalation chains</strong>, naming the person, the gateway and the
   reason; outgoing webhooks in events mode receive it.</li>
+<li>A gateway that answers a call with a Fatal error — it, or its provider, refuses the token or the credentials — or
+  whose call used up its retry budget becomes <strong>Broken</strong>: the calls that come due while it is Broken are not sent, not
+  even after it recovers, and <code>MusterNotificationGatewayBroken</code> is raised. Muster reads its <code>info</code> every 5 minutes
+  (<code>delivery.broken_probe_interval</code>), and the first success, or a check of the Connection whose step <code>info</code> passes,
+  ends the state. The Destinations of the same bridge are not affected. See the
+  <a href="../../operations/runbooks/MusterNotificationGatewayBroken/">runbook</a>.</li>
 </ul>
 <p>The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
 Alert Group it is about is removed by <code>retention.alert_group_summaries</code>.</p>
-<p><code>muster_gateway_calls_total{connection,outcome}</code> counts the attempts of calls, and the log has the events
-<code>gateway_call_queued</code>, <code>gateway_call_attempted</code>, <code>gateway_call_not_delivered</code>, <code>gateway_call_dropped</code> and
-<code>gateway_call_failed</code>, none with the contact or the text.</p>
+<p><code>muster_gateway_calls_total{connection,outcome}</code> counts the attempts of calls, <code>muster_notification_gateway_broken</code>
+is 1 while a gateway is Broken, and the log has the events <code>gateway_call_queued</code>, <code>gateway_call_attempted</code>,
+<code>gateway_call_not_delivered</code>, <code>gateway_call_dropped</code>, <code>gateway_call_failed</code>, <code>gateway_broken</code> and
+<code>gateway_recovered</code>, none with the contact or the text.</p>
 <h2 id="acknowledge-from-a-call">Acknowledge from a call<a class="headerlink" href="#acknowledge-from-a-call" title="Permanent link">&para;</a></h2>
 <p>When the person acknowledges in the call — presses 1, for example — the gateway reports <code>notification_acknowledged</code> with
 the call's action data. Muster verifies the data, which names the call and its Connection, and acknowledges each Alert

@@ -1113,12 +1113,17 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     - Migration 0035 keeps the signed action data of a call through a Notification gateway, with the id of the key that
       signed it, from its first attempt; no data is migrated. It is expand only: a 0.1 replica, or one of a development
       image without it, writes neither column and signs each attempt of a call with the active key, as before.
+    - Migration 0036 adds the [Broken state of Notification gateways](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md)
+      to the Connections; no data is migrated, and no gateway starts Broken. It is expand only: a 0.1 replica, or one of
+      a development image without it, writes none of the new columns; one of such an image sends the calls of a Broken
+      gateway, which then fail and end Not delivered as before.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
-    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule` —
-    so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team; without
-    them, the gaps of every Schedule share one Alert Group, which collects the Teams of all of them. When the Routes
+    `integration`, `destination` and `route`. Add to it the labels that 0.2.0 suggests after `route` — `schedule`, then
+    `connection` — so that each Schedule's gaps get an Alert Group of their own, which belongs to that Schedule's Team,
+    and each Broken Notification gateway one of its own; without them, the gaps of every Schedule share one Alert
+    Group, which collects the Teams of all of them, and so do the Broken gateways. When the Routes
     can deliver to the Teams of their Alert Groups, the suggestion turns that on too, so that each gap reaches its own
     Team; turn it on for a Route accepted before.
 
@@ -1474,6 +1479,14 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     the schema recorded as dirty at version 35. To recover, with the same database role as Muster, run
     `UPDATE schema_migrations SET version = 34, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`.
+
+    Migration 0036 adds the Broken state of Notification gateways to the Connections in one transaction: a failure
+    leaves nothing of it, but the schema recorded as dirty at version 36. To recover, with the same database role as
+    Muster, run `UPDATE schema_migrations SET version = 35, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0036 forgets which gateways are Broken, and an open
+    `MusterNotificationGatewayBroken` stays open while a version before 0036 runs; once 0036 is back, the Leader
+    resolves it within 15 seconds, as it resolves every `MusterNotificationGatewayBroken` of a gateway that is not Broken,
+    and a gateway whose calls still fail becomes Broken again with its next failed call.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -6509,17 +6522,25 @@ on its internal listener.
 - A text longer than the 1,000 characters of the Bridge protocol lists as many Alert Groups as fit, then "And N
   more.", and always ends with how to acknowledge.
 - A call that the gateway refuses, answers in a way Muster cannot classify, or that used up its retry budget, ends Not
-  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`) and one through a gateway
-  deleted before the call went (`gateway_deleted`). Each of its Alert Groups records
+  delivered, as does one to a person without a confirmed contact (`no_confirmed_contact`), one through a gateway
+  deleted before the call went (`gateway_deleted`) and one that comes due while the gateway is Broken
+  (`gateway_broken`). Each of its Alert Groups records
   `page_not_delivered` in its Timeline, of the kind **Escalation chains**, naming the person, the gateway and the
   reason; outgoing webhooks in events mode receive it.
+- A gateway that answers a call with a Fatal error — it, or its provider, refuses the token or the credentials — or
+  whose call used up its retry budget becomes **Broken**: the calls that come due while it is Broken are not sent, not
+  even after it recovers, and `MusterNotificationGatewayBroken` is raised. Muster reads its `info` every 5 minutes
+  (`delivery.broken_probe_interval`), and the first success, or a check of the Connection whose step `info` passes,
+  ends the state. The Destinations of the same bridge are not affected. See the
+  [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md).
 
 The text of a call, which names its Alert Groups, is cleared when the call ends; the call itself is kept until every
 Alert Group it is about is removed by `retention.alert_group_summaries`.
 
-`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, and the log has the events
-`gateway_call_queued`, `gateway_call_attempted`, `gateway_call_not_delivered`, `gateway_call_dropped` and
-`gateway_call_failed`, none with the contact or the text.
+`muster_gateway_calls_total{connection,outcome}` counts the attempts of calls, `muster_notification_gateway_broken`
+is 1 while a gateway is Broken, and the log has the events `gateway_call_queued`, `gateway_call_attempted`,
+`gateway_call_not_delivered`, `gateway_call_dropped`, `gateway_call_failed`, `gateway_broken` and
+`gateway_recovered`, none with the contact or the text.
 
 ## Acknowledge from a call
 
@@ -10781,8 +10802,8 @@ What you can tune:
 The defaults are in the [chart values reference](https://muster-io.github.io/muster/latest/reference/chart-values.md), and the expression of each rule is on
 its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md) page. The rules are covered by unit tests in CI.
 
-The five rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
-`MusterDestinationBroken` and `MusterHeartbeatLost`. The others are `warning`.
+The six rules with severity `critical` are `MusterDown`, `MusterNoLeader`, `MusterDeliveryFailing`,
+`MusterDestinationBroken`, `MusterHeartbeatLost` and `MusterNotificationGatewayBroken`. The others are `warning`.
 
 ### Send the critical rules around Muster
 
@@ -10844,7 +10865,8 @@ Platform. You enable it in either or both ways, each behind its own flag:
 ## Internal alerts
 
 Muster raises its own problems as **Internal alerts**: `MusterSnapshotTruncated`, `MusterHeartbeatLost`,
-`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring` and `MusterScheduleGap`. They are Alerts
+`MusterDestinationBroken`, `MusterTemplateError`, `MusterOIDCSecretExpiring`, `MusterScheduleGap` and
+`MusterNotificationGatewayBroken`. They are Alerts
 of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
 Alert, and they reach nobody until a Route sends them to a Destination. The
 [Internal alerts reference](https://muster-io.github.io/muster/latest/reference/internal-alerts.md) lists them with their labels.
@@ -10854,20 +10876,23 @@ Give them a Route:
 1. Open **Routes**. At the top of the list, Muster suggests *Send Muster's own alerts to a Destination* when no Route
    other than the Default route matches them.
 2. Choose a Destination, and press *Create the route*. The Route matches `alertname=~"Muster.*"` and groups by
-   `alertname`, `integration`, `destination`, `route` and `schedule`: one Alert Group per Internal alert and what it is
-   about, so that the gaps of two Schedules make two Alert Groups, each with its own Team.
+   `alertname`, `integration`, `destination`, `route`, `schedule` and `connection`: one Alert Group per Internal alert
+   and what it is about, so that the gaps of two Schedules make two Alert Groups, each with its own Team, and two
+   Broken Notification gateways two Alert Groups.
 
-Use a Destination that does not depend on what the alert reports: not the one that is Broken. A second messenger, or an
+Use a Destination that does not depend on what the alert reports: not the one that is Broken, and a messenger rather
+than a call for a Broken Notification gateway. A second messenger, or an
 [outgoing webhook](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md) to a chat of your own, serves well. When a Route for
 `MusterHeartbeatLost` exists, the Internal alerts Route goes directly below it. Every Internal alert has a
 [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md), and `MUSTER_RUNBOOK_BASE_URL` (set by the chart from `alerting.runbookBaseURL`) is the base
 of its link.
 
-Four Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
-`MusterTemplateError` and `MusterScheduleGap`. The rule is the backup for when Muster cannot deliver; the Internal alert
-carries the labels of what it is about: the Integration, with its Static labels, for `MusterHeartbeatLost`, the
-Destination for `MusterDestinationBroken`, and the Schedule with its Team for `MusterScheduleGap`, whose Team's slug
-under the Team label makes the alert belong to the Team, so that a Route can pick it by the Team label.
+Five Internal alerts have a chart rule with the same name: `MusterHeartbeatLost`, `MusterDestinationBroken`,
+`MusterTemplateError`, `MusterScheduleGap` and `MusterNotificationGatewayBroken`. The rule is the backup for when
+Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration, with its Static
+labels, for `MusterHeartbeatLost`, the Destination for `MusterDestinationBroken`, the Schedule with its Team for
+`MusterScheduleGap`, whose Team's slug under the Team label makes the alert belong to the Team, so that a Route can
+pick it by the Team label, and the gateway's Connection for `MusterNotificationGatewayBroken`.
 
 ## Watching that Muster is alive
 
@@ -11354,6 +11379,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md) | critical | chart rule |
 | [MusterDestinationBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md) | critical | both |
 | [MusterHeartbeatLost](https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost.md) | critical | both |
+| [MusterNotificationGatewayBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md) | critical | both |
 | [MusterDeliverySlow](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow.md) | warning | chart rule |
 | [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md) | warning | chart rule |
 | [MusterIngestBacklog](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md) | warning | chart rule |
@@ -11722,6 +11748,91 @@ This alert has two sources with the same name, severity `critical` and this page
 - When the cluster was retired on purpose, turn the Heartbeat off or delete the Integration; both resolve the alert.
 - The next signal makes the Heartbeat live again and resolves the Internal alert; see
   [When the Heartbeat is lost](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#when-the-heartbeat-is-lost).
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md -->
+# MusterNotificationGatewayBroken
+
+## Meaning
+
+A [Notification gateway](https://muster-io.github.io/muster/latest/messengers/notification-gateways.md) is **Broken**: a call through it ended with a
+Fatal error — the bridge, or the provider behind it, refused the token or the credentials (`401` or `403`, the class
+`forbidden`), or the outbound address policy blocks the bridge's address — or a call failed until its retry budget ran
+out (`delivery.transient_budget`, 10 attempts within 30
+minutes). Muster then probes the gateway every `delivery.broken_probe_interval` (5 minutes) by reading its `info`, and
+ends the Broken state on the first success. A successful check of its Connection ends it too.
+
+This alert has two sources with the same name, severity `critical` and this page:
+
+- The **Internal alert**, raised by Muster itself as an Alert of the built-in "Muster" Integration when the gateway
+  becomes Broken, with the labels `connection` (the id of the gateway's Connection) and `connection_name`. It is
+  resolved when a probe or a Connection check succeeds, and when the Connection is deleted. The suggested Route
+  "Muster internal alerts" groups by `connection`, so every Broken gateway has an Alert Group of its own.
+- The **chart rule**, the backup for when Muster cannot deliver the Internal alert:
+
+    ```promql
+    max by (connection) (muster_notification_gateway_broken{job="muster"}) == 1
+    ```
+
+    It fires after 5 minutes with the label `connection`. `muster_notification_gateway_broken` is set by the Leader
+    every 15 seconds, so the rule fires about 5 minutes after the gateway became Broken and resolves within 15 seconds
+    after the state ended.
+
+!!! warning "Route it around the gateway"
+    A Broken gateway cannot call anybody about itself. Route the Internal alert to a messenger Destination, and send
+    the chart rule through an Alertmanager route that bypasses Muster.
+
+## Impact
+
+- No call goes through the gateway. Every call that comes due while it is Broken — from an Escalation step or a
+  Notification rule — ends Not delivered: each of its Alert Groups records `page_not_delivered` with the reason
+  `gateway_broken` in its Timeline, naming the person and the gateway.
+- **The calls that came due meanwhile were not sent, and are not sent after the gateway recovers.** Nobody was called
+  for those Alert Groups through this gateway; check them by hand.
+- The Destinations of the same bridge, if it is also a messenger, are not affected: a Broken gateway never makes a
+  Destination Broken, nor the other way round. Other gateways, ingestion, delivery to messengers and timers keep
+  working.
+
+## Diagnosis
+
+1. Open the gateway's Connection page (`/connections/<id>`). Its read in the API, `GET /api/v1/connections/<id>`,
+   has `gateway` with `broken`, `broken_since`, `reason` and `next_probe_at`. The reason is the error the bridge
+   answered to the call or to the last probe, with secrets and the contacts and texts of calls masked; it starts with
+   "unavailable after repeated failures:" when the retry budget ran out.
+2. Open the tab **Request log** of the Connection and narrow it to the operations `sendNotification` and `getInfo`
+   (see [Request log](https://muster-io.github.io/muster/latest/operations/request-log.md#where-to-find-it)): the record shows the status and the body the bridge
+   answered. The probes are the `getInfo` requests of the kind **Broken probe**.
+3. Find the log line `gateway_broken` (`connection`, `cause`, `reason`): `cause` is `fatal` after a Fatal answer and
+   `unavailable` after a call used up its retry budget. The lines `gateway_call_not_delivered` with the reason
+   `gateway_broken` name the calls that were not sent.
+4. Run `muster bridge check <base URL> --token-file <file> --contact <your contact> --no-interactive`, and
+   `--channel <id>` when the bridge is also a messenger, against the bridge to see which step of the Bridge protocol
+   fails, outside Muster: it sends one test notification to your contact (see
+   [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check)).
+
+## Fix
+
+- `cause` `fatal`, a `401` or `403`: the bridge refuses Muster's token, or the provider refuses the bridge's
+  credentials. Replace the token on the Connection if it is Muster's that changed; otherwise fix the credentials or
+  the account of the provider in the bridge's own configuration — an expired API key, a blocked account, a used-up
+  balance.
+- `cause` `fatal` without a status, the reason naming the outbound address policy: Muster refused to reach the
+  bridge's address. Allow it in the **Outbound addresses** (`/admin/organization/outbound`), or fix the base URL of the
+  Connection.
+- `cause` `unavailable`: the bridge or its provider did not answer, or answered `transient` or asked to wait, until the
+  retry budget ran out. Fix the bridge, its provider, the network path to it or the proxy of the Connection.
+- Then press **Check connection** on the Connection page: a check whose step `info` passes ends the Broken state at
+  once. Otherwise the next probe ends it by itself, within `delivery.broken_probe_interval`.
+- **A passing `info` does not prove that calls go through.** The check and the probe read only the bridge's `info`,
+  which a bridge answers also while its provider refuses the bridge's own credentials, so the state can end while
+  calls would still fail and make the gateway Broken again. Before you trust a recovery, run `muster bridge check <base
+  URL> --token-file <file> --contact <your contact>` against the bridge, with `--channel <id>` when it is also a
+  messenger: its step `notification` sends a real notification to your contact through the provider (see
+  [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check)).
+- The Internal alert resolves and `gateway_recovered` (`connection`, `by` — `probe` or `check` — and
+  `broken_for_s`) is logged when the Broken state ends; the chart rule resolves at the Leader's next update of
+  `muster_notification_gateway_broken`, within 15 seconds.
+- Calls that come due afterwards go as usual. Check the Alert Groups whose Timeline shows `page_not_delivered` with
+  `gateway_broken`: their people were not called.
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow.md -->
 # MusterDeliverySlow
@@ -12235,10 +12346,10 @@ The pages of this section are generated from the code and the specification of t
 
 Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes
 them; the endpoint also serves the process (`process_*`) and Go runtime (`go_*`) metrics. Configuration entities
-appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`); the labels of an
-`*_info` metric carry what it describes, such as a name or the version; every other label takes its values from the
-closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported
-only by the replica that is the Leader. The capability is the one that exports the metric.
+appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`, `connection`); the
+labels of an `*_info` metric carry what it describes, such as a name or the version; every other label takes its
+values from the closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only
+metric is exported only by the replica that is the Leader. The capability is the one that exports the metric.
 
 ### `muster_alert_group_time_to_ack_seconds`
 
@@ -12536,6 +12647,14 @@ counter · labels: `method` · C-03 · exported by every replica
 Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted.
 
 - `method`: `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code
+
+### `muster_notification_gateway_broken`
+
+gauge · labels: `connection` · C-30 · exported by the Leader only
+
+1 while the Notification gateway is Broken, 0 while it is in order, per gateway's Connection that is not deleted; set by the Leader.
+
+- `connection` (entity): the public_id of the connection
 
 ### `muster_oidc_checks_total`
 
@@ -12889,6 +13008,12 @@ INFO · fields: `call`, `connection`, `reason` · C-30
 
 A notification_acknowledged event of a Notification gateway ran no Command, and was answered so: call is the public_id of the call its action data names, empty when the data names none, connection the public_id of the Connection that reported it, and reason not_verified for data that is not Muster's signature of a call, expired for data signed with a key that left the Keyring, unknown_call for a call that is not one of this Connection, disabled or deleted for a person the call was for who is disabled or deleted. Refusals of the Commands themselves are logged as command_refused.
 
+### `gateway_broken`
+
+WARN · fields: `connection`, `cause`, `reason` · C-30
+
+A Notification gateway became Broken: connection is the public_id of its Connection, cause fatal after a call it answered with a Fatal error, such as a refused token, or unavailable after a call used up delivery.transient_budget, and reason the masked error it answered. Calls that come due while it is Broken end Not delivered with gateway_broken and are never sent after it recovers; MusterNotificationGatewayBroken fires and a probe through info runs every delivery.broken_probe_interval. The Destinations of the same bridge are not affected.
+
 ### `gateway_call_attempted`
 
 INFO · fields: `call`, `connection`, `attempt`, `outcome`, `replayed` · C-30
@@ -12911,7 +13036,7 @@ The gateway sender could not attempt a call through a Notification gateway, or r
 
 WARN · fields: `call`, `connection`, `user`, `reason`, `error` · C-30
 
-A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, and error the gateway's answer, masked. Never carries the contact or the text of the call.
+A call through a Notification gateway ended Not delivered and recorded page_not_delivered on its Alert Groups: call is the public_id of the call, connection of the gateway's Connection, user of the User called, reason call_refused when the gateway refused it, call_unknown for an answer Muster cannot classify, call_budget_used once delivery.transient_budget was used, by failed attempts or by the time of waits the gateway asked for, no_confirmed_contact when the person had no confirmed contact at the gateway, or gateway_deleted when the gateway was deleted, or is no Notification gateway any more, before the call went, or when Muster refused the call at its attempt for that reason without reaching the gateway, or gateway_broken when the call came due while the gateway was Broken, and error the gateway's answer, masked. Never carries the contact or the text of the call.
 
 ### `gateway_call_queued`
 
@@ -12936,6 +13061,18 @@ A person asked for the confirmation code of their contact at a Notification gate
 INFO · fields: `connection`, `key`, `class` · C-30
 
 Muster called sendNotification of a Bridge Connection in the role gateway: connection is the public_id of the Connection, key the Idempotency-Key of the call, which its retries reuse, and class how the bridge answered it — ok, or the error class of the Bridge protocol: transient, rate_limited, gone, forbidden or invalid. The contact and the text are never logged; the Request log of the Connection has the request.
+
+### `gateway_probe_failed`
+
+WARN · fields: `connection`, `error` · C-30
+
+The outcome of a probe of a Broken Notification gateway through info could not be recorded because of error, such as a lost database connection: connection is the public_id of its Connection. The gateway stays Broken and is probed again after delivery.broken_probe_interval, by any replica.
+
+### `gateway_recovered`
+
+INFO · fields: `connection`, `by`, `broken_for_s` · C-30
+
+A Broken Notification gateway is in order again after a successful probe through info or a successful check of its Connection: connection is the public_id of its Connection, by probe or check, and broken_for_s how long it was Broken, in seconds. MusterNotificationGatewayBroken resolves; the calls that came due meanwhile are not sent.
 
 ### `group_key_previewed`
 
@@ -13451,11 +13588,11 @@ Muster reports problems it can still report through its own pipeline as Internal
 synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with
 them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or
 Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,
-`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from
-`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new
-one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,
-outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,
-`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
+`route`, `destination`, `schedule`, `connection`) with its current name in a `*_name` label; the fingerprint is
+computed from `alertname` and the id label only, so renaming the entity updates the open Internal alert instead
+of raising a new one. An Internal alert about a Team's object also carries the Team's slug under the
+Organization's Team label, outside the fingerprint, so that it belongs to the Team. Every Internal alert carries
+the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
 `major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
 joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.
 
@@ -13470,6 +13607,12 @@ Raised while: A Destination is Broken: the messenger answered with a Fatal error
 critical · labels: `integration`, `integration_name`, the Integration's Static labels · C-07 · runbook: [`operations/runbooks/MusterHeartbeatLost/`](https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost.md)
 
 Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be interrupted and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.
+
+### `MusterNotificationGatewayBroken`
+
+critical · labels: `connection`, `connection_name` · C-30 · runbook: [`operations/runbooks/MusterNotificationGatewayBroken/`](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md)
+
+Raised while: A Notification gateway is Broken: a call through it was answered with a Fatal error, such as a refused token, or failed until delivery.transient_budget was used, so the calls that come due end Not delivered. It resolves when a probe through info or a check of the Connection succeeds, or when the Connection is deleted.
 
 ### `MusterOIDCSecretExpiring`
 
@@ -14536,6 +14679,24 @@ Renders the rule.
 string · default: `0m`
 
 How long the Schedule has a gap now or within the horizon before the rule fires.
+
+### `alerting.rules.MusterNotificationGatewayBroken`
+
+object
+
+A Notification gateway is Broken (critical).
+
+### `alerting.rules.MusterNotificationGatewayBroken.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterNotificationGatewayBroken.for`
+
+string · default: `5m`
+
+How long the Notification gateway is Broken before the rule fires.
 
 ### `dashboard`
 

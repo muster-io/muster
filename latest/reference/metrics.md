@@ -4,10 +4,10 @@
 
 Muster serves these metrics in the Prometheus text format at `/metrics` on the internal listener and never pushes
 them; the endpoint also serves the process (`process_*`) and Go runtime (`go_*`) metrics. Configuration entities
-appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`); the labels of an
-`*_info` metric carry what it describes, such as a name or the version; every other label takes its values from the
-closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only metric is exported
-only by the replica that is the Leader. The capability is the one that exports the metric.
+appear only by their `public_id` (`integration`, `route`, `destination`, `team`, `schedule`, `connection`); the
+labels of an `*_info` metric carry what it describes, such as a name or the version; every other label takes its
+values from the closed set listed below. Histograms are Prometheus histograms with `le` buckets. A Leader-only
+metric is exported only by the replica that is the Leader. The capability is the one that exports the metric.
 
 ### `muster_alert_group_time_to_ack_seconds`
 
@@ -305,6 +305,14 @@ counter · labels: `method` · C-03 · exported by every replica
 Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted.
 
 - `method`: `local`, `oidc`, `totp` — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code
+
+### `muster_notification_gateway_broken`
+
+gauge · labels: `connection` · C-30 · exported by the Leader only
+
+1 while the Notification gateway is Broken, 0 while it is in order, per gateway's Connection that is not deleted; set by the Leader.
+
+- `connection` (entity): the public_id of the connection
 
 ### `muster_oidc_checks_total`
 

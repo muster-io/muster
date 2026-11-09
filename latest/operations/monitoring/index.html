@@ -2170,6 +2170,8 @@
       
         
       
+        
+      
     
     
     
@@ -2343,6 +2345,33 @@
     
   
   MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/MusterNotificationGatewayBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNotificationGatewayBroken
 
     
   </span>
@@ -3097,8 +3126,8 @@ operator. Each rule has a <code>description</code> and a <code>runbook_url</code
 </ul>
 <p>The defaults are in the <a href="../../reference/chart-values/">chart values reference</a>, and the expression of each rule is on
 its <a href="../runbooks/">runbook</a> page. The rules are covered by unit tests in CI.</p>
-<p>The five rules with severity <code>critical</code> are <code>MusterDown</code>, <code>MusterNoLeader</code>, <code>MusterDeliveryFailing</code>,
-<code>MusterDestinationBroken</code> and <code>MusterHeartbeatLost</code>. The others are <code>warning</code>.</p>
+<p>The six rules with severity <code>critical</code> are <code>MusterDown</code>, <code>MusterNoLeader</code>, <code>MusterDeliveryFailing</code>,
+<code>MusterDestinationBroken</code>, <code>MusterHeartbeatLost</code> and <code>MusterNotificationGatewayBroken</code>. The others are <code>warning</code>.</p>
 <h3 id="send-the-critical-rules-around-muster">Send the critical rules around Muster<a class="headerlink" href="#send-the-critical-rules-around-muster" title="Permanent link">&para;</a></h3>
 <div class="admonition warning">
 <p class="admonition-title">Do not route the critical rules through Muster</p>
@@ -3153,7 +3182,8 @@ Platform. You enable it in either or both ways, each behind its own flag:</p>
 </dl>
 <h2 id="internal-alerts">Internal alerts<a class="headerlink" href="#internal-alerts" title="Permanent link">&para;</a></h2>
 <p>Muster raises its own problems as <strong>Internal alerts</strong>: <code>MusterSnapshotTruncated</code>, <code>MusterHeartbeatLost</code>,
-<code>MusterDestinationBroken</code>, <code>MusterTemplateError</code>, <code>MusterOIDCSecretExpiring</code> and <code>MusterScheduleGap</code>. They are Alerts
+<code>MusterDestinationBroken</code>, <code>MusterTemplateError</code>, <code>MusterOIDCSecretExpiring</code>, <code>MusterScheduleGap</code> and
+<code>MusterNotificationGatewayBroken</code>. They are Alerts
 of the built-in "Muster" Integration, which has no tokens and cannot be changed. They go through Routes like any
 Alert, and they reach nobody until a Route sends them to a Destination. The
 <a href="../../reference/internal-alerts/">Internal alerts reference</a> lists them with their labels.</p>
@@ -3162,19 +3192,22 @@ Alert, and they reach nobody until a Route sends them to a Destination. The
 <li>Open <strong>Routes</strong>. At the top of the list, Muster suggests <em>Send Muster's own alerts to a Destination</em> when no Route
    other than the Default route matches them.</li>
 <li>Choose a Destination, and press <em>Create the route</em>. The Route matches <code>alertname=~"Muster.*"</code> and groups by
-   <code>alertname</code>, <code>integration</code>, <code>destination</code>, <code>route</code> and <code>schedule</code>: one Alert Group per Internal alert and what it is
-   about, so that the gaps of two Schedules make two Alert Groups, each with its own Team.</li>
+   <code>alertname</code>, <code>integration</code>, <code>destination</code>, <code>route</code>, <code>schedule</code> and <code>connection</code>: one Alert Group per Internal alert
+   and what it is about, so that the gaps of two Schedules make two Alert Groups, each with its own Team, and two
+   Broken Notification gateways two Alert Groups.</li>
 </ol>
-<p>Use a Destination that does not depend on what the alert reports: not the one that is Broken. A second messenger, or an
+<p>Use a Destination that does not depend on what the alert reports: not the one that is Broken, and a messenger rather
+than a call for a Broken Notification gateway. A second messenger, or an
 <a href="../../outgoing-webhooks/events/">outgoing webhook</a> to a chat of your own, serves well. When a Route for
 <code>MusterHeartbeatLost</code> exists, the Internal alerts Route goes directly below it. Every Internal alert has a
 <a href="../runbooks/">runbook</a>, and <code>MUSTER_RUNBOOK_BASE_URL</code> (set by the chart from <code>alerting.runbookBaseURL</code>) is the base
 of its link.</p>
-<p>Four Internal alerts have a chart rule with the same name: <code>MusterHeartbeatLost</code>, <code>MusterDestinationBroken</code>,
-<code>MusterTemplateError</code> and <code>MusterScheduleGap</code>. The rule is the backup for when Muster cannot deliver; the Internal alert
-carries the labels of what it is about: the Integration, with its Static labels, for <code>MusterHeartbeatLost</code>, the
-Destination for <code>MusterDestinationBroken</code>, and the Schedule with its Team for <code>MusterScheduleGap</code>, whose Team's slug
-under the Team label makes the alert belong to the Team, so that a Route can pick it by the Team label.</p>
+<p>Five Internal alerts have a chart rule with the same name: <code>MusterHeartbeatLost</code>, <code>MusterDestinationBroken</code>,
+<code>MusterTemplateError</code>, <code>MusterScheduleGap</code> and <code>MusterNotificationGatewayBroken</code>. The rule is the backup for when
+Muster cannot deliver; the Internal alert carries the labels of what it is about: the Integration, with its Static
+labels, for <code>MusterHeartbeatLost</code>, the Destination for <code>MusterDestinationBroken</code>, the Schedule with its Team for
+<code>MusterScheduleGap</code>, whose Team's slug under the Team label makes the alert belong to the Team, so that a Route can
+pick it by the Team label, and the gateway's Connection for <code>MusterNotificationGatewayBroken</code>.</p>
 <h2 id="watching-that-muster-is-alive">Watching that Muster is alive<a class="headerlink" href="#watching-that-muster-is-alive" title="Permanent link">&para;</a></h2>
 <p>Metrics and rules need Prometheus. To notice that Muster, its cluster or its network is down altogether, configure the
 <a href="../outgoing-heartbeat/">outgoing heartbeat</a>: an external service alerts you when the calls stop.</p>

@@ -11,6 +11,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterDeliveryFailing](MusterDeliveryFailing.md) | critical | chart rule |
 | [MusterDestinationBroken](MusterDestinationBroken.md) | critical | both |
 | [MusterHeartbeatLost](MusterHeartbeatLost.md) | critical | both |
+| [MusterNotificationGatewayBroken](MusterNotificationGatewayBroken.md) | critical | both |
 | [MusterDeliverySlow](MusterDeliverySlow.md) | warning | chart rule |
 | [MusterDeliveryQueueGrowing](MusterDeliveryQueueGrowing.md) | warning | chart rule |
 | [MusterIngestBacklog](MusterIngestBacklog.md) | warning | chart rule |

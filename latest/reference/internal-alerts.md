@@ -7,11 +7,11 @@ Muster reports problems it can still report through its own pipeline as Internal
 synthetic Stored Snapshot of that Integration, listed with its other Stored Snapshots and processed in order with
 them. Muster raises and resolves them explicitly when their condition changes; they are never resolved as Gone or
 Stale. Besides `alertname` and `severity`, a configuration entity appears by its immutable id (`integration`,
-`route`, `destination`, `schedule`) with its current name in a `*_name` label; the fingerprint is computed from
-`alertname` and the id label only, so renaming the entity updates the open Internal alert instead of raising a new
-one. An Internal alert about a Team's object also carries the Team's slug under the Organization's Team label,
-outside the fingerprint, so that it belongs to the Team. Every Internal alert carries the annotations `summary`,
-`description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
+`route`, `destination`, `schedule`, `connection`) with its current name in a `*_name` label; the fingerprint is
+computed from `alertname` and the id label only, so renaming the entity updates the open Internal alert instead
+of raising a new one. An Internal alert about a Team's object also carries the Team's slug under the
+Organization's Team label, outside the fingerprint, so that it belongs to the Team. Every Internal alert carries
+the annotations `summary`, `description` and `runbook_url`: `MUSTER_RUNBOOK_BASE_URL`, the
 `major.minor` of the binary (`latest` for any version that is not a release `X.Y.Z`) and the runbook below,
 joined by `/`; the annotations some carry besides are listed with them. The capability is the one that raises it.
 
@@ -26,6 +26,12 @@ Raised while: A Destination is Broken: the messenger answered with a Fatal error
 critical · labels: `integration`, `integration_name`, the Integration's Static labels · C-07 · runbook: [`operations/runbooks/MusterHeartbeatLost/`](../operations/runbooks/MusterHeartbeatLost.md)
 
 Raised while: An Integration is Heartbeat lost: no Heartbeat signal arrived within its Heartbeat timeout, so the path from its Alertmanager to Muster may be interrupted and Stale resolution is paused. It resolves with the next signal, when the Heartbeat is turned off or when the Integration is deleted.
+
+### `MusterNotificationGatewayBroken`
+
+critical · labels: `connection`, `connection_name` · C-30 · runbook: [`operations/runbooks/MusterNotificationGatewayBroken/`](../operations/runbooks/MusterNotificationGatewayBroken.md)
+
+Raised while: A Notification gateway is Broken: a call through it was answered with a Fatal error, such as a refused token, or failed until delivery.transient_budget was used, so the calls that come due end Not delivered. It resolves when a probe through info or a check of the Connection succeeds, or when the Connection is deleted.
 
 ### `MusterOIDCSecretExpiring`
 

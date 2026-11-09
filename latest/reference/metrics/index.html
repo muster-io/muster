@@ -2038,6 +2038,8 @@
       
         
       
+        
+      
     
     
     
@@ -2211,6 +2213,33 @@
     
   
   MusterHeartbeatLost
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterNotificationGatewayBroken/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterNotificationGatewayBroken
 
     
   </span>
@@ -3043,6 +3072,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_notification_gateway_broken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_notification_gateway_broken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_oidc_checks_total" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3779,6 +3819,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#muster_notification_gateway_broken" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>muster_notification_gateway_broken</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#muster_oidc_checks_total" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3935,10 +3986,10 @@
 <h1 id="metrics">Metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h1>
 <p>Muster serves these metrics in the Prometheus text format at <code>/metrics</code> on the internal listener and never pushes
 them; the endpoint also serves the process (<code>process_*</code>) and Go runtime (<code>go_*</code>) metrics. Configuration entities
-appear only by their <code>public_id</code> (<code>integration</code>, <code>route</code>, <code>destination</code>, <code>team</code>, <code>schedule</code>); the labels of an
-<code>*_info</code> metric carry what it describes, such as a name or the version; every other label takes its values from the
-closed set listed below. Histograms are Prometheus histograms with <code>le</code> buckets. A Leader-only metric is exported
-only by the replica that is the Leader. The capability is the one that exports the metric.</p>
+appear only by their <code>public_id</code> (<code>integration</code>, <code>route</code>, <code>destination</code>, <code>team</code>, <code>schedule</code>, <code>connection</code>); the
+labels of an <code>*_info</code> metric carry what it describes, such as a name or the version; every other label takes its
+values from the closed set listed below. Histograms are Prometheus histograms with <code>le</code> buckets. A Leader-only
+metric is exported only by the replica that is the Leader. The capability is the one that exports the metric.</p>
 <h3 id="muster_alert_group_time_to_ack_seconds"><code>muster_alert_group_time_to_ack_seconds</code><a class="headerlink" href="#muster_alert_group_time_to_ack_seconds" title="Permanent link">&para;</a></h3>
 <p>histogram · labels: <code>route</code> · C-10 · exported by every replica</p>
 <p>Time from the start of an Alert Group to its first acknowledgement, observed once per Alert Group, by Route.</p>
@@ -4151,6 +4202,12 @@ only by the replica that is the Leader. The capability is the one that exports t
 <p>Failed sign-ins that were evaluated, by method; attempts refused by the sign-in throttle are not counted.</p>
 <ul>
 <li><code>method</code>: <code>local</code>, <code>oidc</code>, <code>totp</code> — local is a wrong login or password, oidc a refused OIDC sign-in, totp a wrong TOTP or recovery code</li>
+</ul>
+<h3 id="muster_notification_gateway_broken"><code>muster_notification_gateway_broken</code><a class="headerlink" href="#muster_notification_gateway_broken" title="Permanent link">&para;</a></h3>
+<p>gauge · labels: <code>connection</code> · C-30 · exported by the Leader only</p>
+<p>1 while the Notification gateway is Broken, 0 while it is in order, per gateway's Connection that is not deleted; set by the Leader.</p>
+<ul>
+<li><code>connection</code> (entity): the public_id of the connection</li>
 </ul>
 <h3 id="muster_oidc_checks_total"><code>muster_oidc_checks_total</code><a class="headerlink" href="#muster_oidc_checks_total" title="Permanent link">&para;</a></h3>
 <p>counter · labels: <code>outcome</code> · C-03 · exported by every replica</p>

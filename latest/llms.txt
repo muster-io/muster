@@ -147,6 +147,7 @@
 - [MusterDeliveryFailing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryFailing.md): A Destination has deliveries waiting and has not had a successful delivery for 10 minutes.
 - [MusterDestinationBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDestinationBroken.md): A Destination is **Broken**: Muster stopped sending to it after a Fatal error — the messenger refused the bot or the request for good — or after its Transient budget ran out (`delivery.transient_budget`, 10 attempts within 30 minutes).
 - [MusterHeartbeatLost](https://muster-io.github.io/muster/latest/operations/runbooks/MusterHeartbeatLost.md): An Integration is **Heartbeat lost**: its Heartbeat is on, and no signal arrived within its Heartbeat timeout (`integration.heartbeat_timeout`, 5 minutes by default).
+- [MusterNotificationGatewayBroken](https://muster-io.github.io/muster/latest/operations/runbooks/MusterNotificationGatewayBroken.md): A Notification gateway is **Broken**: a call through it ended with a Fatal error — the bridge, or the provider behind it, refused the token or the credentials (`401` or `403`, the class `forbidden`), or the outbound address policy blocks the bridge's address — or a call failed until its retry budget ran out (`delivery.transient_budget`, 10 attempts within 30 minutes).
 - [MusterDeliverySlow](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliverySlow.md): Deliveries are slow: the 95th percentile of the time from receiving a Snapshot to the API call that delivers the resulting change is above 5 seconds, the objective Muster keeps while its rate limiters have room.
 - [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md): A Destination has more than 100 deliveries waiting, and the number keeps growing.
 - [MusterIngestBacklog](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md): Processing falls behind ingestion: more than 1,000 Stored Snapshots wait to be processed, or the 95th percentile of the time from receiving a Snapshot to the end of its processing is above 60 seconds.
@@ -171,4 +172,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 862998 bytes, about 215749 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 874966 bytes, about 218741 tokens.

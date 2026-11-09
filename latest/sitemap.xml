@@ -148,6 +148,9 @@
         <loc>https://muster-io.github.io/muster/operations/runbooks/MusterNoLeader/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterNotificationGatewayBroken/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/operations/runbooks/MusterOIDCSecretExpiring/</loc>
       </url>
       <url>
