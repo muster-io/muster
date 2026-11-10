@@ -503,9 +503,8 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 ### Chart rules added in L2
 
 Each joins the table above, the chart and the rule unit tests in the story that implements it; their thresholds and
-windows are _provisional_ (P-88), as those of L1 were. `MusterScheduleGap` (S-133) and
-`MusterNotificationGatewayBroken` (S-149) have moved into the table above; their `for` values, 0m and 5m, stay
-provisional until the maintainer confirms P-88.
+windows were _provisional_ (P-88), as those of L1 were. `MusterScheduleGap` (S-133) and
+`MusterNotificationGatewayBroken` (S-149) have moved into the table above; their `for` values, 0m and 5m, are decided.
 
 ## Metrics added in L2
 

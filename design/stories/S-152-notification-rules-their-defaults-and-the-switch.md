@@ -108,7 +108,7 @@ issue: 441
 - **Organization** (`internal/organization`): `notification_rules` in the read, update, validation and diff; the
   validation of a call there checks only that its gateway exists.
 - **Users** (`internal/users/admin.go`): `Delete` deletes the User's rules in its transaction.
-- **Settings**: `notification_rule.limits` (P-85, confirmed here), `organization.notification_rules`.
+- **Settings**: `notification_rule.limits` (P-85, decided), `organization.notification_rules`.
 - **Log events, metrics**: none new; the Audit log records every change.
 - **Documentation**: the new page `docs/concepts/notification-rules.md` — "Normal and important", "The switch" and
   "Custom rules" — under Concepts in `mkdocs.yml`; S-161 adds how the rules combine with the steps of a chain.
@@ -172,8 +172,8 @@ Organization whose important rule calls, `call` on one that already calls throug
 ## Notes
 
 - Suggested commit: `feat(notificationrules): add personal notification rules with organization defaults`.
-- The maintainer confirms a provisional value with this story (operator attention): P-85, at most 10 actions and waits
-  of 1 to 60 minutes in a Notification rule.
+- The maintainer has confirmed P-85 (operator attention): at most 10 actions and waits of 1 to 60 minutes in a
+  Notification rule.
 - "Call" and "Don't call" keep the Organization's rules as they were when the User chose them (journal D569), so a
   later change of the Organization's rules reaches only the Users in `organization`.
 - Migration `0039` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).

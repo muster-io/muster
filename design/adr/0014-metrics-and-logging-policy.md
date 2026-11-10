@@ -11,6 +11,8 @@
   Leader's tasks that `MusterNoLeader` names (ADR-0007)
 - Amended: 2026-10-27 — the entity labels of metrics are a closed list, which 0.2.0 extends with `team`, `schedule`,
   `connection` and `chain` (C-25, C-27, C-30, C-32); each joins the code with the story that exports its first metric
+- Amended: 2026-11-10 — `gateway` joins the values of the `transport` label, for a command that a person's acknowledgement
+  through a Notification gateway makes (C-30.FR-6)
 
 ## Context
 
@@ -44,7 +46,7 @@ code turns into noise nobody reads.
 - A future hosted mode that serves several Organizations turns the entity labels off with a switch.
 - All other labels take values from closed sets defined in code (`outcome`, `reason`, `command`, `transport`, `kind`,
   …); the catalogue in the product requirements lists each set, and adding a value is a reviewed change like adding a
-  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack` —
+  metric. The `transport` label names how a command arrived — `ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway` —
   or `system` for every transition Muster starts itself: on a timer, or because of ingestion, such as a Reopen, a
   resolve by the system or a rise to Urgent.
 
