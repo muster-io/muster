@@ -322,7 +322,6 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
   await scrollToTop(page.getByTestId("route-message"));
   await expect(root.getByRole("radio", { name: "Built-in" })).toBeChecked();
   await root.getByTestId("sample-picker").selectOption({ value: `alert_group:${group}` });
-  const layout = root.getByTestId("message-layout-preview");
   const tabs: [string, string, string][] = [
     ["Mattermost", "layout-mattermost", "07-preview-mattermost"],
     ["Slack", "layout-slack", "08-preview-slack"],
@@ -330,11 +329,11 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
   ];
   for (const [tab, id, name] of tabs) {
     await root.getByRole("tab", { name: tab }).click();
-    await expect(layout.getByTestId(id).getByTestId("layout-title")).toContainText("— Firing");
-    await expect(layout.getByTestId(id).getByTestId("layout-alerts")).toContainText("checkout-worker-8e6a0");
+    await expect(root.getByTestId(id).getByTestId("layout-title")).toContainText("— Firing");
+    await expect(root.getByTestId(id).getByTestId("layout-alerts")).toContainText("checkout-worker-8e6a0");
     await capture(page, TEMPLATES, name, { locator: root, padding: 16 });
   }
   await root.getByRole("tab", { name: "Bridge" }).click();
-  await expect(layout.getByTestId("layout-json")).toContainText('"key": "firing"');
+  await expect(root.getByTestId("layout-json")).toContainText('"key": "firing"');
   await capture(page, TEMPLATES, "10-preview-bridge", { locator: root, padding: 16 });
 });
