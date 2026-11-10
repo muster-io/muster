@@ -1561,6 +1561,8 @@
       
         
       
+        
+      
     
     
     
@@ -1809,6 +1811,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/what-critical-changes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What critical changes
 
     
   </span>
@@ -3147,6 +3176,16 @@ over minutes on one with many open Alert Groups, as the messengers' rate limits 
 time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
 The open Root messages are edited once, as edits that notify nobody, so that their preset buttons show the new
 labels. See <a href="../../concepts/statuses-and-commands/">statuses and commands</a>.</dd>
+<dt><strong>Team label</strong> (<code>organization.team_label</code>, <code>team</code>)</dt>
+<dd>The label whose value names the Team of an Alert, by the Team's slug. It cannot be a label that an Internal alert
+sets itself, such as <code>alertname</code> or <code>team_id</code>. A new Team label evaluates the firing Alerts of open Alert Groups
+again and only adds Teams to them. See <a href="../../concepts/teams/#which-alerts-belong-to-a-team">Which Alerts belong to a
+Team</a>.</dd>
+<dt><strong>Working hours</strong> (<code>organization.working_hours</code>: Monday to Friday, from the start of the working day to <code>18:00</code>)</dt>
+<dd>The days (<code>organization.working_days</code>) and the end of the working day (<code>organization.workday_end</code>) of the
+Organization's Working hours, which every Team without its own follows; the start is the <strong>Start of the working
+day</strong> above. An end that is not later than the start is refused. See
+<a href="../../concepts/teams/#working-hours">Working hours</a>.</dd>
 </dl>
 <ol>
 <li>Open <strong>Organization</strong>; <strong>General</strong> opens first.</li>

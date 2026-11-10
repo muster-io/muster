@@ -29,6 +29,18 @@ The defaults below are what a new installation has.
     The open Root messages are edited once, as edits that notify nobody, so that their preset buttons show the new
     labels. See [statuses and commands](../concepts/statuses-and-commands.md).
 
+**Team label** (`organization.team_label`, `team`)
+:   The label whose value names the Team of an Alert, by the Team's slug. It cannot be a label that an Internal alert
+    sets itself, such as `alertname` or `team_id`. A new Team label evaluates the firing Alerts of open Alert Groups
+    again and only adds Teams to them. See [Which Alerts belong to a
+    Team](../concepts/teams.md#which-alerts-belong-to-a-team).
+
+**Working hours** (`organization.working_hours`: Monday to Friday, from the start of the working day to `18:00`)
+:   The days (`organization.working_days`) and the end of the working day (`organization.workday_end`) of the
+    Organization's Working hours, which every Team without its own follows; the start is the **Start of the working
+    day** above. An end that is not later than the start is refused. See
+    [Working hours](../concepts/teams.md#working-hours).
+
 1. Open **Organization**; **General** opens first.
 2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
    of the working day** or the **First day of the week**, and select **Save**. "Saved." confirms it.

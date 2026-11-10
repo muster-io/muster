@@ -1415,6 +1415,8 @@
       
         
       
+        
+      
     
     
     
@@ -1876,6 +1878,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../what-critical-changes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What critical changes
 
     
   </span>
@@ -3339,7 +3368,9 @@ and it never changes the level of an Alert, which the Alerts of the Alert Group 
 of outgoing webhook events still show as received.</p>
 <p>Use it for a Route whose Alerts all matter as much as a critical one, whatever their <code>severity</code> label says: with the
 Minimum severity critical, a warning Alert of the Route starts a critical, and so <a href="#urgent">Urgent</a>, Alert Group. The
-Route that Muster suggests for <code>MusterHeartbeatLost</code> has the Minimum severity critical.</p>
+Route that Muster suggests for <code>MusterHeartbeatLost</code> has the Minimum severity critical. <a href="../what-critical-changes/#what-the-minimum-severity-adds">What critical
+changes</a> lists what a Minimum severity does, and what it
+leaves alone.</p>
 <p>A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
 <code>severity_raised</code>, or the Quiet <code>urgency_raised</code> of an Alert Group it makes critical, with the reason "Minimum severity
 of the Route"; it never removes an acknowledgement or a Snooze. A lowered one records nothing and lowers their level,
@@ -3351,7 +3382,8 @@ info. The Organization can change the label and the mapping.</p>
 <p>An Alert Group is <strong>Urgent</strong> when its Severity level is critical — from its Alerts, or from the
 <a href="#minimum-severity">Minimum severity</a> of its Route. An Urgent Alert Group is posted first when many arrive at once, is
 published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
-Route's "rise to Urgent removes the acknowledgement" is on.</p>
+Route's "rise to Urgent removes the acknowledgement" is on. <a href="../what-critical-changes/">What critical changes</a> lists
+every effect of Urgent.</p>
 <p>From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
 got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps <code>urgent</code> on Routes and
 <code>critical_is_urgent</code> on the Organization until 0.3.0. A Route request with <code>urgent: true</code> and no <code>minimum_severity</code>, as
@@ -3495,13 +3527,16 @@ labels</a>.</p>
 </li>
 <li>
 <p>Under <strong>Route Destinations</strong>, choose each Destination in <strong>Add a Destination</strong>. The list shows each one with its type and
-   health, and a Severity condition you can leave at <strong>Any severity</strong>; a Route without Destinations sends no messages.</p>
+   health, and a Severity condition you can leave at <strong>Any severity</strong>; a Route without Destinations sends no messages.
+   Next to them, <strong>Also to the Teams from the label</strong> adds the Destinations of the Teams of the Alerts. Both are
+   explained in <a href="../routing-to-teams/#severity-conditions">Routing to Teams</a>.</p>
 <p><img alt="The Destinations of the Route: the outgoing webhook payments, Healthy" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png" /></p>
 </li>
 <li>
 <p>Under <strong>Severity, Escalation chains and owner</strong>, choose the <a href="#minimum-severity">Minimum severity</a>: <strong>None</strong>, which is
    the default, <strong>warning</strong> or <strong>critical</strong>. It only raises the Severity level of the Route's Alert Groups; with
-   <strong>critical</strong> they are <a href="#urgent">Urgent</a>.</p>
+   <strong>critical</strong> they are <a href="#urgent">Urgent</a>, with <a href="../what-critical-changes/">what that changes</a>. The same section
+   names the <strong>Owning Team</strong>, which only organizes (<a href="../teams/#what-a-team-is">Teams</a>).</p>
 <p><img alt="The Minimum severity of the Route: None, with its hint" class="screenshot" src="../../assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png" /></p>
 </li>
 <li>

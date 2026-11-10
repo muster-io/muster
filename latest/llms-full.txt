@@ -64,7 +64,9 @@ of each Alert Group there up to date until the Alert Group is resolved.
 - [Concepts](https://muster-io.github.io/muster/latest/concepts/alert-groups.md): what an [Alert Group](https://muster-io.github.io/muster/latest/concepts/alert-groups.md) is, how
   [Routes and Group keys](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md) group Alerts, the rules of
   [Snapshots](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md), [Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md) messages, the
-  [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md), and [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md).
+  [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md), [Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md),
+  [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md) and [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md), and
+  [what critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
 - [Operations](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md): [back up and restore](https://muster-io.github.io/muster/latest/operations/backup-and-restore.md),
   [upgrade](https://muster-io.github.io/muster/latest/operations/upgrades.md), [rotate the master keys](https://muster-io.github.io/muster/latest/operations/key-rotation.md), run
   [more than one replica](https://muster-io.github.io/muster/latest/operations/high-availability.md), [monitor Muster](https://muster-io.github.io/muster/latest/operations/monitoring.md), set an
@@ -1893,6 +1895,18 @@ The defaults below are what a new installation has.
     time zone of the person who snoozes. A change applies to Snoozes set afterwards; a Snooze already set does not move.
     The open Root messages are edited once, as edits that notify nobody, so that their preset buttons show the new
     labels. See [statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md).
+
+**Team label** (`organization.team_label`, `team`)
+:   The label whose value names the Team of an Alert, by the Team's slug. It cannot be a label that an Internal alert
+    sets itself, such as `alertname` or `team_id`. A new Team label evaluates the firing Alerts of open Alert Groups
+    again and only adds Teams to them. See [Which Alerts belong to a
+    Team](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team).
+
+**Working hours** (`organization.working_hours`: Monday to Friday, from the start of the working day to `18:00`)
+:   The days (`organization.working_days`) and the end of the working day (`organization.workday_end`) of the
+    Organization's Working hours, which every Team without its own follows; the start is the **Start of the working
+    day** above. An end that is not later than the start is refused. See
+    [Working hours](https://muster-io.github.io/muster/latest/concepts/teams.md#working-hours).
 
 1. Open **Organization**; **General** opens first.
 2. Change the **Name**, the **Time zone of messages** — type in **Search time zones** to narrow the list —, the **Start
@@ -8372,10 +8386,18 @@ Severity level
     [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route.
 
 Urgent
-:   Set exactly when its Severity level is critical. See [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent).
+:   Set exactly when its Severity level is critical. See [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent) and [What critical
+    changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
 
 Reopen count
 :   How many times Muster reopened it.
+
+Teams
+:   The [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team) of every Alert that ever joined it, each with the rule that
+    brought it: the Team label or a Team matcher. They only grow, and they do not change where the Alert Group is
+    delivered, unless its Route delivers to the Teams
+    ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label)). The list filters by Team, and **My
+    Teams** shows those of the Teams you are in.
 
 Alerts
 :   One entry per fingerprint, firing first, resolved ones struck through with their reason.
@@ -8668,7 +8690,9 @@ of outgoing webhook events still show as received.
 
 Use it for a Route whose Alerts all matter as much as a critical one, whatever their `severity` label says: with the
 Minimum severity critical, a warning Alert of the Route starts a critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), Alert Group. The
-Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical.
+Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical. [What critical
+changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md#what-the-minimum-severity-adds) lists what a Minimum severity does, and what it
+leaves alone.
 
 A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
 `severity_raised`, or the Quiet `urgency_raised` of an Alert Group it makes critical, with the reason "Minimum severity
@@ -8684,7 +8708,8 @@ info. The Organization can change the label and the mapping.
 An Alert Group is **Urgent** when its Severity level is critical — from its Alerts, or from the
 [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of its Route. An Urgent Alert Group is posted first when many arrive at once, is
 published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
-Route's "rise to Urgent removes the acknowledgement" is on.
+Route's "rise to Urgent removes the acknowledgement" is on. [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md) lists
+every effect of Urgent.
 
 From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
 got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
@@ -8779,12 +8804,15 @@ labels](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#s
 
 3. Under **Route Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
    health, and a Severity condition you can leave at **Any severity**; a Route without Destinations sends no messages.
+   Next to them, **Also to the Teams from the label** adds the Destinations of the Teams of the Alerts. Both are
+   explained in [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions).
 
     ![The Destinations of the Route: the outgoing webhook payments, Healthy](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
 
 4. Under **Severity, Escalation chains and owner**, choose the [Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity): **None**, which is
    the default, **warning** or **critical**. It only raises the Severity level of the Route's Alert Groups; with
-   **critical** they are [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent).
+   **critical** they are [Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent), with [what that changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md). The same section
+   names the **Owning Team**, which only organizes ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#what-a-team-is)).
 
     ![The Minimum severity of the Route: None, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png){ .screenshot }
 
@@ -9888,7 +9916,31 @@ the same text. An outgoing webhook in events mode sends no final event, and its 
 
 A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
 own configuration with a filter. Alerts and Alert Groups belong to Teams by their labels, so that each team finds its
-Alert Groups. Teams are managed through the API under `/api/v1/teams`.
+Alert Groups. A Route may also deliver to the Destinations of the Teams of its Alerts
+([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md)). Teams are managed in the web UI, under **Teams** in the main navigation, and
+through the API under `/api/v1/teams`.
+
+A Team costs nothing to start with. It may have no people and no Destinations and only name Alerts: it then groups and
+filters them, and you add people, Destinations and Routes when you want them.
+
+## In the web UI
+
+**Teams** lists the Teams with the people in each, and above them the Team label, and below them the values of it that name no
+Team ([Values without a Team](https://muster-io.github.io/muster/latest/concepts/teams.md#values-without-a-team)). **New Team** makes a Team; a value without a Team has its own
+**Create Team**.
+
+![The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/01-teams-list.png){ .screenshot }
+
+A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and **Which Alerts
+belong to this Team**: the Team label with its slug and the Team matchers, with an example of what an Alert gets.
+
+![The people of the Team payments: alice and bob added by hand, petr through the identity provider group](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/02-team-people.png){ .screenshot }
+
+The Destinations of a Team are the Destinations of the team, each with a
+[Severity condition](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions). They receive the Alert Groups of the Routes that deliver
+to the Teams, and nothing else: owning a Destination is another thing.
+
+![The Destinations of the Team payments: payments-critical for critical Alert Groups and payments-notice for the rest](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/04-team-destinations.png){ .screenshot }
 
 ## What a Team is
 
@@ -9964,15 +10016,30 @@ the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever it
 it is delivered.
 
 A worked example
-:   A rule generator sets `category`, `team` and `system` on every alert rule. With the Team label `team`, each Team's
-    slug is the value its rules carry — `payments`, `checkout` — and the Alerts reach their Teams without any matcher.
-    A Team without people that only names Alerts is fine: it groups and filters them.
+:   A rule generator sets `category`, `team` and `system` on every alert rule, so that the rule for a container that
+    was killed for lack of memory, `KubernetesContainerOOMKilled`, reaches Muster with the labels
+    `category="infra"`, `team="payments"` and `system="k8s"`. With the Team label `team` (the default), the slug of
+    each Team is the value its rules carry: the Teams `payments`, `checkout` and `search` pick up their Alerts with no
+    Team matcher at all, and the Alerts with `team="payments"` have `payments` among the Teams of their Alert Group.
+    The labels `category` and `system` belong to the Route: `category="infra"` is the Matcher of the Route
+    "Infrastructure" ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#operations-and-team-destinations-by-severity)), and `system`
+    is a label to group by. A Team matcher is for Alerts that carry no Team label, or a wrong one: the Team `devops`
+    with the matcher `category="infra"` also gets every infrastructure Alert, whichever `team` it says: they belong to it.
+
+Teams without people
+:   A Team does not need people to be useful. A Team with nobody in it, such as `search` above, still names its Alerts
+    and Alert Groups, so that the list of Alert Groups filters by it and an outgoing webhook event carries it in
+    `alert_group.teams`, and may still have Destinations that receive the Alert Groups of its Alerts. People join it
+    later, by hand or through the identity provider, and nothing has to be redone.
 
 Test clusters with one shared namespace
 :   When every team deploys into the same namespace of a test cluster, `namespace` does not tell them apart. Match
     another label instead: the Pod name (`pod=~"checkout-.*"`), an app label the workloads carry
     (`app_kubernetes_io_part_of="checkout"`), or put the Team label itself on the workloads, so that their Alerts carry
-    `team="checkout"`.
+    `team="checkout"`. In the first two ways the Team `checkout` has the Team matchers `pod=~"checkout-.*"` and
+    `app_kubernetes_io_part_of="checkout"`, and an Alert that either one picks belongs to it. In the third, no matcher
+    is needed, and the Alerts of a production cluster and a test cluster reach the same Team. The Route
+    [for test clusters](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#a-route-for-test-clusters) then sends them to the team's own Destinations.
 
 ## Values without a Team
 
@@ -10020,6 +10087,8 @@ person an Admin added, `idp` for a person the identity provider put in it — an
 
 A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
+
+![The identity provider groups of the Team payments: the entry teams/payments/*, which reads the groups claim of the OIDC settings](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/03-team-idp.png){ .screenshot }
 
 The claim of an entry
 :   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster
@@ -10084,11 +10153,16 @@ A Team's Working hours
 
 One Route can serve many teams. Each Destination of a Route, and each Destination of a Team, may be limited by
 Severity level, and a Route may also deliver its Alert Groups to the Destinations of the Teams of their Alerts. Every
-Destination then shows the same Alert Group with one status.
+Destination then shows the same Alert Group with one status. The settings are on the Route form, and each links here:
+[the Severity condition of a Destination](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions), ["Also to the Teams from the
+label"](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label) with ["Run the Teams' Escalation chains"](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#also-to-the-teams-from-the-label),
+the Group key's [Team label](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#teams-that-want-their-own-alert-groups), the
+[preview](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#preview-where-alerts-go), the [Owning Team](https://muster-io.github.io/muster/latest/concepts/teams.md#what-a-team-is) and the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md).
 
-The feature is optional. Many installations need only two operations channels — one for critical Alert Groups and one
+The feature is optional. Many installations need only two operations Destinations — one for critical Alert Groups and one
 for the rest — and a Route that names both with a Severity condition each. Teams and their Destinations come in when
-teams want their own channels.
+teams want their own Destinations.
 
 ## Severity conditions
 
@@ -10108,6 +10182,8 @@ The condition is checked against the Alert Group's Severity level: the highest l
 the Route's Minimum severity. A Destination may be named by several Routes and Teams, each with its own condition, and
 is reached when the condition of any of its entries is met.
 
+![The Destinations of the Route Infrastructure: infra-critical for critical Alert Groups and infra-notice for those below critical](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/05-route-destinations.png){ .screenshot }
+
 Until 0.3.0 Routes still read and take `destination_ids`, derived from `destination_entries`: a request that sends only
 `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
 
@@ -10119,9 +10195,11 @@ Destinations of each of its Teams — the Teams its Alerts belong to by the Team
 Group goes only to the Route's own Destinations. The owning Team of a Route adds nothing: it only organizes and
 filters.
 
+![The option Also to the Teams from the label on the Route form, switched on, with its hint](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/06-route-teams-option.png){ .screenshot }
+
 "Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
 
-### Operations and team channels by Severity
+### Operations and team Destinations by Severity
 
 Operations has `infra-critical` and `infra-notice`, and the Team `payments` has `payments-critical` and
 `payments-notice`. The Route "Infrastructure" takes `category="infra"`, names `infra-critical` for `critical` and
@@ -10129,17 +10207,21 @@ Operations has `infra-critical` and `infra-notice`, and the Team `payments` has 
 `payments-critical` for `critical` and `payments-notice` for `below_critical`.
 
 A warning Alert of `team="payments"` makes one Alert Group with one Root message in `infra-notice` and one in
-`payments-notice`, and none in the critical channels. If a critical Alert joins it, the Alert Group is also published
-in `infra-critical` and `payments-critical`; its messages in the notice channels stay and keep being updated, also
+`payments-notice`, and none in the critical Destinations. If a critical Alert joins it, the Alert Group is also published
+in `infra-critical` and `payments-critical`; its messages in the notice Destinations stay and keep being updated, also
 after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it —
 which adds that Team's Destinations — or its Severity level rises: a level that falls again, or a new Alert that
 brings neither, adds no Destination below critical where the Alert Group was not published before.
 
 ## One Alert Group, one status
 
-An Alert Group has one status and one list of Alerts in every channel it is in. Acknowledge it from `payments-notice`
+An Alert Group has one status and one list of Alerts in every Destination it is in. Acknowledge it from `payments-notice`
 and its message in `infra-notice` shows the same Owner; resolve it anywhere and every message shows it resolved. The
-delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
+Alert Group page names its Teams, and the deliveries of the Alert Group show where it went.
+
+![The header of the Alert Group KubernetesContainerOOMKilled, with its Teams: payments, by the Team label](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot }
+
+The delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
 it — the Route, or a Team — with their conditions.
 
 When an Alert Group reaches a Destination after its first Publication elsewhere — a new Alert raised its Severity level
@@ -10155,9 +10237,11 @@ a Mention.
 ### Teams that want their own Alert Groups
 
 In a Route whose Group key lacks the Team label, Alerts of different Teams with the same key share one Alert Group,
-shown in the channels of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
+shown in the Destinations of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
 in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
-default, to the Group key of the Route.
+default, to the Group key of the Route: with `alertname`, `system` and `team` as the Group key, the "search" Alert gets
+an Alert Group of its own, with its own status, and the Route form offers **Add team to the key** whenever the Route
+delivers to the Teams and its Group key lacks the Team label.
 
 ## Preview where alerts go
 
@@ -10183,6 +10267,8 @@ saved on the Teams page. When the Route delivers to the Teams and the Group key 
 so (`shared_key_warning`), and the form offers to add the Team label to the key.
 
 The preview only reads: it saves nothing, writes no Audit log entry, publishes nothing and sends no message.
+
+![Where alerts go: the Alert Groups the Route Infrastructure would form, with their Teams and the Destinations each would reach](https://muster-io.github.io/muster/latest/assets/screenshots/concepts/teams/07-route-preview.png){ .screenshot }
 
 ## When you change a Route or a Team
 
@@ -10211,9 +10297,97 @@ entries, reach the open Alert Groups at once, without a lifecycle event in their
 
 ## A Route for test clusters
 
-A Route "Test clusters" placed first, with `cluster=~".*-stage|.*-preprod"`, no Destination of its own, "Also to the
-Teams from the label" on and "Run the Teams' Escalation chains" off sends each team its test alerts in its own channels
-and Pages nobody.
+Test alerts should reach the team that owns the workload, in its own Destinations, and Page nobody: the Teams' Destinations still deliver as they are set, but no Escalation chain starts. A Route "Test
+clusters" placed above the Route "Infrastructure", with the Matcher `cluster=~".*-stage|.*-preprod"`, no Destination of
+its own, "Also to the Teams from the label" on and "Run the Teams' Escalation chains" off, does that: the Alert Group of
+`team="payments"` from `shop-stage` goes to the Destinations of the Team `payments` and to nothing else, with their
+Severity conditions, and starts no Escalation chain of the Team. Routes are checked in order, and the first one that
+picks an Alert takes it, so it never reaches "Infrastructure". An Alert of a test cluster whose `team` value names no
+Team goes nowhere: the Route has no Destination of its own, so the Alert Group is only in the web UI. Where that
+matters, give the Route one Destination of its own, such as a Destination for test alerts.
+
+The Teams of such Alerts are those of the Team label and the Team matchers, as everywhere. On a test cluster where
+every team shares one namespace, use a Team matcher on the Pod name or an app label, or put the Team label on the
+workloads ([Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)).
+
+A Minimum severity on the Route would make every test alert critical, and so [Urgent](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md); leave it
+at none.
+
+<!-- Source: https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md -->
+# What critical changes
+
+An Alert Group whose Severity level is **critical** is **Urgent**. Nothing else makes an Alert Group Urgent, and there
+is no separate switch: since 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act
+([Urgent](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#urgent)). This page lists everything that Urgent changes, and then what the
+[Minimum severity](https://muster-io.github.io/muster/latest/concepts/routes-and-group-keys.md#minimum-severity) of a Route adds, so that you know what a critical Alert,
+or a Route that raises its Alert Groups to critical, makes Muster do.
+
+The Severity level of an Alert Group is the highest level of its firing Alerts, raised to the Minimum severity of its
+Route. It follows the Alerts as they fire and resolve, so an Alert Group may become Urgent and stop being Urgent again.
+
+## What an Urgent Alert Group changes
+
+The order of the delivery queue
+:   The delivery queue of a Destination takes Urgent Alert Groups first. They never pass the rate limit of the
+    Destination: an Urgent Alert Group waits for its place within the limit like any other, only before the rest.
+    After an outage of a Destination, the Alert Groups that were not published are published Urgent first
+    ([Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md#what-is-sent-after-recovery)).
+
+Individual publication during a Storm
+:   When a Route creates more new Alert Groups in a minute than its Storm threshold, each of its Destinations gets one
+    Storm summary instead of a message per Alert Group. An Urgent Alert Group is not held back by it: it is published
+    on its own, at once and ahead of the queue ([Storm summaries](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md#storm-summaries)). The same holds
+    for a Destination that an Alert Group joins during the Storm: unless the Alert Group is Urgent, the Destination
+    counts it in its Storm summary ([Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#one-alert-group-one-status)).
+
+The end of a Snooze or of an acknowledgement on a rise
+:   When a rise in Severity level makes an Alert Group Urgent, it ends a Snooze, unless the Snooze was set while the
+    Alert Group was already Urgent. It also removes the acknowledgement where the Route's setting "Rise to Urgent
+    removes the acknowledgement" (`route.urgent_rise_removes_ack`) is on, which it is by default. The Alert Group is
+    Firing again, and the change is Loud, with the reason. It Mentions the Owner it removed and the people of the
+    `rise_to_urgent` Mention setting of each Destination ([Loud and Quiet](https://muster-io.github.io/muster/latest/concepts/loud-and-quiet.md#which-changes-are-loud),
+    [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md#transitions-muster-makes-on-its-own)). A rise that changes
+    nothing else is Quiet.
+
+The filter and the column of the list
+:   The list of [Alert Groups](https://muster-io.github.io/muster/latest/concepts/alert-groups.md#in-the-web-ui) has the filter **Urgent**, which shows only the Urgent
+    Alert Groups or only those that are not, and the column **Urgent**, which marks each Urgent Alert Group. The API
+    takes the parameter `urgent` of `listAlertGroups`.
+
+`urgent` in outgoing webhook events
+:   An event in events mode carries the Alert Group with `alert_group.urgent`, true exactly when its Severity level is
+    critical ([Events mode](https://muster-io.github.io/muster/latest/outgoing-webhooks/events.md)), and a template reads it as `.AlertGroup.Urgent`
+    ([Templates](https://muster-io.github.io/muster/latest/outgoing-webhooks/templates.md#what-the-templates-read)).
+
+The count in Storm summaries
+:   The Storm summary of a Route says how many Alert Groups the Storm holds and how many of them are Urgent, such as
+    "Storm on payments: 24 Alert Groups, 3 urgent", and a template reads `.Storm.UrgentCount`.
+
+Urgent is not a status, and no person sets it: the Root message of an Alert Group shows its Severity level, and the
+page of the Alert Group marks it Urgent.
+
+## What the Minimum severity adds
+
+The Minimum severity of a Route raises the Severity level of its Alert Groups, never that of their Alerts. With the
+Minimum severity critical, every Alert Group of the Route is critical, and so Urgent, from its first Alert, even where
+every Alert says `warning`: everything above applies to it, and the Destinations of the Route with the Severity
+condition `critical` receive it ([Severity conditions](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#severity-conditions)). With the Minimum
+severity `warning`, an Alert Group of `info` Alerts is a warning one, which is not Urgent, and a Destination with the
+condition `below_critical` still receives it.
+
+A change of the Minimum severity applies at once to the open Alert Groups of the Route, and is gentler than a rise of
+an Alert:
+
+- It never removes an acknowledgement and never ends a Snooze, also where it makes an Alert Group Urgent: the Timeline
+  records a Quiet `urgency_raised` with the reason "Minimum severity of the Route", and nothing else.
+- It starts no Escalation chain, and the Root messages are edited Quietly.
+- The Alert Groups it raises into the Severity condition of a Destination reach that Destination Quietly, with no
+  Mention ([When you change a Route or a Team](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#when-you-change-a-route-or-a-team)).
+- A lowered Minimum severity records nothing and lowers the level of the Alert Groups, as a falling level does. The
+  messages that an Alert Group already has stay where they are.
+
+The Alerts keep their own level: the Alerts view, the Alerts of the Alert Group page and `alerts[]` of outgoing webhook
+events show what each Alert says.
 
 <!-- Source: https://muster-io.github.io/muster/latest/concepts/schedules.md -->
 # Schedules

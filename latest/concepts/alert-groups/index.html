@@ -1415,6 +1415,8 @@
       
         
       
+        
+      
     
     
     
@@ -1732,6 +1734,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../what-critical-changes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What critical changes
 
     
   </span>
@@ -3034,9 +3063,16 @@ once, at that switch.</dd>
 <dd>The highest Severity level of its firing Alerts — critical, warning or info — raised to the
 <a href="../routes-and-group-keys/#minimum-severity">Minimum severity</a> of its Route.</dd>
 <dt>Urgent</dt>
-<dd>Set exactly when its Severity level is critical. See <a href="../routes-and-group-keys/#urgent">Urgent</a>.</dd>
+<dd>Set exactly when its Severity level is critical. See <a href="../routes-and-group-keys/#urgent">Urgent</a> and <a href="../what-critical-changes/">What critical
+changes</a>.</dd>
 <dt>Reopen count</dt>
 <dd>How many times Muster reopened it.</dd>
+<dt>Teams</dt>
+<dd>The <a href="../teams/#which-alerts-belong-to-a-team">Teams</a> of every Alert that ever joined it, each with the rule that
+brought it: the Team label or a Team matcher. They only grow, and they do not change where the Alert Group is
+delivered, unless its Route delivers to the Teams
+(<a href="../routing-to-teams/#also-to-the-teams-from-the-label">Routing to Teams</a>). The list filters by Team, and <strong>My
+Teams</strong> shows those of the Teams you are in.</dd>
 <dt>Alerts</dt>
 <dd>One entry per fingerprint, firing first, resolved ones struck through with their reason.</dd>
 <dt>Timeline</dt>

@@ -1415,6 +1415,8 @@
       
         
       
+        
+      
     
     
     
@@ -1687,6 +1689,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-team-is" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1776,6 +1789,33 @@
     
   
   Routing to Teams
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../what-critical-changes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  What critical changes
 
     
   </span>
@@ -2972,6 +3012,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        In the web UI
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-a-team-is" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3060,7 +3111,23 @@
 <h1 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h1>
 <p>A <strong>Team</strong> says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
 own configuration with a filter. Alerts and Alert Groups belong to Teams by their labels, so that each team finds its
-Alert Groups. Teams are managed through the API under <code>/api/v1/teams</code>.</p>
+Alert Groups. A Route may also deliver to the Destinations of the Teams of its Alerts
+(<a href="../routing-to-teams/">Routing to Teams</a>). Teams are managed in the web UI, under <strong>Teams</strong> in the main navigation, and
+through the API under <code>/api/v1/teams</code>.</p>
+<p>A Team costs nothing to start with. It may have no people and no Destinations and only name Alerts: it then groups and
+filters them, and you add people, Destinations and Routes when you want them.</p>
+<h2 id="in-the-web-ui">In the web UI<a class="headerlink" href="#in-the-web-ui" title="Permanent link">&para;</a></h2>
+<p><strong>Teams</strong> lists the Teams with the people in each, and above them the Team label, and below them the values of it that name no
+Team (<a href="#values-without-a-team">Values without a Team</a>). <strong>New Team</strong> makes a Team; a value without a Team has its own
+<strong>Create Team</strong>.</p>
+<p><img alt="The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team" class="screenshot" src="../../assets/screenshots/concepts/teams/01-teams-list.png" /></p>
+<p>A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and <strong>Which Alerts
+belong to this Team</strong>: the Team label with its slug and the Team matchers, with an example of what an Alert gets.</p>
+<p><img alt="The people of the Team payments: alice and bob added by hand, petr through the identity provider group" class="screenshot" src="../../assets/screenshots/concepts/teams/02-team-people.png" /></p>
+<p>The Destinations of a Team are the Destinations of the team, each with a
+<a href="../routing-to-teams/#severity-conditions">Severity condition</a>. They receive the Alert Groups of the Routes that deliver
+to the Teams, and nothing else: owning a Destination is another thing.</p>
+<p><img alt="The Destinations of the Team payments: payments-critical for critical Alert Groups and payments-notice for the rest" class="screenshot" src="../../assets/screenshots/concepts/teams/04-team-destinations.png" /></p>
 <h2 id="what-a-team-is">What a Team is<a class="headerlink" href="#what-a-team-is" title="Permanent link">&para;</a></h2>
 <p>A Team has:</p>
 <ul>
@@ -3129,14 +3196,28 @@ the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever it
 it is delivered.</p>
 <dl>
 <dt>A worked example</dt>
-<dd>A rule generator sets <code>category</code>, <code>team</code> and <code>system</code> on every alert rule. With the Team label <code>team</code>, each Team's
-slug is the value its rules carry — <code>payments</code>, <code>checkout</code> — and the Alerts reach their Teams without any matcher.
-A Team without people that only names Alerts is fine: it groups and filters them.</dd>
+<dd>A rule generator sets <code>category</code>, <code>team</code> and <code>system</code> on every alert rule, so that the rule for a container that
+was killed for lack of memory, <code>KubernetesContainerOOMKilled</code>, reaches Muster with the labels
+<code>category="infra"</code>, <code>team="payments"</code> and <code>system="k8s"</code>. With the Team label <code>team</code> (the default), the slug of
+each Team is the value its rules carry: the Teams <code>payments</code>, <code>checkout</code> and <code>search</code> pick up their Alerts with no
+Team matcher at all, and the Alerts with <code>team="payments"</code> have <code>payments</code> among the Teams of their Alert Group.
+The labels <code>category</code> and <code>system</code> belong to the Route: <code>category="infra"</code> is the Matcher of the Route
+"Infrastructure" (<a href="../routing-to-teams/#operations-and-team-destinations-by-severity">Routing to Teams</a>), and <code>system</code>
+is a label to group by. A Team matcher is for Alerts that carry no Team label, or a wrong one: the Team <code>devops</code>
+with the matcher <code>category="infra"</code> also gets every infrastructure Alert, whichever <code>team</code> it says: they belong to it.</dd>
+<dt>Teams without people</dt>
+<dd>A Team does not need people to be useful. A Team with nobody in it, such as <code>search</code> above, still names its Alerts
+and Alert Groups, so that the list of Alert Groups filters by it and an outgoing webhook event carries it in
+<code>alert_group.teams</code>, and may still have Destinations that receive the Alert Groups of its Alerts. People join it
+later, by hand or through the identity provider, and nothing has to be redone.</dd>
 <dt>Test clusters with one shared namespace</dt>
 <dd>When every team deploys into the same namespace of a test cluster, <code>namespace</code> does not tell them apart. Match
 another label instead: the Pod name (<code>pod=~"checkout-.*"</code>), an app label the workloads carry
 (<code>app_kubernetes_io_part_of="checkout"</code>), or put the Team label itself on the workloads, so that their Alerts carry
-<code>team="checkout"</code>.</dd>
+<code>team="checkout"</code>. In the first two ways the Team <code>checkout</code> has the Team matchers <code>pod=~"checkout-.*"</code> and
+<code>app_kubernetes_io_part_of="checkout"</code>, and an Alert that either one picks belongs to it. In the third, no matcher
+is needed, and the Alerts of a production cluster and a test cluster reach the same Team. The Route
+<a href="../routing-to-teams/#a-route-for-test-clusters">for test clusters</a> then sends them to the team's own Destinations.</dd>
 </dl>
 <h2 id="values-without-a-team">Values without a Team<a class="headerlink" href="#values-without-a-team" title="Permanent link">&para;</a></h2>
 <p>A value of the Team label that names no Team — a typo, a team without a Team yet, or a case that differs, such as
@@ -3177,6 +3258,7 @@ person an Admin added, <code>idp</code> for a person the identity provider put i
 <h2 id="membership-from-the-identity-provider">Membership from the identity provider<a class="headerlink" href="#membership-from-the-identity-provider" title="Permanent link">&para;</a></h2>
 <p>A Team may name groups of the identity provider in <code>idp_entries</code>; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:</p>
+<p><img alt="The identity provider groups of the Team payments: the entry teams/payments/*, which reads the groups claim of the OIDC settings" class="screenshot" src="../../assets/screenshots/concepts/teams/03-team-idp.png" /></p>
 <dl>
 <dt>The claim of an entry</dt>
 <dd>An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster

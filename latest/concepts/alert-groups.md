@@ -56,10 +56,18 @@ Severity level
     [Minimum severity](routes-and-group-keys.md#minimum-severity) of its Route.
 
 Urgent
-:   Set exactly when its Severity level is critical. See [Urgent](routes-and-group-keys.md#urgent).
+:   Set exactly when its Severity level is critical. See [Urgent](routes-and-group-keys.md#urgent) and [What critical
+    changes](what-critical-changes.md).
 
 Reopen count
 :   How many times Muster reopened it.
+
+Teams
+:   The [Teams](teams.md#which-alerts-belong-to-a-team) of every Alert that ever joined it, each with the rule that
+    brought it: the Team label or a Team matcher. They only grow, and they do not change where the Alert Group is
+    delivered, unless its Route delivers to the Teams
+    ([Routing to Teams](routing-to-teams.md#also-to-the-teams-from-the-label)). The list filters by Team, and **My
+    Teams** shows those of the Teams you are in.
 
 Alerts
 :   One entry per fingerprint, firing first, resolved ones struck through with their reason.
