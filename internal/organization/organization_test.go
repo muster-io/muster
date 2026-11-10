@@ -27,6 +27,7 @@ import (
 	"github.com/muster-io/muster/internal/keyring"
 	keyringdb "github.com/muster-io/muster/internal/keyring/dbgen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/publicid"
 )
@@ -230,7 +231,9 @@ type fakeSettings struct {
 	// buttonUpdates are the open_group_updates rows organization_buttons, and woken the notifications on their channel.
 	buttonUpdates []dbgen.InsertOrganizationUpdateParams
 	woken         []string
-	fail          map[string]error
+	// gateways are the Bridge Connections a call of the Notification rules may name.
+	gateways []dbgen.ListRuleGatewaysRow
+	fail     map[string]error
 }
 
 func newFakeSettings(t *testing.T) *fakeSettings {
@@ -245,6 +248,7 @@ func newFakeSettings(t *testing.T) *fakeSettings {
 		RetentionStoredSnapshotsDays: 14, RetentionAlertDetailsDays: 90, RetentionAlertGroupSummariesDays: 730,
 		RetentionAuditLogDays: 365, TotpRequired: "nobody", OidcTokenGraceSeconds: 7 * 24 * 3600,
 		OutgoingHeartbeatProxy: []byte(`{"enabled": false}`), Version: 1, TeamLabel: "team",
+		NotificationRules: notificationrules.Defaults().JSON(),
 	}, policy: dbgen.GetOutboundPolicySettingsRow{Policy: "standard", Allowed: []string{"127.0.0.0/8"},
 		Denied: []string{}, Version: 1}, fail: map[string]error{}}
 }
@@ -294,6 +298,7 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 	s.row.OidcTokenGraceSeconds = arg.OidcTokenGraceSeconds
 	s.row.TotpRequired, s.row.Version = arg.TotpRequired, s.row.Version+1
 	s.row.OutgoingHeartbeatProxy, s.row.Buttons, s.row.TeamLabel = arg.Proxy, arg.Buttons, arg.TeamLabel.String
+	s.row.NotificationRules = arg.NotificationRules
 	s.row.OutgoingHeartbeatUrlSet, s.row.OutgoingHeartbeatUrlUpdatedAt = arg.UrlCiphertext != nil, arg.UrlUpdatedAt
 	s.row.OutgoingHeartbeatProxyPasswordSet = arg.ProxyPasswordCiphertext != nil
 	s.row.OutgoingHeartbeatProxyPasswordUpdatedAt = arg.ProxyPasswordUpdatedAt
@@ -305,6 +310,13 @@ func (s *fakeSettings) UpdateSettings(_ context.Context, arg dbgen.UpdateSetting
 		OutgoingHeartbeatProxyPasswordUpdatedAt:  arg.ProxyPasswordUpdatedAt,
 	}
 	return 1, nil
+}
+
+func (s *fakeSettings) ListRuleGateways(_ context.Context, orgID int64) ([]dbgen.ListRuleGatewaysRow, error) {
+	if err := s.fail["ListRuleGateways"]; err != nil || orgID != 7 {
+		return nil, errors.Join(err, errors.New("another organization"))
+	}
+	return s.gateways, nil
 }
 
 func (s *fakeSettings) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
@@ -1272,4 +1284,136 @@ func TestMessageSettingsRows(t *testing.T) {
 		}
 	}
 	s.fail = map[string]error{}
+}
+
+// ruleInput is an action of a request body.
+func ruleInput(kind string, gateway *string, wait int) notificationrules.ActionInput {
+	in := notificationrules.ActionInput{Kind: kind, GatewayID: gateway}
+	if wait != 0 {
+		in.WaitSeconds = &wait
+	}
+	return in
+}
+
+// TestNotificationRules is C-31.FR-2 and C-20.FR-1 revised for L2: the Organization reads the default Notification
+// rules — normal a Mention, important a Mention, a wait of 5 minutes and a Mention — and updateOrganization changes
+// them under the validation of a User's rules, recorded rule by rule in the diff of organization.updated; an update
+// that omits them keeps them; a call needs only an existing Notification gateway, never a contact; a call whose
+// gateway was deleted reads unavailable and stays when the rules are saved again; a rule beyond the limits is refused
+// at its pointer under /notification_rules.
+func TestNotificationRules(t *testing.T) {
+	s := newFakeSettings(t)
+	svc := NewService(7, s, audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), clock.NewManual(t0)),
+		clock.NewManual(t0))
+	o, err := svc.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(o.NotificationRules.JSON()); got != `{"normal":[{"kind":"mention"}],"important":[{"kind":`+
+		`"mention"},{"kind":"wait","wait_seconds":300},{"kind":"mention"}]}` {
+		t.Errorf("the defaults = %s", got)
+	}
+	if len(o.NotificationRuleViews.Important) != 3 || !o.NotificationRuleViews.Important[1].Available {
+		t.Errorf("the views = %+v", o.NotificationRuleViews)
+	}
+
+	gw := "cn0000000000g1" // normalized to upper case
+	s.gateways = []dbgen.ListRuleGatewaysRow{{ID: 11, PublicID: "CN0000000000G1", Name: "Example Gateway", Live: true}}
+	in := inputOf(o)
+	in.NotificationRules = &notificationrules.SetInput{
+		Normal: &[]notificationrules.ActionInput{ruleInput("mention", nil, 0)},
+		Important: &[]notificationrules.ActionInput{ruleInput("call", &gw, 0), ruleInput("mention", nil, 0),
+			ruleInput("wait", nil, 600), ruleInput("mention", nil, 0)},
+	}
+	got, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := `{"normal":[{"kind":"mention"}],"important":[{"kind":"call","gateway_id":"CN0000000000G1"},{"kind":` +
+		`"mention"},{"kind":"wait","wait_seconds":600},{"kind":"mention"}]}`
+	if string(got.NotificationRules.JSON()) != stored || len(s.updates) != 1 ||
+		string(s.updates[0].NotificationRules) != stored {
+		t.Errorf("stored %s", got.NotificationRules.JSON())
+	}
+	if v := got.NotificationRuleViews.Important[0]; !v.Available || v.Gateway == nil ||
+		v.Gateway.Name != "Example Gateway" {
+		t.Errorf("the call reads %+v", v)
+	}
+	if len(s.audit) != 1 || string(s.audit[0].Diff) != `[{"pointer":"/notification_rules/important","before":[`+
+		`{"kind":"mention"},{"kind":"wait","wait_seconds":300},{"kind":"mention"}],"after":[{"kind":"call",`+
+		`"gateway_id":"CN0000000000G1"},{"kind":"mention"},{"kind":"wait","wait_seconds":600},{"kind":"mention"}]}]` {
+		t.Errorf("diff %s", s.audit[0].Diff)
+	}
+
+	// Omitted, the rules stay; the gateway deleted, the call reads unavailable and stays when saved again.
+	in = inputOf(got)
+	in.Name = "Ops"
+	if kept, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil ||
+		string(kept.NotificationRules.JSON()) != stored {
+		t.Errorf("an update without them = %s, %v", kept.NotificationRules.JSON(), err)
+	}
+	s.gateways[0].Live = false
+	read, err := svc.Get(t.Context())
+	if err != nil || read.NotificationRuleViews.Important[0].Available ||
+		read.NotificationRuleViews.Important[0].Reason != notificationrules.ReasonGatewayDeleted {
+		t.Errorf("a deleted gateway reads %+v, %v", read.NotificationRuleViews.Important, err)
+	}
+	in = inputOf(read)
+	in.NotificationRules = &notificationrules.SetInput{
+		Normal:    &[]notificationrules.ActionInput{ruleInput("mention", nil, 0)},
+		Important: &[]notificationrules.ActionInput{ruleInput("call", &gw, 0), ruleInput("mention", nil, 0)},
+	}
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err != nil {
+		t.Errorf("saved again with the deleted gateway: %v", err)
+	}
+	// Only as many calls as the stored rules have pass through the deleted gateway: the first takes the stored one,
+	// the second is checked.
+	s.gateways = append(s.gateways, dbgen.ListRuleGatewaysRow{ID: 12, PublicID: "CN0000000000G2", Name: "B",
+		Live: true})
+	in.NotificationRules.Normal = &[]notificationrules.ActionInput{ruleInput("call", &gw, 0)}
+	_, err = svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+	if fe, ok := errors.AsType[*FieldError](err); !ok || fe.Pointer != "/notification_rules/important/0/gateway_id" ||
+		fe.Code != "unknown_id" {
+		t.Errorf("a second call through the deleted gateway: %v", err)
+	}
+	in.NotificationRules.Normal = &[]notificationrules.ActionInput{ruleInput("mention", nil, 0)}
+	s.gateways = s.gateways[:1]
+
+	// The limits, at the pointers under /notification_rules; nothing is written.
+	writes := len(s.updates)
+	other := "CN0000000000G2"
+	eleven := make([]notificationrules.ActionInput, 11)
+	for i := range eleven {
+		eleven[i] = ruleInput("mention", nil, 0)
+	}
+	for _, c := range []struct {
+		name      string
+		important []notificationrules.ActionInput
+		want      string
+	}{
+		{"11 actions", eleven, "/notification_rules/important out_of_range"},
+		{"90 seconds", []notificationrules.ActionInput{ruleInput("mention", nil, 0), ruleInput("wait", nil, 90)},
+			"/notification_rules/important/1/wait_seconds out_of_range"},
+		{"only waits", []notificationrules.ActionInput{ruleInput("wait", nil, 60)},
+			"/notification_rules/important required"},
+		{"no gateway", []notificationrules.ActionInput{ruleInput("call", &other, 0)},
+			"/notification_rules/important/0 gateway_required"},
+	} {
+		in.NotificationRules.Important = &c.important
+		_, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in)
+		fe, ok := errors.AsType[*FieldError](err)
+		if !ok || fe.Pointer+" "+fe.Code != c.want {
+			t.Errorf("%s: %v, want %s", c.name, err, c.want)
+		}
+	}
+	if len(s.updates) != writes {
+		t.Errorf("a refused update wrote %d", len(s.updates)-writes)
+	}
+	s.fail["ListRuleGateways"] = errors.New("db down")
+	if _, err := svc.Get(t.Context()); err == nil {
+		t.Error("Get without the gateways")
+	}
+	if _, err := svc.Update(t.Context(), actor, audit.TransportAPI, netip.Addr{}, nil, in); err == nil {
+		t.Error("Update without the gateways")
+	}
 }

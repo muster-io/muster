@@ -216,6 +216,13 @@ sql:
         out: internal/gateways/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/notificationrules/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/notificationrules/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/webhooks/query.sql
     gen:
       go:

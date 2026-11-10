@@ -74,7 +74,8 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label,
+       notification_rules
 FROM organizations
 WHERE id = @org_id;
 
@@ -95,7 +96,7 @@ WHERE id = @org_id;
 
 -- UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 -- URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
--- null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the
+-- null button set keeps the stored one, as a null Team label and null Notification rules do; a changed Team label raises teams_version, the
 -- stamp of the classification that every replica caches (C-25.FR-5).
 -- name: UpdateSettings :execrows
 UPDATE organizations
@@ -124,6 +125,7 @@ SET name                                         = @name,
     outgoing_heartbeat_proxy_password_updated_at = @proxy_password_updated_at,
     buttons                                      = coalesce(sqlc.narg('buttons')::jsonb, buttons),
     team_label                                   = coalesce(sqlc.narg('team_label')::text, team_label),
+    notification_rules = coalesce(sqlc.narg('notification_rules')::jsonb, notification_rules),
     teams_version = teams_version + CASE WHEN team_label <> coalesce(sqlc.narg('team_label')::text, team_label)
                                          THEN 1 ELSE 0 END,
     outgoing_heartbeat_last_attempt_at = CASE WHEN @url_changed::boolean THEN NULL
@@ -134,6 +136,16 @@ SET name                                         = @name,
     updated_at = @now,
     version = version + 1
 WHERE id = @org_id;
+
+-- ListRuleGateways lists every Bridge Connection, deleted ones included, which a call of the Organization's default
+-- Notification rules may name, with whether it is a Notification gateway now: not deleted, its info declaring the role
+-- gateway (C-31.FR-1).
+-- name: ListRuleGateways :many
+SELECT id, public_id, name,
+       (deleted_at IS NULL AND coalesce(bridge_info -> 'roles' @> '["gateway"]'::jsonb, false))::boolean AS live
+FROM connections
+WHERE org_id = @org_id AND type = 'bridge'
+ORDER BY lower(name), id;
 
 -- ClaimOutgoingHeartbeat takes the send of the outgoing heartbeat that is due: with a URL set and no attempt since
 -- @due_before, it records the attempt at @now and returns what the send needs. A second claim in the same interval

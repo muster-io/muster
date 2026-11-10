@@ -302,7 +302,8 @@ SELECT id, public_id, name, time_zone, workday_start, week_start, severity_label
        (outgoing_heartbeat_url_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_url_set,
        outgoing_heartbeat_url_updated_at, outgoing_heartbeat_proxy,
        (outgoing_heartbeat_proxy_password_ciphertext IS NOT NULL)::boolean AS outgoing_heartbeat_proxy_password_set,
-       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label
+       outgoing_heartbeat_proxy_password_updated_at, version, working_days, workday_end, buttons, team_label,
+       notification_rules
 FROM organizations
 WHERE id = $1
 `
@@ -334,6 +335,7 @@ type GetSettingsRow struct {
 	WorkdayEnd                              string
 	Buttons                                 []byte
 	TeamLabel                               string
+	NotificationRules                       []byte
 }
 
 // GetSettings reads the organization resource, with the state of its Secrets but not their values. critical_is_urgent
@@ -368,6 +370,7 @@ func (q *Queries) GetSettings(ctx context.Context, orgID int64) (GetSettingsRow,
 		&i.WorkdayEnd,
 		&i.Buttons,
 		&i.TeamLabel,
+		&i.NotificationRules,
 	)
 	return i, err
 }
@@ -402,6 +405,49 @@ type InsertOrganizationUpdateParams struct {
 func (q *Queries) InsertOrganizationUpdate(ctx context.Context, arg InsertOrganizationUpdateParams) error {
 	_, err := q.db.Exec(ctx, insertOrganizationUpdate, arg.OrgID, arg.Kind, arg.RequestedAt)
 	return err
+}
+
+const listRuleGateways = `-- name: ListRuleGateways :many
+SELECT id, public_id, name,
+       (deleted_at IS NULL AND coalesce(bridge_info -> 'roles' @> '["gateway"]'::jsonb, false))::boolean AS live
+FROM connections
+WHERE org_id = $1 AND type = 'bridge'
+ORDER BY lower(name), id
+`
+
+type ListRuleGatewaysRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	Live     bool
+}
+
+// ListRuleGateways lists every Bridge Connection, deleted ones included, which a call of the Organization's default
+// Notification rules may name, with whether it is a Notification gateway now: not deleted, its info declaring the role
+// gateway (C-31.FR-1).
+func (q *Queries) ListRuleGateways(ctx context.Context, orgID int64) ([]ListRuleGatewaysRow, error) {
+	rows, err := q.db.Query(ctx, listRuleGateways, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuleGatewaysRow{}
+	for rows.Next() {
+		var i ListRuleGatewaysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Live,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSeverityValues = `-- name: ListSeverityValues :many
@@ -583,16 +629,17 @@ SET name                                         = $1,
     outgoing_heartbeat_proxy_password_updated_at = $23,
     buttons                                      = coalesce($24::jsonb, buttons),
     team_label                                   = coalesce($25::text, team_label),
+    notification_rules = coalesce($26::jsonb, notification_rules),
     teams_version = teams_version + CASE WHEN team_label <> coalesce($25::text, team_label)
                                          THEN 1 ELSE 0 END,
-    outgoing_heartbeat_last_attempt_at = CASE WHEN $26::boolean THEN NULL
+    outgoing_heartbeat_last_attempt_at = CASE WHEN $27::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_attempt_at END,
-    outgoing_heartbeat_last_ok         = CASE WHEN $26::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
-    outgoing_heartbeat_last_error      = CASE WHEN $26::boolean THEN NULL
+    outgoing_heartbeat_last_ok         = CASE WHEN $27::boolean THEN NULL ELSE outgoing_heartbeat_last_ok END,
+    outgoing_heartbeat_last_error      = CASE WHEN $27::boolean THEN NULL
                                               ELSE outgoing_heartbeat_last_error END,
-    updated_at = $27,
+    updated_at = $28,
     version = version + 1
-WHERE id = $28
+WHERE id = $29
 `
 
 type UpdateSettingsParams struct {
@@ -621,6 +668,7 @@ type UpdateSettingsParams struct {
 	ProxyPasswordUpdatedAt           pgtype.Timestamptz
 	Buttons                          []byte
 	TeamLabel                        pgtype.Text
+	NotificationRules                []byte
 	UrlChanged                       bool
 	Now                              time.Time
 	OrgID                            int64
@@ -628,7 +676,7 @@ type UpdateSettingsParams struct {
 
 // UpdateSettings writes the editable fields of the organization resource and moves its version. A new or cleared
 // URL of the outgoing heartbeat starts without a result, so that the last result never belongs to another URL. A
-// null button set keeps the stored one, as a null Team label does; a changed Team label raises teams_version, the
+// null button set keeps the stored one, as a null Team label and null Notification rules do; a changed Team label raises teams_version, the
 // stamp of the classification that every replica caches (C-25.FR-5).
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSettings,
@@ -657,6 +705,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.ProxyPasswordUpdatedAt,
 		arg.Buttons,
 		arg.TeamLabel,
+		arg.NotificationRules,
 		arg.UrlChanged,
 		arg.Now,
 		arg.OrgID,

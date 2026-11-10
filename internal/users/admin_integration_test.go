@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/gateways"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/schedules"
 	"github.com/muster-io/muster/internal/teams"
@@ -938,6 +939,48 @@ func TestIntegrationGatewayContactsOfDeletedUsers(t *testing.T) {
 			OR details::text LIKE '%' || $2 || '%' OR diff::text LIKE '%"' || $2 || '"%'`, contact, code).
 			Scan(&leaked); err != nil || leaked != 0 {
 			t.Errorf("%d entries carry the contact in their details or the code, %v", leaked, err)
+		}
+	})
+}
+
+// TestIntegrationRulesOfDeletedUsers is C-31.FR-5 and C-03.FR-13 revised for L2: disabling a user keeps their
+// Notification rules, and deleting them deletes the rules in the transaction of the deletion.
+func TestIntegrationRulesOfDeletedUsers(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		ctx := t.Context()
+		e := setup(t, s)
+		rules := notificationrules.New(notificationrules.Config{OrgID: e.orgID,
+			Store: notificationrules.NewStore(e.d.Pool),
+			Audit: audit.NewWriter(logging.New(&bytes.Buffer{}, logging.LevelInfo), e.clock), Business: e.clock})
+		e.admin.SetRuleRemover(rules)
+		bob := e.create(t, "Bob", "bob", auth.RoleResponder, "bob-password-1")
+		carol := e.create(t, "Carol", "carol", auth.RoleResponder, "carol-password-1")
+		by := notificationrules.Requester{Actor: e.byOps.Actor, Transport: audit.TransportUI}
+		for _, u := range []users.User{bob, carol} {
+			if _, err := rules.UpdateOfUser(ctx, by, u.PublicID, nil, notificationrules.Update{
+				State: notificationrules.StateNoCall}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rows := func(id int64) (n int) {
+			t.Helper()
+			if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM notification_rules WHERE user_id = $1`,
+				id).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		if _, err := e.admin.Disable(ctx, e.byOps, bob.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if rows(bob.ID) != 1 {
+			t.Errorf("disabling deleted the rules")
+		}
+		if err := e.admin.Delete(ctx, e.byOps, bob.PublicID, nil); err != nil {
+			t.Fatal(err)
+		}
+		if rows(bob.ID) != 0 || rows(carol.ID) != 1 {
+			t.Errorf("after the deletion: bob %d, carol %d rows", rows(bob.ID), rows(carol.ID))
 		}
 	})
 }

@@ -50,6 +50,7 @@ import (
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/metrics"
+	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/oidc"
 	oidcdb "github.com/muster-io/muster/internal/oidc/dbgen"
 	"github.com/muster-io/muster/internal/organization"
@@ -1169,6 +1170,9 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 	admin.SetTeamRemover(p.teams)
 	admin.SetFeedRemover(p.icalFeeds)
 	admin.SetContactRemover(p.gatewayContacts)
+	rules := notificationrules.New(notificationrules.Config{OrgID: orgID,
+		Store: notificationrules.NewStore(p.db.AccountLinksDB()), Audit: w, Business: p.clocks.Business})
+	admin.SetRuleRemover(rules)
 	// A change of the outbound address policy applies on this replica as soon as it commits.
 	settings := organization.NewService(orgID, p.db.SettingsStore(), w, p.clocks.Business).WithKeyring(p.keyring).
 		WithLog(p.log).WithOutboundPolicyChanged(p.policies.Invalidate)
@@ -1200,6 +1204,8 @@ func (p *process) newAPI(ctx context.Context) (http.Handler, error) {
 		Links:           linkService,
 		AccountLinks:    p.links,
 		GatewayContacts: p.gatewayContacts,
+		// The Notification rules are kept in the main pool, as the contacts they call are (C-31).
+		NotificationRules: rules,
 		SystemStatus: systemstatus.New(systemstatus.Config{OrgID: orgID, Queries: p.db.SystemStatusQueries(),
 			Replicas: func(ctx context.Context) ([]keyring.Replica, error) {
 				return keyring.LiveReplicas(ctx, p.db.KeyringStore(), p.clocks.Real.Now())

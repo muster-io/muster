@@ -82,7 +82,11 @@
   `paged`, `timeline_entries.paged_user_ids` and `gateway_connection_id`, and the Transport `gateway`, C-30.FR-4,
   FR-7, C-32.FR-19, S-148) and
   [`0035_gateway_call_signature`](../../internal/db/migrations/0035_gateway_call_signature.up.sql)
-  (`gateway_calls.action_data` and `button_key_id`, the signed action data of a call and its key, C-30.FR-6, S-173), in
+  (`gateway_calls.action_data` and `button_key_id`, the signed action data of a call and its key, C-30.FR-6, S-173) and
+  [`0036_gateway_broken`](../../internal/db/migrations/0036_gateway_broken.up.sql)
+  (the Broken state of Notification gateways on `connections`, C-30.FR-8, S-149) and
+  [`0037_notification_rules`](../../internal/db/migrations/0037_notification_rules.up.sql)
+  (`organizations.notification_rules` and the Notification rules of the Users, `notification_rules`, C-31, S-152), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -184,7 +188,8 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 `schedule_overrides` (0025), the personal iCal feeds, `ical_feeds` (0026), the identity provider entries
 of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_destinations` (0032), and the contacts at
 Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), and the calls through
-them, `gateway_calls` and `gateway_call_items` (0034), which makes 76 tables.
+them, `gateway_calls` and `gateway_call_items` (0034), and the Notification rules of the Users, `notification_rules`
+(0037), which makes 77 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -200,6 +205,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), which makes 76 tables.
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
+| Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms` | `groups`, timers, delivery | queue rows deleted when done |
@@ -719,6 +725,15 @@ Serves C-02.FR-21–23, C-03.FR-20, C-10.FR-17, C-19.FR-7, C-20; [ADR-0003](../a
   `week_start`, which the Root messages show (C-29.FR-1 to FR-3, C-10.FR-18), inserts a row
   `organization_message_settings` of `open_group_updates` without a scope in the same transaction (migration 0031,
   [section 5](#5-queues-and-claims)).
+  `notification_rules` (migration 0037, C-31.FR-2, C-20.FR-1, `organization.notification_rules`) is the Organization's
+  default Notification rules, `{"normal": [...], "important": [...]}` with the actions of the API's
+  `NotificationRuleAction` as stored — `{"kind": "mention"}`, `{"kind": "call", "gateway_id": "<Connection public_id>"}`,
+  `{"kind": "wait", "wait_seconds": N}` — whose default, normal a Mention and important a Mention, a wait of 300
+  seconds and a Mention, the migration gave every existing Organization and a replica of an earlier version gives a new
+  one; `organizations_notification_rules_check` keeps it an object with the arrays `normal` and `important`, and the
+  API checks the rest ([4.18](#418-paging)). A call names its gateway by `public_id`, without a foreign key: one whose
+  Connection was deleted stays. Every User without a row of `notification_rules` follows these rules, read at the
+  moment they are needed, so that a change reaches them at once; a change touches no other table (journal D569).
 - **`outbound_policies`** — the outbound address policy (`standard` or `strict`) with its allowed and denied lists of
   networks, host names and domains, a resource with its own ETag (`organization/outbound-policy`). Rules that always
   apply (link-local, metadata, unspecified, multicast) are code, not data.
@@ -755,7 +770,8 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8, C-27.FR-10; [ADR-0008](../adr/0008-spec-f
   sign-in clears it. For a user without an offline token, Personal access tokens work while the last OIDC sign-in is
   within `organizations.oidc_token_grace_seconds`. Deleting a user sets `status = 'deleted'`, renames it
   `deleted-user-<id>` (login too, freeing the unique login) and erases the email (`CHECK`); the row stays because Alert
-  Groups, the Timeline and the Audit log point at it and show "(deactivated)".
+  Groups, the Timeline and the Audit log point at it and show "(deactivated)". The transaction of the deletion also
+  deletes the user's Notification rules ([4.18](#418-paging)).
 - **`user_totp`** — the TOTP seed (a Secret) once enrolled, and a pending seed between "enrol" and "confirm", so
   re-enrolment never loses the active factor before the new one is confirmed. `last_used_step` rejects a replayed code.
 - **`user_recovery_codes`** — single-use codes, argon2id-hashed; regenerating deletes the unused ones.
@@ -1701,6 +1717,32 @@ stored `info` declares the role `gateway`; it has no table of its own.
   `queued_at` and `dropped_at`, set before the first attempt for an Alert Group that stopped, which the call is then not
   about. Deleted with their call and with their Alert Group (`ON DELETE CASCADE`, `gateway_call_items_alert_group_idx`
   on `(alert_group_id)`).
+
+### 4.18 Paging
+
+Serves C-31 (from 0.2.0, migration 0037); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
+
+- **`notification_rules`** — the Notification rules of a User whose state is not "As in the Organization": primary key
+  `user_id` (`ON DELETE CASCADE`, though Users are never hard-deleted: their deletion deletes the row in its
+  transaction), `state` `call`, `no_call` or `custom` (`notification_rules_state_check`) — the state `organization` is
+  the absence of a row, whose User follows `organizations.notification_rules` — and `normal` and `important`, JSON
+  arrays of the actions as `organizations.notification_rules` stores them, the sequences in effect: those of `call` and
+  `no_call` were computed from the Organization's rules when the User chose the state and do not follow a later change
+  of them (journal D569). `gateway_connection_id` is the Notification gateway of the state `call`, set exactly with it
+  (`notification_rules_gateway_check`); Connections are only soft-deleted, so the foreign key never acts, and the call
+  of a deleted gateway stays in the rule and reads unavailable, as one whose User no longer has a confirmed contact
+  there. `notification_rules_gateway_idx` on `(org_id, gateway_connection_id)` backs the foreign key. `version` comes
+  from the sequence `notification_rules_version_seq`, owned by the column, on every write, so that a row deleted by
+  "Reset to the Organization's rules" and written again never repeats the version of an earlier row, which would let a
+  stale `If-Match` pass. The ETag of a User's rules is twice `version`, or, in the state `organization`, without a row,
+  twice `organizations.version` plus one: even and odd never collide, the ETag of a stored row never repeats, and that
+  of the state `organization` changes with every change of the Organization, whose rules the User follows. `updated_at` is on the business clock. A change
+  locks the User's row `FOR NO KEY UPDATE` first, then writes this row, as the deletion of a User locks the User first,
+  so that a change never deadlocks with the deletion and never writes the rules of a deleted User; it reads the
+  Organization's row without a lock. The validation of the rules — at most 10 actions, waits of whole minutes from 1
+  to 60 (`notification_rule.limits`), a Mention or a call in each rule, a call through an existing gateway and, for a
+  User, with their confirmed contact there — is in `internal/notificationrules`, the only writer; `users` deletes a
+  deleted User's row through it.
 
 ## 5. Queues and claims
 

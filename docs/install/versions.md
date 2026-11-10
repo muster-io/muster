@@ -160,6 +160,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       to the Connections; no data is migrated, and no gateway starts Broken. It is expand only: a 0.1 replica, or one of
       a development image without it, writes none of the new columns; one of such an image sends the calls of a Broken
       gateway, which then fail and end Not delivered as before.
+    - Migration 0037 adds the [Notification rules](../concepts/notification-rules.md): the Organization's default
+      rules, which every existing Organization takes — normal a Mention, important a Mention, a wait of 5 minutes and a
+      Mention — and the rules of each User, none at first, so that every User follows the Organization's. It is expand
+      only: a 0.1 replica, or one of a development image without it, reads and writes nothing of either, and an
+      Organization it creates gets the default rules.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -530,6 +535,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     `MusterNotificationGatewayBroken` stays open while a version before 0036 runs; once 0036 is back, the Leader
     resolves it within 15 seconds, as it resolves every `MusterNotificationGatewayBroken` of a gateway that is not Broken,
     and a gateway whose calls still fail becomes Broken again with its next failed call.
+
+    Migration 0037 adds the Notification rules in one transaction: a failure leaves nothing of it, but the schema
+    recorded as dirty at version 37. To recover, with the same database role as Muster, run
+    `UPDATE schema_migrations SET version = 36, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0037 loses every User's own Notification rules and the Organization's default
+    rules; once 0037 is back, every User follows the Organization's rules, which are the defaults again.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
