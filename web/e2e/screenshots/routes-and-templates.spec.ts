@@ -329,7 +329,7 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
   for (const [tab, id, name] of tabs) {
     await root.getByRole("tab", { name: tab }).click();
     await expect(layout.getByTestId(id).getByTestId("layout-title")).toContainText("— Firing");
-    await expect(layout.getByTestId(id).getByTestId("layout-alerts")).toContainText(OOM_PODS[2]);
+    await expect(layout.getByTestId(id).getByTestId("layout-alerts")).toContainText("checkout-worker-8e6a0");
     await capture(page, TEMPLATES, name, { locator: root, padding: 16 });
   }
   await root.getByRole("tab", { name: "Bridge" }).click();
