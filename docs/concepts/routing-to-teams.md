@@ -2,7 +2,12 @@
 
 One Route can serve many teams. Each Destination of a Route, and each Destination of a Team, may be limited by
 Severity level, and a Route may also deliver its Alert Groups to the Destinations of the Teams of their Alerts. Every
-Destination then shows the same Alert Group with one status.
+Destination then shows the same Alert Group with one status. The settings are on the Route form, and each links here:
+[the Severity condition of a Destination](#severity-conditions), ["Also to the Teams from the
+label"](#also-to-the-teams-from-the-label) with ["Run the Teams' Escalation chains"](#also-to-the-teams-from-the-label),
+the Group key's [Team label](#teams-that-want-their-own-alert-groups), the
+[preview](#preview-where-alerts-go), the [Owning Team](teams.md#what-a-team-is) and the
+[Minimum severity](what-critical-changes.md).
 
 The feature is optional. Many installations need only two operations channels — one for critical Alert Groups and one
 for the rest — and a Route that names both with a Severity condition each. Teams and their Destinations come in when
@@ -26,6 +31,8 @@ The condition is checked against the Alert Group's Severity level: the highest l
 the Route's Minimum severity. A Destination may be named by several Routes and Teams, each with its own condition, and
 is reached when the condition of any of its entries is met.
 
+![The Destinations of the Route Infrastructure: infra-critical for critical Alert Groups and infra-notice for those below critical](../assets/screenshots/concepts/teams/05-route-destinations.png){ .screenshot }
+
 Until 0.3.0 Routes still read and take `destination_ids`, derived from `destination_entries`: a request that sends only
 `destination_ids` keeps the condition of each Destination it keeps and gives a new one `any`.
 
@@ -36,6 +43,8 @@ Destinations of each of its Teams — the Teams its Alerts belong to by the Team
 ([Teams](teams.md#which-alerts-belong-to-a-team)) — whose condition its Severity level meets. With it off, the Alert
 Group goes only to the Route's own Destinations. The owning Team of a Route adds nothing: it only organizes and
 filters.
+
+![The option Also to the Teams from the label on the Route form, switched on, with its hint](../assets/screenshots/concepts/teams/06-route-teams-option.png){ .screenshot }
 
 "Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
 
@@ -57,6 +66,9 @@ brings neither, adds no Destination below critical where the Alert Group was not
 
 An Alert Group has one status and one list of Alerts in every channel it is in. Acknowledge it from `payments-notice`
 and its message in `infra-notice` shows the same Owner; resolve it anywhere and every message shows it resolved. The
+Alert Group page names its Teams, and the deliveries of the Alert Group show where it went.
+
+![The Teams of the Alert Group KubernetesContainerOOMKilled: payments, by the Team label](../assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot } The
 delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
 it — the Route, or a Team — with their conditions.
 
@@ -75,7 +87,9 @@ a Mention.
 In a Route whose Group key lacks the Team label, Alerts of different Teams with the same key share one Alert Group,
 shown in the channels of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
 in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
-default, to the Group key of the Route.
+default, to the Group key of the Route: with `alertname`, `system` and `team` as the Group key, the "search" Alert gets
+an Alert Group of its own, with its own status, and the Route form offers **Add team to the key** when the preview
+sees Alerts of different Teams share one.
 
 ## Preview where alerts go
 
@@ -101,6 +115,8 @@ saved on the Teams page. When the Route delivers to the Teams and the Group key 
 so (`shared_key_warning`), and the form offers to add the Team label to the key.
 
 The preview only reads: it saves nothing, writes no Audit log entry, publishes nothing and sends no message.
+
+![Where alerts go: the Alert Groups the Route Infrastructure would form, with their Teams and the Destinations each would reach](../assets/screenshots/concepts/teams/07-route-preview.png){ .screenshot }
 
 ## When you change a Route or a Team
 
@@ -129,6 +145,18 @@ entries, reach the open Alert Groups at once, without a lifecycle event in their
 
 ## A Route for test clusters
 
-A Route "Test clusters" placed first, with `cluster=~".*-stage|.*-preprod"`, no Destination of its own, "Also to the
-Teams from the label" on and "Run the Teams' Escalation chains" off sends each team its test alerts in its own channels
-and Pages nobody.
+Test alerts should reach the team that owns the workload, in its own channels, and wake nobody. A Route "Test
+clusters" placed above the Route "Infrastructure", with the Matcher `cluster=~".*-stage|.*-preprod"`, no Destination of
+its own, "Also to the Teams from the label" on and "Run the Teams' Escalation chains" off, does that: the Alert Group of
+`team="payments"` from `shop-stage` goes to the Destinations of the Team `payments` and to nothing else, with their
+Severity conditions, and starts no Escalation chain of the Team. Routes are checked in order, and the first one that
+picks an Alert takes it, so it never reaches "Infrastructure". An Alert of a test cluster whose `team` value names no
+Team goes nowhere: the Route has no Destination of its own, so the Alert Group is only in the web UI. Where that
+matters, give the Route one Destination of its own, such as a channel for test alerts.
+
+The Teams of such Alerts are those of the Team label and the Team matchers, as everywhere. On a test cluster where
+every team shares one namespace, use a Team matcher on the Pod name or an app label, or put the Team label on the
+workloads ([Teams](teams.md#which-alerts-belong-to-a-team)).
+
+A Minimum severity on the Route would make every test alert critical, and so [Urgent](what-critical-changes.md); leave it
+at none.

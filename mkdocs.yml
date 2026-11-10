@@ -125,6 +125,7 @@ nav:
       - concepts/broken-destinations.md
       - concepts/teams.md
       - concepts/routing-to-teams.md
+      - concepts/what-critical-changes.md
       - concepts/schedules.md
   - Operations:
       - operations/backup-and-restore.md

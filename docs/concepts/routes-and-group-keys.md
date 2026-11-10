@@ -102,7 +102,9 @@ of outgoing webhook events still show as received.
 
 Use it for a Route whose Alerts all matter as much as a critical one, whatever their `severity` label says: with the
 Minimum severity critical, a warning Alert of the Route starts a critical, and so [Urgent](#urgent), Alert Group. The
-Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical.
+Route that Muster suggests for `MusterHeartbeatLost` has the Minimum severity critical. [What critical
+changes](what-critical-changes.md#what-the-minimum-severity-adds) lists what a Minimum severity does, and what it
+leaves alone.
 
 A changed Minimum severity applies at once to the open Alert Groups of the Route, Quietly. A raised one records a Quiet
 `severity_raised`, or the Quiet `urgency_raised` of an Alert Group it makes critical, with the reason "Minimum severity
@@ -118,7 +120,8 @@ info. The Organization can change the label and the mapping.
 An Alert Group is **Urgent** when its Severity level is critical — from its Alerts, or from the
 [Minimum severity](#minimum-severity) of its Route. An Urgent Alert Group is posted first when many arrive at once, is
 published on its own during a Storm, and a rise to Urgent can end a Snooze or remove an acknowledgement, where the
-Route's "rise to Urgent removes the acknowledgement" is on.
+Route's "rise to Urgent removes the acknowledgement" is on. [What critical changes](what-critical-changes.md) lists
+every effect of Urgent.
 
 From 0.2.0 the urgent mark of a Route and the Organization's "critical is Urgent" no longer act: a Route marked urgent
 got the Minimum severity critical, and a critical Alert Group is always Urgent. The API keeps `urgent` on Routes and
@@ -213,12 +216,15 @@ labels](../integrations/alertmanager.md#static-labels).
 
 3. Under **Route Destinations**, choose each Destination in **Add a Destination**. The list shows each one with its type and
    health, and a Severity condition you can leave at **Any severity**; a Route without Destinations sends no messages.
+   Next to them, **Also to the Teams from the label** adds the Destinations of the Teams of the Alerts. Both are
+   explained in [Routing to Teams](routing-to-teams.md#severity-conditions).
 
     ![The Destinations of the Route: the outgoing webhook payments, Healthy](../assets/screenshots/concepts/routes-and-group-keys/06-destinations.png){ .screenshot }
 
 4. Under **Severity, Escalation chains and owner**, choose the [Minimum severity](#minimum-severity): **None**, which is
    the default, **warning** or **critical**. It only raises the Severity level of the Route's Alert Groups; with
-   **critical** they are [Urgent](#urgent).
+   **critical** they are [Urgent](#urgent), with [what that changes](what-critical-changes.md). The same section
+   names the **Owning Team**, which only organizes ([Teams](teams.md#what-a-team-is)).
 
     ![The Minimum severity of the Route: None, with its hint](../assets/screenshots/concepts/routes-and-group-keys/07-minimum-severity.png){ .screenshot }
 
