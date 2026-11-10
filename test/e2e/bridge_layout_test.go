@@ -32,6 +32,21 @@ func (e *brd) routeTo(route string, dests ...string) {
 	e.api.json(http.MethodPut, "/api/v1/routes/"+route, string(body), http.StatusOK, "If-Match", a.header.Get("ETag"))
 }
 
+// checkEverywhere runs the check of the demo Bridge Connection on every replica. A check reads the bridge's info
+// again only through the replica that serves it, and another replica keeps its copy in memory for
+// bridge.info_max_age (C-22.FR-2), so a test that changes the fake's info and then waits for a delivery, which any
+// replica may claim, checks on each of them.
+func (e *brd) checkEverywhere() {
+	e.t.Helper()
+	for _, r := range e.h.Replicas {
+		c := patClient{t: e.t, base: r.App, token: e.api.token}
+		if check := c.json(http.MethodPost, "/api/v1/connections/"+e.conn+"/checks", "", http.StatusOK); check["ok"] !=
+			true {
+			e.t.Fatalf("check on %s = %v", r.App, check)
+		}
+	}
+}
+
 // in are the messages of the fake bridge whose title ends with " "+title in channel.
 func (e *brd) in(channel, title string) []fakebridge.Message {
 	e.t.Helper()
@@ -142,10 +157,7 @@ func TestBridgeLayout(t *testing.T) {
 
 	// Without native_mentions the footer names bob as text, and the Owner has no ref.
 	e.configure(`{"capabilities":{"native_mentions":false}}`)
-	if check := e.api.json(http.MethodPost, "/api/v1/connections/"+e.conn+"/checks", "", http.StatusOK); check["ok"] !=
-		true {
-		t.Fatalf("check = %v", check)
-	}
+	e.checkEverywhere()
 	e.configure(`{"channels":{"ch-third":"third"}}`)
 	third := e.destination("alerts-third", "ch-third")
 	e.routeTo(route, dest, prod, third)
@@ -155,7 +167,7 @@ func TestBridgeLayout(t *testing.T) {
 		t.Fatalf("without native_mentions: owner %s, mentions %+v", o, plain.Envelope.Mentions)
 	}
 	e.configure(`{"capabilities":` + mustJSON(fakebridge.DefaultConfig().Capabilities) + `}`)
-	e.api.json(http.MethodPost, "/api/v1/connections/"+e.conn+"/checks", "", http.StatusOK)
+	e.checkEverywhere()
 	e.settled()
 
 	// A new Alert is a Thread reply, which carries no layout.
@@ -182,10 +194,7 @@ func TestBridgeLayout(t *testing.T) {
 
 	// A body cut to max_body_length: the description goes from the body and from the layout.
 	e.configure(`{"limits":{"max_body_length":1000,"edit_max_age_seconds":null}}`)
-	if check := e.api.json(http.MethodPost, "/api/v1/connections/"+e.conn+"/checks", "", http.StatusOK); check["ok"] !=
-		true {
-		t.Fatalf("check = %v", check)
-	}
+	e.checkEverywhere()
 	e.group("l1", "LongQueue")
 	for n := 1; n <= 3; n++ {
 		e.alert("l1", fmt.Sprintf("l%d", n), fmt.Sprintf(`{"team":"br","cluster":"long","pod":"l%d"}`, n),
