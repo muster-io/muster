@@ -8,9 +8,11 @@ depends_on: [S-167]
 covers: [C-31.FR-1, C-31.FR-2, C-31.FR-4, C-31.FR-5, C-31.AC-3, C-31.AC-4, C-31.AC-6, C-20.FR-1]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/0039_notification_rules.up.sql
-  - internal/db/migrations/0039_notification_rules.down.sql
+  - sqlc.yaml
+  - internal/db/migrations/0037_notification_rules.up.sql
+  - internal/db/migrations/0037_notification_rules.down.sql
   - design/db/schema.md
+  - docs/install/versions.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/notificationrules/rules.go
@@ -23,14 +25,14 @@ files_touched:
   - internal/api/notificationrules_test.go
   - internal/api/problem.go
   - internal/api/server.go
+  - internal/api/organization.go
   - internal/organization/organization.go
-  - internal/organization/settings.go
+  - internal/organization/query.sql
   - internal/organization/organization_test.go
   - internal/users/admin.go
   - internal/users/admin_integration_test.go
   - internal/runtime/runtime.go
-  - design/prd/l1/defaults.md
-  - design/prd/L2.md
+  - internal/archlint/secretleak.go
   - test/e2e/notification_rules_test.go
   - docs/concepts/notification-rules.md
   - mkdocs.yml
@@ -90,16 +92,19 @@ issue: 441
   - Problem codes: `gateway_required` and `contact_required` (`validation-failed`, in `errors[].code`); `out_of_range`
     and `required` at the action or the rule. `internal/api/problem.go` maps the errors of `notificationrules` — these
     codes, `session_required`, a stale version — to their problems.
-- **Schema** (migration `0039_notification_rules`, expand only; `schema.md` §4.2, §4.3 and a new §4.18 Paging):
+- **Schema** (migration `0037_notification_rules`, expand only; `schema.md` §4.2, §4.3 and a new §4.18 Paging):
   - `organizations.notification_rules jsonb NOT NULL DEFAULT` the defaults of C-31.FR-2, with a CHECK that it is an
     object with the arrays `normal` and `important`.
   - `notification_rules`: `org_id`, `user_id` (FK, `ON DELETE CASCADE`, primary key), `state` (`CHECK IN ('call',
     'no_call', 'custom')` — `organization` is the absence of a row), `gateway_connection_id` (FK `connections`, set
-    exactly with `call`), `normal jsonb NOT NULL`, `important jsonb NOT NULL`, `version`, `updated_at`; index
-    `(org_id, gateway_connection_id)`.
+    exactly with `call`; Connections are only soft-deleted, so the call of a deleted gateway stays), `normal jsonb NOT
+    NULL`, `important jsonb NOT NULL`, `version` (from a sequence, so that a row deleted by a reset and written again
+    never repeats an ETag), `updated_at`; index `(org_id, gateway_connection_id)`.
   - The down migration drops both.
 - **Notification rules** (`internal/notificationrules`, a new flat domain package, ADR-0016): `rules.go` — validation
-  within `notification_rule.limits`, the reads with availability (`gateways.ConfirmedContact`, S-167), the Audit log
+  within `notification_rule.limits`, the reads with availability (the confirmed contacts of S-167, read by a query of its own, the semantics of
+  `gateways.ConfirmedContact`, since `internal/gateways` depends on `internal/organization`, which validates the
+  Organization's rules with this package), the Audit log
   `notification_rules.updated` with a before/after diff, `Effective(user)` for the runs of S-155; `states.go` — the
   sequences of `call` (a call through the chosen gateway inserted at the start of the important rule, together with its
   first action, unless that rule already calls through that gateway), `no_call` (every call removed; a rule left without
@@ -150,7 +155,7 @@ curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -c '[.important[] | .
 E=$(curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -r .etag)
 curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/users/$PETR/notification-rules -d '{"state":"custom",
   "normal":[{"kind":"mention"},{"kind":"mention"},{"kind":"mention"}],"important":[{"kind":"mention"}]}' | jq -r .state   # custom
-curl -s "${A[@]}" "$API/audit-log?action=notification_rules.updated" | jq -r '.items[0].actor.login'      # admin
+curl -s "${A[@]}" "$API/audit-log?action=notification_rules.updated" | jq -r '.items[0].actor.name'       # admin
 E=$(curl -s "${A[@]}" $API/users/$PETR/notification-rules | jq -r .etag)
 curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/users/$PETR/notification-rules -d '{"state":"custom",
   "normal":[{"kind":"mention"},{"kind":"wait","wait_seconds":90}],"important":[{"kind":"mention"}]}' | jq -c '[.status, .errors[0].pointer]'
@@ -176,7 +181,8 @@ Organization whose important rule calls, `call` on one that already calls throug
   Notification rule.
 - "Call" and "Don't call" keep the Organization's rules as they were when the User chose them (journal D569), so a
   later change of the Organization's rules reaches only the Users in `organization`.
-- Migration `0039` follows the story map; a story merged out of that order renumbers its migration (S-167's Notes).
+- Migration `0037` is the next free number after S-149's `0036`: the story map's `0039` assumed stories that are not
+  merged yet, and a story merged out of that order renumbers its migration (S-167's Notes).
 - A wait is `wait_seconds` in the API and in the stored rules, a multiple of 60, as every duration of the API is in
   seconds (maintainer's decision Q4 of the plan review); C-31 and `notification_rule.limits` speak in minutes, which the
   multiple keeps, and the profile (S-153) shows and edits minutes.

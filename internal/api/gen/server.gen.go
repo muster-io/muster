@@ -1685,6 +1685,69 @@ func (e NotPageableReason) Valid() bool {
 	}
 }
 
+// Defines values for NotificationRuleActionKind.
+const (
+	NotificationRuleActionKindCall    NotificationRuleActionKind = "call"
+	NotificationRuleActionKindMention NotificationRuleActionKind = "mention"
+	NotificationRuleActionKindWait    NotificationRuleActionKind = "wait"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRuleActionKind enum.
+func (e NotificationRuleActionKind) Valid() bool {
+	switch e {
+	case NotificationRuleActionKindCall:
+		return true
+	case NotificationRuleActionKindMention:
+		return true
+	case NotificationRuleActionKindWait:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationRuleUnavailableReason.
+const (
+	NotificationRuleUnavailableReasonGatewayDeleted     NotificationRuleUnavailableReason = "gateway_deleted"
+	NotificationRuleUnavailableReasonNoConfirmedContact NotificationRuleUnavailableReason = "no_confirmed_contact"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRuleUnavailableReason enum.
+func (e NotificationRuleUnavailableReason) Valid() bool {
+	switch e {
+	case NotificationRuleUnavailableReasonGatewayDeleted:
+		return true
+	case NotificationRuleUnavailableReasonNoConfirmedContact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationRulesState.
+const (
+	NotificationRulesStateCall         NotificationRulesState = "call"
+	NotificationRulesStateCustom       NotificationRulesState = "custom"
+	NotificationRulesStateNoCall       NotificationRulesState = "no_call"
+	NotificationRulesStateOrganization NotificationRulesState = "organization"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRulesState enum.
+func (e NotificationRulesState) Valid() bool {
+	switch e {
+	case NotificationRulesStateCall:
+		return true
+	case NotificationRulesStateCustom:
+		return true
+	case NotificationRulesStateNoCall:
+		return true
+	case NotificationRulesStateOrganization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NullableAlertGroupStatus.
 const (
 	NullableAlertGroupStatusAcknowledged NullableAlertGroupStatus = "acknowledged"
@@ -6291,6 +6354,73 @@ type NoteList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// NotificationRuleAction One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from 1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and ignored in requests, so that a read can be sent back.
+type NotificationRuleAction struct {
+	// Available Set in reads; false for a call that cannot run now, which stays in the rule.
+	Available *bool `json:"available,omitempty"`
+
+	// Gateway Set in reads; the gateway of a call, null for the other kinds and for a Connection that no longer exists.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway,omitempty"`
+
+	// GatewayId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	GatewayId *PublicId                  `json:"gateway_id,omitempty"`
+	Kind      NotificationRuleActionKind `json:"kind"`
+
+	// UnavailableReason Set in reads; why `available` is false, null when it is true.
+	UnavailableReason nullable.Nullable[NotificationRuleUnavailableReason] `json:"unavailable_reason,omitempty"`
+
+	// WaitSeconds The wait in seconds, with `wait`; a multiple of 60 from 60 to 3600.
+	WaitSeconds *int `json:"wait_seconds,omitempty"`
+}
+
+// NotificationRuleActionKind defines model for NotificationRuleAction.Kind.
+type NotificationRuleActionKind string
+
+// NotificationRuleSet The normal and the important rule, each at most 10 actions (`notification_rule.limits`, else `422` `out_of_range` at the rule) with at least one `mention` or `call` (else `422` `required` at the rule). A call while no Notification gateway exists is `422` `gateway_required` at the action; one whose `gateway_id` names a Connection that is no Notification gateway `unknown_id` at its `gateway_id`. As many calls through a gateway as the stored rules of the same owner have, across both rules, pass without these checks, which keeps an action whose gateway was deleted; a further call through it is checked.
+type NotificationRuleSet struct {
+	Important []NotificationRuleAction `json:"important"`
+	Normal    []NotificationRuleAction `json:"normal"`
+}
+
+// NotificationRuleUnavailableReason `gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more; `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization's rules).
+type NotificationRuleUnavailableReason string
+
+// NotificationRules A User's Notification rules as in effect.
+type NotificationRules struct {
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. In the state `organization` it changes with every change of the Organization, whose rules the User follows.
+	Etag *string `json:"etag,omitempty"`
+
+	// Gateway The gateway of the state `call`; null in the other states.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
+
+	// Important The important rule in effect.
+	Important []NotificationRuleAction `json:"important"`
+
+	// Normal The normal rule in effect.
+	Normal []NotificationRuleAction `json:"normal"`
+
+	// State The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+	State NotificationRulesState `json:"state"`
+}
+
+// NotificationRulesState The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+type NotificationRulesState string
+
+// NotificationRulesUpdate A change of a User's rules; fields the state does not take are ignored.
+type NotificationRulesUpdate struct {
+	// GatewayId With `call`, the Notification gateway of the call; may be left out when the User has a confirmed contact at exactly one.
+	GatewayId *PublicId `json:"gateway_id,omitempty"`
+
+	// Important With `custom`, the important rule; required.
+	Important *[]NotificationRuleAction `json:"important,omitempty"`
+
+	// Normal With `custom`, the normal rule; required.
+	Normal *[]NotificationRuleAction `json:"normal,omitempty"`
+
+	// State The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+	State NotificationRulesState `json:"state"`
+}
+
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
@@ -6551,6 +6681,9 @@ type Organization struct {
 	InstanceLabels []string `json:"instance_labels"`
 	Name           string   `json:"name"`
 
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules NotificationRuleSet `json:"notification_rules"`
+
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 	OutgoingHeartbeat     struct {
@@ -6607,6 +6740,9 @@ type OrganizationBase struct {
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
 
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
+
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 
@@ -6660,6 +6796,9 @@ type OrganizationInput struct {
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
+
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
 
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
@@ -10076,6 +10215,12 @@ type UpdateLookupTableParams struct {
 	IfMatch IfMatch `json:"If-Match"`
 }
 
+// UpdateMyNotificationRulesParams defines parameters for UpdateMyNotificationRules.
+type UpdateMyNotificationRulesParams struct {
+	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
+	IfMatch IfMatch `json:"If-Match"`
+}
+
 // CompleteOidcLinkParams defines parameters for CompleteOidcLink.
 type CompleteOidcLinkParams struct {
 	// Code Authorization code.
@@ -10373,6 +10518,12 @@ type UpdateUserParams struct {
 // CreateUserGatewayContactJSONBody defines parameters for CreateUserGatewayContact.
 type CreateUserGatewayContactJSONBody = map[string]interface{}
 
+// UpdateUserNotificationRulesParams defines parameters for UpdateUserNotificationRules.
+type UpdateUserNotificationRulesParams struct {
+	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
+	IfMatch IfMatch `json:"If-Match"`
+}
+
 // DeliverAlertGroupEventParams defines parameters for DeliverAlertGroupEvent.
 type DeliverAlertGroupEventParams struct {
 	// WebhookId Id of this event, kept across retries.
@@ -10493,6 +10644,9 @@ type CreateMyGatewayContactJSONRequestBody = GatewayContactInput
 // ConfirmMyGatewayContactJSONRequestBody defines body for ConfirmMyGatewayContact for application/json ContentType.
 type ConfirmMyGatewayContactJSONRequestBody = GatewayContactConfirm
 
+// UpdateMyNotificationRulesJSONRequestBody defines body for UpdateMyNotificationRules for application/json ContentType.
+type UpdateMyNotificationRulesJSONRequestBody = NotificationRulesUpdate
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = PasswordChange
 
@@ -10579,6 +10733,9 @@ type UpdateUserJSONRequestBody = UserUpdate
 
 // CreateUserGatewayContactJSONRequestBody defines body for CreateUserGatewayContact for application/json ContentType.
 type CreateUserGatewayContactJSONRequestBody = CreateUserGatewayContactJSONBody
+
+// UpdateUserNotificationRulesJSONRequestBody defines body for UpdateUserNotificationRules for application/json ContentType.
+type UpdateUserNotificationRulesJSONRequestBody = NotificationRulesUpdate
 
 // DeliverAlertGroupEventJSONRequestBody defines body for DeliverAlertGroupEvent for application/json ContentType.
 type DeliverAlertGroupEventJSONRequestBody = OutgoingWebhookEvent
@@ -12983,6 +13140,15 @@ type ServerInterface interface {
 	// IssueMyIcalFeed Issue the caller's iCal feed
 	// (POST /me/ical-feed)
 	IssueMyIcalFeed(w http.ResponseWriter, r *http.Request)
+	// GetMyNotificationRules Read own Notification rules
+	// (GET /me/notification-rules)
+	GetMyNotificationRules(w http.ResponseWriter, r *http.Request)
+	// UpdateMyNotificationRules Change own Notification rules
+	// (PUT /me/notification-rules)
+	UpdateMyNotificationRules(w http.ResponseWriter, r *http.Request, params UpdateMyNotificationRulesParams)
+	// ResetMyNotificationRules Reset own Notification rules to the Organization's
+	// (POST /me/notification-rules/reset)
+	ResetMyNotificationRules(w http.ResponseWriter, r *http.Request)
 	// StartOidcLink Start linking an OIDC identity
 	// (POST /me/oidc-identity)
 	StartOidcLink(w http.ResponseWriter, r *http.Request)
@@ -13271,6 +13437,12 @@ type ServerInterface interface {
 	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
 	DeleteUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId, gatewayContactId GatewayContactId)
+	// GetUserNotificationRules Read a user's Notification rules
+	// (GET /users/{user_id}/notification-rules)
+	GetUserNotificationRules(w http.ResponseWriter, r *http.Request, userId UserId)
+	// UpdateUserNotificationRules Change a user's Notification rules
+	// (PUT /users/{user_id}/notification-rules)
+	UpdateUserNotificationRules(w http.ResponseWriter, r *http.Request, userId UserId, params UpdateUserNotificationRulesParams)
 	// CreatePasswordSetupLink Issue a password setup link
 	// (POST /users/{user_id}/password-setup-links)
 	CreatePasswordSetupLink(w http.ResponseWriter, r *http.Request, userId UserId)
@@ -16939,6 +17111,79 @@ func (siw *ServerInterfaceWrapper) IssueMyIcalFeed(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetMyNotificationRules operation middleware
+func (siw *ServerInterfaceWrapper) GetMyNotificationRules(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyNotificationRules(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMyNotificationRules operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMyNotificationRules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateMyNotificationRulesParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	} else {
+		err := fmt.Errorf("Header parameter If-Match is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "If-Match", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMyNotificationRules(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetMyNotificationRules operation middleware
+func (siw *ServerInterfaceWrapper) ResetMyNotificationRules(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetMyNotificationRules(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartOidcLink operation middleware
 func (siw *ServerInterfaceWrapper) StartOidcLink(w http.ResponseWriter, r *http.Request) {
 
@@ -20010,6 +20255,86 @@ func (siw *ServerInterfaceWrapper) DeleteUserGatewayContact(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// GetUserNotificationRules operation middleware
+func (siw *ServerInterfaceWrapper) GetUserNotificationRules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUserNotificationRules(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUserNotificationRules operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUserNotificationRules(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UpdateUserNotificationRulesParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = IfMatch
+
+	} else {
+		err := fmt.Errorf("Header parameter If-Match is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "If-Match", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUserNotificationRules(w, r, userId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreatePasswordSetupLink operation middleware
 func (siw *ServerInterfaceWrapper) CreatePasswordSetupLink(w http.ResponseWriter, r *http.Request) {
 
@@ -20370,6 +20695,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/gateway-contacts", wrapper.ListUserGatewayContacts)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users/{user_id}/gateway-contacts", wrapper.CreateUserGatewayContact)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/gateway-contacts/{gateway_contact_id}", wrapper.DeleteUserGatewayContact)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/me/notification-rules", wrapper.GetMyNotificationRules)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/me/notification-rules", wrapper.UpdateMyNotificationRules)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/me/notification-rules/reset", wrapper.ResetMyNotificationRules)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}/notification-rules", wrapper.GetUserNotificationRules)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/users/{user_id}/notification-rules", wrapper.UpdateUserNotificationRules)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/request-log", wrapper.ListRequestLog)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/request-log/{request_record_id}", wrapper.GetRequestRecord)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/system-status", wrapper.GetSystemStatus)
@@ -30720,6 +31050,318 @@ func (response IssueMyIcalFeed429ApplicationProblemPlusJSONResponse) VisitIssueM
 	return err
 }
 
+type GetMyNotificationRulesRequestObject struct {
+}
+
+type GetMyNotificationRulesResponseObject interface {
+	VisitGetMyNotificationRulesResponse(w http.ResponseWriter) error
+}
+
+type GetMyNotificationRules200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetMyNotificationRules200JSONResponse struct {
+	Body    NotificationRules
+	Headers GetMyNotificationRules200ResponseHeaders
+}
+
+func (response GetMyNotificationRules200JSONResponse) VisitGetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyNotificationRules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyNotificationRules401ApplicationProblemPlusJSONResponse) VisitGetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyNotificationRules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyNotificationRules403ApplicationProblemPlusJSONResponse) VisitGetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMyNotificationRules429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetMyNotificationRules429ApplicationProblemPlusJSONResponse) VisitGetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRulesRequestObject struct {
+	Params UpdateMyNotificationRulesParams
+	Body   *UpdateMyNotificationRulesJSONRequestBody
+}
+
+type UpdateMyNotificationRulesResponseObject interface {
+	VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error
+}
+
+type UpdateMyNotificationRules200ResponseHeaders struct {
+	ETag *string
+}
+
+type UpdateMyNotificationRules200JSONResponse struct {
+	Body    NotificationRules
+	Headers UpdateMyNotificationRules200ResponseHeaders
+}
+
+func (response UpdateMyNotificationRules200JSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules400ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules401ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules403ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules412ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules422ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules428ApplicationProblemPlusJSONResponse struct {
+	PreconditionRequiredApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules428ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(428)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateMyNotificationRules429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateMyNotificationRules429ApplicationProblemPlusJSONResponse) VisitUpdateMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetMyNotificationRulesRequestObject struct {
+}
+
+type ResetMyNotificationRulesResponseObject interface {
+	VisitResetMyNotificationRulesResponse(w http.ResponseWriter) error
+}
+
+type ResetMyNotificationRules200ResponseHeaders struct {
+	ETag *string
+}
+
+type ResetMyNotificationRules200JSONResponse struct {
+	Body    NotificationRules
+	Headers ResetMyNotificationRules200ResponseHeaders
+}
+
+func (response ResetMyNotificationRules200JSONResponse) VisitResetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetMyNotificationRules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ResetMyNotificationRules401ApplicationProblemPlusJSONResponse) VisitResetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetMyNotificationRules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ResetMyNotificationRules403ApplicationProblemPlusJSONResponse) VisitResetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResetMyNotificationRules429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ResetMyNotificationRules429ApplicationProblemPlusJSONResponse) VisitResetMyNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartOidcLinkRequestObject struct {
 }
 
@@ -40554,6 +41196,270 @@ func (response DeleteUserGatewayContact429ApplicationProblemPlusJSONResponse) Vi
 	return err
 }
 
+type GetUserNotificationRulesRequestObject struct {
+	UserId UserId `json:"user_id"`
+}
+
+type GetUserNotificationRulesResponseObject interface {
+	VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error
+}
+
+type GetUserNotificationRules200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetUserNotificationRules200JSONResponse struct {
+	Body    NotificationRules
+	Headers GetUserNotificationRules200ResponseHeaders
+}
+
+func (response GetUserNotificationRules200JSONResponse) VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNotificationRules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserNotificationRules401ApplicationProblemPlusJSONResponse) VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNotificationRules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserNotificationRules403ApplicationProblemPlusJSONResponse) VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNotificationRules404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserNotificationRules404ApplicationProblemPlusJSONResponse) VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetUserNotificationRules429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetUserNotificationRules429ApplicationProblemPlusJSONResponse) VisitGetUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRulesRequestObject struct {
+	UserId UserId `json:"user_id"`
+	Params UpdateUserNotificationRulesParams
+	Body   *UpdateUserNotificationRulesJSONRequestBody
+}
+
+type UpdateUserNotificationRulesResponseObject interface {
+	VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error
+}
+
+type UpdateUserNotificationRules200ResponseHeaders struct {
+	ETag *string
+}
+
+type UpdateUserNotificationRules200JSONResponse struct {
+	Body    NotificationRules
+	Headers UpdateUserNotificationRules200ResponseHeaders
+}
+
+func (response UpdateUserNotificationRules200JSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules400ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules401ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules403ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules404ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules412ApplicationProblemPlusJSONResponse struct {
+	PreconditionFailedApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules412ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules422ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules428ApplicationProblemPlusJSONResponse struct {
+	PreconditionRequiredApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules428ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(428)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserNotificationRules429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response UpdateUserNotificationRules429ApplicationProblemPlusJSONResponse) VisitUpdateUserNotificationRulesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreatePasswordSetupLinkRequestObject struct {
 	UserId UserId `json:"user_id"`
 }
@@ -41026,6 +41932,15 @@ type StrictServerInterface interface {
 	// IssueMyIcalFeed Issue the caller's iCal feed
 	// (POST /me/ical-feed)
 	IssueMyIcalFeed(ctx context.Context, request IssueMyIcalFeedRequestObject) (IssueMyIcalFeedResponseObject, error)
+	// GetMyNotificationRules Read own Notification rules
+	// (GET /me/notification-rules)
+	GetMyNotificationRules(ctx context.Context, request GetMyNotificationRulesRequestObject) (GetMyNotificationRulesResponseObject, error)
+	// UpdateMyNotificationRules Change own Notification rules
+	// (PUT /me/notification-rules)
+	UpdateMyNotificationRules(ctx context.Context, request UpdateMyNotificationRulesRequestObject) (UpdateMyNotificationRulesResponseObject, error)
+	// ResetMyNotificationRules Reset own Notification rules to the Organization's
+	// (POST /me/notification-rules/reset)
+	ResetMyNotificationRules(ctx context.Context, request ResetMyNotificationRulesRequestObject) (ResetMyNotificationRulesResponseObject, error)
 	// StartOidcLink Start linking an OIDC identity
 	// (POST /me/oidc-identity)
 	StartOidcLink(ctx context.Context, request StartOidcLinkRequestObject) (StartOidcLinkResponseObject, error)
@@ -41314,6 +42229,12 @@ type StrictServerInterface interface {
 	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
 	DeleteUserGatewayContact(ctx context.Context, request DeleteUserGatewayContactRequestObject) (DeleteUserGatewayContactResponseObject, error)
+	// GetUserNotificationRules Read a user's Notification rules
+	// (GET /users/{user_id}/notification-rules)
+	GetUserNotificationRules(ctx context.Context, request GetUserNotificationRulesRequestObject) (GetUserNotificationRulesResponseObject, error)
+	// UpdateUserNotificationRules Change a user's Notification rules
+	// (PUT /users/{user_id}/notification-rules)
+	UpdateUserNotificationRules(ctx context.Context, request UpdateUserNotificationRulesRequestObject) (UpdateUserNotificationRulesResponseObject, error)
 	// CreatePasswordSetupLink Issue a password setup link
 	// (POST /users/{user_id}/password-setup-links)
 	CreatePasswordSetupLink(ctx context.Context, request CreatePasswordSetupLinkRequestObject) (CreatePasswordSetupLinkResponseObject, error)
@@ -44042,6 +44963,87 @@ func (sh *strictHandler) IssueMyIcalFeed(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// GetMyNotificationRules operation middleware
+func (sh *strictHandler) GetMyNotificationRules(w http.ResponseWriter, r *http.Request) {
+	var request GetMyNotificationRulesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMyNotificationRules(ctx, request.(GetMyNotificationRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMyNotificationRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMyNotificationRulesResponseObject); ok {
+		if err := validResponse.VisitGetMyNotificationRulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMyNotificationRules operation middleware
+func (sh *strictHandler) UpdateMyNotificationRules(w http.ResponseWriter, r *http.Request, params UpdateMyNotificationRulesParams) {
+	var request UpdateMyNotificationRulesRequestObject
+
+	request.Params = params
+
+	var body UpdateMyNotificationRulesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMyNotificationRules(ctx, request.(UpdateMyNotificationRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMyNotificationRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMyNotificationRulesResponseObject); ok {
+		if err := validResponse.VisitUpdateMyNotificationRulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResetMyNotificationRules operation middleware
+func (sh *strictHandler) ResetMyNotificationRules(w http.ResponseWriter, r *http.Request) {
+	var request ResetMyNotificationRulesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResetMyNotificationRules(ctx, request.(ResetMyNotificationRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResetMyNotificationRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResetMyNotificationRulesResponseObject); ok {
+		if err := validResponse.VisitResetMyNotificationRulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // StartOidcLink operation middleware
 func (sh *strictHandler) StartOidcLink(w http.ResponseWriter, r *http.Request) {
 	var request StartOidcLinkRequestObject
@@ -46688,6 +47690,66 @@ func (sh *strictHandler) DeleteUserGatewayContact(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteUserGatewayContactResponseObject); ok {
 		if err := validResponse.VisitDeleteUserGatewayContactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetUserNotificationRules operation middleware
+func (sh *strictHandler) GetUserNotificationRules(w http.ResponseWriter, r *http.Request, userId UserId) {
+	var request GetUserNotificationRulesRequestObject
+
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetUserNotificationRules(ctx, request.(GetUserNotificationRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetUserNotificationRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetUserNotificationRulesResponseObject); ok {
+		if err := validResponse.VisitGetUserNotificationRulesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateUserNotificationRules operation middleware
+func (sh *strictHandler) UpdateUserNotificationRules(w http.ResponseWriter, r *http.Request, userId UserId, params UpdateUserNotificationRulesParams) {
+	var request UpdateUserNotificationRulesRequestObject
+
+	request.UserId = userId
+	request.Params = params
+
+	var body UpdateUserNotificationRulesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateUserNotificationRules(ctx, request.(UpdateUserNotificationRulesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateUserNotificationRules")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateUserNotificationRulesResponseObject); ok {
+		if err := validResponse.VisitUpdateUserNotificationRulesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

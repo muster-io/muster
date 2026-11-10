@@ -76,6 +76,11 @@ tags:
   description: The contacts of people at Notification gateways — Bridge Connections in the role `gateway` that call or
     text people — added and confirmed with a code only by their person, from the web session, and seen and removed by
     Admins.
+- name: Notification rules
+  description: The normal and the important Notification rule of every User, each a short sequence of Mentions in the
+    Thread, calls through a Notification gateway and waits, in one of four states; a person changes their own from the
+    web session, an Admin any User's. The Organization's default rules are the field `notification_rules` of
+    `organization`.
 - name: Request log
   description: The recent HTTP requests Muster sent for a Connection or an outgoing webhook Destination, each attempt with
     its answer and masked, kept for `request_log.max_age` and to the newest `request_log.max_records` of each owner
@@ -7298,6 +7303,212 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /me/notification-rules:
+    get:
+      operationId: getMyNotificationRules
+      tags:
+      - Notification rules
+      summary: Read own Notification rules
+      description: 'The caller''s normal and important rule as in effect (C-31.FR-1, FR-2): in the state `organization`
+        the Organization''s current rules, otherwise those stored when the caller chose the state. A call action reads
+        `available` false with `unavailable_reason` `gateway_deleted` once its gateway was deleted or is no Notification
+        gateway any more, and `no_confirmed_contact` once the caller has no confirmed contact there; it stays in the
+        rule. Web session only: a token gets `403` (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: The caller's rules.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRules'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      operationId: updateMyNotificationRules
+      tags:
+      - Notification rules
+      summary: Change own Notification rules
+      description: 'Sets the state of the caller''s rules (C-31.FR-2, FR-5): `organization` follows the Organization''s
+        rules, which reach the caller at once when an Admin changes them; `call` takes the Organization''s current
+        rules with a call through `gateway_id` at the start of the important rule, together with its first action,
+        unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without
+        a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and
+        `no_call` are computed now and stored: a later change of the Organization''s rules does not reach them.
+        Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed
+        contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no
+        Notification gateway exists `gateway_required` there, for a gateway without the caller''s confirmed contact
+        `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are
+        validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a
+        confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a
+        gateway as the caller''s own stored rules have, in either rule, pass even when the gateway was deleted or the
+        contact removed, so that they stay; a further call through it is checked, and a caller in the state
+        `organization` keeps none, not even those of the Organization''s rules. A call that would make the important rule longer than 10
+        actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log
+        as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`;
+        an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      parameters:
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRulesUpdate'
+      responses:
+        '200':
+          description: The caller's rules.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRules'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /me/notification-rules/reset:
+    post:
+      operationId: resetMyNotificationRules
+      tags:
+      - Notification rules
+      summary: Reset own Notification rules to the Organization's
+      description: '"Reset to the Organization''s rules": the caller''s rules return to the state `organization` and
+        follow the Organization''s rules again (C-31.FR-2). Recorded in the Audit log as `notification_rules.updated`;
+        a caller already in that state records nothing. Web session only: a token gets `403` (`session_required`).'
+      x-permission: authenticated
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      responses:
+        '200':
+          description: The caller's rules, in the state `organization`.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRules'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /users/{user_id}/notification-rules:
+    get:
+      operationId: getUserNotificationRules
+      tags:
+      - Notification rules
+      summary: Read a user's Notification rules
+      description: The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User
+        answers `404`.
+      x-permission: users:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: The User's rules.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRules'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      operationId: updateUserNotificationRules
+      tags:
+      - Notification rules
+      summary: Change a user's Notification rules
+      description: 'An Admin sets the state of a User''s rules or their custom sequences (C-31.FR-4), as
+        `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of
+        that User at its gateway. `state` `organization` is "Reset to the Organization''s rules". Requires `If-Match`
+        (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A
+        deleted User answers `404`. An Admin''s own rules change from the web session only, as under `/me`: with a
+        token the answer is `403` (`session_required`).'
+      x-permission: users:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationRulesUpdate'
+      responses:
+        '200':
+          description: The User's rules.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRules'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /request-log:
     get:
       operationId: listRequestLog
@@ -9583,6 +9794,12 @@ components:
             the account, and the token sent to the bot still links it (`startBridgeCodeLink`); or Slack refused the
             direct message to the account with `cannot_dm_bot`, `user_not_found`, or `channel_not_found` for its user
             id (`startSlackLink`). The pointer is `/handle`.
+        - code: gateway_required
+          description: A call of a Notification rule, or the state `call` of a User's rules, while no Notification
+            gateway exists; the pointer is the action's or `/gateway_id`.
+        - code: contact_required
+          description: A call of a User's Notification rules, or their state `call`, through a Notification gateway at
+            which the User has no confirmed contact; the pointer is the action's or `/gateway_id`.
         - code: webhook_call_failed
           description: Saving a Telegram Connection that enters the webhook update mode, or changes its base URL or bot
             token in it, called `setWebhook`, or one that leaves it called `deleteWebhook`, and the call failed; nothing
@@ -11162,6 +11379,136 @@ components:
           type: integer
           minimum: 1
           maximum: 36500
+    NotificationRuleAction:
+      type: object
+      description: 'One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call
+        through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and
+        otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from
+        1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its
+        `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields
+        the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and
+        ignored in requests, so that a read can be sent back.'
+      required:
+      - kind
+      properties:
+        kind:
+          type: string
+          enum:
+          - mention
+          - call
+          - wait
+        gateway_id:
+          $ref: '#/components/schemas/PublicId'
+        wait_seconds:
+          type: integer
+          description: The wait in seconds, with `wait`; a multiple of 60 from 60 to 3600.
+          example: 300
+        gateway:
+          description: Set in reads; the gateway of a call, null for the other kinds and for a Connection that no longer
+            exists.
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        available:
+          type: boolean
+          description: Set in reads; false for a call that cannot run now, which stays in the rule.
+        unavailable_reason:
+          description: Set in reads; why `available` is false, null when it is true.
+          oneOf:
+          - $ref: '#/components/schemas/NotificationRuleUnavailableReason'
+          - type: 'null'
+    NotificationRuleUnavailableReason:
+      type: string
+      description: '`gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more;
+        `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization''s rules).'
+      enum:
+      - gateway_deleted
+      - no_confirmed_contact
+    NotificationRuleSet:
+      type: object
+      description: 'The normal and the important rule, each at most 10 actions (`notification_rule.limits`, else `422`
+        `out_of_range` at the rule) with at least one `mention` or `call` (else `422` `required` at the rule). A call
+        while no Notification gateway exists is `422` `gateway_required` at the action; one whose `gateway_id` names a
+        Connection that is no Notification gateway `unknown_id` at its `gateway_id`. As many calls through a gateway
+        as the stored rules of the same owner have, across both rules, pass without these checks, which keeps an
+        action whose gateway was deleted; a further call through it is checked.'
+      required:
+      - normal
+      - important
+      properties:
+        normal:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
+        important:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
+    NotificationRulesState:
+      type: string
+      description: 'The state of a User''s rules (C-31.FR-2): `organization`, "As in the Organization", the default —
+        the Organization''s current rules; `call`, "Call" — the Organization''s rules as they were when chosen, with a
+        call through the chosen gateway at the start of the important rule; `no_call`, "Don''t call" — the
+        Organization''s rules as they were when chosen, without any call; `custom` — sequences set through the API.'
+      enum:
+      - organization
+      - call
+      - no_call
+      - custom
+    NotificationRules:
+      type: object
+      description: A User's Notification rules as in effect.
+      required:
+      - state
+      - gateway
+      - normal
+      - important
+      - etag
+      properties:
+        state:
+          $ref: '#/components/schemas/NotificationRulesState'
+        gateway:
+          description: The gateway of the state `call`; null in the other states.
+          oneOf:
+          - $ref: '#/components/schemas/EntityRef'
+          - type: 'null'
+        normal:
+          type: array
+          description: The normal rule in effect.
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
+        important:
+          type: array
+          description: The important rule in effect.
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
+        etag:
+          type: string
+          readOnly: true
+          description: The same value as the `ETag` header; send it as `If-Match` on the next update. In the state
+            `organization` it changes with every change of the Organization, whose rules the User follows.
+    NotificationRulesUpdate:
+      type: object
+      description: A change of a User's rules; fields the state does not take are ignored.
+      required:
+      - state
+      properties:
+        state:
+          $ref: '#/components/schemas/NotificationRulesState'
+        gateway_id:
+          description: With `call`, the Notification gateway of the call; may be left out when the User has a confirmed
+            contact at exactly one.
+          $ref: '#/components/schemas/PublicId'
+        normal:
+          type: array
+          description: With `custom`, the normal rule; required.
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
+        important:
+          type: array
+          description: With `custom`, the important rule; required.
+          items:
+            $ref: '#/components/schemas/NotificationRuleAction'
     OrganizationBase:
       type: object
       required:
@@ -11254,6 +11601,15 @@ components:
             older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC
             again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service
             account tokens are not affected. Edited on Organization → Security.'
+        notification_rules:
+          description: 'The Organization''s default Notification rules (`organization.notification_rules`, C-31.FR-2;
+            default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in
+            the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on
+            an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs
+            only an existing Notification gateway, never a contact. A change is recorded in the diff of
+            `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they
+            change only through the API.'
+          $ref: '#/components/schemas/NotificationRuleSet'
     Organization:
       allOf:
       - $ref: '#/components/schemas/OrganizationBase'
@@ -11269,6 +11625,7 @@ components:
         - workday_end
         - working_hours
         - outgoing_heartbeat
+        - notification_rules
         - etag
         properties:
           id:

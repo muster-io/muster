@@ -30,6 +30,7 @@ import (
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/oidc"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
@@ -430,6 +431,9 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	if f, ok := errors.AsType[*teams.FieldError](err); ok {
 		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 	}
+	if f, ok := errors.AsType[*notificationrules.FieldError](err); ok {
+		return fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
+	}
 	if f, ok := errors.AsType[*schedules.FieldError](err); ok {
 		p := fieldProblem(http.StatusUnprocessableEntity, f.Pointer, f.Code, f.Detail)
 		if f.Reason != "" {
@@ -459,8 +463,10 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 	case errors.Is(err, tokens.ErrNameTaken):
 		return problem(http.StatusConflict, typeConflict, codeNameTaken,
 			"Another Service account has this name; names are compared case-insensitively.")
-	case errors.Is(err, tokens.ErrVersionMismatch):
+	case errors.Is(err, tokens.ErrVersionMismatch), errors.Is(err, notificationrules.ErrVersionMismatch):
 		return errPreconditionFailed
+	case errors.Is(err, notificationrules.ErrUserNotFound):
+		return problem(http.StatusNotFound, typeNotFound, "", "No such user.")
 	case errors.Is(err, integrations.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Integration or Integration token.")
 	case errors.Is(err, integrations.ErrNameTaken):

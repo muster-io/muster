@@ -29,6 +29,7 @@ import (
 	"github.com/muster-io/muster/internal/internalalerts"
 	"github.com/muster-io/muster/internal/keyring"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/notificationrules"
 	"github.com/muster-io/muster/internal/organization/dbgen"
 	"github.com/muster-io/muster/internal/proxyconf"
 )
@@ -118,7 +119,12 @@ type Organization struct {
 	TOTPRequired      TOTPPolicy
 	OIDCTokenGrace    time.Duration
 	OutgoingHeartbeat OutgoingHeartbeat
-	Version           int64
+	// NotificationRules are organization.notification_rules, the default Notification rules that every User in the
+	// state organization follows (C-31.FR-2, C-20.FR-1); NotificationRuleViews are the same as a read shows them, with
+	// whether each call's gateway still exists, set by Get and Update.
+	NotificationRules     notificationrules.Set
+	NotificationRuleViews notificationrules.SetView
+	Version               int64
 }
 
 // SecretInput is a Secret field of an update: omitted keeps the stored value, null clears it, a value replaces it.
@@ -153,6 +159,8 @@ type Input struct {
 	OIDCTokenGraceSeconds int64
 	HeartbeatURL          SecretInput
 	HeartbeatProxy        ProxyInput
+	// NotificationRules are organization.notification_rules; nil keeps the stored ones.
+	NotificationRules *notificationrules.SetInput
 }
 
 // ButtonSetInput is the Organization's button set as an update writes it: every button, or the items, which Items
@@ -182,6 +190,7 @@ type SettingsQueries interface {
 	UpdateOutboundPolicy(ctx context.Context, arg dbgen.UpdateOutboundPolicyParams) (int64, error)
 	ListSeverityValues(ctx context.Context, arg dbgen.ListSeverityValuesParams) ([]dbgen.ListSeverityValuesRow, error)
 	InsertOrganizationUpdate(ctx context.Context, arg dbgen.InsertOrganizationUpdateParams) error
+	ListRuleGateways(ctx context.Context, orgID int64) ([]dbgen.ListRuleGatewaysRow, error)
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 	// Notify sends a live-update hint, in the transaction when the queries run in one.
@@ -272,7 +281,35 @@ func NewService(orgID int64, s SettingsStore, w *audit.Writer, business clock.Cl
 
 // Get reads the organization resource.
 func (s *Service) Get(ctx context.Context) (Organization, error) {
-	return s.get(ctx, s.store)
+	o, err := s.get(ctx, s.store)
+	if err != nil {
+		return Organization{}, err
+	}
+	return s.describe(ctx, s.store, o)
+}
+
+// describe sets the Notification rules of o as a read shows them: a call whose gateway was deleted, or is no
+// Notification gateway any more, reads unavailable (C-31.FR-1).
+func (s *Service) describe(ctx context.Context, q SettingsQueries, o Organization) (Organization, error) {
+	gws, err := s.ruleGateways(ctx, q)
+	if err != nil {
+		return Organization{}, err
+	}
+	o.NotificationRuleViews = notificationrules.Describe(o.NotificationRules, gws, false)
+	return o, nil
+}
+
+// ruleGateways lists the Bridge Connections a call of the Organization's rules may name.
+func (s *Service) ruleGateways(ctx context.Context, q SettingsQueries) (notificationrules.Gateways, error) {
+	rows, err := q.ListRuleGateways(ctx, s.orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list the notification gateways: %w", err)
+	}
+	out := make(notificationrules.Gateways, len(rows))
+	for i, r := range rows {
+		out[i] = notificationrules.Gateway{ID: r.ID, PublicID: r.PublicID, Name: r.Name, Live: r.Live}
+	}
+	return out, nil
 }
 
 func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, error) {
@@ -318,11 +355,16 @@ func (s *Service) get(ctx context.Context, q SettingsQueries) (Organization, err
 		return Organization{}, err
 	}
 	o.Buttons = set
+	if o.NotificationRules, err = notificationrules.ParseSet(row.NotificationRules); err != nil {
+		return Organization{}, err
+	}
 	return o, nil
 }
 
 // Update applies an update of every field of the organization resource (C-20.FR-1, FR-8, FR-9, C-04.FR-8); an omitted
-// start of the working day or first day of the week keeps the stored one. version is the version of If-Match, nil for
+// start of the working day or first day of the week keeps the stored one, as omitted Notification rules do, which
+// are validated as a User's are, except that a call needs only an existing gateway (C-31.FR-2); a change of them
+// reaches every User in the state organization at once, and no other (journal D569). version is the version of If-Match, nil for
 // any; another one is ErrVersionMismatch. An invalid field is a *FieldError at the full JSON pointer of the field, and
 // changes nothing. A change is recorded in the Audit log as organization.updated with its before/after diff, in which
 // the Secrets show only that they changed, and announced to the live-updates streams with an organization hint, in
@@ -353,6 +395,20 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 		if err != nil {
 			return err
 		}
+		if in.NotificationRules != nil {
+			gws, err := s.ruleGateways(ctx, q)
+			if err != nil {
+				return err
+			}
+			// A call of the Organization's rules needs only an existing gateway: who has a contact there is the
+			// concern of each User's rules (C-31.FR-4).
+			rules, fe := notificationrules.Validate(*in.NotificationRules, "/notification_rules",
+				notificationrules.Check{Gateways: gws, Kept: before.NotificationRules})
+			if fe != nil {
+				return &FieldError{Pointer: fe.Pointer, Code: fe.Code, Detail: fe.Detail}
+			}
+			after.NotificationRules = rules
+		}
 		stored, err := q.GetOutgoingHeartbeatSecrets(ctx, s.orgID)
 		if err != nil {
 			return fmt.Errorf("read the secrets of the outgoing heartbeat: %w", err)
@@ -379,8 +435,8 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			diff = append(diff, audit.Change{Pointer: "/outgoing_heartbeat/proxy/password", SecretChanged: true})
 		}
 		if len(diff) == 0 {
-			out = before
-			return nil
+			out, err = s.describe(ctx, q, before)
+			return err
 		}
 		mapping, err := json.Marshal(after.SeverityMapping)
 		if err != nil {
@@ -421,6 +477,7 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			ProxyPasswordUpdatedAt:           optTime(password.UpdatedAt),
 			Buttons:                          set,
 			TeamLabel:                        pgtype.Text{String: after.TeamLabel, Valid: true},
+			NotificationRules:                after.NotificationRules.JSON(),
 			UrlChanged:                       urlChanged,
 			Now:                              now,
 		}); err != nil {
@@ -442,6 +499,9 @@ func (s *Service) Update(ctx context.Context, r audit.Actor, t audit.Transport, 
 			}
 		}
 		if out, err = s.get(ctx, q); err != nil {
+			return err
+		}
+		if out, err = s.describe(ctx, q, out); err != nil {
 			return err
 		}
 		if err := s.audit.Record(ctx, q, audit.Entry{
@@ -648,6 +708,8 @@ type view struct {
 	TOTPRequired          string            `json:"totp_required"`
 	OIDCTokenGraceSeconds int64             `json:"oidc_token_grace_seconds"`
 	OutgoingHeartbeat     heartbeatView     `json:"outgoing_heartbeat"`
+	// NotificationRules are diffed rule by rule: /notification_rules/normal and /notification_rules/important.
+	NotificationRules notificationrules.Set `json:"notification_rules"`
 }
 
 // retentionView is what the diff shows of the retention periods.
@@ -676,6 +738,7 @@ func viewOf(o Organization) view {
 		},
 		TOTPRequired: string(o.TOTPRequired), OIDCTokenGraceSeconds: int64(o.OIDCTokenGrace / time.Second),
 		OutgoingHeartbeat: heartbeatView{Proxy: o.OutgoingHeartbeat.Proxy},
+		NotificationRules: o.NotificationRules,
 	}
 }
 
