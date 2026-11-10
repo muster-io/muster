@@ -314,6 +314,17 @@ answered, in English, that it failed. At most 64 presses wait for a slot in a pr
 more, and a press still waiting or running at the end of the shutdown's grace period, fails without an answer and is
 logged. None of these bounds is configurable.
 
+## What Muster posts
+
+A Root message is a message with one attachment in the colour of its status. Its blocks are a section with the title,
+`#N` and the Alert Group's title linked to the Alert Group page, and the status as a word; one section with the
+Severity, Route, Teams and Started as fields; a section with the summary and the description; a context with the key
+labels; a section with the Alerts and the notices; a context with the footer; a section with the links, "Open in
+Muster" first; and the buttons. See [Messages and templates](../configure/messages-and-templates.md#the-default-message)
+for the layout and its preview, and [Labels in the message](../configure/messages-and-templates.md#labels-in-the-message)
+for the key labels. Each section is at most 3,000 characters as Slack gets them; a long message drops its description
+first, then its Alerts, its summary and its key labels.
+
 ## Who gets notified
 
 Slack cannot send a message without a notification: whom a new message notifies depends on each member's settings for

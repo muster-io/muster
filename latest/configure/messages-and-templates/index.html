@@ -3227,21 +3227,54 @@ Open in Muster · Runbook · Source
 <li><strong>The links</strong>: "Open in Muster" first, then the runbook, the source and the links of Link rules.</li>
 </ol>
 <p>Every other label and annotation is on the Alert Group page, one click away through "Open in Muster".</p>
+<p>The images below are the tabs of the Route's <a href="#what-you-can-change-and-what-you-cannot">preview</a>, for a firing Alert
+Group of three <code>KubernetesContainerOOMKilled</code> Alerts on the Route "Infrastructure", with the Team <code>payments</code>, in
+English.</p>
 <dl>
 <dt><strong>Mattermost</strong></dt>
-<dd>One attachment in the colour of the status: the title of item 1 as its title, the fields as short fields, items 3
-to 7 as its text with the links as its last line, and the buttons under it.</dd>
+<dd>
+<p>One attachment in the colour of the status: the title of item 1 as its title, the fields as short fields, items 3
+to 7 as its text with the links as its last line, and the buttons under it. A Loud message has its Mentions as the
+first line of the text. See <a href="../../messengers/mattermost/#what-muster-posts">Connect Mattermost</a>.</p>
+<p><img alt="The Mattermost tab of the preview: the title, the fields Severity, Route, Teams and Started, the summary, the description, the key labels, the pods and the link Open in Muster" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/07-preview-mattermost.png" /></p>
+</dd>
 <dt><strong>Slack</strong></dt>
-<dd>One attachment in the colour of the status: a section with the title, one section with the fields, a section with
+<dd>
+<p>One attachment in the colour of the status: a section with the title, one section with the fields, a section with
 the summary and the description, the key labels as a context, a section with the Alerts and the notices, the
-footer as a context, a section with the links, and the buttons.</dd>
+footer as a context, a section with the links, and the buttons. See
+<a href="../../messengers/slack/#what-muster-posts">Connect Slack</a>.</p>
+<p><img alt="The Slack tab of the preview: the blocks of the message, a header with the title, a section with the fields, sections with the summary and the description, a context with the key labels, a section with the pods and a context with the link" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/08-preview-slack.png" /></p>
+</dd>
 <dt><strong>Telegram</strong></dt>
-<dd>One message: the title with the status emoji beside the word, the fields as lines <code>Severity: warning</code>, then the
-items in order, with the buttons as its inline keyboard.</dd>
+<dd>
+<p>One message: the title with the status emoji beside the word, the fields as lines <code>Severity: warning</code>, then the
+items in order, with the buttons as its inline keyboard. See
+<a href="../../messengers/telegram/#what-muster-sends">Connect Telegram</a>.</p>
+<p><img alt="The Telegram tab of the preview: the title, the fields as lines, the summary, the description, the key labels, the pods and the link Open in Muster" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/09-preview-telegram.png" /></p>
+</dd>
+<dt><strong>A bridge</strong></dt>
+<dd>
+<p>The envelope of the Bridge protocol: the status with its colour and emoji, the title, the link, the buttons of the
+Destination, the same message as CommonMark in <code>body</code> — the form that a bridge renders in its messenger's markup —
+and, beside it, <code>layout</code>, the same content as structured data, so that a bridge can lay it out natively without
+parsing markup. The Bridge tab shows the <code>layout</code> as JSON beside the <code>body</code>. A bridge renders either of the two;
+how, is in <a href="../../messengers/write-a-bridge/#render-the-structured-layout">Render the structured layout</a>, and what
+Muster posts through a bridge in <a href="../../messengers/bridge/#what-muster-posts">Connect a messenger through a bridge</a>.</p>
+<p><img alt="The Bridge tab of the preview: the layout as JSON beside the CommonMark body, whose length is shown against the limit that the bridge sets itself" class="screenshot" src="../../assets/screenshots/configure/messages-and-templates/10-preview-bridge.png" /></p>
+</dd>
 </dl>
 <p>A message longer than its messenger allows — 4,096 characters in Telegram, 3,000 in a Slack section, 16,383 in
 Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
-status, the fields, the footer, the buttons and the link to Muster always stay.</p>
+status, the fields, the footer, the buttons and the link to Muster always stay. Through a bridge, the limit is the
+longest <code>body</code> that the bridge declares, and the same parts go first. The <code>layout</code> that a bridge receives loses the same
+parts as its <code>body</code>.</p>
+<p>A Route's own templates replace only part of this. A <strong>Root message</strong> template replaces items 3 to 5, the summary and
+the description, the key labels and the Alerts; an <strong>Alert line</strong> template replaces the value of the label that tells
+the Alerts apart on each line of item 5; the Fallback template, which shows when a template fails, lists every label
+instead of items 3 to 5. The title, the fields, the notices, the footer, the buttons and the links stay Muster's in
+every case, and so does the length rule above. A message with a template of its own, or with the Fallback template, has
+no <code>layout</code> through a bridge, since part of its content exists only in the <code>body</code>: the preview's Bridge tab says so.</p>
 <h2 id="labels-in-the-message">Labels in the message<a class="headerlink" href="#labels-in-the-message" title="Permanent link">&para;</a></h2>
 <p>"Labels in the message" (<code>route.message_labels</code>) chooses the labels of item 4. Choose them in <strong>Routes → a Route →
 Message → Labels in the message</strong>: the labels are chips that you remove with their ×, and <strong>+ label</strong> offers the labels

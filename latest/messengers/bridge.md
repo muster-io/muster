@@ -225,12 +225,19 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   messenger. The people are the Owner while the Alert Group is acknowledged, with the `ref` of their entry in
   `mentions` when the message carries their Mention, and `null` in an edit and through a bridge without native
   mentions; its `name` is their display name in Muster, which may differ from the `display_name` of their entry in
-  `mentions`. A bridge renders either `body` or `layout`; a bridge that ignores `layout` works as before. Storm
-  summaries and Thread replies have no `layout`, nor has a Root message whose Route has its own Root message template
-  or line template, or that the fallback template shows after a template failed, since part of its content exists
-  only in `body`: render `body` whenever `layout` is absent. A test message has "🧪 Test message" as the first of its
-  `notices`. The [Bridge protocol](../reference/bridge-protocol.md) reference shows its
-  schema.
+  `mentions`. Who snoozed or resolved the Alert Group is only text in a line of `notices`, such as "Snoozed by Bob until
+  …", with no `ref`: a bridge cannot mention them from `layout`. A bridge renders either `body` or `layout`; a bridge
+  that ignores `layout` works as before. Storm summaries and Thread replies have no `layout`, nor has a Root message
+  whose Route has its own Root message template or line template, or that the fallback template shows after a template
+  failed, since part of its content exists only in `body`: render `body` whenever `layout` is absent. A test message
+  has "🧪 Test message" as the first of its `notices`, which a bridge shows before the rest. A link's `url` is an
+  absolute `http` or `https` address as the Route gives it, and may be an IRI, with characters outside ASCII in its
+  host or path. The libraries for Go and Python, from 0.1.1, drop a `layout` that does not match the protocol and
+  render `body`, rather than refuse the message. How a bridge renders `layout` is in
+  [Render the structured layout](write-a-bridge.md#render-the-structured-layout); the
+  [Bridge protocol](../reference/bridge-protocol.md) reference shows its schema, and
+  [Messages and templates](../configure/messages-and-templates.md#the-default-message) shows what it says in each
+  messenger.
 - **The length.** The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
   long Root message drops its description first, then its Alerts, its summary and its key labels, but always keeps its
   title, its status, its fields, its footer, its buttons and its links, the one to Muster first. `layout` loses the

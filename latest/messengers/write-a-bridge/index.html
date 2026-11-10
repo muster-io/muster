@@ -1212,6 +1212,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Rendering the envelope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-the-structured-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Render the structured layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -3513,6 +3530,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Rendering the envelope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-the-structured-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Render the structured layout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -4592,8 +4626,10 @@ at once.</dd>
 <code>message_deleted</code> events only with <code>deletion_events</code>. Muster handles every event type whatever its copy of <code>info</code>
 says, so an event sent just after a feature was switched on is not lost.</p>
 <h2 id="rendering-the-envelope">Rendering the envelope<a class="headerlink" href="#rendering-the-envelope" title="Permanent link">&para;</a></h2>
-<p>Muster sends a JSON envelope: the <code>status</code>, <code>color</code> and <code>emoji</code>, the <code>title</code>, the <code>link</code>, the <code>body</code> and the <code>buttons</code>.
-<strong>The bridge renders it in its messenger's markup.</strong> Muster never writes a messenger's markup for a bridge.</p>
+<p>Muster sends a JSON envelope: the <code>status</code>, <code>color</code> and <code>emoji</code>, the <code>title</code>, the <code>link</code>, the <code>body</code> and the <code>buttons</code>, and
+for a Root message and a test message also the <code>layout</code>, the same content as structured data (see
+<a href="#render-the-structured-layout">Render the structured layout</a>). <strong>The bridge renders it in its messenger's markup.</strong>
+Muster never writes a messenger's markup for a bridge.</p>
 <p><strong>The body is CommonMark 0.31 with one extension, strikethrough</strong> (<code>~~text~~</code>) as GitHub Flavored Markdown writes it.</p>
 <ul>
 <li>Muster uses paragraphs, hard line breaks, emphasis, strong emphasis, strikethrough, code spans, links, bullet lists
@@ -4626,6 +4662,265 @@ sends. Choose that limit so that a body of that length fits your messenger after
 message is still too long, you make the final cut where your markup needs it, and answer <code>truncated: true</code>. Cut by
 whole code points, never inside an entity, a tag or a surrogate pair, and close any markup you opened. A request whose
 body exceeds <code>max_body_length</code> is <code>invalid</code>.</p>
+<h3 id="render-the-structured-layout">Render the structured layout<a class="headerlink" href="#render-the-structured-layout" title="Permanent link">&para;</a></h3>
+<p>A Root message and a test message carry their content twice: as CommonMark in <code>body</code>, and as plain-text data in
+<code>layout</code>, beside it. <strong>A bridge renders either <code>body</code> or <code>layout</code>, never both.</strong> A bridge that ignores <code>layout</code> works as
+before. One that renders it has no CommonMark to parse and no <code>#N</code> that its messenger turns into a hashtag, and decides
+for itself how its messenger shows a field, a label or a person.</p>
+<p><strong>Render <code>body</code> whenever <code>layout</code> is absent.</strong> Muster sends no <code>layout</code> for a Storm summary or a Thread reply, for a Root
+message whose Route has its own Root message template or line template, for the Fallback template that shows when a
+template fails, and, of course, in a request from a version of Muster that has none. Those messages hold content that
+only <code>body</code> has. The Routes' own templates are described in
+<a href="../../configure/messages-and-templates/#what-you-can-change-and-what-you-cannot">Messages and templates</a>.</p>
+<p>What <code>layout</code> has, in the order a message shows it:</p>
+<dl>
+<dt><code>number</code> and <code>title</code></dt>
+<dd>The Alert Group's number alone, such as <code>1287</code>, and its title without it. <code>#1287</code> written in text becomes a hashtag
+in some messengers, so the number is a field of its own: write it as your messenger writes a number that is not a
+tag, or as a field.</dd>
+<dt><code>status</code></dt>
+<dd><code>key</code> (<code>firing</code>, <code>acknowledged</code>, <code>snoozed</code> or <code>resolved</code>) for your colour or emoji, and <code>word</code>, the status in the
+Route's language.</dd>
+<dt><code>fields</code></dt>
+<dd>A list of <code>name</code> and <code>value</code>: Severity, Route, Teams (left out when the Alert Group has none) and Started.</dd>
+<dt><code>summary</code> and <code>description</code></dt>
+<dd>Two texts, empty when there is none.</dd>
+<dt><code>labels</code></dt>
+<dd>The key labels of the Route's <a href="../../configure/messages-and-templates/#labels-in-the-message">Labels in the message</a>,
+each a <code>key</code> and a <code>value</code>: the value of a label whose Alerts differ is "3 values", in the Route's language.</dd>
+<dt><code>alerts</code></dt>
+<dd><code>null</code> for an Alert Group of one Alert. Otherwise the <code>label</code> that tells the Alerts apart, <code>values</code> — each with
+<code>resolved</code>, firing ones first — and <code>total</code>, how many Alerts the Alert Group has. Muster sends no "…and 7 more":
+count the Alerts you do not show yourself, as <code>total</code> minus the values you listed, because you may cut more than
+Muster did.</dd>
+<dt><code>notices</code></dt>
+<dd>The notices that apply, such as "Reopened ×2", then the footer, as lines: who snoozed or resolved the Alert Group, or
+why Muster resolved it. A test message has the mark of a test as its first notice, which is localized ("🧪 Test message" is the English form), and a bridge shows it before the
+rest of the message, so that nobody takes a test for an Alert Group.</dd>
+<dt><code>owner</code> and <code>assignees</code></dt>
+<dd>People, each with a <code>name</code>, their name in Muster, and a <code>ref</code>. <code>owner</code> is who acknowledged the Alert Group, while it
+is acknowledged, and <code>null</code> otherwise; <code>assignees</code> are whom Muster Paged before an acknowledgement, and are empty
+until Muster Pages people through Escalation chains. A <code>ref</code> names the entry of the same <code>ref</code> in the envelope's
+<code>mentions</code>, which has the person's <code>external_id</code> in your messenger, so that you mention them by your own user id.
+It is <code>null</code> where the message carries no Mention of them: in every edit, which carries no Mentions at all, and in a
+message to a bridge without <code>native_mentions</code> or for a person whose account is not linked. Then write the <code>name</code>.
+A person who snoozed or resolved the Alert Group is no <code>owner</code>: they appear only as text in a line of <code>notices</code>, with
+no <code>ref</code>, so that a bridge cannot mention them from <code>layout</code>.</dd>
+<dt><code>links</code></dt>
+<dd>A list of <code>label</code> and <code>url</code>, "Open in Muster" first. A <code>url</code> is an absolute <code>http</code> or <code>https</code> address as the Route
+gives it, and may be an IRI, with characters outside ASCII in its host or path: a messenger that needs ASCII
+encodes it.</dd>
+</dl>
+<p>The buttons are not in <code>layout</code>: they stay in the envelope's <code>buttons</code>.</p>
+<p><strong>The values are plain text, never CommonMark.</strong> <code>Queue *full* on #1</code> arrives as it is, and the bridge escapes it for its
+messenger. Alert data in them cannot mention anyone, and a value that contains markup is data, not markup. This is the
+one rule that decides whether the bridge is safe: escape every value you write. A link's <code>url</code> is a link target, not
+text: do not escape it like text, but give it to your messenger as a link, and let your messenger refuse what it cannot
+open.</p>
+<p><strong>When Muster shortens the <code>body</code></strong> to <code>limits.max_body_length</code>, it shortens <code>layout</code> the same way: the description
+first, then the Alerts, the summary and the labels, while the title, the status, the fields, the people and the links
+stay. A bridge that has to cut more cuts in the same order.</p>
+<p><strong>A <code>layout</code> that does not match the protocol</strong> is no reason to refuse the message. The libraries for Go and Python,
+from 0.1.1, drop it, accept the message and give your code <code>Layout</code> nil, or <code>layout</code> <code>None</code>, so that you render the
+<code>body</code>, and log one warning with the place and the reason, never the content. A bridge without a library does the same:
+it treats a <code>layout</code> it cannot read as absent.</p>
+<p>The examples below render the message for Parley, the fictional messenger of <a href="#start-with-a-library">Start with a library</a>.
+Parley reads <code>*bold*</code>, <code>~strikethrough~</code>, <code>`code`</code> and <code>&lt;@id&gt;</code> mentions, so a hashtag <code>#42</code> and the other
+characters it reads are escaped. They print the same lines for the same message:</p>
+<div class="highlight"><pre><span></span><code>*Acknowledged* KubernetesContainerOOMKilled
+Alert Group 1287
+Severity: warning
+Route: Infrastructure
+Teams: payments
+Started: 2026-10-04 03:12 UTC
+Container killed for memory
+The container exceeded its limit.
+system=kubernetes · team=payments · namespace=checkout
+pod: checkout-api-5b2c1, checkout-api-7d9f4, ~checkout-worker-8e6a0~
+Acknowledged by &lt;@u-olga&gt;
+Open in Muster: https://muster.example.org/alert-groups/AGK7M3QX9P2RTA
+Runbook: https://wiki.example.org/runbooks/oom
+</code></pre></div>
+<p>In an edit, which carries no Mentions, the same message names the owner by <code>name</code>: "Acknowledged by Olga Petrova".</p>
+<p><strong>In Go</strong>, <code>bridge.MessageInput</code> and <code>bridge.MessageContent</code> have <code>Layout *bridge.Layout</code>, nil when Muster sends none. The
+library has checked it against the protocol before it calls your code.</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// parleyEscape makes plain text safe for Parley, which reads *bold*, ~strikethrough~, `code`, &lt;@id&gt; mentions and #tags.</span>
+<span class="kd">var</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">NewReplacer</span><span class="p">(</span><span class="s">`\`</span><span class="p">,</span><span class="w"> </span><span class="s">`\\`</span><span class="p">,</span><span class="w"> </span><span class="s">`*`</span><span class="p">,</span><span class="w"> </span><span class="s">`\*`</span><span class="p">,</span><span class="w"> </span><span class="s">`~`</span><span class="p">,</span><span class="w"> </span><span class="s">`\~`</span><span class="p">,</span><span class="w"> </span><span class="s">"`"</span><span class="p">,</span><span class="w"> </span><span class="s">"\\`"</span><span class="p">,</span><span class="w"> </span><span class="s">`&lt;`</span><span class="p">,</span><span class="w"> </span><span class="s">`\&lt;`</span><span class="p">,</span><span class="w"> </span><span class="s">`#`</span><span class="p">,</span><span class="w"> </span><span class="s">`\#`</span><span class="p">).</span><span class="nx">Replace</span>
+
+<span class="c1">// renderLayout writes the structured layout of a Root message or a test message as text for Parley. mentions is the</span>
+<span class="c1">// envelope's list, which an edit leaves empty.</span>
+<span class="kd">func</span><span class="w"> </span><span class="nx">renderLayout</span><span class="p">(</span><span class="nx">l</span><span class="w"> </span><span class="o">*</span><span class="nx">bridge</span><span class="p">.</span><span class="nx">Layout</span><span class="p">,</span><span class="w"> </span><span class="nx">kind</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageKind</span><span class="p">,</span><span class="w"> </span><span class="nx">mentions</span><span class="w"> </span><span class="p">[]</span><span class="nx">bridge</span><span class="p">.</span><span class="nx">Mention</span><span class="p">)</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">byRef</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kt">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">bridge</span><span class="p">.</span><span class="nx">Mention</span><span class="p">{}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">m</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">mentions</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">byRef</span><span class="p">[</span><span class="nx">m</span><span class="p">.</span><span class="nx">Ref</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">m</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">person</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">p</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">LayoutPerson</span><span class="p">)</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">p</span><span class="p">.</span><span class="nx">Ref</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">m</span><span class="p">,</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">byRef</span><span class="p">[</span><span class="o">*</span><span class="nx">p</span><span class="p">.</span><span class="nx">Ref</span><span class="p">];</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="k">return</span><span class="w"> </span><span class="s">"&lt;@"</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">m</span><span class="p">.</span><span class="nx">ExternalId</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"&gt;"</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nx">lines</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span>
+<span class="w">    </span><span class="nx">add</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="kd">func</span><span class="p">(</span><span class="nx">format</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">args</span><span class="w"> </span><span class="p">...</span><span class="kt">any</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="nx">format</span><span class="p">,</span><span class="w"> </span><span class="nx">args</span><span class="p">...))</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// The mark of a test message is its first notice, and it comes before everything else.</span>
+<span class="w">    </span><span class="nx">notices</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Notices</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">kind</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageKindTest</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">notices</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">add</span><span class="p">(</span><span class="s">"*%s*"</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">notices</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+<span class="w">        </span><span class="nx">notices</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">notices</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">add</span><span class="p">(</span><span class="s">"*%s* %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Status</span><span class="p">.</span><span class="nx">Word</span><span class="p">),</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Title</span><span class="p">))</span>
+<span class="w">    </span><span class="nx">add</span><span class="p">(</span><span class="s">"Alert Group %d"</span><span class="p">,</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Number</span><span class="p">)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">f</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Fields</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">add</span><span class="p">(</span><span class="s">"%s: %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">Name</span><span class="p">),</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">Value</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">text</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="nx">l</span><span class="p">.</span><span class="nx">Summary</span><span class="p">,</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Description</span><span class="p">}</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">text</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="s">""</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">text</span><span class="p">))</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Labels</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">pairs</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Labels</span><span class="p">))</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="p">,</span><span class="w"> </span><span class="nx">label</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Labels</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">pairs</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">label</span><span class="p">.</span><span class="nx">Key</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"="</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">label</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">pairs</span><span class="p">,</span><span class="w"> </span><span class="s">" · "</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">a</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Alerts</span><span class="p">;</span><span class="w"> </span><span class="nx">a</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">values</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">.</span><span class="nx">Values</span><span class="p">))</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="p">,</span><span class="w"> </span><span class="nx">v</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">a</span><span class="p">.</span><span class="nx">Values</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">values</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">v</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="nx">v</span><span class="p">.</span><span class="nx">Resolved</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">values</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"~"</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">values</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"~"</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="nx">line</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">a</span><span class="p">.</span><span class="nx">Label</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">": "</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">values</span><span class="p">,</span><span class="w"> </span><span class="s">", "</span><span class="p">)</span>
+<span class="w">        </span><span class="c1">// The bridge counts what it does not show: Muster sends the total, not "…and K more".</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">more</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">a</span><span class="p">.</span><span class="nx">Total</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">.</span><span class="nx">Values</span><span class="p">);</span><span class="w"> </span><span class="nx">more</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">line</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Sprintf</span><span class="p">(</span><span class="s">" …and %d more"</span><span class="p">,</span><span class="w"> </span><span class="nx">more</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="nx">line</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">notice</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">notices</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">lines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">append</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">notice</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Owner</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">add</span><span class="p">(</span><span class="s">"Acknowledged by %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">person</span><span class="p">(</span><span class="o">*</span><span class="nx">l</span><span class="p">.</span><span class="nx">Owner</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Assignees</span><span class="p">)</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">names</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">Assignees</span><span class="p">))</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="nx">i</span><span class="p">,</span><span class="w"> </span><span class="nx">p</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Assignees</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">names</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">person</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="nx">add</span><span class="p">(</span><span class="s">"Paged: %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">names</span><span class="p">,</span><span class="w"> </span><span class="s">", "</span><span class="p">))</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">_</span><span class="p">,</span><span class="w"> </span><span class="nx">link</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">l</span><span class="p">.</span><span class="nx">Links</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">add</span><span class="p">(</span><span class="s">"%s: %s"</span><span class="p">,</span><span class="w"> </span><span class="nx">parleyEscape</span><span class="p">(</span><span class="nx">link</span><span class="p">.</span><span class="nx">Label</span><span class="p">),</span><span class="w"> </span><span class="nx">link</span><span class="p">.</span><span class="nx">Url</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Join</span><span class="p">(</span><span class="nx">lines</span><span class="p">,</span><span class="w"> </span><span class="s">"\n"</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>PostMessage</code> and <code>EditMessage</code> choose between the two, as the sketch of <a href="#the-go-library">The Go library</a> renders the
+<code>body</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">m</span><span class="w"> </span><span class="o">*</span><span class="nx">parleyMessenger</span><span class="p">)</span><span class="w"> </span><span class="nx">PostMessage</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">bot</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageInput</span><span class="p">)</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessagePosted</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">text</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">render</span><span class="p">(</span><span class="nx">in</span><span class="p">.</span><span class="nx">Title</span><span class="p">,</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">ReplaceMentions</span><span class="p">(</span><span class="nx">in</span><span class="p">.</span><span class="nx">Body</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Mentions</span><span class="p">,</span><span class="w"> </span><span class="nx">mention</span><span class="p">))</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Layout</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">renderLayout</span><span class="p">(</span><span class="nx">in</span><span class="p">.</span><span class="nx">Layout</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Kind</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Mentions</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="nx">id</span><span class="p">,</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">m</span><span class="p">.</span><span class="nx">api</span><span class="p">.</span><span class="nx">Send</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">ChannelId</span><span class="p">,</span><span class="w"> </span><span class="nx">text</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessagePosted</span><span class="p">{},</span><span class="w"> </span><span class="nx">classify</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessagePosted</span><span class="p">{</span><span class="nx">MessageId</span><span class="p">:</span><span class="w"> </span><span class="nx">id</span><span class="p">},</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">m</span><span class="w"> </span><span class="o">*</span><span class="nx">parleyMessenger</span><span class="p">)</span><span class="w"> </span><span class="nx">EditMessage</span><span class="p">(</span><span class="nx">ctx</span><span class="w"> </span><span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span><span class="w"> </span><span class="nx">bot</span><span class="p">,</span><span class="w"> </span><span class="nx">messageID</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageContent</span><span class="p">)</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageEdited</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">text</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">render</span><span class="p">(</span><span class="nx">in</span><span class="p">.</span><span class="nx">Title</span><span class="p">,</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">in</span><span class="p">.</span><span class="nx">Layout</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">renderLayout</span><span class="p">(</span><span class="nx">in</span><span class="p">.</span><span class="nx">Layout</span><span class="p">,</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageKindRoot</span><span class="p">,</span><span class="w"> </span><span class="kc">nil</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">m</span><span class="p">.</span><span class="nx">api</span><span class="p">.</span><span class="nx">Edit</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span><span class="w"> </span><span class="nx">messageID</span><span class="p">,</span><span class="w"> </span><span class="nx">text</span><span class="p">);</span><span class="w"> </span><span class="nx">err</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="kc">nil</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageEdited</span><span class="p">{},</span><span class="w"> </span><span class="nx">classify</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nx">bridge</span><span class="p">.</span><span class="nx">MessageEdited</span><span class="p">{},</span><span class="w"> </span><span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>In Python</strong>, <code>MessageInput</code> and <code>MessageContent</code> have <code>layout</code>, <code>None</code> when Muster sends none:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">muster_bridge</span><span class="w"> </span><span class="kn">import</span> <span class="n">Layout</span><span class="p">,</span> <span class="n">LayoutPerson</span><span class="p">,</span> <span class="n">Mention</span><span class="p">,</span> <span class="n">MessageKind</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">parley_escape</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Make plain text safe for Parley, which reads *bold*, ~strikethrough~, `code`, &lt;@id&gt; mentions and #tags."""</span>
+    <span class="k">return</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">"([</span><span class="se">\\</span><span class="s2">*~`&lt;#])"</span><span class="p">,</span> <span class="sa">r</span><span class="s2">"</span><span class="se">\\</span><span class="s2">\1"</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">render_layout</span><span class="p">(</span><span class="n">layout</span><span class="p">:</span> <span class="n">Layout</span><span class="p">,</span> <span class="n">kind</span><span class="p">:</span> <span class="n">MessageKind</span><span class="p">,</span> <span class="n">mentions</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Mention</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Write the structured layout of a Root message or a test message as text for Parley.</span>
+
+<span class="sd">    `mentions` is the envelope's list, which an edit leaves empty."""</span>
+    <span class="n">by_ref</span> <span class="o">=</span> <span class="p">{</span><span class="n">m</span><span class="o">.</span><span class="n">ref</span><span class="p">:</span> <span class="n">m</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">mentions</span><span class="p">}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">person</span><span class="p">(</span><span class="n">who</span><span class="p">:</span> <span class="n">LayoutPerson</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">mention</span> <span class="o">=</span> <span class="n">by_ref</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">who</span><span class="o">.</span><span class="n">ref</span><span class="p">)</span> <span class="k">if</span> <span class="n">who</span><span class="o">.</span><span class="n">ref</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">"&lt;@</span><span class="si">{</span><span class="n">mention</span><span class="o">.</span><span class="n">external_id</span><span class="si">}</span><span class="s2">&gt;"</span> <span class="k">if</span> <span class="n">mention</span> <span class="k">else</span> <span class="n">parley_escape</span><span class="p">(</span><span class="n">who</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+
+    <span class="n">lines</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">notices</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">notices</span><span class="p">)</span>
+    <span class="c1"># The mark of a test message is its first notice, and it comes before everything else.</span>
+    <span class="k">if</span> <span class="n">kind</span> <span class="o">==</span> <span class="n">MessageKind</span><span class="o">.</span><span class="n">test</span> <span class="ow">and</span> <span class="n">notices</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"*</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">notices</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="si">}</span><span class="s2">*"</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"*</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">status</span><span class="o">.</span><span class="n">word</span><span class="p">)</span><span class="si">}</span><span class="s2">* </span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">title</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Alert Group </span><span class="si">{</span><span class="n">layout</span><span class="o">.</span><span class="n">number</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">name</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">layout</span><span class="o">.</span><span class="n">fields</span><span class="p">]</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="k">for</span> <span class="n">text</span> <span class="ow">in</span> <span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">summary</span><span class="p">,</span> <span class="n">layout</span><span class="o">.</span><span class="n">description</span><span class="p">)</span> <span class="k">if</span> <span class="n">text</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">layout</span><span class="o">.</span><span class="n">labels</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">" · "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">l</span><span class="o">.</span><span class="n">key</span><span class="p">)</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">l</span><span class="o">.</span><span class="n">value</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">layout</span><span class="o">.</span><span class="n">labels</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">layout</span><span class="o">.</span><span class="n">alerts</span><span class="p">:</span>
+        <span class="n">values</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"~</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">value</span><span class="p">)</span><span class="si">}</span><span class="s2">~"</span> <span class="k">if</span> <span class="n">v</span><span class="o">.</span><span class="n">resolved</span> <span class="k">else</span> <span class="n">parley_escape</span><span class="p">(</span><span class="n">v</span><span class="o">.</span><span class="n">value</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">layout</span><span class="o">.</span><span class="n">alerts</span><span class="o">.</span><span class="n">values</span><span class="p">]</span>
+        <span class="n">line</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">alerts</span><span class="o">.</span><span class="n">label</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="s1">', '</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">values</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span>
+        <span class="c1"># The bridge counts what it does not show: Muster sends the total, not "…and K more".</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">more</span> <span class="o">:=</span> <span class="n">layout</span><span class="o">.</span><span class="n">alerts</span><span class="o">.</span><span class="n">total</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">line</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">" …and </span><span class="si">{</span><span class="n">more</span><span class="si">}</span><span class="s2"> more"</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">notice</span><span class="p">)</span> <span class="k">for</span> <span class="n">notice</span> <span class="ow">in</span> <span class="n">notices</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">layout</span><span class="o">.</span><span class="n">owner</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Acknowledged by </span><span class="si">{</span><span class="n">person</span><span class="p">(</span><span class="n">layout</span><span class="o">.</span><span class="n">owner</span><span class="p">)</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">layout</span><span class="o">.</span><span class="n">assignees</span><span class="p">:</span>
+        <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">"Paged: "</span> <span class="o">+</span> <span class="s2">", "</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">person</span><span class="p">(</span><span class="n">who</span><span class="p">)</span> <span class="k">for</span> <span class="n">who</span> <span class="ow">in</span> <span class="n">layout</span><span class="o">.</span><span class="n">assignees</span><span class="p">))</span>
+    <span class="n">lines</span> <span class="o">+=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">parley_escape</span><span class="p">(</span><span class="n">link</span><span class="o">.</span><span class="n">label</span><span class="p">)</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">link</span><span class="o">.</span><span class="n">url</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">link</span> <span class="ow">in</span> <span class="n">layout</span><span class="o">.</span><span class="n">links</span><span class="p">]</span>
+    <span class="k">return</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">post_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">message</span><span class="p">:</span> <span class="n">MessageInput</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MessagePosted</span><span class="p">:</span>
+        <span class="n">body</span> <span class="o">=</span> <span class="n">replace_mentions</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">body</span><span class="p">,</span> <span class="n">message</span><span class="o">.</span><span class="n">mentions</span><span class="p">,</span> <span class="n">mention</span><span class="p">)</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">render</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">title</span><span class="p">,</span> <span class="n">body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">message</span><span class="o">.</span><span class="n">layout</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">render_layout</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">layout</span><span class="p">,</span> <span class="n">message</span><span class="o">.</span><span class="n">kind</span><span class="p">,</span> <span class="n">message</span><span class="o">.</span><span class="n">mentions</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">message_id</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">api</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">channel_id</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">ParleyError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">classify</span><span class="p">(</span><span class="n">error</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">error</span>
+        <span class="k">return</span> <span class="n">MessagePosted</span><span class="p">(</span><span class="n">message_id</span><span class="o">=</span><span class="n">message_id</span><span class="p">)</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">edit_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">message_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">content</span><span class="p">:</span> <span class="n">MessageContent</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MessageEdited</span><span class="p">:</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">render</span><span class="p">(</span><span class="n">content</span><span class="o">.</span><span class="n">title</span><span class="p">,</span> <span class="n">content</span><span class="o">.</span><span class="n">body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">content</span><span class="o">.</span><span class="n">layout</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">text</span> <span class="o">=</span> <span class="n">render_layout</span><span class="p">(</span><span class="n">content</span><span class="o">.</span><span class="n">layout</span><span class="p">,</span> <span class="n">MessageKind</span><span class="o">.</span><span class="n">root</span><span class="p">,</span> <span class="p">[])</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">api</span><span class="o">.</span><span class="n">edit</span><span class="p">(</span><span class="n">message_id</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">ParleyError</span> <span class="k">as</span> <span class="n">error</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">classify</span><span class="p">(</span><span class="n">error</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">error</span>
+        <span class="k">return</span> <span class="n">MessageEdited</span><span class="p">()</span>
+</code></pre></div>
+<p>Without a library, read <code>layout</code> from the same JSON as <code>body</code>, with the schema <code>Layout</code> of the
+<a href="../../reference/bridge-protocol/">Bridge protocol</a>; the example above is its whole use. Check a bridge that renders
+<code>layout</code> with <a href="#muster-bridge-check"><code>muster bridge check</code></a>: its test messages carry a <code>layout</code>, as Root messages do, and
+it judges the bridge's answers whether the bridge renders <code>layout</code> or <code>body</code>.</p>
 <h2 id="idempotency-key"><code>Idempotency-Key</code><a class="headerlink" href="#idempotency-key" title="Permanent link">&para;</a></h2>
 <p>Every request that creates something carries an <code>Idempotency-Key</code> header: <code>postMessage</code>, <code>replyInThread</code>,
 <code>sendDirectMessage</code> and <code>answerEvent</code>. The key is one to 255 printable ASCII characters without spaces. Muster reuses a

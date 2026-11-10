@@ -1009,8 +1009,10 @@ says, so an event sent just after a feature was switched on is not lost.
 
 ## Rendering the envelope
 
-Muster sends a JSON envelope: the `status`, `color` and `emoji`, the `title`, the `link`, the `body` and the `buttons`.
-**The bridge renders it in its messenger's markup.** Muster never writes a messenger's markup for a bridge.
+Muster sends a JSON envelope: the `status`, `color` and `emoji`, the `title`, the `link`, the `body` and the `buttons`, and
+for a Root message and a test message also the `layout`, the same content as structured data (see
+[Render the structured layout](#render-the-structured-layout)). **The bridge renders it in its messenger's markup.**
+Muster never writes a messenger's markup for a bridge.
 
 **The body is CommonMark 0.31 with one extension, strikethrough** (`~~text~~`) as GitHub Flavored Markdown writes it.
 
@@ -1050,6 +1052,296 @@ sends. Choose that limit so that a body of that length fits your messenger after
 message is still too long, you make the final cut where your markup needs it, and answer `truncated: true`. Cut by
 whole code points, never inside an entity, a tag or a surrogate pair, and close any markup you opened. A request whose
 body exceeds `max_body_length` is `invalid`.
+
+### Render the structured layout
+
+A Root message and a test message carry their content twice: as CommonMark in `body`, and as plain-text data in
+`layout`, beside it. **A bridge renders either `body` or `layout`, never both.** A bridge that ignores `layout` works as
+before. One that renders it has no CommonMark to parse and no `#N` that its messenger turns into a hashtag, and decides
+for itself how its messenger shows a field, a label or a person.
+
+**Render `body` whenever `layout` is absent.** Muster sends no `layout` for a Storm summary or a Thread reply, for a Root
+message whose Route has its own Root message template or line template, for the Fallback template that shows when a
+template fails, and, of course, in a request from a version of Muster that has none. Those messages hold content that
+only `body` has. The Routes' own templates are described in
+[Messages and templates](../configure/messages-and-templates.md#what-you-can-change-and-what-you-cannot).
+
+What `layout` has, in the order a message shows it:
+
+`number` and `title`
+:   The Alert Group's number alone, such as `1287`, and its title without it. `#1287` written in text becomes a hashtag
+    in some messengers, so the number is a field of its own: write it as your messenger writes a number that is not a
+    tag, or as a field.
+
+`status`
+:   `key` (`firing`, `acknowledged`, `snoozed` or `resolved`) for your colour or emoji, and `word`, the status in the
+    Route's language.
+
+`fields`
+:   A list of `name` and `value`: Severity, Route, Teams (left out when the Alert Group has none) and Started.
+
+`summary` and `description`
+:   Two texts, empty when there is none.
+
+`labels`
+:   The key labels of the Route's [Labels in the message](../configure/messages-and-templates.md#labels-in-the-message),
+    each a `key` and a `value`: the value of a label whose Alerts differ is "3 values", in the Route's language.
+
+`alerts`
+:   `null` for an Alert Group of one Alert. Otherwise the `label` that tells the Alerts apart, `values` — each with
+    `resolved`, firing ones first — and `total`, how many Alerts the Alert Group has. Muster sends no "…and 7 more":
+    count the Alerts you do not show yourself, as `total` minus the values you listed, because you may cut more than
+    Muster did.
+
+`notices`
+:   The notices that apply, such as "Reopened ×2", then the footer, as lines: who snoozed or resolved the Alert Group, or
+    why Muster resolved it. A test message has the mark of a test as its first notice, which is localized ("🧪 Test message" is the English form), and a bridge shows it before the
+    rest of the message, so that nobody takes a test for an Alert Group.
+
+`owner` and `assignees`
+:   People, each with a `name`, their name in Muster, and a `ref`. `owner` is who acknowledged the Alert Group, while it
+    is acknowledged, and `null` otherwise; `assignees` are whom Muster Paged before an acknowledgement, and are empty
+    until Muster Pages people through Escalation chains. A `ref` names the entry of the same `ref` in the envelope's
+    `mentions`, which has the person's `external_id` in your messenger, so that you mention them by your own user id.
+    It is `null` where the message carries no Mention of them: in every edit, which carries no Mentions at all, and in a
+    message to a bridge without `native_mentions` or for a person whose account is not linked. Then write the `name`.
+    A person who snoozed or resolved the Alert Group is no `owner`: they appear only as text in a line of `notices`, with
+    no `ref`, so that a bridge cannot mention them from `layout`.
+
+`links`
+:   A list of `label` and `url`, "Open in Muster" first. A `url` is an absolute `http` or `https` address as the Route
+    gives it, and may be an IRI, with characters outside ASCII in its host or path: a messenger that needs ASCII
+    encodes it.
+
+The buttons are not in `layout`: they stay in the envelope's `buttons`.
+
+**The values are plain text, never CommonMark.** `Queue *full* on #1` arrives as it is, and the bridge escapes it for its
+messenger. Alert data in them cannot mention anyone, and a value that contains markup is data, not markup. This is the
+one rule that decides whether the bridge is safe: escape every value you write. A link's `url` is a link target, not
+text: do not escape it like text, but give it to your messenger as a link, and let your messenger refuse what it cannot
+open.
+
+**When Muster shortens the `body`** to `limits.max_body_length`, it shortens `layout` the same way: the description
+first, then the Alerts, the summary and the labels, while the title, the status, the fields, the people and the links
+stay. A bridge that has to cut more cuts in the same order.
+
+**A `layout` that does not match the protocol** is no reason to refuse the message. The libraries for Go and Python,
+from 0.1.1, drop it, accept the message and give your code `Layout` nil, or `layout` `None`, so that you render the
+`body`, and log one warning with the place and the reason, never the content. A bridge without a library does the same:
+it treats a `layout` it cannot read as absent.
+
+The examples below render the message for Parley, the fictional messenger of [Start with a library](#start-with-a-library).
+Parley reads `*bold*`, `~strikethrough~`, `` `code` `` and `<@id>` mentions, so a hashtag `#42` and the other
+characters it reads are escaped. They print the same lines for the same message:
+
+```text
+*Acknowledged* KubernetesContainerOOMKilled
+Alert Group 1287
+Severity: warning
+Route: Infrastructure
+Teams: payments
+Started: 2026-10-04 03:12 UTC
+Container killed for memory
+The container exceeded its limit.
+system=kubernetes · team=payments · namespace=checkout
+pod: checkout-api-5b2c1, checkout-api-7d9f4, ~checkout-worker-8e6a0~
+Acknowledged by <@u-olga>
+Open in Muster: https://muster.example.org/alert-groups/AGK7M3QX9P2RTA
+Runbook: https://wiki.example.org/runbooks/oom
+```
+
+In an edit, which carries no Mentions, the same message names the owner by `name`: "Acknowledged by Olga Petrova".
+
+**In Go**, `bridge.MessageInput` and `bridge.MessageContent` have `Layout *bridge.Layout`, nil when Muster sends none. The
+library has checked it against the protocol before it calls your code.
+
+```go
+// parleyEscape makes plain text safe for Parley, which reads *bold*, ~strikethrough~, `code`, <@id> mentions and #tags.
+var parleyEscape = strings.NewReplacer(`\`, `\\`, `*`, `\*`, `~`, `\~`, "`", "\\`", `<`, `\<`, `#`, `\#`).Replace
+
+// renderLayout writes the structured layout of a Root message or a test message as text for Parley. mentions is the
+// envelope's list, which an edit leaves empty.
+func renderLayout(l *bridge.Layout, kind bridge.MessageKind, mentions []bridge.Mention) string {
+	byRef := map[string]bridge.Mention{}
+	for _, m := range mentions {
+		byRef[m.Ref] = m
+	}
+	person := func(p bridge.LayoutPerson) string {
+		if p.Ref != nil {
+			if m, ok := byRef[*p.Ref]; ok {
+				return "<@" + m.ExternalId + ">"
+			}
+		}
+		return parleyEscape(p.Name)
+	}
+	var lines []string
+	add := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+
+	// The mark of a test message is its first notice, and it comes before everything else.
+	notices := l.Notices
+	if kind == bridge.MessageKindTest && len(notices) > 0 {
+		add("*%s*", parleyEscape(notices[0]))
+		notices = notices[1:]
+	}
+	add("*%s* %s", parleyEscape(l.Status.Word), parleyEscape(l.Title))
+	add("Alert Group %d", l.Number)
+	for _, f := range l.Fields {
+		add("%s: %s", parleyEscape(f.Name), parleyEscape(f.Value))
+	}
+	for _, text := range []string{l.Summary, l.Description} {
+		if text != "" {
+			lines = append(lines, parleyEscape(text))
+		}
+	}
+	if len(l.Labels) > 0 {
+		pairs := make([]string, len(l.Labels))
+		for i, label := range l.Labels {
+			pairs[i] = parleyEscape(label.Key) + "=" + parleyEscape(label.Value)
+		}
+		lines = append(lines, strings.Join(pairs, " · "))
+	}
+	if a := l.Alerts; a != nil {
+		values := make([]string, len(a.Values))
+		for i, v := range a.Values {
+			values[i] = parleyEscape(v.Value)
+			if v.Resolved {
+				values[i] = "~" + values[i] + "~"
+			}
+		}
+		line := parleyEscape(a.Label) + ": " + strings.Join(values, ", ")
+		// The bridge counts what it does not show: Muster sends the total, not "…and K more".
+		if more := a.Total - len(a.Values); more > 0 {
+			line += fmt.Sprintf(" …and %d more", more)
+		}
+		lines = append(lines, line)
+	}
+	for _, notice := range notices {
+		lines = append(lines, parleyEscape(notice))
+	}
+	if l.Owner != nil {
+		add("Acknowledged by %s", person(*l.Owner))
+	}
+	if len(l.Assignees) > 0 {
+		names := make([]string, len(l.Assignees))
+		for i, p := range l.Assignees {
+			names[i] = person(p)
+		}
+		add("Paged: %s", strings.Join(names, ", "))
+	}
+	for _, link := range l.Links {
+		add("%s: %s", parleyEscape(link.Label), link.Url)
+	}
+	return strings.Join(lines, "\n")
+}
+```
+
+`PostMessage` and `EditMessage` choose between the two, as the sketch of [The Go library](#the-go-library) renders the
+`body`:
+
+```go
+func (m *parleyMessenger) PostMessage(ctx context.Context, bot string, in bridge.MessageInput) (
+	bridge.MessagePosted, error) {
+	text := render(in.Title, bridge.ReplaceMentions(in.Body, in.Mentions, mention))
+	if in.Layout != nil {
+		text = renderLayout(in.Layout, in.Kind, in.Mentions)
+	}
+	id, err := m.api.Send(ctx, in.ChannelId, text)
+	if err != nil {
+		return bridge.MessagePosted{}, classify(err)
+	}
+	return bridge.MessagePosted{MessageId: id}, nil
+}
+
+func (m *parleyMessenger) EditMessage(ctx context.Context, bot, messageID string, in bridge.MessageContent) (
+	bridge.MessageEdited, error) {
+	text := render(in.Title, in.Body)
+	if in.Layout != nil {
+		text = renderLayout(in.Layout, bridge.MessageKindRoot, nil)
+	}
+	if err := m.api.Edit(ctx, messageID, text); err != nil {
+		return bridge.MessageEdited{}, classify(err)
+	}
+	return bridge.MessageEdited{}, nil
+}
+```
+
+**In Python**, `MessageInput` and `MessageContent` have `layout`, `None` when Muster sends none:
+
+```python
+import re
+
+from muster_bridge import Layout, LayoutPerson, Mention, MessageKind
+
+
+def parley_escape(text: str) -> str:
+    """Make plain text safe for Parley, which reads *bold*, ~strikethrough~, `code`, <@id> mentions and #tags."""
+    return re.sub(r"([\\*~`<#])", r"\\\1", text)
+
+
+def render_layout(layout: Layout, kind: MessageKind, mentions: list[Mention]) -> str:
+    """Write the structured layout of a Root message or a test message as text for Parley.
+
+    `mentions` is the envelope's list, which an edit leaves empty."""
+    by_ref = {m.ref: m for m in mentions}
+
+    def person(who: LayoutPerson) -> str:
+        mention = by_ref.get(who.ref) if who.ref else None
+        return f"<@{mention.external_id}>" if mention else parley_escape(who.name)
+
+    lines: list[str] = []
+    notices = list(layout.notices)
+    # The mark of a test message is its first notice, and it comes before everything else.
+    if kind == MessageKind.test and notices:
+        lines.append(f"*{parley_escape(notices.pop(0))}*")
+    lines.append(f"*{parley_escape(layout.status.word)}* {parley_escape(layout.title)}")
+    lines.append(f"Alert Group {layout.number}")
+    lines += [f"{parley_escape(f.name)}: {parley_escape(f.value)}" for f in layout.fields]
+    lines += [parley_escape(text) for text in (layout.summary, layout.description) if text]
+    if layout.labels:
+        lines.append(" · ".join(f"{parley_escape(l.key)}={parley_escape(l.value)}" for l in layout.labels))
+    if layout.alerts:
+        values = [f"~{parley_escape(v.value)}~" if v.resolved else parley_escape(v.value) for v in layout.alerts.values]
+        line = f"{parley_escape(layout.alerts.label)}: {', '.join(values)}"
+        # The bridge counts what it does not show: Muster sends the total, not "…and K more".
+        if (more := layout.alerts.total - len(values)) > 0:
+            line += f" …and {more} more"
+        lines.append(line)
+    lines += [parley_escape(notice) for notice in notices]
+    if layout.owner:
+        lines.append(f"Acknowledged by {person(layout.owner)}")
+    if layout.assignees:
+        lines.append("Paged: " + ", ".join(person(who) for who in layout.assignees))
+    lines += [f"{parley_escape(link.label)}: {link.url}" for link in layout.links]
+    return "\n".join(lines)
+```
+
+```python
+    async def post_message(self, bot: str, message: MessageInput) -> MessagePosted:
+        body = replace_mentions(message.body, message.mentions, mention)
+        text = render(message.title, body)
+        if message.layout is not None:
+            text = render_layout(message.layout, message.kind, message.mentions)
+        try:
+            message_id = await self.api.send(message.channel_id, text)
+        except ParleyError as error:
+            raise classify(error) from error
+        return MessagePosted(message_id=message_id)
+
+    async def edit_message(self, bot: str, message_id: str, content: MessageContent) -> MessageEdited:
+        text = render(content.title, content.body)
+        if content.layout is not None:
+            text = render_layout(content.layout, MessageKind.root, [])
+        try:
+            await self.api.edit(message_id, text)
+        except ParleyError as error:
+            raise classify(error) from error
+        return MessageEdited()
+```
+
+Without a library, read `layout` from the same JSON as `body`, with the schema `Layout` of the
+[Bridge protocol](../reference/bridge-protocol.md); the example above is its whole use. Check a bridge that renders
+`layout` with [`muster bridge check`](#muster-bridge-check): its test messages carry a `layout`, as Root messages do, and
+it judges the bridge's answers whether the bridge renders `layout` or `body`.
 
 ## `Idempotency-Key`
 

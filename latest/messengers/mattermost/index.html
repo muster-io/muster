@@ -970,6 +970,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-muster-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Muster posts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#who-gets-notified" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3167,6 +3178,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-muster-posts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What Muster posts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#who-gets-notified" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3348,6 +3370,15 @@ request of the Connection, to any of its Destinations, for the seconds of its <c
 <h2 id="keep-posts-editable">Keep posts editable<a class="headerlink" href="#keep-posts-editable" title="Permanent link">&para;</a></h2>
 <p>Muster edits a Root message for as long as its Alert Group is open, which can be days. Keep
 <strong>ServiceSettings.PostEditTimeLimit</strong> at <code>-1</code>, its default, so that posts can be edited at any age.</p>
+<h2 id="what-muster-posts">What Muster posts<a class="headerlink" href="#what-muster-posts" title="Permanent link">&para;</a></h2>
+<p>A Root message is one post with no text of its own and one attachment in the colour of its status. The attachment's
+title is <code>#N</code> and the Alert Group's title, linked to the Alert Group page, with the status as a word; the Severity,
+Route, Teams and Started are its short fields; the summary, the description, the key labels, the Alerts, the notices
+and the footer are its text, with the links as its last line; and the buttons come under it. The labels, the Alerts and
+the text of the Route's message are chosen on the Route: see
+<a href="../../configure/messages-and-templates/#the-default-message">Messages and templates</a>, which shows the attachment, and
+<a href="../../configure/messages-and-templates/#labels-in-the-message">Labels in the message</a>. A post is at most 16,383
+characters; a long one drops its description first, then its Alerts, its summary and its key labels.</p>
 <h2 id="who-gets-notified">Who gets notified<a class="headerlink" href="#who-gets-notified" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Edits notify nobody</strong>, even an edit that adds a Mention. That is why every Loud event is a new post: a new Root

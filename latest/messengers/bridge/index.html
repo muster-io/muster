@@ -3389,12 +3389,19 @@ and with the class of the bridge's answer otherwise; a Destination that fails th
   messenger. The people are the Owner while the Alert Group is acknowledged, with the <code>ref</code> of their entry in
   <code>mentions</code> when the message carries their Mention, and <code>null</code> in an edit and through a bridge without native
   mentions; its <code>name</code> is their display name in Muster, which may differ from the <code>display_name</code> of their entry in
-  <code>mentions</code>. A bridge renders either <code>body</code> or <code>layout</code>; a bridge that ignores <code>layout</code> works as before. Storm
-  summaries and Thread replies have no <code>layout</code>, nor has a Root message whose Route has its own Root message template
-  or line template, or that the fallback template shows after a template failed, since part of its content exists
-  only in <code>body</code>: render <code>body</code> whenever <code>layout</code> is absent. A test message has "🧪 Test message" as the first of its
-  <code>notices</code>. The <a href="../../reference/bridge-protocol/">Bridge protocol</a> reference shows its
-  schema.</li>
+  <code>mentions</code>. Who snoozed or resolved the Alert Group is only text in a line of <code>notices</code>, such as "Snoozed by Bob until
+  …", with no <code>ref</code>: a bridge cannot mention them from <code>layout</code>. A bridge renders either <code>body</code> or <code>layout</code>; a bridge
+  that ignores <code>layout</code> works as before. Storm summaries and Thread replies have no <code>layout</code>, nor has a Root message
+  whose Route has its own Root message template or line template, or that the fallback template shows after a template
+  failed, since part of its content exists only in <code>body</code>: render <code>body</code> whenever <code>layout</code> is absent. A test message
+  has "🧪 Test message" as the first of its <code>notices</code>, which a bridge shows before the rest. A link's <code>url</code> is an
+  absolute <code>http</code> or <code>https</code> address as the Route gives it, and may be an IRI, with characters outside ASCII in its
+  host or path. The libraries for Go and Python, from 0.1.1, drop a <code>layout</code> that does not match the protocol and
+  render <code>body</code>, rather than refuse the message. How a bridge renders <code>layout</code> is in
+  <a href="../write-a-bridge/#render-the-structured-layout">Render the structured layout</a>; the
+  <a href="../../reference/bridge-protocol/">Bridge protocol</a> reference shows its schema, and
+  <a href="../../configure/messages-and-templates/#the-default-message">Messages and templates</a> shows what it says in each
+  messenger.</li>
 <li><strong>The length.</strong> The text fits the longest text the bridge declares, read from the Connection's copy of its info: a
   long Root message drops its description first, then its Alerts, its summary and its key labels, but always keeps its
   title, its status, its fields, its footer, its buttons and its links, the one to Muster first. <code>layout</code> loses the
