@@ -97,8 +97,8 @@ issue: 422
 
 - The marks of an unreachable On-call, in the warnings and in "On call now": S-164.
 - The pages: S-135 (the Schedule page with its gaps and warnings) and S-136 ("On call now").
-- The confirmation of the thresholds and windows of the chart rules of L2 (P-88): S-149 confirms them, once both rules
-  of L2 exist, as L2.md §5.3 says. The scan interval (P-80) is confirmed by the test environment.
+- The confirmation of the thresholds and windows of the chart rules of L2 (P-88): the maintainer has confirmed them
+  with S-149, once both rules of L2 existed, and L2.md §5.3 lists P-88 as decided. The scan interval (P-80) is confirmed by the test environment.
 
 ## Contracts
 

@@ -53,7 +53,7 @@ records a lifecycle event of FR-15 with its loudness and Mentions; Destinations 
   on it" from a Service account); "not permitted". The API returns them as `Problem` documents with `409` for
   preconditions and `403` for permissions.
 - **C-10.FR-3** Every command passes through one dispatcher: permission → precondition → transition → Audit log →
-  Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`) is recorded;
+  Timeline → re-render. The Transport (`ui`, `api`, `mattermost`, `telegram`, `bridge`, `slack`, `gateway`) is recorded;
   transitions Muster starts itself use the Transport `system` and appear in the Timeline only (ADR-0016).
   _Revised for L2 (2026-10-26):_ the Transport `gateway` joins them (C-30.FR-6), and `mcp` comes with the MCP server
   later in L2; the [Transports](reference.md#transports) are listed in reference.md.

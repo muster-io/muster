@@ -68,7 +68,7 @@ acceptance:
   - "[C-30.FR-8] The suggested Route \"Muster internal alerts\" groups by `connection` too — its Group key gains `connection` after `route` and after S-133's `schedule` if that has merged — so that two Broken gateways make two Alert Groups; the simulation of `Suggestions` counts each Notification gateway as an entity of `MusterNotificationGatewayBroken`; the upgrade notes of 0.2.0 name `connection` among the labels to add to a Route accepted in 0.1 (`suggestions_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] While a gateway is Broken, every call that comes due ends Not delivered with the reason `gateway_broken` and records `page_not_delivered`, and none of them is sent after it recovers; the sender probes it through `info` every `delivery.broken_probe_interval`, and a successful probe — or a successful Connection check — ends the state, resolves the alert and sets the gauge to 0 at the next run (`broken_integration_test.go`)."
   - "[C-30.FR-8, C-30.AC-5] A Bridge Connection with both roles whose gateway is Broken keeps its Destinations healthy and delivering, and a Broken Destination of it leaves the gateway as it is (`broken_integration_test.go`)."
-  - "[C-30.FR-8] The chart renders the rule `MusterNotificationGatewayBroken` — `max by (connection) (muster_notification_gateway_broken{job=\"muster\"}) == 1`, `for` 5m, severity `critical` — with its threshold and `for` as chart values and its `runbook_url`; its rule unit test fires after 5 minutes at 1 and not at 0; reference.md moves the Internal alert, the chart rule and the metric into the main tables; P-88 stays provisional for both chart rules of L2 until the maintainer confirms it; `make rules-test helm-check docs-check` pass."
+  - "[C-30.FR-8] The chart renders the rule `MusterNotificationGatewayBroken` — `max by (connection) (muster_notification_gateway_broken{job=\"muster\"}) == 1`, `for` 5m, severity `critical` — with its threshold and `for` as chart values and its `runbook_url`; its rule unit test fires after 5 minutes at 1 and not at 0; reference.md moves the Internal alert, the chart rule and the metric into the main tables; P-88 is decided for both chart rules of L2; `make rules-test helm-check docs-check` pass."
   - "[C-30.FR-8] The runbook page MusterNotificationGatewayBroken says what the alert means, how to read the reason on the Connection page and in the Request log, how to fix the bridge's credentials or its provider, and that calls due meanwhile were not sent; it is in the runbook index and the monitoring page; `make docs-check` passes."
 verify: "make ci test-integration e2e-go rules-test helm-check docs-check"
 operator_attention: true
@@ -92,7 +92,7 @@ issue: 438
 **OUT**
 
 - The Connection page's health and Broken banner: S-150.
-- Thresholds of the chart rules beyond P-88's confirmation, which the maintainer gives with this story.
+- Thresholds of the chart rules beyond the values of P-88, which the maintainer has confirmed: `for` 0m for `MusterScheduleGap` and 5m for `MusterNotificationGatewayBroken`.
 
 ## Contracts
 
@@ -142,7 +142,7 @@ issue: 438
   its threshold and `for` as chart values; `tests/rules/MusterNotificationGatewayBroken.yaml`.
 - **Shared tables**: reference.md moves `MusterNotificationGatewayBroken` from "Internal alerts added in L2" and "Chart
   rules added in L2", and `muster_notification_gateway_broken` from "Metrics added in L2", into the main tables; P-88
-  stays provisional — in defaults.md and in L2.md §5.3 — until the maintainer confirms it (see Notes).
+  is decided — in defaults.md and in L2.md §5.3 (see Notes).
 - **Web test fixtures** (`web/src/test/fixtures/connections.ts`): `gateway` null in the Bridge Connection builders.
 - **Log events**: `gateway_broken`, `gateway_recovered`, `gateway_probe_failed`, C-30.
 - **Settings**: `delivery.broken_probe_interval`, `delivery.transient_budget`; the chart values of the rule (P-88).
@@ -198,16 +198,15 @@ None.
 ## Notes
 
 - Suggested commit: `feat(gateways): mark failing notification gateways broken and alert about them`.
-- The maintainer confirms provisional values with this story (operator attention): P-88, the thresholds and windows of
-  the chart rules of L2 — `MusterScheduleGap` (S-133) and `MusterNotificationGatewayBroken` — as reference.md has them.
+- The maintainer has confirmed P-88 (operator attention): the `for` of the chart rules of L2 — 0m for
+  `MusterScheduleGap` (S-133) and 5m for `MusterNotificationGatewayBroken` — as reference.md has them.
 - P-68 is decided (L2.md §5.3): calls due while Broken are not sent after recovery, as Pages that a Broken Destination
   could not deliver are not.
 - Migration `0036`: the story map planned `0038`; the latest migration on `master` is `0035`, so this story takes the
   next free number, as S-167's Notes describe for a story merged out of the map's order.
-- P-88 is not confirmed by this pull request: the chart renders `MusterScheduleGap` with `for` 0m and
-  `MusterNotificationGatewayBroken` with `for` 5m as chart values, reference.md keeps them marked provisional, and
-  defaults.md and L2.md §5.3 keep P-88 among the provisional values; the maintainer confirms or changes them, and the
-  pull request that does so moves P-88 to "Decided since they were first listed".
+- P-88 is decided: the maintainer confirmed that the chart renders `MusterScheduleGap` with `for` 0m and
+  `MusterNotificationGatewayBroken` with `for` 5m as chart values, and a later pull request moved P-88 to "Decided
+  since they were first listed" in defaults.md, reference.md and L2.md §5.3.
 
 ## Coverage
 

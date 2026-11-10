@@ -164,7 +164,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md). Th
   before, `400` to a body that is no event, and `401` to a bad signature, an unknown or deleted Connection and a
   Connection in poll mode alike, so the endpoint reveals nothing about which Connections exist.
   _Revised for L2 (2026-10-26):_ a Notification gateway also sends the event `notification_acknowledged` (C-30.FR-2,
-  C-30.FR-6).
+  C-30.FR-6); one older than `bridge.event_max_age` after its `occurred_at`, by the real clock, is dropped unanswered and
+  logged as `bridge_acknowledgement_dropped`, as a press is.
 - **C-22.FR-12** A `press` names the message whose button was pressed, the person (`external_id`, `display_name`) and
   the button's data. Muster verifies the signature with the key it names, checks that the data was issued for that
   message — a Root message or a Thread reply of a Destination of this Connection, a mismatch refused like a bad

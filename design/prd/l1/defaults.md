@@ -139,7 +139,7 @@ Other lifecycle values:
 |---|---|---|---|---|
 | `delivery.interactive_budget` | 5 s | built in | C-11 | decided |
 | `delivery.transient_backoff` | exponential with jitter, from 2 s up to 5 min | built in | C-11 | decided |
-| `delivery.transient_budget` | 10 attempts within 30 min; then the Destination is Broken, or for a call the Notification gateway (C-30.FR-8) | built in | C-11 | decided |
+| `delivery.transient_budget` | 10 attempts within 30 min; then the Destination is Broken, or for a call the Notification gateway (C-30.FR-8). For a call through a Notification gateway (C-30.FR-4) the 30 min also run through the gateway's RetryAfter waits, which count no attempt, and the call ends Not delivered (`call_budget_used`) | built in | C-11 | decided |
 | `delivery.broken_probe_interval` | 5 min; the probe is the oldest waiting delivery, or the Destination check when nothing waits; a Broken Notification gateway is probed through `info` (C-30.FR-8) | built in | C-11 | decided |
 | `delivery.storm_calm_period` | 5 min below the threshold | built in | C-11 | decided |
 | `delivery.thread_alerts_listed` | first 10 new Alerts, then "…and K more" | built in | C-11 | decided |
@@ -253,12 +253,12 @@ Other lifecycle values:
 | `schedule.gap_scan_interval` | 5 min, the Leader's scan for gaps | built in | C-27 | P-80 |
 | `ical.window` | the segments of the Result in which the User is On-call, from 7 days back to 60 days ahead | built in | C-27 | P-81 |
 | `ical.token` | the prefix `mstr_cal_`, 32 random bytes, stored as a hash, shown once, one per User | built in | C-27 | decided |
-| `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | P-85 |
+| `notification_rule.limits` | up to 10 actions; a wait of 1 to 60 minutes | built in | C-31 | decided |
 | `escalation.limits` | up to 20 steps; a wait of 1 to 1,440 minutes; a repeat up to 10 times | built in | C-32 | P-84 |
 | `gateway.contact_code` | 6 digits, valid 10 min, at most 5 attempts | built in | C-30 | P-86 |
 | `gateway.contact_code_requests` | 5 per hour per User; 3 per hour per contact | built in | C-30 | P-86 |
 | `gateway.combine_window` | 60 s: the first call to a person through a gateway goes at once; the Pages that come due after it go together in the next call, no sooner than this after the previous call ended, accepted or Not delivered | built in | C-30 | P-87 |
-| Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | P-88 |
+| Chart rules of L2 | as in [reference.md](reference.md#chart-rules-added-in-l2) | Helm chart | C-27, C-30 | decided |
 
 ## Self-observation and chart
 

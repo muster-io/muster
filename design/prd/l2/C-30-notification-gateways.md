@@ -57,7 +57,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   claims; it is sent at least once under an `Idempotency-Key` through the gateway Connection's limiter
   (`connection.bridge.limiter`), calls about critical Alert Groups first. Its failures are classified and retried in the
   delivery client class within `delivery.transient_backoff` and `delivery.transient_budget`, as deliveries are
-  (C-11.FR-8). Calls are not reconciled: a call has no Root message and no Desired state (ADR-0005). The first call to a
+  (C-11.FR-8), with one difference: a gateway's RetryAfter answer counts toward the time of `delivery.transient_budget`
+  from the first such answer or failure, though never as an attempt, and a call whose budget time is used up ends Not
+  delivered with the reason `call_budget_used`. A delivery's RetryAfter answers do not count toward its budget. A wait
+  for a token of the Connection's limiter counts toward neither. Calls are not reconciled: a call has no Root message and no Desired state (ADR-0005). The first call to a
   person through a gateway goes at once. A Page through the same gateway to the same person that comes due while a call
   to them is waiting, being retried, or within `gateway.combine_window` after the previous call ended — accepted by the
   gateway or Not delivered — joins the next call, which goes once that window has passed, as one call about all of its
@@ -77,7 +80,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   is never made through a gateway. The person's Role and state apply as for a press (C-18.FR-8). An Acknowledge that
   runs is recorded in the Audit log and the Timeline like any Acknowledge; one that its precondition refuses changes
   nothing and is logged as a refusal, like any refused Command (C-10.AC-4). The answer goes through `answerEvent` on the
-  interactive path. Events are handled once per id (C-22.FR-11).
+  interactive path. Events are handled once per id (C-22.FR-11); one older than `bridge.event_max_age` is dropped
+  unanswered and logged as `bridge_acknowledgement_dropped`, so that an event a gateway sends again after
+  `bridge.event_dedup_window` never makes the person an Owner again.
 - **C-30.FR-7** A call the person does not acknowledge lets the Escalation chain and the Notification rules go on. A
   call that ends Not delivered — refused, an unknown answer, or the retry budget used up — records the lifecycle event
   `page_not_delivered` naming the person and the gateway.
