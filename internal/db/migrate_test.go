@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (36)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (37)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":36`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":37`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":36`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":37`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (36)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (37)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":36`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":37`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3642,6 +3642,90 @@ func TestIntegrationGatewayBroken(t *testing.T) {
 			t.Errorf("after down: %d connections", got)
 		}
 		if err := e.mm.Migrate(36); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationNotificationRules runs 0037 over a database at 36 with an Organization, a User and a Bridge
+// Connection: the existing Organization reads the default rules; the CHECKs refuse rules that are not an object with
+// the arrays normal and important, a state outside call, no_call and custom, and a gateway without the state call or
+// the state call without one; each write of a row takes a new version from the sequence, also after the row was
+// deleted; deleting the User deletes the row; down drops the table, the sequence, the column and its CHECK and keeps
+// the Organization; up again works.
+func TestIntegrationNotificationRules(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 36)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SR0000000000PA', 'petr', 'petr', 'responder', 'local', 'active', now(), now()
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, bridge_base_url, bridge_event_delivery,
+			bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+			updated_at)
+			SELECT id, 'CN0000000000G1', 'bridge', 'gw', 'http://gw', 'poll', '\x00', 'k1', now(), 1, 1, now(), now()
+			FROM organizations`)
+		if err := e.mm.Migrate(37); err != nil {
+			t.Fatalf("up to 37: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM organizations WHERE notification_rules = '{"normal": [{"kind":
+			"mention"}], "important": [{"kind": "mention"}, {"kind": "wait", "wait_seconds": 300}, {"kind":
+			"mention"}]}'::jsonb`); got != 1 {
+			t.Errorf("the existing Organization: %d with the default rules", got)
+		}
+		refusedBy := func(t *testing.T, sql, constraint string) {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), sql)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.ConstraintName != constraint {
+				t.Errorf("%s: refused by %v, want %s", sql, err, constraint)
+			}
+		}
+		for _, rules := range []string{`'[]'`, `'{"normal": []}'`, `'{"normal": [], "important": {}}'`} {
+			refusedBy(t, `UPDATE organizations SET notification_rules = `+rules, "organizations_notification_rules_check")
+		}
+		insert := func(state, gateway string) string {
+			return `INSERT INTO notification_rules (org_id, user_id, state, gateway_connection_id, normal, important,
+				updated_at) SELECT org_id, id, '` + state + `', ` + gateway + `, '[]', '[]', now() FROM users`
+		}
+		const gw = `(SELECT id FROM connections)`
+		refusedBy(t, insert("organization", "NULL"), "notification_rules_state_check")
+		refusedBy(t, insert("call", "NULL"), "notification_rules_gateway_check")
+		refusedBy(t, insert("custom", gw), "notification_rules_gateway_check")
+		version := func() int {
+			t.Helper()
+			return e.count(t, `SELECT version FROM notification_rules`)
+		}
+		e.exec(t, insert("call", gw))
+		first := version()
+		e.exec(t, `UPDATE notification_rules SET state = 'no_call', gateway_connection_id = NULL,
+			version = nextval('notification_rules_version_seq')`)
+		second := version()
+		e.exec(t, `DELETE FROM notification_rules`)
+		e.exec(t, insert("custom", "NULL"))
+		if third := version(); first >= second || second >= third {
+			t.Errorf("versions %d, %d, %d", first, second, third)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'notification_rules_gateway_idx'
+			AND indexdef LIKE '%(org_id, gateway_connection_id)%'`); got != 1 {
+			t.Errorf("the index of the gateway: %d", got)
+		}
+		e.exec(t, `DELETE FROM users`)
+		if got := e.count(t, `SELECT count(*) FROM notification_rules`); got != 0 {
+			t.Errorf("after the User's deletion: %d rows", got)
+		}
+		e.exec(t, insert("custom", "NULL"))
+		e.step(t, -1)
+		if got := e.count(t, `SELECT count(*) FROM information_schema.tables WHERE table_name = 'notification_rules'`) +
+			e.count(t, `SELECT count(*) FROM information_schema.sequences
+				WHERE sequence_name = 'notification_rules_version_seq'`) +
+			e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'organizations' AND column_name = 'notification_rules'`); got != 0 {
+			t.Errorf("after down: %d of the table, the sequence and the column left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM organizations`); got != 1 {
+			t.Errorf("after down: %d organizations", got)
+		}
+		if err := e.mm.Migrate(37); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

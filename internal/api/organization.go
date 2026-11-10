@@ -91,6 +91,7 @@ func organizationOf(o organization.Organization) gen.Organization {
 		TotpRequired: gen.TotpPolicy(o.TOTPRequired), OidcTokenGraceSeconds: int(o.OIDCTokenGrace / time.Second),
 		Etag: &tag, WorkdayEnd: o.WorkdayEnd, WorkingDays: make([]gen.Weekday, 0, len(o.WorkingDays)),
 		Buttons: gen.OrganizationButtonSet{All: o.Buttons.All}, TeamLabel: o.TeamLabel,
+		NotificationRules: ruleSetOf(o.NotificationRuleViews),
 	}
 	if !o.Buttons.All {
 		items := buttonItemsOf(o.Buttons.Items)
@@ -152,7 +153,8 @@ func inputOf(b gen.UpdateOrganizationJSONRequestBody) organization.Input {
 			AlertGroupSummariesDays: int64(b.Retention.AlertGroupSummariesDays),
 			AuditLogDays:            int64(b.Retention.AuditLogDays),
 		},
-		HeartbeatURL: secretInputOf(b.OutgoingHeartbeat.Url),
+		HeartbeatURL:      secretInputOf(b.OutgoingHeartbeat.Url),
+		NotificationRules: ruleSetInputOf(b.NotificationRules),
 	}
 	if b.WorkingDays != nil {
 		days := make([]string, len(*b.WorkingDays))

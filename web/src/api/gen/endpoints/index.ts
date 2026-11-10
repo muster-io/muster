@@ -11,6 +11,7 @@ export * from './links/links';
 export * from './live-updates/live-updates';
 export * from './messenger-callbacks/messenger-callbacks';
 export * from './notification-gateways/notification-gateways';
+export * from './notification-rules/notification-rules';
 export * from './oidc/oidc';
 export * from './organization/organization';
 export * from './profile/profile';

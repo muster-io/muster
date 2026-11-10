@@ -5306,7 +5306,8 @@ func (s *probeOrgSettings) GetSettings(context.Context, int64) (orgdb.GetSetting
 		RetentionAlertGroupSummariesDays: d.Retention.AlertGroupSummariesDays,
 		RetentionAuditLogDays:            d.Retention.AuditLogDays, TotpRequired: "nobody",
 		OidcTokenGraceSeconds: int64(d.OIDCTokenGrace / time.Second), OutgoingHeartbeatUrlSet: s.url.Set(),
-		OutgoingHeartbeatProxy: s.proxy, OutgoingHeartbeatProxyPasswordSet: s.password.Set(), Version: s.version}, nil
+		OutgoingHeartbeatProxy: s.proxy, OutgoingHeartbeatProxyPasswordSet: s.password.Set(), Version: s.version,
+		NotificationRules: []byte(`{"normal": [{"kind": "mention"}], "important": [{"kind": "mention"}]}`)}, nil
 }
 
 func (s *probeOrgSettings) LockSettings(context.Context, int64) (int64, error) { return s.version, nil }
@@ -5362,6 +5363,10 @@ func (s *probeOrgSettings) InsertOrganizationUpdate(context.Context,
 }
 
 func (s *probeOrgSettings) NotifyOpenGroupUpdates(context.Context, string) error { return nil }
+
+func (s *probeOrgSettings) ListRuleGateways(context.Context, int64) ([]orgdb.ListRuleGatewaysRow, error) {
+	return nil, nil
+}
 
 func (s *probeOrgSettings) ClaimOutgoingHeartbeat(_ context.Context, arg orgdb.ClaimOutgoingHeartbeatParams) (
 	orgdb.ClaimOutgoingHeartbeatRow, error) {

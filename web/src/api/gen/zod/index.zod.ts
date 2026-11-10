@@ -11,6 +11,7 @@ export * from './links/links.zod';
 export * from './live-updates/live-updates.zod';
 export * from './messenger-callbacks/messenger-callbacks.zod';
 export * from './notification-gateways/notification-gateways.zod';
+export * from './notification-rules/notification-rules.zod';
 export * from './oidc/oidc.zod';
 export * from './organization/organization.zod';
 export * from './profile/profile.zod';

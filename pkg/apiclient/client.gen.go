@@ -1690,6 +1690,69 @@ func (e NotPageableReason) Valid() bool {
 	}
 }
 
+// Defines values for NotificationRuleActionKind.
+const (
+	NotificationRuleActionKindCall    NotificationRuleActionKind = "call"
+	NotificationRuleActionKindMention NotificationRuleActionKind = "mention"
+	NotificationRuleActionKindWait    NotificationRuleActionKind = "wait"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRuleActionKind enum.
+func (e NotificationRuleActionKind) Valid() bool {
+	switch e {
+	case NotificationRuleActionKindCall:
+		return true
+	case NotificationRuleActionKindMention:
+		return true
+	case NotificationRuleActionKindWait:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationRuleUnavailableReason.
+const (
+	NotificationRuleUnavailableReasonGatewayDeleted     NotificationRuleUnavailableReason = "gateway_deleted"
+	NotificationRuleUnavailableReasonNoConfirmedContact NotificationRuleUnavailableReason = "no_confirmed_contact"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRuleUnavailableReason enum.
+func (e NotificationRuleUnavailableReason) Valid() bool {
+	switch e {
+	case NotificationRuleUnavailableReasonGatewayDeleted:
+		return true
+	case NotificationRuleUnavailableReasonNoConfirmedContact:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NotificationRulesState.
+const (
+	NotificationRulesStateCall         NotificationRulesState = "call"
+	NotificationRulesStateCustom       NotificationRulesState = "custom"
+	NotificationRulesStateNoCall       NotificationRulesState = "no_call"
+	NotificationRulesStateOrganization NotificationRulesState = "organization"
+)
+
+// Valid indicates whether the value is a known member of the NotificationRulesState enum.
+func (e NotificationRulesState) Valid() bool {
+	switch e {
+	case NotificationRulesStateCall:
+		return true
+	case NotificationRulesStateCustom:
+		return true
+	case NotificationRulesStateNoCall:
+		return true
+	case NotificationRulesStateOrganization:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NullableAlertGroupStatus.
 const (
 	NullableAlertGroupStatusAcknowledged NullableAlertGroupStatus = "acknowledged"
@@ -6301,6 +6364,73 @@ type NoteList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// NotificationRuleAction One action of a Notification rule (C-31.FR-1): `mention`, a Mention in the Thread; `call`, a call through the Notification gateway `gateway_id`, required when more than one Notification gateway exists and otherwise the only one; `wait`, a wait of `wait_seconds` before the next action, a whole number of minutes from 1 to 60 (`notification_rule.limits`): a multiple of 60 from 60 to 3600, else `422` `out_of_range` at its `wait_seconds`, `required` without it. Actions without a wait between them happen at the same moment. Fields the kind does not take are ignored. `gateway`, `available` and `unavailable_reason` are set in reads and ignored in requests, so that a read can be sent back.
+type NotificationRuleAction struct {
+	// Available Set in reads; false for a call that cannot run now, which stays in the rule.
+	Available *bool `json:"available,omitempty"`
+
+	// Gateway Set in reads; the gateway of a call, null for the other kinds and for a Connection that no longer exists.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway,omitempty"`
+
+	// GatewayId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	GatewayId *PublicId                  `json:"gateway_id,omitempty"`
+	Kind      NotificationRuleActionKind `json:"kind"`
+
+	// UnavailableReason Set in reads; why `available` is false, null when it is true.
+	UnavailableReason nullable.Nullable[NotificationRuleUnavailableReason] `json:"unavailable_reason,omitempty"`
+
+	// WaitSeconds The wait in seconds, with `wait`; a multiple of 60 from 60 to 3600.
+	WaitSeconds *int `json:"wait_seconds,omitempty"`
+}
+
+// NotificationRuleActionKind defines model for NotificationRuleAction.Kind.
+type NotificationRuleActionKind string
+
+// NotificationRuleSet The normal and the important rule, each at most 10 actions (`notification_rule.limits`, else `422` `out_of_range` at the rule) with at least one `mention` or `call` (else `422` `required` at the rule). A call while no Notification gateway exists is `422` `gateway_required` at the action; one whose `gateway_id` names a Connection that is no Notification gateway `unknown_id` at its `gateway_id`. As many calls through a gateway as the stored rules of the same owner have, across both rules, pass without these checks, which keeps an action whose gateway was deleted; a further call through it is checked.
+type NotificationRuleSet struct {
+	Important []NotificationRuleAction `json:"important"`
+	Normal    []NotificationRuleAction `json:"normal"`
+}
+
+// NotificationRuleUnavailableReason `gateway_deleted`: the gateway of the call was deleted or is no Notification gateway any more; `no_confirmed_contact`: the person has no confirmed contact at it (never in the Organization's rules).
+type NotificationRuleUnavailableReason string
+
+// NotificationRules A User's Notification rules as in effect.
+type NotificationRules struct {
+	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. In the state `organization` it changes with every change of the Organization, whose rules the User follows.
+	Etag *string `json:"etag,omitempty"`
+
+	// Gateway The gateway of the state `call`; null in the other states.
+	Gateway nullable.Nullable[EntityRef] `json:"gateway"`
+
+	// Important The important rule in effect.
+	Important []NotificationRuleAction `json:"important"`
+
+	// Normal The normal rule in effect.
+	Normal []NotificationRuleAction `json:"normal"`
+
+	// State The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+	State NotificationRulesState `json:"state"`
+}
+
+// NotificationRulesState The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+type NotificationRulesState string
+
+// NotificationRulesUpdate A change of a User's rules; fields the state does not take are ignored.
+type NotificationRulesUpdate struct {
+	// GatewayId With `call`, the Notification gateway of the call; may be left out when the User has a confirmed contact at exactly one.
+	GatewayId *PublicId `json:"gateway_id,omitempty"`
+
+	// Important With `custom`, the important rule; required.
+	Important *[]NotificationRuleAction `json:"important,omitempty"`
+
+	// Normal With `custom`, the normal rule; required.
+	Normal *[]NotificationRuleAction `json:"normal,omitempty"`
+
+	// State The state of a User's rules (C-31.FR-2): `organization`, "As in the Organization", the default — the Organization's current rules; `call`, "Call" — the Organization's rules as they were when chosen, with a call through the chosen gateway at the start of the important rule; `no_call`, "Don't call" — the Organization's rules as they were when chosen, without any call; `custom` — sequences set through the API.
+	State NotificationRulesState `json:"state"`
+}
+
 // NullableAlertGroupStatus defines model for NullableAlertGroupStatus.
 type NullableAlertGroupStatus string
 
@@ -6561,6 +6691,9 @@ type Organization struct {
 	InstanceLabels []string `json:"instance_labels"`
 	Name           string   `json:"name"`
 
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules NotificationRuleSet `json:"notification_rules"`
+
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 	OutgoingHeartbeat     struct {
@@ -6617,6 +6750,9 @@ type OrganizationBase struct {
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
 
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
+
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
 
@@ -6670,6 +6806,9 @@ type OrganizationInput struct {
 	CriticalIsUrgent *bool    `json:"critical_is_urgent,omitempty"`
 	InstanceLabels   []string `json:"instance_labels"`
 	Name             string   `json:"name"`
+
+	// NotificationRules The Organization's default Notification rules (`organization.notification_rules`, C-31.FR-2; default: normal a Mention; important a Mention, a wait of 300 seconds and a Mention), which every User in the state `organization` follows at once; Users in `call`, `no_call` or `custom` keep their rules. Omit it on an update to keep it. Validated as `NotificationRuleSet` says, at `/notification_rules/...`; a call needs only an existing Notification gateway, never a contact. A change is recorded in the diff of `organization.updated` at `/notification_rules/normal` and `/notification_rules/important`. In 0.2.0 they change only through the API.
+	NotificationRules *NotificationRuleSet `json:"notification_rules,omitempty"`
 
 	// OidcTokenGraceSeconds `auth.oidc_token_grace` (default 7 days), only for accounts that sign in through OIDC and for which the IdP granted no offline token: their Personal access tokens work while the owner's last OIDC sign-in is no older than this, and otherwise get `401` with `oidc_recheck_required` until the owner signs in through OIDC again. Accounts with an offline token are re-checked in the background instead and have no such limit. Service account tokens are not affected. Edited on Organization → Security.
 	OidcTokenGraceSeconds int `json:"oidc_token_grace_seconds"`
@@ -10086,6 +10225,12 @@ type UpdateLookupTableParams struct {
 	IfMatch IfMatch `json:"If-Match"`
 }
 
+// UpdateMyNotificationRulesParams defines parameters for UpdateMyNotificationRules.
+type UpdateMyNotificationRulesParams struct {
+	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
+	IfMatch IfMatch `json:"If-Match"`
+}
+
 // CompleteOidcLinkParams defines parameters for CompleteOidcLink.
 type CompleteOidcLinkParams struct {
 	// Code Authorization code.
@@ -10383,6 +10528,12 @@ type UpdateUserParams struct {
 // CreateUserGatewayContactJSONBody defines parameters for CreateUserGatewayContact.
 type CreateUserGatewayContactJSONBody = map[string]interface{}
 
+// UpdateUserNotificationRulesParams defines parameters for UpdateUserNotificationRules.
+type UpdateUserNotificationRulesParams struct {
+	// IfMatch ETag of the representation being replaced, as returned by the last read. A mismatch gets `412`; a missing header gets `428`.
+	IfMatch IfMatch `json:"If-Match"`
+}
+
 // DeliverAlertGroupEventParams defines parameters for DeliverAlertGroupEvent.
 type DeliverAlertGroupEventParams struct {
 	// WebhookId Id of this event, kept across retries.
@@ -10503,6 +10654,9 @@ type CreateMyGatewayContactJSONRequestBody = GatewayContactInput
 // ConfirmMyGatewayContactJSONRequestBody defines body for ConfirmMyGatewayContact for application/json ContentType.
 type ConfirmMyGatewayContactJSONRequestBody = GatewayContactConfirm
 
+// UpdateMyNotificationRulesJSONRequestBody defines body for UpdateMyNotificationRules for application/json ContentType.
+type UpdateMyNotificationRulesJSONRequestBody = NotificationRulesUpdate
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = PasswordChange
 
@@ -10589,6 +10743,9 @@ type UpdateUserJSONRequestBody = UserUpdate
 
 // CreateUserGatewayContactJSONRequestBody defines body for CreateUserGatewayContact for application/json ContentType.
 type CreateUserGatewayContactJSONRequestBody = CreateUserGatewayContactJSONBody
+
+// UpdateUserNotificationRulesJSONRequestBody defines body for UpdateUserNotificationRules for application/json ContentType.
+type UpdateUserNotificationRulesJSONRequestBody = NotificationRulesUpdate
 
 // DeliverAlertGroupEventJSONRequestBody defines body for DeliverAlertGroupEvent for application/json ContentType.
 type DeliverAlertGroupEventJSONRequestBody = OutgoingWebhookEvent
@@ -13805,6 +13962,38 @@ type ClientInterface interface {
 	// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
 	IssueMyIcalFeed(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetMyNotificationRules Read own Notification rules
+	//
+	// The caller's normal and important rule as in effect (C-31.FR-1, FR-2): in the state `organization` the Organization's current rules, otherwise those stored when the caller chose the state. A call action reads `available` false with `unavailable_reason` `gateway_deleted` once its gateway was deleted or is no Notification gateway any more, and `no_confirmed_contact` once the caller has no confirmed contact there; it stays in the rule. Web session only: a token gets `403` (`session_required`).
+	//
+	// Corresponds with GET /me/notification-rules (the `GetMyNotificationRules` operationId).
+	GetMyNotificationRules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateMyNotificationRulesWithBody Change own Notification rules
+	//
+	// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+	UpdateMyNotificationRulesWithBody(ctx context.Context, params *UpdateMyNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateMyNotificationRules Change own Notification rules
+	//
+	// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+	UpdateMyNotificationRules(ctx context.Context, params *UpdateMyNotificationRulesParams, body UpdateMyNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResetMyNotificationRules Reset own Notification rules to the Organization's
+	//
+	// "Reset to the Organization's rules": the caller's rules return to the state `organization` and follow the Organization's rules again (C-31.FR-2). Recorded in the Audit log as `notification_rules.updated`; a caller already in that state records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Corresponds with POST /me/notification-rules/reset (the `ResetMyNotificationRules` operationId).
+	ResetMyNotificationRules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// StartOidcLink Start linking an OIDC identity
 	//
 	// Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -14771,6 +14960,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 	DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetUserNotificationRules Read a user's Notification rules
+	//
+	// The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User answers `404`.
+	//
+	// Corresponds with GET /users/{user_id}/notification-rules (the `GetUserNotificationRules` operationId).
+	GetUserNotificationRules(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserNotificationRulesWithBody Change a user's Notification rules
+	//
+	// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+	UpdateUserNotificationRulesWithBody(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserNotificationRules Change a user's Notification rules
+	//
+	// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+	UpdateUserNotificationRules(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, body UpdateUserNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreatePasswordSetupLink Issue a password setup link
 	//
@@ -17109,6 +17323,78 @@ func (c *Client) IssueMyIcalFeed(ctx context.Context, reqEditors ...RequestEdito
 	return c.Client.Do(req)
 }
 
+// GetMyNotificationRules Read own Notification rules
+//
+// The caller's normal and important rule as in effect (C-31.FR-1, FR-2): in the state `organization` the Organization's current rules, otherwise those stored when the caller chose the state. A call action reads `available` false with `unavailable_reason` `gateway_deleted` once its gateway was deleted or is no Notification gateway any more, and `no_confirmed_contact` once the caller has no confirmed contact there; it stays in the rule. Web session only: a token gets `403` (`session_required`).
+//
+// Corresponds with GET /me/notification-rules (the `GetMyNotificationRules` operationId).
+func (c *Client) GetMyNotificationRules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMyNotificationRulesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateMyNotificationRulesWithBody Change own Notification rules
+//
+// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+func (c *Client) UpdateMyNotificationRulesWithBody(ctx context.Context, params *UpdateMyNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateMyNotificationRulesRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateMyNotificationRules Change own Notification rules
+//
+// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+func (c *Client) UpdateMyNotificationRules(ctx context.Context, params *UpdateMyNotificationRulesParams, body UpdateMyNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateMyNotificationRulesRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResetMyNotificationRules Reset own Notification rules to the Organization's
+//
+// "Reset to the Organization's rules": the caller's rules return to the state `organization` and follow the Organization's rules again (C-31.FR-2). Recorded in the Audit log as `notification_rules.updated`; a caller already in that state records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Corresponds with POST /me/notification-rules/reset (the `ResetMyNotificationRules` operationId).
+func (c *Client) ResetMyNotificationRules(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResetMyNotificationRulesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // StartOidcLink Start linking an OIDC identity
 //
 // Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -19316,6 +19602,61 @@ func (c *Client) CreateUserGatewayContact(ctx context.Context, userId UserId, bo
 // Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 func (c *Client) DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteUserGatewayContactRequest(c.Server, userId, gatewayContactId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetUserNotificationRules Read a user's Notification rules
+//
+// The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User answers `404`.
+//
+// Corresponds with GET /users/{user_id}/notification-rules (the `GetUserNotificationRules` operationId).
+func (c *Client) GetUserNotificationRules(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetUserNotificationRulesRequest(c.Server, userId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserNotificationRulesWithBody Change a user's Notification rules
+//
+// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+func (c *Client) UpdateUserNotificationRulesWithBody(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserNotificationRulesRequestWithBody(c.Server, userId, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserNotificationRules Change a user's Notification rules
+//
+// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+func (c *Client) UpdateUserNotificationRules(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, body UpdateUserNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserNotificationRulesRequest(c.Server, userId, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -24271,6 +24612,113 @@ func NewIssueMyIcalFeedRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewGetMyNotificationRulesRequest constructs an http.Request for the GetMyNotificationRules method
+func NewGetMyNotificationRulesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/notification-rules")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateMyNotificationRulesRequest calls the generic UpdateMyNotificationRules builder with application/json body
+func NewUpdateMyNotificationRulesRequest(server string, params *UpdateMyNotificationRulesParams, body UpdateMyNotificationRulesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateMyNotificationRulesRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewUpdateMyNotificationRulesRequestWithBody constructs an http.Request for the UpdateMyNotificationRules method, with any body, and a specified content type
+func NewUpdateMyNotificationRulesRequestWithBody(server string, params *UpdateMyNotificationRulesParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/notification-rules")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("If-Match", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewResetMyNotificationRulesRequest constructs an http.Request for the ResetMyNotificationRules method
+func NewResetMyNotificationRulesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/me/notification-rules/reset")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewStartOidcLinkRequest constructs an http.Request for the StartOidcLink method
 func NewStartOidcLinkRequest(server string) (*http.Request, error) {
 	var err error
@@ -28612,6 +29060,100 @@ func NewDeleteUserGatewayContactRequest(server string, userId UserId, gatewayCon
 	return req, nil
 }
 
+// NewGetUserNotificationRulesRequest constructs an http.Request for the GetUserNotificationRules method
+func NewGetUserNotificationRulesRequest(server string, userId UserId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "user_id", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/users/%s/notification-rules", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateUserNotificationRulesRequest calls the generic UpdateUserNotificationRules builder with application/json body
+func NewUpdateUserNotificationRulesRequest(server string, userId UserId, params *UpdateUserNotificationRulesParams, body UpdateUserNotificationRulesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateUserNotificationRulesRequestWithBody(server, userId, params, "application/json", bodyReader)
+}
+
+// NewUpdateUserNotificationRulesRequestWithBody constructs an http.Request for the UpdateUserNotificationRules method, with any body, and a specified content type
+func NewUpdateUserNotificationRulesRequestWithBody(server string, userId UserId, params *UpdateUserNotificationRulesParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "user_id", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/users/%s/notification-rules", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("If-Match", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 // NewCreatePasswordSetupLinkRequest constructs an http.Request for the CreatePasswordSetupLink method
 func NewCreatePasswordSetupLinkRequest(server string, userId UserId) (*http.Request, error) {
 	var err error
@@ -29858,6 +30400,42 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /me/ical-feed (the `IssueMyIcalFeed` operationId).
 	IssueMyIcalFeedWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*IssueMyIcalFeedResponse, error)
 
+	// GetMyNotificationRulesWithResponse Read own Notification rules
+	//
+	// The caller's normal and important rule as in effect (C-31.FR-1, FR-2): in the state `organization` the Organization's current rules, otherwise those stored when the caller chose the state. A call action reads `available` false with `unavailable_reason` `gateway_deleted` once its gateway was deleted or is no Notification gateway any more, and `no_confirmed_contact` once the caller has no confirmed contact there; it stays in the rule. Web session only: a token gets `403` (`session_required`).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /me/notification-rules (the `GetMyNotificationRules` operationId).
+	GetMyNotificationRulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyNotificationRulesResponse, error)
+
+	// UpdateMyNotificationRulesWithBodyWithResponse Change own Notification rules
+	//
+	// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+	UpdateMyNotificationRulesWithBodyWithResponse(ctx context.Context, params *UpdateMyNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateMyNotificationRulesResponse, error)
+
+	// UpdateMyNotificationRulesWithResponse Change own Notification rules
+	//
+	// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+	UpdateMyNotificationRulesWithResponse(ctx context.Context, params *UpdateMyNotificationRulesParams, body UpdateMyNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMyNotificationRulesResponse, error)
+
+	// ResetMyNotificationRulesWithResponse Reset own Notification rules to the Organization's
+	//
+	// "Reset to the Organization's rules": the caller's rules return to the state `organization` and follow the Organization's rules again (C-31.FR-2). Recorded in the Audit log as `notification_rules.updated`; a caller already in that state records nothing. Web session only: a token gets `403` (`session_required`).
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /me/notification-rules/reset (the `ResetMyNotificationRules` operationId).
+	ResetMyNotificationRulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ResetMyNotificationRulesResponse, error)
+
 	// StartOidcLinkWithResponse Start linking an OIDC identity
 	//
 	// Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -30958,6 +31536,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 	DeleteUserGatewayContactWithResponse(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*DeleteUserGatewayContactResponse, error)
+
+	// GetUserNotificationRulesWithResponse Read a user's Notification rules
+	//
+	// The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User answers `404`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /users/{user_id}/notification-rules (the `GetUserNotificationRules` operationId).
+	GetUserNotificationRulesWithResponse(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*GetUserNotificationRulesResponse, error)
+
+	// UpdateUserNotificationRulesWithBodyWithResponse Change a user's Notification rules
+	//
+	// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+	UpdateUserNotificationRulesWithBodyWithResponse(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserNotificationRulesResponse, error)
+
+	// UpdateUserNotificationRulesWithResponse Change a user's Notification rules
+	//
+	// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+	UpdateUserNotificationRulesWithResponse(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, body UpdateUserNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserNotificationRulesResponse, error)
 
 	// CreatePasswordSetupLinkWithResponse Issue a password setup link
 	//
@@ -38862,6 +39467,262 @@ func (r IssueMyIcalFeedResponse) ContentType() string {
 	return ""
 }
 
+// GetMyNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for GetMyNotificationRules
+type GetMyNotificationRulesResponse200Headers struct {
+	ETag *string
+}
+
+// GetMyNotificationRulesResponse429Headers the declared response headers of an HTTP 429 response for GetMyNotificationRules
+type GetMyNotificationRulesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type GetMyNotificationRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NotificationRules
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetMyNotificationRulesResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetMyNotificationRulesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetMyNotificationRulesResponse) GetJSON200() *NotificationRules {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetMyNotificationRulesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r GetMyNotificationRulesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r GetMyNotificationRulesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMyNotificationRulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMyNotificationRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMyNotificationRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMyNotificationRulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// UpdateMyNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for UpdateMyNotificationRules
+type UpdateMyNotificationRulesResponse200Headers struct {
+	ETag *string
+}
+
+// UpdateMyNotificationRulesResponse429Headers the declared response headers of an HTTP 429 response for UpdateMyNotificationRules
+type UpdateMyNotificationRulesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type UpdateMyNotificationRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NotificationRules
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON412 the response for an HTTP 412 `application/problem+json` response
+	ApplicationproblemJSON412 *PreconditionFailed
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON428 the response for an HTTP 428 `application/problem+json` response
+	ApplicationproblemJSON428 *PreconditionRequired
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *UpdateMyNotificationRulesResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *UpdateMyNotificationRulesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateMyNotificationRulesResponse) GetJSON200() *NotificationRules {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON412 returns the response for an HTTP 412 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON412() *PreconditionFailed {
+	return r.ApplicationproblemJSON412
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON428 returns the response for an HTTP 428 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON428() *PreconditionRequired {
+	return r.ApplicationproblemJSON428
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r UpdateMyNotificationRulesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateMyNotificationRulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateMyNotificationRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateMyNotificationRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateMyNotificationRulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ResetMyNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for ResetMyNotificationRules
+type ResetMyNotificationRulesResponse200Headers struct {
+	ETag *string
+}
+
+// ResetMyNotificationRulesResponse429Headers the declared response headers of an HTTP 429 response for ResetMyNotificationRules
+type ResetMyNotificationRulesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type ResetMyNotificationRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NotificationRules
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ResetMyNotificationRulesResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *ResetMyNotificationRulesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ResetMyNotificationRulesResponse) GetJSON200() *NotificationRules {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r ResetMyNotificationRulesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r ResetMyNotificationRulesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r ResetMyNotificationRulesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r ResetMyNotificationRulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ResetMyNotificationRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResetMyNotificationRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ResetMyNotificationRulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // StartOidcLinkResponse429Headers the declared response headers of an HTTP 429 response for StartOidcLink
 type StartOidcLinkResponse429Headers struct {
 	RetryAfter *int
@@ -46697,6 +47558,200 @@ func (r DeleteUserGatewayContactResponse) ContentType() string {
 	return ""
 }
 
+// GetUserNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for GetUserNotificationRules
+type GetUserNotificationRulesResponse200Headers struct {
+	ETag *string
+}
+
+// GetUserNotificationRulesResponse429Headers the declared response headers of an HTTP 429 response for GetUserNotificationRules
+type GetUserNotificationRulesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type GetUserNotificationRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NotificationRules
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetUserNotificationRulesResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetUserNotificationRulesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetUserNotificationRulesResponse) GetJSON200() *NotificationRules {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetUserNotificationRulesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r GetUserNotificationRulesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r GetUserNotificationRulesResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r GetUserNotificationRulesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetUserNotificationRulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetUserNotificationRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetUserNotificationRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetUserNotificationRulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// UpdateUserNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for UpdateUserNotificationRules
+type UpdateUserNotificationRulesResponse200Headers struct {
+	ETag *string
+}
+
+// UpdateUserNotificationRulesResponse429Headers the declared response headers of an HTTP 429 response for UpdateUserNotificationRules
+type UpdateUserNotificationRulesResponse429Headers struct {
+	RetryAfter *int
+}
+
+type UpdateUserNotificationRulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *NotificationRules
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON412 the response for an HTTP 412 `application/problem+json` response
+	ApplicationproblemJSON412 *PreconditionFailed
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON428 the response for an HTTP 428 `application/problem+json` response
+	ApplicationproblemJSON428 *PreconditionRequired
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *UpdateUserNotificationRulesResponse200Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *UpdateUserNotificationRulesResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateUserNotificationRulesResponse) GetJSON200() *NotificationRules {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON412 returns the response for an HTTP 412 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON412() *PreconditionFailed {
+	return r.ApplicationproblemJSON412
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON428 returns the response for an HTTP 428 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON428() *PreconditionRequired {
+	return r.ApplicationproblemJSON428
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r UpdateUserNotificationRulesResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateUserNotificationRulesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateUserNotificationRulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateUserNotificationRulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateUserNotificationRulesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // CreatePasswordSetupLinkResponse429Headers the declared response headers of an HTTP 429 response for CreatePasswordSetupLink
 type CreatePasswordSetupLinkResponse429Headers struct {
 	RetryAfter *int
@@ -48763,6 +49818,66 @@ func (c *ClientWithResponses) IssueMyIcalFeedWithResponse(ctx context.Context, r
 	return ParseIssueMyIcalFeedResponse(rsp)
 }
 
+// GetMyNotificationRulesWithResponse Read own Notification rules
+//
+// The caller's normal and important rule as in effect (C-31.FR-1, FR-2): in the state `organization` the Organization's current rules, otherwise those stored when the caller chose the state. A call action reads `available` false with `unavailable_reason` `gateway_deleted` once its gateway was deleted or is no Notification gateway any more, and `no_confirmed_contact` once the caller has no confirmed contact there; it stays in the rule. Web session only: a token gets `403` (`session_required`).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /me/notification-rules (the `GetMyNotificationRules` operationId).
+func (c *ClientWithResponses) GetMyNotificationRulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMyNotificationRulesResponse, error) {
+	rsp, err := c.GetMyNotificationRules(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMyNotificationRulesResponse(rsp)
+}
+
+// UpdateMyNotificationRulesWithBodyWithResponse Change own Notification rules
+//
+// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+func (c *ClientWithResponses) UpdateMyNotificationRulesWithBodyWithResponse(ctx context.Context, params *UpdateMyNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateMyNotificationRulesResponse, error) {
+	rsp, err := c.UpdateMyNotificationRulesWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateMyNotificationRulesResponse(rsp)
+}
+
+// UpdateMyNotificationRulesWithResponse Change own Notification rules
+//
+// Sets the state of the caller's rules (C-31.FR-2, FR-5): `organization` follows the Organization's rules, which reach the caller at once when an Admin changes them; `call` takes the Organization's current rules with a call through `gateway_id` at the start of the important rule, together with its first action, unless that rule already calls through that gateway; `no_call` takes them without any call, a rule left without a Mention getting one in place of its first call; `custom` takes `normal` and `important` as sent. `call` and `no_call` are computed now and stored: a later change of the Organization's rules does not reach them. Fields the state does not take are ignored. `gateway_id` may be left out when the caller has a confirmed contact at exactly one Notification gateway; with several it is `422` `required` at `/gateway_id`; while no Notification gateway exists `gateway_required` there, for a gateway without the caller's confirmed contact `contact_required`, for a Connection that is no Notification gateway `unknown_id`. The custom rules are validated as `NotificationRuleSet` says, at `/normal/...` and `/important/...`; a call there needs a confirmed contact of the caller at its gateway (`contact_required` at the action). As many calls through a gateway as the caller's own stored rules have, in either rule, pass even when the gateway was deleted or the contact removed, so that they stay; a further call through it is checked, and a caller in the state `organization` keeps none, not even those of the Organization's rules. A call that would make the important rule longer than 10 actions is `422` `out_of_range` at `/state`. Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff of `state`, `gateway_id`, `normal` and `important`; an update that changes nothing records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /me/notification-rules (the `UpdateMyNotificationRules` operationId).
+func (c *ClientWithResponses) UpdateMyNotificationRulesWithResponse(ctx context.Context, params *UpdateMyNotificationRulesParams, body UpdateMyNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateMyNotificationRulesResponse, error) {
+	rsp, err := c.UpdateMyNotificationRules(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateMyNotificationRulesResponse(rsp)
+}
+
+// ResetMyNotificationRulesWithResponse Reset own Notification rules to the Organization's
+//
+// "Reset to the Organization's rules": the caller's rules return to the state `organization` and follow the Organization's rules again (C-31.FR-2). Recorded in the Audit log as `notification_rules.updated`; a caller already in that state records nothing. Web session only: a token gets `403` (`session_required`).
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /me/notification-rules/reset (the `ResetMyNotificationRules` operationId).
+func (c *ClientWithResponses) ResetMyNotificationRulesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ResetMyNotificationRulesResponse, error) {
+	rsp, err := c.ResetMyNotificationRules(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResetMyNotificationRulesResponse(rsp)
+}
+
 // StartOidcLinkWithResponse Start linking an OIDC identity
 //
 // Starts linking the caller's account to an identity at the OIDC provider: returns the authorization URL (PKCE `S256`, `state` and `nonce`) that the SPA opens after warning "After linking you will sign in only through OIDC; your password will be removed." The `state` is bound to this web session, so the callback adds the identity only to the account that started the link. A successful link removes the password: the account then signs in only through OIDC, keeps its TOTP enrolment, and `oidc.sync_role` applies to it. There is no unlinking by the user; an Admin can convert the account back to local (`convertUserToLocal`). Web session only: a token gets `403` (`session_required`). `409` with `oidc_not_enabled` while OIDC is off, or `oidc_already_linked` when the account already signs in through OIDC.
@@ -50612,6 +51727,51 @@ func (c *ClientWithResponses) DeleteUserGatewayContactWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseDeleteUserGatewayContactResponse(rsp)
+}
+
+// GetUserNotificationRulesWithResponse Read a user's Notification rules
+//
+// The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User answers `404`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /users/{user_id}/notification-rules (the `GetUserNotificationRules` operationId).
+func (c *ClientWithResponses) GetUserNotificationRulesWithResponse(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*GetUserNotificationRulesResponse, error) {
+	rsp, err := c.GetUserNotificationRules(ctx, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetUserNotificationRulesResponse(rsp)
+}
+
+// UpdateUserNotificationRulesWithBodyWithResponse Change a user's Notification rules
+//
+// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+func (c *ClientWithResponses) UpdateUserNotificationRulesWithBodyWithResponse(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserNotificationRulesResponse, error) {
+	rsp, err := c.UpdateUserNotificationRulesWithBody(ctx, userId, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserNotificationRulesResponse(rsp)
+}
+
+// UpdateUserNotificationRulesWithResponse Change a user's Notification rules
+//
+// An Admin sets the state of a User's rules or their custom sequences (C-31.FR-4), as `updateMyNotificationRules` does for the caller, with the same checks: a call needs a confirmed contact of that User at its gateway. `state` `organization` is "Reset to the Organization's rules". Requires `If-Match` (`412` when stale). Recorded in the Audit log as `notification_rules.updated` with a before/after diff. A deleted User answers `404`. An Admin's own rules change from the web session only, as under `/me`: with a token the answer is `403` (`session_required`).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /users/{user_id}/notification-rules (the `UpdateUserNotificationRules` operationId).
+func (c *ClientWithResponses) UpdateUserNotificationRulesWithResponse(ctx context.Context, userId UserId, params *UpdateUserNotificationRulesParams, body UpdateUserNotificationRulesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserNotificationRulesResponse, error) {
+	rsp, err := c.UpdateUserNotificationRules(ctx, userId, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserNotificationRulesResponse(rsp)
 }
 
 // CreatePasswordSetupLinkWithResponse Issue a password setup link
@@ -57808,6 +58968,244 @@ func ParseIssueMyIcalFeedResponse(rsp *http.Response) (*IssueMyIcalFeedResponse,
 	return response, nil
 }
 
+// ParseGetMyNotificationRulesResponse parses an HTTP response from a GetMyNotificationRulesWithResponse call
+func ParseGetMyNotificationRulesResponse(rsp *http.Response) (*GetMyNotificationRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMyNotificationRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NotificationRules
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers GetMyNotificationRulesResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers GetMyNotificationRulesResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseUpdateMyNotificationRulesResponse parses an HTTP response from a UpdateMyNotificationRulesWithResponse call
+func ParseUpdateMyNotificationRulesResponse(rsp *http.Response) (*UpdateMyNotificationRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateMyNotificationRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NotificationRules
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON412 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 428:
+		var dest PreconditionRequired
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON428 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers UpdateMyNotificationRulesResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers UpdateMyNotificationRulesResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseResetMyNotificationRulesResponse parses an HTTP response from a ResetMyNotificationRulesWithResponse call
+func ParseResetMyNotificationRulesResponse(rsp *http.Response) (*ResetMyNotificationRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResetMyNotificationRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NotificationRules
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ResetMyNotificationRulesResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers ResetMyNotificationRulesResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseStartOidcLinkResponse parses an HTTP response from a StartOidcLinkWithResponse call
 func ParseStartOidcLinkResponse(rsp *http.Response) (*StartOidcLinkResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -64952,6 +66350,188 @@ func ParseDeleteUserGatewayContactResponse(rsp *http.Response) (*DeleteUserGatew
 	switch {
 	case rsp.StatusCode == 429:
 		var headers DeleteUserGatewayContactResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetUserNotificationRulesResponse parses an HTTP response from a GetUserNotificationRulesWithResponse call
+func ParseGetUserNotificationRulesResponse(rsp *http.Response) (*GetUserNotificationRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetUserNotificationRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NotificationRules
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers GetUserNotificationRulesResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers GetUserNotificationRulesResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseUpdateUserNotificationRulesResponse parses an HTTP response from a UpdateUserNotificationRulesWithResponse call
+func ParseUpdateUserNotificationRulesResponse(rsp *http.Response) (*UpdateUserNotificationRulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateUserNotificationRulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest NotificationRules
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON412 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 428:
+		var dest PreconditionRequired
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON428 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers UpdateUserNotificationRulesResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 429:
+		var headers UpdateUserNotificationRulesResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

@@ -183,6 +183,14 @@ type ContactRemover interface {
 		addr netip.Addr) (func(context.Context), error)
 }
 
+// RuleRemover deletes the Notification rules of a deleted user (C-31.FR-5): Admin calls it inside the transaction tx
+// of the delete, after the erasure of their contacts at Notification gateways and before the Audit log entry, which
+// records the deletion. Disabling a user keeps their rules. An error rolls the delete back. It returns what to run once
+// tx committed, or nil. The Notification rules implement it (ADR-0016: the interface is declared by its consumer).
+type RuleRemover interface {
+	RemoveUserRules(ctx context.Context, tx dbgen.DBTX, userID int64) (func(context.Context), error)
+}
+
 // Requester is who asks for an administrative change and how: the actor and the Transport of the Audit log entry, and
 // the client address.
 type Requester struct {
@@ -204,6 +212,7 @@ type Admin struct {
 	teams     TeamRemover
 	feeds     FeedRemover
 	contacts  ContactRemover
+	rules     RuleRemover
 }
 
 // NewAdmin returns the Admin of the Organization orgID; clock is the business clock and publicURL is
@@ -232,6 +241,10 @@ func (a *Admin) SetFeedRemover(r FeedRemover) { a.feeds = r }
 // SetContactRemover sets what erases the contacts at Notification gateways of the users that Delete deletes; the
 // runtime sets it on the Admin the API uses. One without erases nothing.
 func (a *Admin) SetContactRemover(r ContactRemover) { a.contacts = r }
+
+// SetRuleRemover sets what deletes the Notification rules of the users that Delete deletes; the runtime sets it on the
+// Admin the API uses. One without deletes nothing.
+func (a *Admin) SetRuleRemover(r RuleRemover) { a.rules = r }
 
 // release runs the OwnerReleaser for the user u in the transaction of q and adds what it returns to committed.
 func (a *Admin) release(ctx context.Context, q AdminQueries, u User, reason string,
@@ -525,7 +538,8 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 // deleted-user-<public_id>, the email and the password are erased, the sessions end, the Personal access tokens are
 // revoked with the reason owner_deleted (C-04.FR-1), open password setup links are superseded, their acknowledged
 // Alert Groups are released, their Account links removed (C-03.FR-13), they leave every Team (C-25.FR-3), their iCal
-// feed is deleted (C-27.FR-10) and their contacts at Notification gateways are erased (C-30.FR-3). The Audit log keeps
+// feed is deleted (C-27.FR-10), their contacts at Notification gateways are erased (C-30.FR-3) and their Notification
+// rules deleted (C-31.FR-5). The Audit log keeps
 // the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
 // Admin is ErrLastAdmin.
 func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int64) error {
@@ -584,6 +598,15 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 			after, err := a.contacts.RemoveUserContacts(ctx, q.Tx(), before.ID, r.Actor, r.Transport, r.Address)
 			if err != nil {
 				return fmt.Errorf("erase the gateway contacts of %s: %w", before.PublicID, err)
+			}
+			if after != nil {
+				committed = append(committed, after)
+			}
+		}
+		if a.rules != nil {
+			after, err := a.rules.RemoveUserRules(ctx, q.Tx(), before.ID)
+			if err != nil {
+				return fmt.Errorf("delete the notification rules of %s: %w", before.PublicID, err)
 			}
 			if after != nil {
 				committed = append(committed, after)
