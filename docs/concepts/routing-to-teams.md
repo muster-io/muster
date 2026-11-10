@@ -68,7 +68,7 @@ An Alert Group has one status and one list of Alerts in every channel it is in. 
 and its message in `infra-notice` shows the same Owner; resolve it anywhere and every message shows it resolved. The
 Alert Group page names its Teams, and the deliveries of the Alert Group show where it went.
 
-![The Teams of the Alert Group KubernetesContainerOOMKilled: payments, by the Team label](../assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot } The
+![The header of the Alert Group KubernetesContainerOOMKilled, with its Teams: payments, by the Team label](../assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot } The
 delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
 it — the Route, or a Team — with their conditions.
 

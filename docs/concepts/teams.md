@@ -174,7 +174,7 @@ person an Admin added, `idp` for a person the identity provider put in it — an
 A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
 
-![The identity provider groups of the Team payments: the entry teams/payments/* with the claim groups](../assets/screenshots/concepts/teams/03-team-idp.png){ .screenshot }
+![The identity provider groups of the Team payments: the entry teams/payments/*, which reads the groups claim of the OIDC settings](../assets/screenshots/concepts/teams/03-team-idp.png){ .screenshot }
 
 The claim of an entry
 :   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster

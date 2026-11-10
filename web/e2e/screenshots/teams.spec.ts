@@ -278,8 +278,8 @@ test("shows the Teams, the Team page, the Route form and the Alert Group", async
   await page.goto(`/alert-groups/${group}`);
   await expect(page.getByTestId("alert-group-teams")).toContainText("payments — by the Team label");
   await capture(page, TEAMS, "08-alert-group-teams", {
-    locator: page.getByTestId("alert-group-teams"),
-    padding: 48,
+    locator: page.getByTestId("alert-group-header"),
+    padding: 16,
   });
   expect(paymentsId).not.toBe("");
 });
