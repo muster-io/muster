@@ -138,6 +138,7 @@
 - [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md): One Route can serve many teams.
 - [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md): An Alert Group whose Severity level is **critical** is **Urgent**.
 - [Schedules](https://muster-io.github.io/muster/latest/concepts/schedules.md): A **Schedule** says who in a Team is On-call and when.
+- [Notification rules](https://muster-io.github.io/muster/latest/concepts/notification-rules.md): A **Notification rule** says how a Page reaches a person.
 
 ### Operations
 
@@ -183,4 +184,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 912430 bytes, about 228107 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 919090 bytes, about 229772 tokens.
