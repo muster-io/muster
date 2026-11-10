@@ -2,7 +2,31 @@
 
 A **Team** says who owns what: Routes and Destinations may name the Team that owns them, so that each team finds its
 own configuration with a filter. Alerts and Alert Groups belong to Teams by their labels, so that each team finds its
-Alert Groups. Teams are managed through the API under `/api/v1/teams`.
+Alert Groups. A Route may also deliver to the Destinations of the Teams of its Alerts
+([Routing to Teams](routing-to-teams.md)). Teams are managed in the web UI, under **Teams** in the main navigation, and
+through the API under `/api/v1/teams`.
+
+A Team costs nothing to start with. It may have no people and no Destinations and only name Alerts: it then groups and
+filters them, and you add people, Destinations and Routes when you want them.
+
+## In the web UI
+
+**Teams** lists the Teams with the people in each, and above them the Team label, and below them the values of it that name no
+Team ([Values without a Team](#values-without-a-team)). **New Team** makes a Team; a value without a Team has its own
+**Create Team**.
+
+![The Teams list with the Teams payments and search, and the values checkout and Payments of the Team label that name no Team](../assets/screenshots/concepts/teams/01-teams-list.png){ .screenshot }
+
+A Team's page has its people, its identity provider groups, its Working hours, its Destinations, and **Which Alerts
+belong to this Team**: the Team label with its slug and the Team matchers, with an example of what an Alert gets.
+
+![The people of the Team payments: alice and bob added by hand, petr through the identity provider group](../assets/screenshots/concepts/teams/02-team-people.png){ .screenshot }
+
+The Destinations of a Team are the Destinations of the team, each with a
+[Severity condition](routing-to-teams.md#severity-conditions). They receive the Alert Groups of the Routes that deliver
+to the Teams, and nothing else: owning a Destination is another thing.
+
+![The Destinations of the Team payments: payments-critical for critical Alert Groups and payments-notice for the rest](../assets/screenshots/concepts/teams/04-team-destinations.png){ .screenshot }
 
 ## What a Team is
 
@@ -78,15 +102,30 @@ the Teams you are in ("My Teams"). The Teams of an Alert Group exist whatever it
 it is delivered.
 
 A worked example
-:   A rule generator sets `category`, `team` and `system` on every alert rule. With the Team label `team`, each Team's
-    slug is the value its rules carry — `payments`, `checkout` — and the Alerts reach their Teams without any matcher.
-    A Team without people that only names Alerts is fine: it groups and filters them.
+:   A rule generator sets `category`, `team` and `system` on every alert rule, so that the rule for a container that
+    was killed for lack of memory, `KubernetesContainerOOMKilled`, reaches Muster with the labels
+    `category="infra"`, `team="payments"` and `system="k8s"`. With the Team label `team` (the default), the slug of
+    each Team is the value its rules carry: the Teams `payments`, `checkout` and `search` pick up their Alerts with no
+    Team matcher at all, and the Alerts with `team="payments"` have `payments` among the Teams of their Alert Group.
+    The labels `category` and `system` belong to the Route: `category="infra"` is the Matcher of the Route
+    "Infrastructure" ([Routing to Teams](routing-to-teams.md#operations-and-team-destinations-by-severity)), and `system`
+    is a label to group by. A Team matcher is for Alerts that carry no Team label, or a wrong one: the Team `devops`
+    with the matcher `category="infra"` also gets every infrastructure Alert, whichever `team` it says: they belong to it.
+
+Teams without people
+:   A Team does not need people to be useful. A Team with nobody in it, such as `search` above, still names its Alerts
+    and Alert Groups, so that the list of Alert Groups filters by it and an outgoing webhook event carries it in
+    `alert_group.teams`, and may still have Destinations that receive the Alert Groups of its Alerts. People join it
+    later, by hand or through the identity provider, and nothing has to be redone.
 
 Test clusters with one shared namespace
 :   When every team deploys into the same namespace of a test cluster, `namespace` does not tell them apart. Match
     another label instead: the Pod name (`pod=~"checkout-.*"`), an app label the workloads carry
     (`app_kubernetes_io_part_of="checkout"`), or put the Team label itself on the workloads, so that their Alerts carry
-    `team="checkout"`.
+    `team="checkout"`. In the first two ways the Team `checkout` has the Team matchers `pod=~"checkout-.*"` and
+    `app_kubernetes_io_part_of="checkout"`, and an Alert that either one picks belongs to it. In the third, no matcher
+    is needed, and the Alerts of a production cluster and a test cluster reach the same Team. The Route
+    [for test clusters](routing-to-teams.md#a-route-for-test-clusters) then sends them to the team's own Destinations.
 
 ## Values without a Team
 
@@ -134,6 +173,8 @@ person an Admin added, `idp` for a person the identity provider put in it — an
 
 A Team may name groups of the identity provider in `idp_entries`; the people in those groups who sign in through
 OIDC are in the Team. Each entry has a group and, optionally, the claim it reads:
+
+![The identity provider groups of the Team payments: the entry teams/payments/*, which reads the groups claim of the OIDC settings](../assets/screenshots/concepts/teams/03-team-idp.png){ .screenshot }
 
 The claim of an entry
 :   An entry reads its own claim, by its exact name, or, without one, the groups claim of the OIDC settings. Muster

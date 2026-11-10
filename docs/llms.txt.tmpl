@@ -59,6 +59,16 @@
 5. [Link Slack]({{page "messengers/account-links.md#link-slack"}}): people link their accounts with a code that the bot sends by direct message.
 6. Finished when a person presses a button of the test message and Muster answers "{{quote "docs/messengers/slack.md" "This is a test message; nothing was changed"}}" ([The test message]({{page "messengers/slack.md#the-test-message"}})).
 
+### Set up Teams and route to them
+
+1. [Teams]({{page "concepts/teams.md"}}): what a Team is and what it owns. {{quote "docs/concepts/teams.md" "A Team grants no Permission and limits none"}}: Roles stay the same for the whole Organization, and only an Admin creates Teams and adds people to them.
+2. [Teams]({{page "concepts/teams.md#which-alerts-belong-to-a-team"}}): an Alert belongs to a Team by the value of the Team label, {{setting "organization.team_label"}} by default, which must equal the Team's slug, or by a Team matcher. A value that names no Team adds nothing ([Values without a Team]({{page "concepts/teams.md#values-without-a-team"}})). For test clusters where every team shares one namespace, match `pod` or an app label, or put the Team label on the workloads.
+3. [Teams]({{page "concepts/teams.md#membership-from-the-identity-provider"}}): people join a Team by hand or through groups of the identity provider, each entry with the claim it reads and exact groups or subtrees such as `teams/payments/*`.
+4. [Routing to Teams]({{page "concepts/routing-to-teams.md"}}): {{quote "docs/concepts/routing-to-teams.md" "The feature is optional."}} Give each Destination of a Route and of a Team a Severity condition ([Severity conditions]({{page "concepts/routing-to-teams.md#severity-conditions"}})), and turn on "Also to the Teams from the label" on the Route ([Also to the Teams from the label]({{page "concepts/routing-to-teams.md#also-to-the-teams-from-the-label"}})).
+5. [Routing to Teams]({{page "concepts/routing-to-teams.md#teams-that-want-their-own-alert-groups"}}): Teams that want their own Alert Groups add the Team label to the Group key of the Route; read [Preview where alerts go]({{page "concepts/routing-to-teams.md#preview-where-alerts-go"}}) before saving, and use [A Route for test clusters]({{page "concepts/routing-to-teams.md#a-route-for-test-clusters"}}) to send test alerts to the Teams without their Escalation chains.
+6. [What critical changes]({{page "concepts/what-critical-changes.md"}}): {{quote "docs/concepts/what-critical-changes.md" "Nothing else makes an Alert Group Urgent"}}; read it before you set a Minimum severity on a Route.
+7. Finished when the preview of the Route lists, for each Alert Group, the Teams and the Destinations you expect.
+
 ### Automate through the API
 
 1. [API]({{page "reference/api.md"}}): the conventions of the API and its tokens. {{quote "docs/reference/api.md" "Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token."}} [Sign-in]({{page "sign-in/index.md#ways-to-sign-in"}}) describes both.
