@@ -168,6 +168,17 @@ request of the Connection, to any of its Destinations, for the seconds of its `R
 Muster edits a Root message for as long as its Alert Group is open, which can be days. Keep
 **ServiceSettings.PostEditTimeLimit** at `-1`, its default, so that posts can be edited at any age.
 
+## What Muster posts
+
+A Root message is one post with no text of its own and one attachment in the colour of its status. The attachment's
+title is `#N` and the Alert Group's title, linked to the Alert Group page, with the status as a word; the Severity,
+Route, Teams and Started are its short fields; the summary, the description, the key labels, the Alerts, the notices
+and the footer are its text, with the links as its last line; and the buttons come under it. The labels, the Alerts and
+the text of the Route's message are chosen on the Route: see
+[Messages and templates](../configure/messages-and-templates.md#the-default-message), which shows the attachment, and
+[Labels in the message](../configure/messages-and-templates.md#labels-in-the-message). A post is at most 16,383
+characters; a long one drops its description first, then its Alerts, its summary and its key labels.
+
 ## Who gets notified
 
 - **Edits notify nobody**, even an edit that adds a Mention. That is why every Loud event is a new post: a new Root

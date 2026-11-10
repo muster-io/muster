@@ -22,18 +22,20 @@
 ### Write a bridge in Go
 
 1. [Write a bridge]({{page "messengers/write-a-bridge.md#the-go-library"}}): The Go library, installed with `{{quote "docs/messengers/write-a-bridge.md" "go get github.com/muster-io/muster-bridge-go"}}`, and [The example bridge]({{page "messengers/write-a-bridge.md#the-example-bridge"}}), which {{quote "docs/messengers/write-a-bridge.md" "is built on the Go library and lives in its repository, in `examples/chat`"}}.
-2. [Connect a messenger through a bridge]({{page "messengers/bridge.md"}}): the Bridge Connection and its Destinations, as an Admin sets them up.
-3. [Bridge protocol]({{page "reference/bridge-protocol.md"}}) and its specification, [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}).
-4. The repository [muster-io/muster-bridge-go](https://github.com/muster-io/muster-bridge-go): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-go/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
-5. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) passes against the bridge.
+2. [Render the structured layout]({{page "messengers/write-a-bridge.md#render-the-structured-layout"}}): {{quote "docs/messengers/write-a-bridge.md" "A bridge renders either `body` or `layout`, never both."}} {{quote "docs/messengers/write-a-bridge.md" "Render `body` whenever `layout` is absent."}} Go: `bridge.Layout`.
+3. [Connect a messenger through a bridge]({{page "messengers/bridge.md"}}): the Bridge Connection and its Destinations, and [what Muster posts]({{page "messengers/bridge.md#what-muster-posts"}}).
+4. [Bridge protocol]({{page "reference/bridge-protocol.md"}}) and its specification, [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}).
+5. The repository [muster-io/muster-bridge-go](https://github.com/muster-io/muster-bridge-go): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-go/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
+6. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) passes against the bridge.
 
 ### Write a bridge in Python
 
 1. [Write a bridge]({{page "messengers/write-a-bridge.md#the-python-library"}}): The Python library, installed in a virtual environment, `{{quote "docs/messengers/write-a-bridge.md" "python3 -m venv .venv && . .venv/bin/activate"}}`, with `{{quote "docs/messengers/write-a-bridge.md" "pip install muster-bridge"}}`. {{quote "docs/messengers/write-a-bridge.md" "Its versions stay `0.x` until Muster 1.0"}}.
-2. [Connect a messenger through a bridge]({{page "messengers/bridge.md"}}): the Bridge Connection and its Destinations, as an Admin sets them up.
-3. [Bridge protocol]({{page "reference/bridge-protocol.md"}}) and its specification, [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}).
-4. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
-5. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) passes against the bridge.
+2. [Render the structured layout]({{page "messengers/write-a-bridge.md#render-the-structured-layout"}}): Python: `Layout` and `MessageInput`; render `body` whenever `layout` is absent.
+3. [Connect a messenger through a bridge]({{page "messengers/bridge.md"}}): the Bridge Connection and its Destinations, and [what Muster posts]({{page "messengers/bridge.md#what-muster-posts"}}).
+4. [Bridge protocol]({{page "reference/bridge-protocol.md"}}) and its specification, [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}).
+5. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the guide to the library, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) the guide for an agent that changes the library itself.
+6. Finished when [`muster bridge check`]({{page "messengers/write-a-bridge.md#muster-bridge-check"}}) passes against the bridge.
 
 ### Connect Alertmanager
 
@@ -61,13 +63,11 @@
 
 ### Set up Teams and route to them
 
-1. [Teams]({{page "concepts/teams.md"}}): what a Team is and what it owns. {{quote "docs/concepts/teams.md" "A Team grants no Permission and limits none"}}: Roles stay the same for the whole Organization, and only an Admin creates Teams and adds people to them.
-2. [Teams]({{page "concepts/teams.md#which-alerts-belong-to-a-team"}}): an Alert belongs to a Team by the value of the Team label, {{setting "organization.team_label"}} by default, which must equal the Team's slug, or by a Team matcher. A value that names no Team adds nothing ([Values without a Team]({{page "concepts/teams.md#values-without-a-team"}})). For test clusters where every team shares one namespace, match `pod` or an app label, or put the Team label on the workloads.
-3. [Teams]({{page "concepts/teams.md#membership-from-the-identity-provider"}}): people join a Team by hand or through groups of the identity provider, each entry with the claim it reads and exact groups or subtrees such as `teams/payments/*`.
-4. [Routing to Teams]({{page "concepts/routing-to-teams.md"}}): {{quote "docs/concepts/routing-to-teams.md" "The feature is optional."}} Give each Destination of a Route and of a Team a Severity condition ([Severity conditions]({{page "concepts/routing-to-teams.md#severity-conditions"}})), and turn on "Also to the Teams from the label" on the Route ([Also to the Teams from the label]({{page "concepts/routing-to-teams.md#also-to-the-teams-from-the-label"}})).
-5. [Routing to Teams]({{page "concepts/routing-to-teams.md#teams-that-want-their-own-alert-groups"}}): Teams that want their own Alert Groups add the Team label to the Group key of the Route; read [Preview where alerts go]({{page "concepts/routing-to-teams.md#preview-where-alerts-go"}}) before saving, and use [A Route for test clusters]({{page "concepts/routing-to-teams.md#a-route-for-test-clusters"}}) to send test alerts to the Teams without their Escalation chains.
-6. [What critical changes]({{page "concepts/what-critical-changes.md"}}): {{quote "docs/concepts/what-critical-changes.md" "Nothing else makes an Alert Group Urgent"}}; read it before you set a Minimum severity on a Route.
-7. Finished when the preview of the Route lists, for each Alert Group, the Teams and the Destinations you expect.
+1. [Teams]({{page "concepts/teams.md"}}): {{quote "docs/concepts/teams.md" "A Team grants no Permission and limits none"}}. An Alert belongs to a Team by the value of the Team label ({{setting "organization.team_label"}} by default), which must equal the Team's slug, or by a Team matcher ([Which Alerts belong to a Team]({{page "concepts/teams.md#which-alerts-belong-to-a-team"}})). On test clusters with a shared namespace, match `pod` or an app label.
+2. [Teams]({{page "concepts/teams.md#membership-from-the-identity-provider"}}): people join by hand or through identity provider groups, such as `teams/payments/*`.
+3. [Routing to Teams]({{page "concepts/routing-to-teams.md"}}): {{quote "docs/concepts/routing-to-teams.md" "The feature is optional."}} Give Destinations Severity conditions and turn on "Also to the Teams from the label" on the Route; Teams that want their own Alert Groups add the Team label to the Group key; [A Route for test clusters]({{page "concepts/routing-to-teams.md#a-route-for-test-clusters"}}) delivers test alerts without Escalation chains.
+4. [What critical changes]({{page "concepts/what-critical-changes.md"}}): {{quote "docs/concepts/what-critical-changes.md" "Nothing else makes an Alert Group Urgent"}}; read it before setting a Minimum severity.
+5. Finished when the [preview]({{page "concepts/routing-to-teams.md#preview-where-alerts-go"}}) of the Route lists the Teams and Destinations you expect.
 
 ### Automate through the API
 
