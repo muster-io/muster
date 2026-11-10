@@ -50,11 +50,10 @@ const CHANNELS = {
   "payments-notice": "ch-payments-notice",
   "search-notice": "ch-search-notice",
 } as const;
-type DestinationName = keyof typeof CHANNELS;
 
 test.describe.configure({ mode: "serial" });
 
-const destinationIds = new Map<DestinationName, string>();
+const destinationIds = new Map<string, string>();
 let integrationId = "";
 let routeId = "";
 let paymentsId = "";
@@ -74,11 +73,7 @@ async function cleanUp(): Promise<void> {
   }
 }
 
-async function putTeam(
-  admin: Api,
-  id: string,
-  body: Record<string, unknown>,
-): Promise<void> {
+async function putTeam(admin: Api, id: string, body: Record<string, unknown>): Promise<void> {
   const team = await admin.call<{ name: string; slug: string; etag: string }>(
     "GET",
     `/api/v1/teams/${id}`,
@@ -92,12 +87,7 @@ async function putTeam(
 }
 
 /** Sends one Alert of category=infra through the fake Alertmanager. */
-async function alert(
-  id: string,
-  alertname: string,
-  team: string,
-  severity: string,
-): Promise<void> {
+async function alert(id: string, alertname: string, team: string, severity: string): Promise<void> {
   await fam("PUT", `/groups/${AM_GROUP}/alerts/${id}`, {
     labels: { alertname, category: "infra", team, system: "k8s", severity },
     annotations: { summary: `${alertname} is firing` },
@@ -135,9 +125,9 @@ test.beforeAll(async () => {
           limiter: { limit: 50, per_seconds: 1 },
         },
       );
-      destinationIds.set(name as DestinationName, created.destination.id);
+      destinationIds.set(name, created.destination.id);
     }
-    const id = (name: DestinationName) => destinationIds.get(name) ?? "";
+    const id = (name: string) => destinationIds.get(name) ?? "";
 
     const payments = await admin.call<{ id: string }>("POST", "/api/v1/teams", {
       name: "payments",
