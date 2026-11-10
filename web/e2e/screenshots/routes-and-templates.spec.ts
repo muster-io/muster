@@ -341,6 +341,6 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
   await capture(page, TEMPLATES, "10-preview-bridge", {
     locator: root,
     padding: 16,
-    replace: POD_KEEP,
+    replace: [...POD_KEEP, ["http://localhost:8080", "https://muster.example.org"]],
   });
 });

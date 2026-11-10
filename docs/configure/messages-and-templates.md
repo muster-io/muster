@@ -45,22 +45,53 @@ Open in Muster · Runbook · Source
 
 Every other label and annotation is on the Alert Group page, one click away through "Open in Muster".
 
+The images below are the tabs of the Route's [preview](#what-you-can-change-and-what-you-cannot), for a firing Alert
+Group of three `KubernetesContainerOOMKilled` Alerts on the Route "Infrastructure", with the Team `payments`, in
+English.
+
 **Mattermost**
 :   One attachment in the colour of the status: the title of item 1 as its title, the fields as short fields, items 3
-    to 7 as its text with the links as its last line, and the buttons under it.
+    to 7 as its text with the links as its last line, and the buttons under it. A Loud message has its Mentions as the
+    first line of the text. See [Connect Mattermost](../messengers/mattermost.md#what-muster-posts).
+
+    ![The Mattermost tab of the preview: the title, the fields Severity, Route, Teams and Started, the summary, the description, the key labels, the pods and the link Open in Muster](../assets/screenshots/configure/messages-and-templates/07-preview-mattermost.png){ .screenshot }
 
 **Slack**
 :   One attachment in the colour of the status: a section with the title, one section with the fields, a section with
     the summary and the description, the key labels as a context, a section with the Alerts and the notices, the
-    footer as a context, a section with the links, and the buttons.
+    footer as a context, a section with the links, and the buttons. See
+    [Connect Slack](../messengers/slack.md#what-muster-posts).
+
+    ![The Slack tab of the preview: the blocks of the message, a header with the title, a section with the fields, sections with the summary and the description, a context with the key labels, a section with the pods and a context with the link](../assets/screenshots/configure/messages-and-templates/08-preview-slack.png){ .screenshot }
 
 **Telegram**
 :   One message: the title with the status emoji beside the word, the fields as lines `Severity: warning`, then the
-    items in order, with the buttons as its inline keyboard.
+    items in order, with the buttons as its inline keyboard. See
+    [Connect Telegram](../messengers/telegram.md#what-muster-sends).
+
+    ![The Telegram tab of the preview: the title, the fields as lines, the summary, the description, the key labels, the pods and the link Open in Muster](../assets/screenshots/configure/messages-and-templates/09-preview-telegram.png){ .screenshot }
+
+**A bridge**
+:   The envelope of the Bridge protocol: the status with its colour and emoji, the title, the link, the buttons of the
+    Destination, the same message as CommonMark in `body` — the form that a bridge renders in its messenger's markup —
+    and, beside it, `layout`, the same content as structured data, so that a bridge can lay it out natively without
+    parsing markup. The Bridge tab shows the `layout` as JSON beside the `body`. A bridge renders either of the two;
+    how, is in [Render the structured layout](../messengers/write-a-bridge.md#render-the-structured-layout), and what
+    Muster posts through a bridge in [Connect a messenger through a bridge](../messengers/bridge.md#what-muster-posts).
+
+    ![The Bridge tab of the preview: the layout as JSON beside the CommonMark body, whose length is shown against the limit that the bridge sets itself](../assets/screenshots/configure/messages-and-templates/10-preview-bridge.png){ .screenshot }
 
 A message longer than its messenger allows — 4,096 characters in Telegram, 3,000 in a Slack section, 16,383 in
-Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
-status, the fields, the footer, the buttons and the link to Muster always stay.
+Mattermost, the longest `body` that a bridge declares through a bridge — loses its description first, then its Alerts,
+then its summary, then its key labels; the title, the status, the fields, the footer, the buttons and the link to
+Muster always stay. The `layout` that a bridge receives loses the same parts as its `body`.
+
+A Route's own templates replace only part of this. A **Root message** template replaces items 3 to 5, the summary and
+the description, the key labels and the Alerts; an **Alert line** template replaces the value of the label that tells
+the Alerts apart on each line of item 5; the Fallback template, which shows when a template fails, lists every label
+instead of items 3 to 5. The title, the fields, the notices, the footer, the buttons and the links stay Muster's in
+every case, and so does the length rule above. A message with a template of its own, or with the Fallback template, has
+no `layout` through a bridge, since part of its content exists only in the `body`: the preview's Bridge tab says so.
 
 ## Labels in the message
 
