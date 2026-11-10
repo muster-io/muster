@@ -148,6 +148,7 @@ nav:
           - operations/runbooks/MusterDeliveryQueueGrowing.md
           - operations/runbooks/MusterIngestBacklog.md
           - operations/runbooks/MusterIngestRejected.md
+          - operations/runbooks/MusterIngestSnapshotFailed.md
           - operations/runbooks/MusterTemplateError.md
           - operations/runbooks/MusterClockSkew.md
           - operations/runbooks/MusterLoginFailures.md

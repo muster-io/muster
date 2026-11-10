@@ -115,17 +115,21 @@ const (
 	WarningHeartbeatNotConfigured = "heartbeat_not_configured"
 	WarningHeartbeatWaiting       = "heartbeat_waiting"
 	WarningHeartbeatLost          = "heartbeat_lost"
+	WarningSnapshotFailed         = "snapshot_failed"
 )
 
 // Warning is a warning of an Integration: snapshot_truncated with the count of truncated groupKeys,
 // long_repeat_interval with the Alertmanager route and its learned repeat interval, or one of the Heartbeat warnings,
-// heartbeat_lost with the time of the last signal in Since.
+// heartbeat_lost with the time of the last signal in Since, or snapshot_failed with the receipt time of the newest
+// webhook Stored Snapshot in Since, its public id in SnapshotID and its processing error in Error.
 type Warning struct {
 	Kind                  string
 	TruncatedGroupCount   int64
 	RoutePath             string
 	RepeatIntervalSeconds int64
 	Since                 *time.Time
+	SnapshotID            string
+	Error                 string
 }
 
 // FieldError is a field of a request that is not valid, at a JSON pointer of the request body, with a stable code of
@@ -237,6 +241,8 @@ type Queries interface {
 	EnsureBuiltin(ctx context.Context, arg dbgen.EnsureBuiltinParams) (string, error)
 	CountTruncatedGroupsOf(ctx context.Context, arg dbgen.CountTruncatedGroupsOfParams) (
 		[]dbgen.CountTruncatedGroupsOfRow, error)
+	ListFailedLatestSnapshots(ctx context.Context, arg dbgen.ListFailedLatestSnapshotsParams) (
+		[]dbgen.ListFailedLatestSnapshotsRow, error)
 	ListLongRepeatRoutes(ctx context.Context, arg dbgen.ListLongRepeatRoutesParams) (
 		[]dbgen.ListLongRepeatRoutesRow, error)
 	audit.Store
@@ -426,8 +432,9 @@ func (s *Service) decorate(ctx context.Context, q Queries, list []Integration) e
 }
 
 // withWarnings sets the warnings of each Integration: the Heartbeat warning of its state, except on the built-in one
-// (C-07.FR-5); snapshot_truncated while any of its groupKeys is truncated, and one long_repeat_interval per
-// Alertmanager route whose learned repeat interval is above LongRepeatWarning (C-06.FR-18).
+// (C-07.FR-5); snapshot_truncated while any of its groupKeys is truncated, one long_repeat_interval per
+// Alertmanager route whose learned repeat interval is above LongRepeatWarning (C-06.FR-18), and snapshot_failed while
+// its newest settled webhook Stored Snapshot failed (C-06.FR-20).
 func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integration) error {
 	if len(list) == 0 {
 		return nil
@@ -460,6 +467,18 @@ func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integratio
 		if i := slices.Index(ids, r.IntegrationID); i >= 0 {
 			list[i].Warnings = append(list[i].Warnings, Warning{Kind: WarningLongRepeatInterval,
 				RoutePath: r.RoutePath, RepeatIntervalSeconds: (r.LearnedRepeatIntervalMs + 500) / 1000})
+		}
+	}
+	failed, err := q.ListFailedLatestSnapshots(ctx, dbgen.ListFailedLatestSnapshotsParams{OrgID: s.orgID,
+		IntegrationIds: ids})
+	if err != nil {
+		return fmt.Errorf("list the failed latest snapshots: %w", err)
+	}
+	for _, r := range failed {
+		if i := slices.Index(ids, r.IntegrationID); i >= 0 {
+			at := r.ReceivedAt.UTC()
+			list[i].Warnings = append(list[i].Warnings, Warning{Kind: WarningSnapshotFailed, Since: &at,
+				SnapshotID: r.PublicID, Error: r.ProcessingError.String})
 		}
 	}
 	return nil
@@ -878,21 +897,24 @@ func (s *Service) exportInfo(publicID, name string) {
 	exportCounters(publicID)
 }
 
-// exportCounters creates the series of muster_ingest_requests_total of an Integration at zero, one per outcome:
-// increase() never counts the first sample of a series, so MusterIngestRejected would otherwise miss the first
-// rejected request of the Integration on each replica.
+// exportCounters creates the series of muster_ingest_requests_total of an Integration at zero, one per outcome, and
+// that of muster_ingest_failed_snapshots_total: increase() never counts the first sample of a series, so
+// MusterIngestRejected and MusterIngestSnapshotFailed would otherwise miss the first rejected request or failed
+// Snapshot of the Integration on each replica.
 func exportCounters(publicID string) {
 	for _, outcome := range metrics.IngestOutcomes {
 		metrics.IngestRequests.With(publicID, outcome)
 	}
+	metrics.IngestFailedSnapshots.With(publicID)
 }
 
-// unexportCounters removes the series of muster_ingest_requests_total of a deleted Integration, whose tokens count
-// as unknown from then on.
+// unexportCounters removes the series of muster_ingest_requests_total and muster_ingest_failed_snapshots_total of a
+// deleted Integration, whose tokens count as unknown from then on.
 func unexportCounters(publicID string) {
 	for _, outcome := range metrics.IngestOutcomes {
 		metrics.IngestRequests.Delete(publicID, outcome)
 	}
+	metrics.IngestFailedSnapshots.Delete(publicID)
 }
 
 // unexportInfo removes the muster_integration_info series of an Integration.

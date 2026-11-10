@@ -67,6 +67,7 @@
   "fix.telegram_base_url": "messengers/telegram-restricted-networks.md",
   "fix.telegram_comments": "messengers/telegram.md#enable-comments-on-the-channel",
   "fix.telegram_destination": "messengers/telegram.md#add-a-destination",
+  "fix.snapshot_failed": "integrations/alertmanager.md#what-the-body-needs",
   "fix.template_error": "operations/runbooks/MusterTemplateError.md",
   "fix.token.bridge": "messengers/bridge.md#create-the-connection",
   "fix.token.mattermost": "messengers/mattermost.md#create-the-bot-account",

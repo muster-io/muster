@@ -566,6 +566,17 @@ func TestBuiltinAndWarningsAPI(t *testing.T) {
 		got.Warnings[1].TruncatedGroupCount.IsSpecified() {
 		t.Errorf("get = %d %s", a.status, a.body)
 	}
+	fi.in.Warnings = []integrations.Warning{{Kind: integrations.WarningSnapshotFailed, Since: &since,
+		SnapshotID: "SS00000000000A", Error: "the webhook has no groupKey"}}
+	a = x.call(t, http.MethodGet, "/api/v1/integrations/"+integrationID, "", "Cookie", viewerCookie)
+	got = gen.Integration{}
+	decodeInto(t, a, &got)
+	if a.status != http.StatusOK || len(got.Warnings) != 1 || got.Warnings[0].Kind != gen.IntegrationWarningKindSnapshotFailed ||
+		got.Warnings[0].Error.MustGet() != "the webhook has no groupKey" ||
+		got.Warnings[0].SnapshotId.MustGet() != "SS00000000000A" || !got.Warnings[0].Since.MustGet().Equal(since) ||
+		got.Warnings[0].RoutePath.IsSpecified() {
+		t.Errorf("snapshot_failed warning = %d %s", a.status, a.body)
+	}
 	fi.err = integrations.ErrBuiltinImmutable
 	path := "/api/v1/integrations/" + integrationID
 	for _, a := range []answer{

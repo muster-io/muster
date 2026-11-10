@@ -675,6 +675,29 @@
                 }
               }
             },
+            "MusterIngestSnapshotFailed": {
+              "description": "Stored Snapshots of an Integration failed in processing (warning).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "description": "Renders the rule.",
+                  "type": "boolean"
+                },
+                "for": {
+                  "description": "How long the condition holds before the rule fires.",
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(0|(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?)$"
+                },
+                "window": {
+                  "description": "The window in which failed Stored Snapshots count.",
+                  "type": "string",
+                  "minLength": 2,
+                  "pattern": "^(([0-9]+)y)?(([0-9]+)w)?(([0-9]+)d)?(([0-9]+)h)?(([0-9]+)m)?(([0-9]+)s)?(([0-9]+)ms)?$"
+                }
+              }
+            },
             "MusterTemplateError": {
               "description": "Templates failed to render (warning).",
               "type": "object",

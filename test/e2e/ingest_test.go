@@ -247,3 +247,52 @@ func TestIngestionOnTheAppPort(t *testing.T) {
 		t.Errorf("the API on the shared port = %d", a.status)
 	}
 }
+
+// TestFailedSnapshotWarning is C-06.FR-20 on the Integration: a body without groupKey still answers 202, and the
+// Integration carries the warning snapshot_failed with the error of its newest Stored Snapshot, until a later one is
+// processed.
+func TestFailedSnapshotWarning(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	admin := newAgent(t, r.App)
+	if a := admin.signIn(devmode.AdminEmail, devmode.AdminPassword); a.status != http.StatusCreated {
+		t.Fatalf("sign in = %d %s", a.status, a.body)
+	}
+	id := admin.json(http.MethodPost, "/api/v1/integrations", `{"name":"ci","connection_mode":"webhook_only",
+		"static_labels":{},"duplicate_window_seconds":45,"heartbeat":{"enabled":false}}`, http.StatusCreated)["id"].(string)
+	token := admin.json(http.MethodPost, "/api/v1/integrations/"+id+"/tokens", `{"name":"ci"}`,
+		http.StatusCreated)["value"].(string)
+	series := `muster_ingest_failed_snapshots_total{integration="` + id + `"}`
+	for _, rr := range h.Replicas {
+		eventually(t, "the failed series at zero", func() bool { return rr.Metric(t, series) == "0" })
+	}
+	failed := func() map[string]any {
+		for _, w := range admin.json(http.MethodGet, "/api/v1/integrations/"+id, "", http.StatusOK)["warnings"].([]any) {
+			if w.(map[string]any)["kind"] == "snapshot_failed" {
+				return w.(map[string]any)
+			}
+		}
+		return nil
+	}
+	if failed() != nil {
+		t.Fatalf("a warning before any Snapshot: %v", failed())
+	}
+
+	bad := `{"version":"4","status":"firing","receiver":"x","alerts":[{"status":"firing","labels":{"alertname":"T"},` +
+		`"annotations":{},"startsAt":"2026-11-05T13:42:37Z"}]}`
+	if s := postIngest(t, r.Ingest+"/api/v1/ingest", token, bad); s != http.StatusAccepted {
+		t.Fatalf("a body without groupKey = %d, want 202", s)
+	}
+	eventually(t, "the snapshot_failed warning", func() bool { return failed() != nil })
+	w := failed()
+	if w["error"] != "the webhook has no groupKey" || w["snapshot_id"] == nil || w["since"] == nil {
+		t.Errorf("warning = %v", w)
+	}
+
+	good := `{"version":"4","groupKey":"{}:{alertname=\"T\"}","status":"firing","receiver":"x","alerts":[{` +
+		`"status":"firing","labels":{"alertname":"T"},"annotations":{},"startsAt":"2026-11-05T13:42:37Z"}]}`
+	if s := postIngest(t, r.Ingest+"/api/v1/ingest", token, good); s != http.StatusAccepted {
+		t.Fatalf("a valid body = %d, want 202", s)
+	}
+	eventually(t, "the warning to clear", func() bool { return failed() == nil })
+}

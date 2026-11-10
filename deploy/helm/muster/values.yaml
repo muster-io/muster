@@ -179,6 +179,10 @@ alerting:
       for: 0m
       unauthorized: 10
       window: 15m
+    MusterIngestSnapshotFailed:
+      enabled: true
+      for: 0m
+      window: 15m
     MusterTemplateError:
       enabled: true
       for: 0m

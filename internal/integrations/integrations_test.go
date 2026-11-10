@@ -65,11 +65,12 @@ type fakeStore struct {
 	nextID  int64
 	// truncated counts the truncated groupKeys by Integration, routes are the learned Alertmanager routes, open the
 	// firing Internal alerts, and snapshots the synthetic Stored Snapshots written with their bodies.
-	truncated map[int64]int64
-	routes    []dbgen.ListLongRepeatRoutesRow
-	open      []idb.ListOpenInternalAlertsRow
-	snapshots []internalSnapshot
-	body      []byte
+	truncated    map[int64]int64
+	routes       []dbgen.ListLongRepeatRoutesRow
+	failedLatest []dbgen.ListFailedLatestSnapshotsRow
+	open         []idb.ListOpenInternalAlertsRow
+	snapshots    []internalSnapshot
+	body         []byte
 }
 
 // internalSnapshot is a synthetic Stored Snapshot the fake stored.
@@ -112,6 +113,20 @@ func (s *fakeStore) CountTruncatedGroupsOf(_ context.Context, arg dbgen.CountTru
 	for _, id := range arg.IntegrationIds {
 		if n := s.truncated[id]; n > 0 && arg.OrgID == orgID {
 			out = append(out, dbgen.CountTruncatedGroupsOfRow{IntegrationID: id, TruncatedGroupCount: n})
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) ListFailedLatestSnapshots(_ context.Context, arg dbgen.ListFailedLatestSnapshotsParams) (
+	[]dbgen.ListFailedLatestSnapshotsRow, error) {
+	if err := s.fail["ListFailedLatestSnapshots"]; err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListFailedLatestSnapshotsRow
+	for _, r := range s.failedLatest {
+		if slices.Contains(arg.IntegrationIds, r.IntegrationID) && arg.OrgID == orgID {
+			out = append(out, r)
 		}
 	}
 	return out, nil
@@ -1242,7 +1257,16 @@ func TestWarnings(t *testing.T) {
 	if err != nil || len(page.Integrations[1].Warnings) != 2 || page.Integrations[1].Warnings[1].RoutePath != `{}/{x="y"}` {
 		t.Errorf("list %+v, %v", page, err)
 	}
-	for _, name := range []string{"CountTruncatedGroupsOf", "ListLongRepeatRoutes"} {
+	failedAt := t0.Add(-time.Minute)
+	store.failedLatest = []dbgen.ListFailedLatestSnapshotsRow{{IntegrationID: a.ID, PublicID: "SS00000000000A",
+		ReceivedAt: failedAt, ProcessingError: pgtype.Text{String: "the webhook has no groupKey", Valid: true}}}
+	got, err = svc.Get(ctx, a.PublicID)
+	if err != nil || len(got.Warnings) != 4 || got.Warnings[3].Kind != WarningSnapshotFailed ||
+		got.Warnings[3].Error != "the webhook has no groupKey" || got.Warnings[3].SnapshotID != "SS00000000000A" ||
+		got.Warnings[3].Since == nil || !got.Warnings[3].Since.Equal(failedAt) {
+		t.Errorf("snapshot_failed warning of a = %+v, %v", got.Warnings, err)
+	}
+	for _, name := range []string{"CountTruncatedGroupsOf", "ListLongRepeatRoutes", "ListFailedLatestSnapshots"} {
 		store.fail = map[string]error{name: errors.New("down")}
 		if _, err := svc.Get(ctx, a.PublicID); err == nil {
 			t.Errorf("%s failing: no error", name)
