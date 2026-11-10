@@ -82,9 +82,10 @@ English.
     ![The Bridge tab of the preview: the layout as JSON beside the CommonMark body, whose length is shown against the limit that the bridge sets itself](../assets/screenshots/configure/messages-and-templates/10-preview-bridge.png){ .screenshot }
 
 A message longer than its messenger allows — 4,096 characters in Telegram, 3,000 in a Slack section, 16,383 in
-Mattermost, the longest `body` that a bridge declares through a bridge — loses its description first, then its Alerts,
-then its summary, then its key labels; the title, the status, the fields, the footer, the buttons and the link to
-Muster always stay. The `layout` that a bridge receives loses the same parts as its `body`.
+Mattermost — loses its description first, then its Alerts, then its summary, then its key labels; the title, the
+status, the fields, the footer, the buttons and the link to Muster always stay. Through a bridge, the limit is the
+longest `body` that the bridge declares, and the same parts go first. The `layout` that a bridge receives loses the same
+parts as its `body`.
 
 A Route's own templates replace only part of this. A **Root message** template replaces items 3 to 5, the summary and
 the description, the key labels and the Alerts; an **Alert line** template replaces the value of the label that tells

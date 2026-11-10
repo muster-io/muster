@@ -1095,7 +1095,7 @@ What `layout` has, in the order a message shows it:
 
 `notices`
 :   The notices that apply, such as "Reopened ×2", then the footer, as lines: who snoozed or resolved the Alert Group, or
-    why Muster resolved it. A test message has "🧪 Test message" as its first notice, and a bridge shows it before the
+    why Muster resolved it. A test message has the mark of a test as its first notice, which is localized ("🧪 Test message" is the English form), and a bridge shows it before the
     rest of the message, so that nobody takes a test for an Alert Group.
 
 `owner` and `assignees`
@@ -1117,7 +1117,9 @@ The buttons are not in `layout`: they stay in the envelope's `buttons`.
 
 **The values are plain text, never CommonMark.** `Queue *full* on #1` arrives as it is, and the bridge escapes it for its
 messenger. Alert data in them cannot mention anyone, and a value that contains markup is data, not markup. This is the
-one rule that decides whether the bridge is safe: escape every value you write.
+one rule that decides whether the bridge is safe: escape every value you write. A link's `url` is a link target, not
+text: do not escape it like text, but give it to your messenger as a link, and let your messenger refuse what it cannot
+open.
 
 **When Muster shortens the `body`** to `limits.max_body_length`, it shortens `layout` the same way: the description
 first, then the Alerts, the summary and the labels, while the title, the status, the fields, the people and the links
