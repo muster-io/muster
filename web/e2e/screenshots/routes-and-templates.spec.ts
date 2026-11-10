@@ -42,6 +42,8 @@ const INFRA_ROUTE = "Infrastructure";
 const INFRA_GROUP = "infra-oom";
 const OOM = "KubernetesContainerOOMKilled";
 /** The pods of the three KubernetesContainerOOMKilled Alerts of the preview of the Root message. */
+/** The pod name that the capture would take for an id, as it is quoted in the layout's JSON and has 20 characters or more. */
+const POD_KEEP: [string, string][] = [['"checkout-worker-8e6a0"', '"checkout-worker-8e6a0"']];
 const OOM_PODS = ["checkout-api-5b2c1", "checkout-api-7d9f4", "checkout-worker-8e6a0"];
 /** The four Alerts of the Group key table of the Routes page: cluster, namespace and pod. */
 const ALERTS: [string, string, string][] = [
@@ -331,9 +333,14 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
     await root.getByRole("tab", { name: tab }).click();
     await expect(root.getByTestId(id).getByTestId("layout-title")).toContainText("— Firing");
     await expect(root.getByTestId(id).getByTestId("layout-alerts")).toContainText("checkout-worker-8e6a0");
-    await capture(page, TEMPLATES, name, { locator: root, padding: 16 });
+    await expect(root.getByTestId(id).getByTestId("layout-fields")).toContainText("Teams");
+    await capture(page, TEMPLATES, name, { locator: root, padding: 16, replace: POD_KEEP });
   }
   await root.getByRole("tab", { name: "Bridge" }).click();
   await expect(root.getByTestId("layout-json")).toContainText('"key": "firing"');
-  await capture(page, TEMPLATES, "10-preview-bridge", { locator: root, padding: 16 });
+  await capture(page, TEMPLATES, "10-preview-bridge", {
+    locator: root,
+    padding: 16,
+    replace: POD_KEEP,
+  });
 });
