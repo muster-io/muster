@@ -274,6 +274,8 @@ test("shows the Root message in Mattermost, Slack, Telegram and through a Bridge
   const admin = await adminApi();
   let routeId = "";
   try {
+    // The Route "payments" of the first test would take the Alerts of team=payments first.
+    await removeRoute(admin, ROUTE);
     await ensureTeam(admin, "payments");
     const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
       "GET",
