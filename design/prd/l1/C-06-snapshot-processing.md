@@ -152,7 +152,7 @@ verified facts of [Alertmanager](../../facts.md#alertmanager) and [Grafana](../.
 - **C-06.FR-18** The Integration page shows a table of the Alertmanager routes seen (taken from `groupKey`), with the
   learned repeat interval and the resulting time to resolve by absence; when an interval exceeds
   `processing.long_repeat_warning`, a warning with the recommended route snippet; and, while any `groupKey` is
-  truncated, the truncation warning. The Integrations list shows both warnings.
+  truncated, the truncation warning. The Integrations list shows all three warnings.
 - **C-06.FR-19** The Integration page has an Alerts view: the Alerts Muster currently tracks for the Integration —
   labels, state (firing, or resolved with its reason and time), `startsAt`, time last seen, the Alertmanager groups
   listing it and any Static label warning — filtered by state and by labels; from C-08 and C-09 on, each also shows its
@@ -165,7 +165,9 @@ verified facts of [Alertmanager](../../facts.md#alertmanager) and [Grafana](../.
   as received. _Proposed for the maintainer (issue #506):_ while the newest processed or failed webhook Stored Snapshot
   of an Integration is `failed`, the Integration carries the warning `snapshot_failed` with its error, its time and its
   id, on the Integration page, in the Integrations list and in `GET /integrations/{id}`; it clears when a later
-  Snapshot is processed. The chart rule `MusterIngestSnapshotFailed` fires on the counter.
+  Snapshot is processed, also one from another sender of the same Integration, so the chart rule is the durable
+  signal. Every role reads the warning, so its error leaves out the quoted values of the sender, which the Stored
+  Snapshot, read with `stored-snapshots:read`, keeps in full. The chart rule `MusterIngestSnapshotFailed` fires on the counter.
 
 ## UI
 

@@ -44,11 +44,11 @@ describe("snapshot_failed", () => {
     await expect
       .element(banner)
       .toHaveTextContent(
-        "The latest Snapshot was rejected: the webhook has no groupKey. The sender still got 202, and the Snapshot created no alert. Fix the body the sender posts. How to fix",
+        "The latest request was rejected: the webhook has no groupKey. The sender still got 202, and the request created no alert. Fix the body the sender posts. How to fix",
       );
     await expect
       .element(
-        screen.getByRole("link", { name: "How to fix: A rejected Snapshot (opens in a new tab)" }),
+        screen.getByRole("link", { name: "How to fix: A rejected request (opens in a new tab)" }),
       )
       .toHaveAttribute(
         "href",
@@ -58,7 +58,7 @@ describe("snapshot_failed", () => {
     await expect
       .element(banner)
       .toHaveTextContent(
-        "Последний снимок отклонён: the webhook has no groupKey. Отправитель всё равно получил 202, а снимок не создал ни одного алерта. Исправьте тело, которое он отправляет. Как исправить",
+        "Последний запрос отклонён: the webhook has no groupKey. Отправитель всё равно получил 202, а запрос не создал ни одного алерта. Исправьте тело, которое он отправляет. Как исправить",
       );
   });
 
@@ -67,7 +67,7 @@ describe("snapshot_failed", () => {
     await expect
       .element(screen.getByTestId("integration-warning-mark"))
       .toHaveTextContent(
-        "1 warningThe latest Snapshot was rejected: the webhook has no groupKey. The sender still got 202, and the Snapshot created no alert. Fix the body the sender posts.",
+        "1 warningThe latest request was rejected: the webhook has no groupKey. The sender still got 202, and the request created no alert. Fix the body the sender posts.",
       );
   });
 });

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1271,6 +1272,27 @@ func TestWarnings(t *testing.T) {
 		if _, err := svc.Get(ctx, a.PublicID); err == nil {
 			t.Errorf("%s failing: no error", name)
 		}
+	}
+}
+
+// TestWarningError is the error of snapshot_failed as every role reads it: a value the sender chose, quoted in the
+// processing error, is not repeated, and a long one is cut.
+func TestWarningError(t *testing.T) {
+	long := strings.Repeat("x", 2000)
+	quoted := strconv.Quote(long)
+	for _, c := range []struct{ in, want string }{
+		{"the webhook has no groupKey", "the webhook has no groupKey"},
+		{"the status of the webhook is " + quoted + ", not firing or resolved",
+			`the status of the webhook is "…", not firing or resolved`},
+		{"alert 3: the status is " + quoted[:300] + `\"cut`, `alert 3: the status is "…"`},
+		{`alert 0: the status is "a\"b", not firing or resolved`, `alert 0: the status is "…", not firing or resolved`},
+	} {
+		if got := warningError(c.in); got != c.want {
+			t.Errorf("warningError(%.60q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := warningError(strings.Repeat("é", 400)); len(got) > maxWarningErrorLength+len("…") {
+		t.Errorf("a long error is %d bytes", len(got))
 	}
 }
 

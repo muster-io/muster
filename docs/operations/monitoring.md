@@ -39,6 +39,9 @@ What you can tune:
 - Some rules have thresholds: `window` (the range of the `rate` or `increase`), `seconds` (`MusterDeliverySlow`: p95
   delivery latency; `MusterClockSkew`: the skew), `size` (`MusterDeliveryQueueGrowing`), `backlog` and `delaySeconds`
   (`MusterIngestBacklog`), `unauthorized` (`MusterIngestRejected`) and `failures` (`MusterLoginFailures`).
+- `MusterIngestSnapshotFailed` fires for an Integration whose requests were accepted and then rejected in processing,
+  for example a custom sender's body without `groupKey`; it has `for` and `window` and resolves a `window` after the
+  last failure. The Integration page shows the matching warning.
 
 The defaults are in the [chart values reference](../reference/chart-values.md), and the expression of each rule is on
 its [runbook](runbooks/index.md) page. The rules are covered by unit tests in CI.

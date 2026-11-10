@@ -478,10 +478,27 @@ func (s *Service) withWarnings(ctx context.Context, q Queries, list []Integratio
 		if i := slices.Index(ids, r.IntegrationID); i >= 0 {
 			at := r.ReceivedAt.UTC()
 			list[i].Warnings = append(list[i].Warnings, Warning{Kind: WarningSnapshotFailed, Since: &at,
-				SnapshotID: r.PublicID, Error: r.ProcessingError.String})
+				SnapshotID: r.PublicID, Error: warningError(r.ProcessingError.String)})
 		}
 	}
 	return nil
+}
+
+// quotedValue is a quoted fragment of a processing error, closed or cut off by the length limit of the error.
+var quotedValue = regexp.MustCompile(`"(?:[^"\\]|\\.)*(?:"|$)`)
+
+// maxWarningErrorLength bounds the error of a snapshot_failed warning, in bytes.
+const maxWarningErrorLength = 300
+
+// warningError is the processing error of a failed Stored Snapshot as the warning shows it: every quoted fragment,
+// where the error repeats a value the sender chose, such as its status, is replaced by "…", because every role reads
+// an Integration and only stored-snapshots:read reads the Stored Snapshot with its full error.
+func warningError(processingError string) string {
+	out := quotedValue.ReplaceAllString(processingError, `"…"`)
+	if len(out) > maxWarningErrorLength {
+		out = strings.ToValidUTF8(out[:maxWarningErrorLength], "") + "…"
+	}
+	return out
 }
 
 // heartbeatWarning is the warning of the Heartbeat state of an Integration that is not the built-in one: without a

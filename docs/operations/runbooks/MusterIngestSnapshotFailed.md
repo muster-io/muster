@@ -19,7 +19,11 @@ chart rule only. The sender got `202`, because ingestion never answers `400`; th
 
 - The failed Snapshots create or change no Alert and no Alert Group, so nothing is sent for them, and they are not
   retried by themselves.
-- Snapshots that arrive later are processed as usual, and the Integration page stops warning once one is processed.
+- Snapshots that arrive later are processed as usual, and the Integration page stops warning once one is processed,
+  also one from another sender of the same Integration. The warning is not a durable signal; this rule is, and it
+  resolves 15 minutes after the last failure.
+- The warning shows the error without the values the sender chose, such as a quoted status. The Stored Snapshot has
+  the full error.
 
 ## Diagnosis
 

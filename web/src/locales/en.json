@@ -1281,7 +1281,7 @@
       "slackScopes": "Missing Slack scopes",
       "slackServer": "The proxy in front of Slack",
       "slackTokens": "Slack tokens",
-      "snapshotFailed": "A rejected Snapshot",
+      "snapshotFailed": "A rejected request",
       "telegramAdmin": "The bot's admin rights",
       "telegramBaseUrl": "Telegram in restricted networks",
       "telegramChannel": "The Telegram channel",
@@ -1507,7 +1507,7 @@
     "longRepeatInterval": "Alertmanager route {{route}} repeats every {{interval}}; Muster can resolve its alerts by absence only after {{absence}}. Use a repeat interval of 5–15 minutes on the route to Muster.",
     "mark_one": "{{count}} warning",
     "mark_other": "{{count}} warnings",
-    "snapshotFailed": "The latest Snapshot was rejected: {{error}}. The sender still got 202, and the Snapshot created no alert. Fix the body the sender posts.",
+    "snapshotFailed": "The latest request was rejected: {{error}}. The sender still got 202, and the request created no alert. Fix the body the sender posts.",
     "snapshotTruncated_one": "Alertmanager truncates Snapshots for {{count}} group. Set max_alerts: 0 on the Alertmanager receiver.",
     "snapshotTruncated_other": "Alertmanager truncates Snapshots for {{count}} groups. Set max_alerts: 0 on the Alertmanager receiver."
   },
