@@ -9,9 +9,9 @@ the Group key's [Team label](#teams-that-want-their-own-alert-groups), the
 [preview](#preview-where-alerts-go), the [Owning Team](teams.md#what-a-team-is) and the
 [Minimum severity](what-critical-changes.md).
 
-The feature is optional. Many installations need only two operations channels — one for critical Alert Groups and one
+The feature is optional. Many installations need only two operations Destinations — one for critical Alert Groups and one
 for the rest — and a Route that names both with a Severity condition each. Teams and their Destinations come in when
-teams want their own channels.
+teams want their own Destinations.
 
 ## Severity conditions
 
@@ -48,7 +48,7 @@ filters.
 
 "Run the Teams' Escalation chains" (`run_team_chains`) is stored with the option; it acts once Escalation chains run.
 
-### Operations and team channels by Severity
+### Operations and team Destinations by Severity
 
 Operations has `infra-critical` and `infra-notice`, and the Team `payments` has `payments-critical` and
 `payments-notice`. The Route "Infrastructure" takes `category="infra"`, names `infra-critical` for `critical` and
@@ -56,20 +56,21 @@ Operations has `infra-critical` and `infra-notice`, and the Team `payments` has 
 `payments-critical` for `critical` and `payments-notice` for `below_critical`.
 
 A warning Alert of `team="payments"` makes one Alert Group with one Root message in `infra-notice` and one in
-`payments-notice`, and none in the critical channels. If a critical Alert joins it, the Alert Group is also published
-in `infra-critical` and `payments-critical`; its messages in the notice channels stay and keep being updated, also
+`payments-notice`, and none in the critical Destinations. If a critical Alert joins it, the Alert Group is also published
+in `infra-critical` and `payments-critical`; its messages in the notice Destinations stay and keep being updated, also
 after the critical Alert resolves. The Destinations of an Alert Group only grow, and only when a Team joins it —
 which adds that Team's Destinations — or its Severity level rises: a level that falls again, or a new Alert that
 brings neither, adds no Destination below critical where the Alert Group was not published before.
 
 ## One Alert Group, one status
 
-An Alert Group has one status and one list of Alerts in every channel it is in. Acknowledge it from `payments-notice`
+An Alert Group has one status and one list of Alerts in every Destination it is in. Acknowledge it from `payments-notice`
 and its message in `infra-notice` shows the same Owner; resolve it anywhere and every message shows it resolved. The
 Alert Group page names its Teams, and the deliveries of the Alert Group show where it went.
 
-![The header of the Alert Group KubernetesContainerOOMKilled, with its Teams: payments, by the Team label](../assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot } The
-delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
+![The header of the Alert Group KubernetesContainerOOMKilled, with its Teams: payments, by the Team label](../assets/screenshots/concepts/teams/08-alert-group-teams.png){ .screenshot }
+
+The delivery state of the Alert Group (`listAlertGroupDeliveries`) names, for each Destination, the entries that reached
 it — the Route, or a Team — with their conditions.
 
 When an Alert Group reaches a Destination after its first Publication elsewhere — a new Alert raised its Severity level
@@ -85,11 +86,11 @@ a Mention.
 ### Teams that want their own Alert Groups
 
 In a Route whose Group key lacks the Team label, Alerts of different Teams with the same key share one Alert Group,
-shown in the channels of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
+shown in the Destinations of all of them: an Alert of "search" that joins a firing Alert Group of "payments" is published
 in `search-notice` with `destination_joined`. Teams that want their own Alert Groups add the Team label, `team` by
 default, to the Group key of the Route: with `alertname`, `system` and `team` as the Group key, the "search" Alert gets
-an Alert Group of its own, with its own status, and the Route form offers **Add team to the key** when the preview
-sees Alerts of different Teams share one.
+an Alert Group of its own, with its own status, and the Route form offers **Add team to the key** whenever the Route
+delivers to the Teams and its Group key lacks the Team label.
 
 ## Preview where alerts go
 
@@ -145,14 +146,14 @@ entries, reach the open Alert Groups at once, without a lifecycle event in their
 
 ## A Route for test clusters
 
-Test alerts should reach the team that owns the workload, in its own channels, and wake nobody. A Route "Test
+Test alerts should reach the team that owns the workload, in its own Destinations, and Page nobody: the Teams' Destinations still deliver as they are set, but no Escalation chain starts. A Route "Test
 clusters" placed above the Route "Infrastructure", with the Matcher `cluster=~".*-stage|.*-preprod"`, no Destination of
 its own, "Also to the Teams from the label" on and "Run the Teams' Escalation chains" off, does that: the Alert Group of
 `team="payments"` from `shop-stage` goes to the Destinations of the Team `payments` and to nothing else, with their
 Severity conditions, and starts no Escalation chain of the Team. Routes are checked in order, and the first one that
 picks an Alert takes it, so it never reaches "Infrastructure". An Alert of a test cluster whose `team` value names no
 Team goes nowhere: the Route has no Destination of its own, so the Alert Group is only in the web UI. Where that
-matters, give the Route one Destination of its own, such as a channel for test alerts.
+matters, give the Route one Destination of its own, such as a Destination for test alerts.
 
 The Teams of such Alerts are those of the Team label and the Team matchers, as everywhere. On a test cluster where
 every team shares one namespace, use a Team matcher on the Pod name or an app label, or put the Team label on the

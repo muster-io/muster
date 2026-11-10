@@ -18,7 +18,7 @@ files_touched:
   - mkdocs.yml
   - web/e2e/screenshots/teams.spec.ts
 acceptance:
-  - "[C-26.FR-13] Concepts → Routing to Teams has the worked example of operations and team channels by Severity — the Route \"Infrastructure\" with `infra-critical` and `infra-notice`, \"Also to the Teams from the label\", and Teams with a critical and a notice channel each — says that the feature is optional and that many installations need only two operations channels, explains with an example that a shared Alert Group has one status and one list of Alerts in every channel, that teams wanting their own add the Team label to the Group key, and shows a Route for test clusters that delivers to the Teams without their Escalation chains; every Route setting of S-123 links to it."
+  - "[C-26.FR-13] Concepts → Routing to Teams has the worked example of operations and team Destinations by Severity — the Route \"Infrastructure\" with `infra-critical` and `infra-notice`, \"Also to the Teams from the label\", and Teams with a critical and a notice Destination each — says that the feature is optional and that many installations need only two operations Destinations, explains with an example that a shared Alert Group has one status and one list of Alerts in every Destination, that teams wanting their own add the Team label to the Group key, and shows a Route for test clusters that delivers to the Teams without their Escalation chains; every Route setting of S-123 links to it."
   - "[C-26.FR-13] The new page Concepts → What critical changes lists the effects of an Urgent Alert Group — the order of the delivery queue, individual publication during a Storm, the end of a Snooze or an acknowledgement on a rise, the filter and column of the list, `urgent` in outgoing webhook events, the count in Storm summaries — and the Minimum severity of a Route, and Routes and Group keys links to it."
   - "[C-25.FR-12] Concepts → Teams has what a Team owns and what it does not grant, the Team label and Team matchers with a worked example of labels such as `category`, `team` and `system` set by a rule generator, Teams without people that only name Alerts, test clusters where every team shares one namespace (match `pod`, an app label, or put the team label on the workloads), and membership from the identity provider with the claim of each entry and subtrees, with screenshots of the Teams list, a Team page and the Route form."
   - "`make docs-screenshots GUIDES=teams` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms.txt` lists the new pages in a scenario on setting up Teams and routing."
@@ -74,7 +74,7 @@ issue: 413
 1. `make docs-check` passes: every page builds strictly, every image exists and has its alternative text, every link and
    anchor resolves, and `docslinkcheck` finds every anchor of `docs-links.json`.
 2. `make docs-serve` → Concepts → Teams, Routing to Teams and What critical changes read as the acceptance says; the
-   worked example of Routing to Teams gives the same channels as the end-to-end test of S-121.
+   worked example of Routing to Teams gives the same Destinations as the end-to-end test of S-121.
 3. On `muster dev` (`make dev`), "Learn more" next to "Also to the Teams from the label" and next to "Minimum severity"
    on the Route form opens these pages at their sections.
 
