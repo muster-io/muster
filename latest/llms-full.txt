@@ -1124,6 +1124,15 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Mention — and the rules of each User, none at first, so that every User follows the Organization's. It is expand
       only: a 0.1 replica, or one of a development image without it, reads and writes nothing of either, and an
       Organization it creates gets the default rules.
+    - Migration 0038 marks the edits of open Root messages that a change of configuration alone made — a new button
+      set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them after
+      the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the same
+      urgency; no data is migrated, and a
+      re-render still pending at the upgrade keeps its place. It is expand only: a 0.1 replica, or one of a development
+      image without it, claims in its own order and never writes the mark, so an edit, a final edit or a republication
+      it queues for a Root message whose re-render a 0.2.0 replica queued — still pending, or already delivered by the
+      older replica — waits behind the other pending deliveries of its urgency until it is delivered; a delivery by a
+      0.2.0 replica clears the mark.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -1500,6 +1509,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     `UPDATE schema_migrations SET version = 36, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0037 loses every User's own Notification rules and the Organization's default
     rules; once 0037 is back, every User follows the Organization's rules, which are the defaults again.
+
+    Migration 0038 adds the mark of configuration edits and its claim index to the deliveries in one transaction: a
+    failure leaves nothing of it, but the schema recorded as dirty at version 38. To recover, with the same database
+    role as Muster, run `UPDATE schema_migrations SET version = 37, dirty = false;` and start the 0.2.0 replica again,
+    or run `muster migrate`. Going back below 0038 loses no delivery: the pending edits of a re-render are sent again
+    in the order of urgency and due time alone.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
@@ -2008,7 +2023,10 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 [key labels and Alerts](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-default-message): each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow.
+many open Alert Groups, as the messengers' rate limits allow. They never hold up the Root messages of new Alert Groups
+or the edits of Root messages that Alerts and Commands make, of the same urgency: a Destination sends those first, for
+as long as they use up its rate limit — Alert Groups that keep flapping, for example — and these edits with the rest;
+none is dropped. Thread replies wait behind these edits while they are due.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
@@ -10724,6 +10742,10 @@ Route. It follows the Alerts as they fire and resolve, so an Alert Group may bec
 The order of the delivery queue
 :   The delivery queue of a Destination takes Urgent Alert Groups first. They never pass the rate limit of the
     Destination: an Urgent Alert Group waits for its place within the limit like any other, only before the rest.
+    Among the Urgent ones and among the rest, the edits of Root messages that only a change of configuration made, such
+    as a new button set, come last: after the Root messages of new Alert Groups and the edits of Root messages that
+    Alerts and Commands make, for as long as those use up the rate limit, and before the Thread replies
+    ([Organization](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling)).
     After an outage of a Destination, the Alert Groups that were not published are published Urgent first
     ([Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md#what-is-sent-after-recovery)).
 

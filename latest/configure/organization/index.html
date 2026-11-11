@@ -3298,7 +3298,10 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 <a href="../messages-and-templates/#the-default-message">key labels and Alerts</a>: each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow.</p>
+many open Alert Groups, as the messengers' rate limits allow. They never hold up the Root messages of new Alert Groups
+or the edits of Root messages that Alerts and Commands make, of the same urgency: a Destination sends those first, for
+as long as they use up its rate limit — Alert Groups that keep flapping, for example — and these edits with the rest;
+none is dropped. Thread replies wait behind these edits while they are due.</p>
 <ol>
 <li>Open <strong>Organization → Alert handling</strong>.</li>
 <li>Change the <strong>Instance labels</strong>: <strong>Add label</strong> adds one, the × next to a label removes it.</li>
