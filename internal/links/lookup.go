@@ -32,6 +32,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/publicid"
@@ -166,6 +167,7 @@ type Queries interface {
 	ListLookupTables(ctx context.Context, arg dbgen.ListLookupTablesParams) ([]dbgen.ListLookupTablesRow, error)
 	GetLookupTable(ctx context.Context, arg dbgen.GetLookupTableParams) (dbgen.GetLookupTableRow, error)
 	LockLookupTable(ctx context.Context, arg dbgen.LockLookupTableParams) (int64, error)
+	LockLinkRules(ctx context.Context, arg dbgen.LockLinkRulesParams) error
 	ListLookupEntries(ctx context.Context, arg dbgen.ListLookupEntriesParams) ([]dbgen.ListLookupEntriesRow, error)
 	InsertLookupTable(ctx context.Context, arg dbgen.InsertLookupTableParams) (int64, error)
 	UpdateLookupTable(ctx context.Context, arg dbgen.UpdateLookupTableParams) error
@@ -568,6 +570,9 @@ func (s *Service) CreateTable(ctx context.Context, r Requester, in TableInput) (
 	in = normalize(in)
 	var created Table
 	err := s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		id := publicid.New(publicid.LookupTable)
 		description := ""
 		if in.Description != nil {
@@ -630,6 +635,9 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 	in = normalize(in)
 	var updated Table
 	err := s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		before, err := s.lockTable(ctx, q, publicID)
 		if err != nil {
 			return err
@@ -684,6 +692,9 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 // that the URL template of a Link rule reads by its name is an InUseError.
 func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string, version *int64) error {
 	return s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		before, err := s.lockTable(ctx, q, publicID)
 		if err != nil {
 			return err
@@ -713,6 +724,23 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 // link, and delivery then edits nothing.
 func (s *Service) requestRerender(ctx context.Context, q Queries) error {
 	return requestRerender(ctx, q, s.orgID, s.business.Now())
+}
+
+// lockLinkChanges, first in the transaction of every change of a Link rule or of a Lookup table, takes the
+// Organization's transaction advisory lock (db.LinkRulesLockClass) exclusively, so that the changes serialize: one
+// reads the rules and the tables the others committed, and a change of a table never misses a rule saved at the same
+// time, whose own request a worker could claim and render before the table change commits. It also closes the gap of
+// refuseInUse against a rule saved at the same time. The re-render workers never take it, only the evaluation lock
+// of the Organization, so the two cannot wait on each other.
+func (s *Service) lockLinkChanges(ctx context.Context, q Queries) error {
+	return lockLinkChanges(ctx, q, s.orgID)
+}
+
+func lockLinkChanges(ctx context.Context, q Queries, orgID int64) error {
+	if err := q.LockLinkRules(ctx, dbgen.LockLinkRulesParams{LockClass: db.LinkRulesLockClass, OrgID: orgID}); err != nil {
+		return fmt.Errorf("lock the link rules and lookup tables for a change: %w", err)
+	}
+	return nil
 }
 
 // requestTableRerender is requestRerender for a change of the Lookup tables named names (the old and the new name of

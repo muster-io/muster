@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/links/dbgen"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/publicid"
@@ -147,6 +148,13 @@ func (f *fakeStore) GetLookupTable(_ context.Context, arg dbgen.GetLookupTablePa
 		return t.GetLookupTableRow, nil
 	}
 	return dbgen.GetLookupTableRow{}, pgx.ErrNoRows
+}
+
+func (f *fakeStore) LockLinkRules(_ context.Context, arg dbgen.LockLinkRulesParams) error {
+	if arg.LockClass != db.LinkRulesLockClass || arg.OrgID != orgID {
+		return errors.New("the wrong lock")
+	}
+	return f.err("LockLinkRules")
 }
 
 func (f *fakeStore) LockLookupTable(_ context.Context, arg dbgen.LockLookupTableParams) (int64, error) {
