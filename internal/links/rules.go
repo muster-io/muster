@@ -328,6 +328,9 @@ func (s *Service) CreateRule(ctx context.Context, r Requester, in RuleInput) (Ru
 	}
 	var created Rule
 	err = s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		id := publicid.New(publicid.LinkRule)
 		ruleID, err := q.InsertLinkRule(ctx, dbgen.InsertLinkRuleParams{OrgID: s.orgID, PublicID: id, Name: in.Name,
 			ScopeType: in.Scope.Type, ScopeLabel: scopeLabel(in.Scope), UrlTemplate: in.URLTemplate,
@@ -386,6 +389,9 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 	}
 	var updated Rule
 	err = s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		before, err := s.lockRule(ctx, q, publicID)
 		if err != nil {
 			return err
@@ -438,6 +444,9 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 // ErrBuiltinImmutable.
 func (s *Service) DeleteRule(ctx context.Context, r Requester, publicID string, version *int64) error {
 	return s.store.InTx(ctx, func(q Queries) error {
+		if err := s.lockLinkChanges(ctx, q); err != nil {
+			return err
+		}
 		before, err := s.lockRule(ctx, q, publicID)
 		if err != nil {
 			return err

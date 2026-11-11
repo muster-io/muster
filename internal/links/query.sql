@@ -18,6 +18,11 @@ SELECT id, public_id, name, description, column_names, created_at, version
 FROM lookup_tables
 WHERE org_id = @org_id AND public_id = @public_id;
 
+-- LockLinkRules takes the transaction advisory lock of the changes of the Link rules and Lookup tables of the
+-- Organization (db.LinkRulesLockClass, keyed by the Organization) exclusively, until the end of the transaction.
+-- name: LockLinkRules :exec
+SELECT pg_advisory_xact_lock(@lock_class::int, hashint8(@org_id::bigint));
+
 -- LockLookupTable locks a Lookup table by public_id for a change.
 -- name: LockLookupTable :one
 SELECT id

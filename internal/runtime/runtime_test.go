@@ -509,6 +509,8 @@ func (fakeLinksStore) EnsureExploreRule(context.Context, linksdb.EnsureExploreRu
 	return linksdb.EnsureExploreRuleRow{}, pgx.ErrNoRows
 }
 
+func (fakeLinksStore) LockLinkRules(context.Context, linksdb.LockLinkRulesParams) error { return nil }
+
 func (s fakeLinksStore) InTx(_ context.Context, f func(links.Queries) error) error { return f(s) }
 
 // DestinationsStore has no Destinations.

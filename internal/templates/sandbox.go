@@ -808,26 +808,45 @@ func (t *Template) ExecuteIn(env Env, data any) (out string, err error) {
 // LookupTables are the Lookup tables the template reads by a literal name, `lookup "grafana" …`, sorted and without
 // duplicates.
 func (t *Template) LookupTables() []string {
-	var out []string
+	out, _ := t.lookupNames()
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// ComputesLookupTable reports whether the template calls `lookup` with a name that is not a literal, such as
+// `lookup .Labels.table …`, so that it may read any Lookup table.
+func (t *Template) ComputesLookupTable() bool {
+	_, computed := t.lookupNames()
+	return computed
+}
+
+// lookupNames are the literal table names of the calls of `lookup` in the template, and whether some call names its
+// table otherwise.
+func (t *Template) lookupNames() (names []string, computed bool) {
 	for _, tmpl := range t.tmpl.Templates() {
 		if tmpl.Tree == nil {
 			continue
 		}
 		walk(tmpl.Root, func(n parse.Node) {
 			c, ok := n.(*parse.CommandNode)
-			if !ok || len(c.Args) < 2 {
+			if !ok || len(c.Args) < 1 {
 				return
 			}
 			if id, ok := c.Args[0].(*parse.IdentifierNode); !ok || id.Ident != "lookup" {
 				return
 			}
+			if len(c.Args) < 2 {
+				computed = true
+				return
+			}
 			if name, ok := c.Args[1].(*parse.StringNode); ok {
-				out = append(out, name.Text)
+				names = append(names, name.Text)
+			} else {
+				computed = true
 			}
 		})
 	}
-	slices.Sort(out)
-	return slices.Compact(out)
+	return names, computed
 }
 
 // The trusted Mention tokens of `mention` (C-12.FR-8, ADR-0012): a name, and the group of a group Mention, between

@@ -93,6 +93,13 @@ const GatewayCallLockClass int32 = 0x6d75_000b
 // Connection, which locks its row first, does not take it.
 const GatewayStateLockClass int32 = 0x6d75_000c
 
+// LinkRulesLockClass is the first key of the transaction advisory lock of the changes of the Link rules and Lookup
+// tables of an Organization, whose second key is hashint8 of the Organization's id: every create, update and delete
+// of a rule or a table takes it exclusively first (internal/links), so that a table change sees every rule saved
+// before it commits and requests the re-render of the open Root messages only when a rule reads the table. The
+// re-render workers never take it.
+const LinkRulesLockClass int32 = 0x6d75_000d
+
 // querier is what the checks need of the main pool or of a connection.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)

@@ -212,8 +212,9 @@ func TestIntegrationRouteSettingsAndLinksRerender(t *testing.T) {
 			Entries: []links.Entry{{Key: "k", Values: map[string]string{"a": "1"}}}}); err != nil {
 			t.Fatal(err)
 		}
-		if n := rows(t, groups.KindOrganizationLinks); n != 1 {
-			t.Fatalf("a new lookup table: %d rows of organization_links", n)
+		// No rule reads the table "unused" by its name, and none computes a name, so no walk is requested.
+		if n := rows(t, groups.KindOrganizationLinks); n != 0 {
+			t.Fatalf("a new lookup table no rule reads: %d rows of organization_links", n)
 		}
 		if calls := run(t); len(calls) != 0 {
 			t.Errorf("a lookup table no rule reads made %s", methods(calls))

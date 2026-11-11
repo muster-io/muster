@@ -779,6 +779,22 @@ func (q *Queries) LockLinkRule(ctx context.Context, arg LockLinkRuleParams) (int
 	return id, err
 }
 
+const lockLinkRules = `-- name: LockLinkRules :exec
+SELECT pg_advisory_xact_lock($1::int, hashint8($2::bigint))
+`
+
+type LockLinkRulesParams struct {
+	LockClass int32
+	OrgID     int64
+}
+
+// LockLinkRules takes the transaction advisory lock of the changes of the Link rules and Lookup tables of the
+// Organization (db.LinkRulesLockClass, keyed by the Organization) exclusively, until the end of the transaction.
+func (q *Queries) LockLinkRules(ctx context.Context, arg LockLinkRulesParams) error {
+	_, err := q.db.Exec(ctx, lockLinkRules, arg.LockClass, arg.OrgID)
+	return err
+}
+
 const lockLookupTable = `-- name: LockLookupTable :one
 SELECT id
 FROM lookup_tables

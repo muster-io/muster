@@ -95,13 +95,21 @@ func TestIntegrationEnsureExplore(t *testing.T) {
 			t.Fatalf("created %s version %d, %d rows", tmpl, version, rows())
 		}
 		set(previousExploreTemplates[0])
-		for range 2 {
-			if err := EnsureExplore(ctx, store, org.ID, t0); err != nil {
-				t.Fatal(err)
-			}
+		if err := EnsureExplore(ctx, store, org.ID, t0); err != nil {
+			t.Fatal(err)
 		}
 		if gotID, tmpl, version := read(); gotID != id || tmpl != ExploreTemplate || version != 2 || rows() != 1 {
 			t.Fatalf("upgraded %s %s version %d, %d rows", gotID, tmpl, version, rows())
+		}
+		// The second boot finds the current template and requests nothing: with the pending row gone, none returns.
+		if _, err := d.Pool.Exec(ctx, `DELETE FROM open_group_updates WHERE org_id = $1`, org.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureExplore(ctx, store, org.ID, t0); err != nil {
+			t.Fatal(err)
+		}
+		if gotID, tmpl, version := read(); gotID != id || tmpl != ExploreTemplate || version != 2 || rows() != 0 {
+			t.Fatalf("second boot %s %s version %d, %d rows", gotID, tmpl, version, rows())
 		}
 		if _, err := d.Pool.Exec(ctx, `DELETE FROM open_group_updates WHERE org_id = $1`, org.ID); err != nil {
 			t.Fatal(err)
