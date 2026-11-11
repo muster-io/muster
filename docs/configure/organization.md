@@ -98,9 +98,9 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 [key labels and Alerts](messages-and-templates.md#the-default-message): each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow. They never hold up the Root messages of new Alert Groups,
-the edits of Root messages that Alerts and Commands make or the Thread replies, such as the one about new Alerts,
-Urgent or not: a Destination sends those first, for as long as they use up its rate limit — Alert Groups that keep
+many open Alert Groups, as the messengers' rate limits allow. They never hold up, Urgent or not, the Root messages of
+new Alert Groups, the edits of Root messages that Alerts and Commands make or the Thread replies, such as the one about
+new Alerts: a Destination sends those first, for as long as they use up its rate limit — Alert Groups that keep
 flapping, for example — and these edits with the rest, Urgent ones first; none is dropped.
 
 1. Open **Organization → Alert handling**.

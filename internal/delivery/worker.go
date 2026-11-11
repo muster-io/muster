@@ -225,9 +225,10 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // that time claims them in this order, so the token goes to the first rank, then to a Thread reply or an event, and to
 // a configuration edit only when nothing else waits for it. Configuration edits take every token the rest leaves, and
 // none is dropped; a Thread reply waits only while the first rank uses up the limiter, and the Thread batching window
-// keeps it to one reply per window and delivery. With two replicas, one whose configuration pass reaches the bucket
-// first can take the token ahead of a reply that the other replica claimed: the reply loses that one token interval
-// and is due again with the denied edits, ahead of them in the next round of either replica.
+// keeps the replies of new Alerts to one per window and delivery. Within one replica the order is strict. Across
+// replicas it is likely but not strict: one whose configuration pass reaches the bucket first can take the token ahead
+// of a reply that another replica claimed, and each such race costs the reply one token interval, as a Publication can
+// lose one to a configuration edit that another replica claimed just before it came due.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
