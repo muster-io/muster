@@ -409,18 +409,19 @@ type ClaimDueDeliveriesRow struct {
 // never delays a Publication, an edit of a Root message that an Alert or a Command made, or a Thread reply of its
 // urgency or below, and the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one
 // claimed batch of it; Thread replies and webhook events, Urgent or not, come after the Root-message work of both.
-// @skip_destinations are the Destinations whose limiter refused a take earlier in the round (Round): their rows are
-// left untouched for the next round, so a spent limiter costs a round at most one claimed batch of refused takes; NULL
-// skips none. It is a filter, not part of the index range: the claim reads past the skipped rows due before the others.
-// The order is order only and strict: configuration edits wait as long as the work before them uses up the limiter —
-// Alert Groups that keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of
-// its Alert Group, which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at
-// once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work
-// before it. A delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its
-// final edit or, never published there, to end it (prepare): an Enqueue that read the Destination's entries before its
-// deletion committed can create one after the deletion ended the others, and a Publication claimed before it committed
-// can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may
-// plan it as the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
+// @skip_destinations are the Destinations whose limiter refused a take earlier in the round (Round) — for the Urgent
+// claims, only those whose refused token is not due yet: their rows are left untouched for the next round, so a spent
+// limiter costs a round at most one claimed batch of refused takes of the work that is not Urgent; NULL skips none. It
+// is a filter, not part of the index range: the claim reads past the skipped rows due before the others. The order is
+// order only and strict: configuration edits wait as long as the work before them uses up the limiter — Alert Groups
+// that keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of its Alert
+// Group, which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due
+// when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work before it.
+// A delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its final edit or,
+// never published there, to end it (prepare): an Enqueue that read the Destination's entries before its deletion
+// committed can create one after the deletion ended the others, and a Publication claimed before it committed can fail
+// meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
+// the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
 // deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
 // The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
 // without the ranks, which only Root messages have; a fix of it applies to them too.

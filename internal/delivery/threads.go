@@ -138,7 +138,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 				At: t.due.Add(TokenMargin)}); err != nil {
 				return fmt.Errorf("reschedule the thread reply: %w", err)
 			}
-			noteRefused(ctx, d.ID)
+			noteRefused(ctx, d.ID, t.due)
 			return nil
 		}
 		if err := q.RenewReplyLease(ctx, dbgen.RenewReplyLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,

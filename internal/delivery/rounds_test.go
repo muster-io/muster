@@ -411,3 +411,64 @@ func TestUrgentAfterAShortBatch(t *testing.T) {
 		t.Fatalf("the Urgent Publication at %d and the first reply at %d; first calls %q", urgent, reply, order)
 	}
 }
+
+// TestUrgentOnARefusedDestination is C-11.FR-3: an Urgent Publication that comes due during a long pass of
+// configuration edits of another Destination, in a Destination whose limiter refused an edit earlier in the round,
+// goes out within one claimed batch once that limiter has a token again: the round leaves the Destination out of the
+// claims of the work that is not Urgent until the next round, and out of the Urgent claims only until its token is
+// due.
+func TestUrgentOnARefusedDestination(t *testing.T) {
+	e := roundEnv(t, 0)
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	const n, m = 30, 200
+	for i := range n {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+	}
+	for i := range m {
+		e.enqueue(t, groupOn(e.env, routeOther, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != n+m {
+		t.Fatalf("%d of %d published", p, n+m)
+	}
+	e.rec.Reset()
+	for i := range n {
+		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent())
+	}
+	for i := range m {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: groupOn(e.env, routeOther, i, "renamed"),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 5, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes, injected := 0, -1
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(10 * time.Millisecond)
+		if takes == 60 {
+			injected = len(e.rec.Calls())
+			e.enqueue(t, newGroupOf(e.env, n, "urgent", true), groups.System, created())
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	calls := e.rec.Calls()
+	at := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
+	})
+	if injected < 0 || at < 0 || at-injected > int(delivery.Batch) {
+		t.Fatalf("takes %d, injected at call %d, the Urgent Publication at call %d of %d", takes, injected, at,
+			len(calls))
+	}
+	// The edits that Alerts made in Destination 11 still wait: none of them took a token after the refusal.
+	if u := slices.IndexFunc(calls[injected:], func(c deliverytest.Call) bool {
+		return c.Destination.ID == destMM && strings.Contains(textOf(c), "annotated")
+	}); u >= 0 {
+		t.Errorf("an edit that Alerts made in Destination 11 went at call %d after the refusal", injected+u)
+	}
+}

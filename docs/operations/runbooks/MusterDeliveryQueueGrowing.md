@@ -20,7 +20,11 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
   the delivery worker leaves the rest of its deliveries untouched until the next round, about a tenth of a second
   later, so the queue holds up the messages of other Destinations by about one batch of ten calls a round, not by its
   size. On the Destinations whose limiters have room, Thread replies and the events of outgoing webhooks still wait
-  for the Root messages and edits due before them, as the delivery order says.
+  for the Root messages and edits due before them, as the delivery order says. Urgent Alert Groups of this
+  Destination still get its next free call.
+- While the queue lasts, the delivery worker runs a round about every tenth of a second: each tries about one batch of
+  ten calls to this Destination and makes about ten claims per Organization in PostgreSQL, each a millisecond or two,
+  longer with tens of thousands of waiting deliveries.
 
 ## Diagnosis
 

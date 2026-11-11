@@ -263,7 +263,7 @@ func (w *Worker) prepareEvent(ctx context.Context, org, id int64) (eventAttempt,
 				Owner: w.Lease.Owner, At: t.due.Add(TokenMargin)}); err != nil {
 				return fmt.Errorf("reschedule the webhook event: %w", err)
 			}
-			noteRefused(ctx, d.ID)
+			noteRefused(ctx, d.ID, t.due)
 			return nil
 		}
 		if err := q.RenewWebhookEventLease(ctx, dbgen.RenewWebhookEventLeaseParams{OrgID: org, ID: id,
