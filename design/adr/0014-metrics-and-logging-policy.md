@@ -13,6 +13,8 @@
   `connection` and `chain` (C-25, C-27, C-30, C-32); each joins the code with the story that exports its first metric
 - Amended: 2026-11-10 — `gateway` joins the values of the `transport` label, for a command that a person's acknowledgement
   through a Notification gateway makes (C-30.FR-6)
+- Amended: 2026-11-11 — the chart rule `MusterIngestSnapshotFailed` joins the warning rules, for Stored Snapshots that
+  processing rejected after ingestion accepted them (C-06.FR-20)
 
 ## Context
 
@@ -84,8 +86,9 @@ The reference page of all metrics is generated from the registry in code, and CI
 are present. Critical: `MusterDown`, `MusterNoLeader` (the Leader's tasks — Telegram and Bridge polling, Slack's Socket
 Mode connections, the Heartbeat lost and Stale checks, partition maintenance, the outgoing heartbeat — have stopped),
 `MusterDeliveryFailing`, `MusterDestinationBroken`, `MusterHeartbeatLost`. Warning: `MusterDeliverySlow`,
-`MusterDeliveryQueueGrowing`, `MusterIngestBacklog`, `MusterIngestRejected` (an oversized ingestion request, or more
-unauthorized ones than a threshold, so that a single scanner request does not fire it), `MusterTemplateError`,
+`MusterDeliveryQueueGrowing`, `MusterIngestBacklog`, `MusterIngestSnapshotFailed` (a Stored Snapshot that processing rejected after ingestion
+accepted it), `MusterIngestRejected` (an oversized ingestion request, or more unauthorized ones than a threshold, so
+that a single scanner request does not fire it), `MusterTemplateError`,
 `MusterClockSkew`, `MusterLoginFailures`. Every rule has a `description` and a `runbook_url` into the versioned
 documentation; thresholds are chart values; the documentation tells users to send critical rules through an Alertmanager
 route that bypasses Muster. One "Muster" dashboard with Overview, Ingestion, Delivery and Platform rows ships as a
