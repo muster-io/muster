@@ -3316,6 +3316,13 @@ critical, and a Route raises the level of its Alert Groups with its
   and a change of a Link rule or a Lookup table, reach the open Alert Groups: their Root messages are edited once,
   Quietly, to show the new texts, Snooze buttons, body or links, instead of at each Alert Group's next change; no
   data is migrated.</li>
+<li>Migration 0040 does the same for the user a footer names: a new display name of a User, a new, changed or
+  removed Account link of a User, and a new name of a Service account edit, once and Quietly, the open Root
+  messages whose footer names them as the Owner or as who snoozed; no data is migrated. Whether a Root message
+  needs an edit is now decided by the footer of its Destination's identity space alone, so after the upgrade an
+  open Root message whose footer names a User with an Account link in any other identity space — a User with only
+  a Telegram link, for a Mattermost Destination — gets one Quiet edit, with no visible change, at its next
+  re-render.</li>
 </ul>
 <p><strong>The Route for Muster's own alerts groups by more labels.</strong> An installation that accepted the suggestion "Send
 Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is <code>alertname</code>,
@@ -3383,8 +3390,9 @@ messages after a change of the severity label, the Team label, the Instance labe
 working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
 of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
 this version. The same holds for a change of a Route's language, Snooze durations or templates, or of a Link rule
-or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039. A 0.1 replica
-ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
+or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039, and for a
+rename of a User or a Service account or a change of an Account link made on one without migration 0040. A 0.1
+replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
 Destination of their Route, whatever its condition, and not to the Destinations of their Teams, and it records no
 <code>destination_joined</code>. Set Severity conditions, the Destinations of Teams and "Also
 to the Teams from the label" after every replica runs 0.2.0.</p>
@@ -3735,6 +3743,47 @@ recorded as dirty at version 39. To recover, with the same database role as Must
 </ol>
 <p>Going back below 0039 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
 Alert Group's next change; a replica of a version without 0039 neither writes nor claims them.</p>
+<p>Migration 0040 lets a rename of a User or a Service account, or a change of an Account link, re-render the open
+Root messages whose footer names them, in four transactions: the first adds two indexes on the Alert Groups, the
+second the new columns, foreign keys and CHECKs of <code>open_group_updates</code>, the third validates them, the fourth drops
+the kind CHECK of 0039. The indexes are built inside a transaction, so on a large <code>alert_groups</code> table the writes
+to it, ingestion included, wait while the build runs. A failure leaves the schema recorded as dirty at version 40.
+To recover, with the same database role as Muster:</p>
+<ol>
+<li>
+<p>Check how far it got:</p>
+<div class="highlight"><pre><span></span><code><span class="k">SELECT</span><span class="w"> </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">pg_indexes</span>
+<span class="w">         </span><span class="k">WHERE</span><span class="w"> </span><span class="n">indexname</span><span class="w"> </span><span class="k">IN</span><span class="w"> </span><span class="p">(</span><span class="s1">'alert_groups_snoozed_by_user_idx'</span><span class="p">,</span>
+<span class="w">                             </span><span class="s1">'alert_groups_snoozed_by_service_account_idx'</span><span class="p">))</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">indexes</span><span class="p">,</span>
+<span class="w">       </span><span class="p">(</span><span class="k">SELECT</span><span class="w"> </span><span class="k">count</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">pg_constraint</span>
+<span class="w">         </span><span class="k">WHERE</span><span class="w"> </span><span class="n">conrelid</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'open_group_updates'</span><span class="p">::</span><span class="n">regclass</span>
+<span class="w">           </span><span class="k">AND</span><span class="w"> </span><span class="n">conname</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">'open_group_updates_kind_v8_check'</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">checks</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If <code>checks</code> is 0, drop what the first transaction made and clear the failed attempt:</p>
+<div class="highlight"><pre><span></span><code><span class="k">DROP</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">alert_groups_snoozed_by_user_idx</span><span class="p">;</span>
+<span class="k">DROP</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">alert_groups_snoozed_by_service_account_idx</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="k">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>If <code>checks</code> is 1, finish the third and the fourth transactions and clear the mark:</p>
+<div class="highlight"><pre><span></span><code><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_user_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_service_account_id_fkey</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_kind_v8_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_user_scope_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="n">VALIDATE</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="n">open_group_updates_service_account_scope_check</span><span class="p">;</span>
+<span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">open_group_updates</span><span class="w"> </span><span class="k">DROP</span><span class="w"> </span><span class="k">CONSTRAINT</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">open_group_updates_kind_v7_check</span><span class="p">;</span>
+<span class="k">UPDATE</span><span class="w"> </span><span class="n">schema_migrations</span><span class="w"> </span><span class="k">SET</span><span class="w"> </span><span class="n">dirty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">false</span><span class="p">;</span>
+</code></pre></div>
+</li>
+<li>
+<p>Start the 0.2.0 replica again, or run <code>muster migrate</code>.</p>
+</li>
+</ol>
+<p>Going back below 0040 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
+Alert Group's next change; a replica of a version without 0040 neither writes nor claims them.</p>
 </dd>
 <dt>0.1.1</dt>
 <dd>Migration 0020 is expand only: it adds the column <code>oidc_settings.groups_claim_seen_at</code>, and replicas of 0.1.0 that
