@@ -696,7 +696,7 @@ func (f *fakeDB) MarkDelivered(_ context.Context, arg dbgen.MarkDeliveredParams)
 		return err
 	}
 	if d := f.delivery(arg.ID); d.owner == arg.Owner && d.version == arg.Version {
-		d.state, d.receivedAt, d.owner, d.until = "delivered", nil, "", time.Time{}
+		d.state, d.receivedAt, d.owner, d.until, d.configOnly = "delivered", nil, "", time.Time{}, false
 		d.pastEditWindow = d.pastEditWindow || arg.PastEditWindow
 		d.attempts, d.firstFailed, d.errorClass, d.lastError = 0, nil, nil, nil
 	}
@@ -815,7 +815,7 @@ func (f *fakeDB) RecordDelivered(_ context.Context, arg dbgen.RecordDeliveredPar
 	case raced && left:
 		d.state = "pending"
 	case d.version == arg.Version && !d.desiredRetire && !arg.Replayed:
-		d.state = "delivered"
+		d.state, d.configOnly = "delivered", false
 	default:
 		d.state = "pending"
 	}
@@ -858,7 +858,7 @@ func (f *fakeDB) RecordRepublished(_ context.Context, arg dbgen.RecordRepublishe
 	switch {
 	case endedRow(d):
 	case d.version == arg.Version && !d.desiredRetire && !arg.Replayed:
-		d.state = "delivered"
+		d.state, d.configOnly = "delivered", false
 	default:
 		d.state = "pending"
 	}

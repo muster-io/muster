@@ -24,10 +24,11 @@ import (
 // TestIntegrationConfigurationEditsLast is C-11.FR-3 and FR-15 on PostgreSQL, for a re-render of many open Root
 // messages: 100 open Alert Groups are published in one Telegram channel; a change of the Destination's button set
 // re-renders them through open_group_updates, and the channel's limiter (10 per minute) lets the first 10 edits through.
-// A new Alert Group and new Alerts of an open one arrive then: the Publication and the edit of the Alerts are the next
-// calls to the channel, before the 90 remaining edits of the re-render; a second re-render on top of the pending edit
-// of Alerts keeps that edit's place; then every edit of the re-render goes out, by age. The mark follows SetDesired's
-// rule and is cleared by a final edit, a republication and a rejoin.
+// New Alerts of an open one arrive then, and a second re-render on top of their pending edit keeps that edit's place; a
+// new Alert Group arrives last, due after every edit of the re-render. The Publication and the edit of the Alerts are
+// the next calls to the channel, before the 90 remaining edits of the re-render; then every edit of the re-render goes
+// out, by age. The mark follows SetDesired's rule and is cleared by a delivered edit, a final edit, a republication and
+// a rejoin.
 func TestIntegrationConfigurationEditsLast(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -92,9 +93,8 @@ func TestIntegrationConfigurationEditsLast(t *testing.T) {
 			t.Fatalf("%d edits within the bucket, %d marked; want 10, 90", n, marked())
 		}
 
-		// A new Alert Group, and a new Alert of the open Cfg050, while 90 edits wait.
+		// A new Alert of the open Cfg050 while 90 edits wait, then a second re-render on top of its edit.
 		l.business.Advance(time.Second)
-		l.fire(t, "cfg-new", "CfgNew/a")
 		l.fire(t, "cfg-050", "Cfg050/b")
 		flag := func(name string) (bool, string) {
 			t.Helper()
@@ -107,18 +107,28 @@ func TestIntegrationConfigurationEditsLast(t *testing.T) {
 			}
 			return only, state
 		}
-		for _, name := range []string{"CfgNew", "Cfg050"} {
-			if only, state := flag(name); only || state != "pending" {
-				t.Errorf("%s: configuration only %v, %s", name, only, state)
-			}
+		if only, state := flag("Cfg050"); only || state != "pending" {
+			t.Errorf("Cfg050: configuration only %v, %s", only, state)
 		}
-		// A second re-render: Cfg050 keeps the place of its edit of Alerts, the others stay marked.
+		// Cfg050 keeps the place of its edit of Alerts, the others stay marked.
 		rerender(`[{"button": "resolve"}]`)
 		if only, _ := flag("Cfg050"); only {
 			t.Error("a re-render on top of the edit of Alerts marked it")
 		}
 		if n := marked(); n != 99 {
 			t.Errorf("%d marked after the second re-render, want 99", n)
+		}
+		// A new Alert Group, due later than every edit of the re-render: only the rank puts it first, as age, and
+		// last_delivered_at NULLS FIRST behind it, would not.
+		l.business.Advance(10 * time.Second)
+		l.fire(t, "cfg-new", "CfgNew/a")
+		if n := l.count(t, `SELECT count(*) FROM deliveries d JOIN alert_groups g ON g.id = d.alert_group_id
+			WHERE g.title LIKE 'CfgNew%' AND d.next_attempt_at > (SELECT max(next_attempt_at) FROM deliveries
+				WHERE destination_id = $1 AND configuration_only AND state = 'pending')`, dest); n != 1 {
+			t.Fatalf("the Publication of CfgNew is not due after the edits of the re-render")
+		}
+		if only, state := flag("CfgNew"); only || state != "pending" {
+			t.Errorf("CfgNew: configuration only %v, %s", only, state)
 		}
 
 		l.rec.Reset()
@@ -147,6 +157,10 @@ func TestIntegrationConfigurationEditsLast(t *testing.T) {
 		if n := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'delivered'`,
 			dest); n != 101 {
 			t.Errorf("%d of 101 delivered", n)
+		}
+		if n := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND configuration_only`,
+			dest); n != 0 {
+			t.Errorf("%d delivered edits keep the mark", n)
 		}
 
 		// A final edit, a republication and a rejoin clear the mark; a Publication never takes it.

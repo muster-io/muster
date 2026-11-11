@@ -399,10 +399,11 @@ type ClaimDueDeliveriesRow struct {
 // first, then the edits that are not configuration only before those a change of configuration alone made
 // (configuration_only, SetDesired), then the earliest, then the one delivered longest ago, so that deliveries waiting
 // for the same token take turns; another claimer skips the rows this one locked. The rank is order only: a re-render of
-// every open Root message never delays a Publication or the change of an Alert or a Command in the same Destination,
-// and it takes every token they leave, its edits by age. Their demand per Destination is bounded — new Alert Groups
-// beyond a Route's Storm threshold wait in its Storm summary — and an edit that waits is not lost: the next change of
-// its Alert Group carries the configuration with it and ends the mark. A claimed edit without a token is released at
+// every open Root message never delays a Publication or the change of an Alert or a Command of the same urgency in the
+// same Destination, and it takes every token they leave, its edits by age. Its edits wait only while Publications and
+// the edits of Alerts and Commands alone use up the limiter, and those are then backlogged themselves; an edit that
+// waits is not lost: the next change of its Alert Group carries the configuration with it and ends the mark. A
+// delivered edit ends the mark too. A claimed edit without a token is released at
 // once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against a
 // Publication. A delivery a Storm holds waits for its Storm, and one of a
 // deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
@@ -3645,7 +3646,7 @@ func (q *Queries) MarkDeletedInMessenger(ctx context.Context, arg MarkDeletedInM
 const markDelivered = `-- name: MarkDelivered :exec
 UPDATE deliveries
 SET state = 'delivered', desired_received_at = NULL, past_edit_window = past_edit_window OR $1::boolean,
-    attempts = 0, first_failed_at = NULL, last_error_class = NULL, last_error = NULL,
+    attempts = 0, first_failed_at = NULL, last_error_class = NULL, last_error = NULL, configuration_only = false,
     lease_owner = NULL, lease_until = NULL, updated_at = $2
 WHERE org_id = $3 AND id = $4 AND lease_owner = $5::text AND desired_version = $6
 `
@@ -3933,6 +3934,8 @@ SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::b
                                   AND NOT $1::boolean THEN 'delivered'
                               ELSE 'pending'
                           END,
+    configuration_only  = d.configuration_only AND (f.ended OR d.desired_version <> $2::bigint
+                                                    OR d.desired_retire OR $1::boolean),
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = CASE WHEN $1::boolean THEN d.desired_received_at END,
     next_attempt_at     = $10::timestamptz,
@@ -4309,6 +4312,9 @@ SET superseded_message_ids   = CASE
     actual_status            = CASE WHEN $4::boolean THEN NULL ELSE $9::text END,
     actual_button_key_id     = $10::text,
     past_edit_window         = false,
+    configuration_only       = configuration_only AND (state IN ('withheld', 'retired', 'deleted_in_messenger')
+                                                       OR desired_version <> $7::bigint OR desired_retire
+                                                       OR $4::boolean),
     last_delivered_at        = $5::timestamptz,
     state                    = CASE
                                    WHEN state IN ('withheld', 'retired', 'deleted_in_messenger') THEN state
@@ -5310,9 +5316,9 @@ type SetDesiredParams struct {
 // before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
 // configuration_only marks the edit of a published Root message that a change of configuration alone made
 // (@configuration_only, configurationOnly in enqueue.go), which ClaimDueDeliveries takes after the rest: set only on a
-// delivered row, kept on a pending row that had it, and cleared by any other change, so that a Publication, a final
-// edit, a delivery restarted after Not delivered and a re-render on top of the pending change of an Alert or a Command
-// keep their place.
+// delivered row, kept on a pending row that had it, cleared once the edit is delivered (MarkDelivered, RecordDelivered,
+// RecordRepublished) and by any other change, so that a Publication, a final edit, a delivery restarted after Not
+// delivered and a re-render on top of the pending change of an Alert or a Command keep their place.
 func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string, error) {
 	row := q.db.QueryRow(ctx, setDesired,
 		arg.DesiredText,
