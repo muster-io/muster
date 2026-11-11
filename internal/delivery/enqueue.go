@@ -804,8 +804,8 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 // published Root message is claimed after the other due deliveries of its urgency and, when it is not Urgent, after the
 // Thread replies and webhook events (SetDesired, ClaimDueDeliveries, Worker.Round). A change that Alerts or a Command
 // make always records a lifecycle event — new, continued or resolved Alerts, changed annotations, a rise, a change of
-// status — so a rendering without one is a re-render of configuration, the mark of the first Publication or the end of
-// a Reopen window or a Grace period.
+// status — so a rendering without one is a re-render of configuration, the mark of the first Publication or the end
+// of a Reopen window or a Grace period.
 func configurationOnly(r groups.Rendering) bool {
 	if r.Configuration {
 		return true

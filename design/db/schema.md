@@ -1810,17 +1810,19 @@ claims, per Organization, the Urgent deliveries that are not configuration only,
 other deliveries that are not configuration only, the Thread replies, the outgoing webhook events and last the other
 configuration edits. Each claim is an equality on `urgent` and `configuration_only`, a range of `deliveries_due_v2_idx`;
 an `OR` of ranks would filter every pending delivery instead. Every row denied a token is due again at that token's
-time, so the order of the claims decides who gets it. Urgent Root messages never wait behind those that are not Urgent;
-Thread replies, Urgent or not, come after both. The order is order only and strict: configuration edits wait for as long
-as the work before them uses up the limiter, take every token it leaves, by age, and an edit that waits is carried by
-the next change of its Alert Group, which clears the mark. The configuration edits that are not Urgent wait while
-Root-message work, Thread replies and webhook events together use up the limiter: in a Telegram chat at 10 calls a
-minute, about three Alert Groups a minute that resolve and open again, each taking up to four calls (a Root message edit
-and a Thread reply each time), leave them nothing. A configuration claim takes one batch at a time and the round then
-goes back to the first rank, so a large re-render delays new work of a higher rank by at most one batch; it takes only
-the edits due when the round started, so each is attempted at most once a round and the round ends. A `RetryAfter` sets
-`next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
-`first_failed_at`; running out of either makes the Destination Broken.
+time, so the order of the claims decides who gets it. Urgent Root messages wait behind those that are not Urgent for at
+most one claimed batch of a later pass; Thread replies, Urgent or not, come after both. The order is order only and
+strict: configuration edits wait for as long as the work before them uses up the limiter, take every token it leaves, by
+age, and an edit that waits is carried by the next change of its Alert Group, which clears the mark. The configuration
+edits that are not Urgent wait while Root-message work, Thread replies and webhook events together use up the limiter:
+in a Telegram chat at 10 calls a minute, about three Alert Groups a minute that resolve and open again, each taking up
+to four calls (a Root message edit and a Thread reply each time), leave them nothing. Every claim after the first takes
+one batch and the round then goes back to the first, so new Urgent Root-message work waits at most one claimed batch of
+a later rank, and a token that comes free during a later claim goes to it. The two configuration claims take only the
+edits due when the round started, so each is attempted at most once a round, unless its lease runs out within it; the
+other claims take what is due now and end, as before, on a short claim. A `RetryAfter` sets `next_attempt_at` exactly
+and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at `first_failed_at`;
+running out of either makes the Destination Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

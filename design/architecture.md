@@ -843,9 +843,9 @@ is pending collapse into the next one ([ADR-0005], [C-11].FR-1). The HTTP call i
 through the delivery client class, which makes one attempt and leaves the next one to the row ([ADR-0015]). The limiters
 are shared by all replicas: their token buckets live in PostgreSQL ([C-11].FR-3). Each round claims the Urgent
 deliveries, then the Urgent edits of a change of configuration, then the other deliveries, the Thread replies and the
-outgoing webhook events, and last the other edits of a change of configuration, one batch of those at a time before it
-goes back to the top, so that Urgent Root messages never wait behind the rest and a re-render of every open Root message
-takes only the tokens the work before it leaves.
+outgoing webhook events, and last the other edits of a change of configuration; each claim after the first takes one
+batch before the round goes back to the top, so that Urgent Root messages wait behind the rest for at most one claimed
+batch and a re-render of every open Root message takes only the tokens the work before it leaves.
 
 ```mermaid
 sequenceDiagram
@@ -857,7 +857,7 @@ sequenceDiagram
     participant MS as messenger or endpoint
 
     DB-->>DW: NOTIFY, or next_attempt_at reached
-    DW->>DB: claim a due delivery row, Urgent first,<br/>edits of a change of configuration after the work of their urgency<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
+    DW->>DB: claim a due delivery row by rank<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
     DW->>DB: read the latest Desired state (text, buttons, hash)
     alt the actual message already matches
         DW->>DB: nothing to do

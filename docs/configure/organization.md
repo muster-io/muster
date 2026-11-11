@@ -98,15 +98,16 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 [key labels and Alerts](messages-and-templates.md#the-default-message): each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow. A Destination sends the edits of Urgent Alert Groups
-right after their Root messages and the edits that Alerts and Commands make to them, and before anything about the
-other Alert Groups, so the Root message of an Urgent Alert Group never waits behind one that is not Urgent. The edits of
-the other Alert Groups come last: they never hold up the Root messages of new Alert Groups, the edits of Root messages
-that Alerts and Commands make, the Thread replies, such as the one about new Alerts, or the events of outgoing webhooks.
-A Destination sends those first, for as long as they use up its rate limit, and these edits with the rest; none is
-dropped. Alert Groups that keep flapping can hold them up for a long time: a Telegram chat takes 10 calls a minute, and
-an Alert Group that resolves and opens again takes up to four of them, a Root message edit and a Thread reply each
-time, so about three such Alert Groups a minute leave nothing for these edits until they calm down.
+many open Alert Groups, as the messengers' rate limits allow. A Destination sends the edits of Urgent Alert Groups right
+after their Root messages and the edits that Alerts and Commands make to them, and before anything about the other Alert
+Groups, so the Root message of an Urgent Alert Group waits for work that is not Urgent at most one batch of it, about
+ten calls; Thread replies, Urgent or not, come after the Root messages of both. The edits of the other Alert Groups come
+last: they never hold up the Root messages of new Alert Groups, the edits of Root messages that Alerts and Commands
+make, the Thread replies, such as the one about new Alerts, or the events of outgoing webhooks. A Destination sends
+those first, for as long as they use up its rate limit, and these edits with the rest; none is dropped. Alert Groups
+that keep flapping can hold them up for a long time: a Telegram chat takes 10 calls a minute, and an Alert Group that
+resolves and opens again takes up to four of them, a Root message edit and a Thread reply each time, so about three such
+Alert Groups a minute leave nothing for these edits until they calm down.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.

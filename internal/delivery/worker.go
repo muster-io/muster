@@ -232,11 +232,12 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // reply that another replica claimed, and each such race costs the reply one token interval, as a Publication can lose
 // one to a configuration edit that another replica claimed just before it came due.
 //
-// A configuration pass works one batch at a time and goes back to the top of the order after each full one, so that
-// new work of a higher rank waits at most one batch behind a large re-render (reconcile). Both passes claim only the
-// edits due when the round started: an edit denied a token is due again after the start, so each is claimed at most
-// once a round and the round ends after at most one batch per Batch edits due at its start, whatever the size of the
-// re-render and however long it takes. The other passes drain as they always did, until a claim comes back short.
+// Every pass after the first works one batch at a time and the round goes back to the first pass after each full one,
+// so that the Publication or edit of an Urgent Root message that comes due meanwhile waits at most one claimed batch of
+// a later pass (reconcile). The two configuration passes claim only the edits due when the round started: an edit
+// denied a token is due again after the start, so each is claimed at most once a round, unless its lease runs out
+// within it, whatever the size of the re-render. The other passes claim what is due now and end, as the drains before
+// them did, once a claim comes back short; the round ends when every pass after the first comes back short in turn.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -259,21 +260,25 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 // reconcile works the due deliveries, Thread replies and webhook events of the Organization in the order of Round.
 func (w *Worker) reconcile(ctx context.Context, org int64) error {
 	start := w.Lease.Clocks.Business.Now()
+	type pass struct {
+		claim func(ctx context.Context, org int64) ([]int64, error)
+		work  func(ctx context.Context, org, id int64)
+	}
+	later := []pass{{w.claimDeliveries(true, true, start), w.deliver},
+		{w.claimDeliveries(false, false, time.Time{}), w.deliver}, {w.claimReplies, w.reply},
+		{w.claimEvents, w.sendEvent}, {w.claimDeliveries(false, true, start), w.deliver}}
 	var errs []error
+top:
 	for {
 		errs = append(errs, w.drain(ctx, org, w.claimDeliveries(true, false, time.Time{}), w.deliver))
-		full, err := w.batchOnce(ctx, org, w.claimDeliveries(true, true, start), w.deliver)
-		errs = append(errs, err)
-		if full {
-			continue
+		for _, p := range later {
+			full, err := w.batchOnce(ctx, org, p.claim, p.work)
+			errs = append(errs, err)
+			if full {
+				continue top
+			}
 		}
-		errs = append(errs, w.drain(ctx, org, w.claimDeliveries(false, false, time.Time{}), w.deliver),
-			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent))
-		full, err = w.batchOnce(ctx, org, w.claimDeliveries(false, true, start), w.deliver)
-		errs = append(errs, err)
-		if !full {
-			return errors.Join(errs...)
-		}
+		return errors.Join(errs...)
 	}
 }
 
