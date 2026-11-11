@@ -170,6 +170,30 @@ func (f *fakeDB) LockActiveUser(_ context.Context, arg dbgen.LockActiveUserParam
 	return nil, nil
 }
 
+func (f *fakeDB) ShareUser(_ context.Context, arg dbgen.ShareUserParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ShareUser"); err != nil {
+		return nil, err
+	}
+	if arg.OrgID != orgID {
+		return nil, nil
+	}
+	return []int64{arg.ID}, nil
+}
+
+func (f *fakeDB) ShareServiceAccount(_ context.Context, arg dbgen.ShareServiceAccountParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ShareServiceAccount"); err != nil {
+		return nil, err
+	}
+	if arg.OrgID != orgID {
+		return nil, nil
+	}
+	return []int64{arg.ID}, nil
+}
+
 // TestAcknowledgeByInactiveUser: an Acknowledge by a User disabled or deleted after it was authenticated is refused
 // under the lock of the User's row, so it never leaves an Owner that the release missed; a failing lock fails it.
 func TestAcknowledgeByInactiveUser(t *testing.T) {
@@ -186,5 +210,38 @@ func TestAcknowledgeByInactiveUser(t *testing.T) {
 	h.db.fail["LockActiveUser"] = errBoom
 	if _, err := h.svc.Acknowledge(t.Context(), alice, g.PublicID); !errors.Is(err, errBoom) {
 		t.Errorf("a failing lock = %v", err)
+	}
+}
+
+// TestSnoozeSharesWhoSnoozes is C-12.FR-12 for the footer of a snoozed Alert Group: a Snooze locks the row of the User
+// or the Service account who snoozes FOR SHARE before it locks the Alert Group, as an Acknowledge locks who
+// acknowledges, so that a change of their name or Account links, which locks that row before it writes its re-render,
+// sees the Snooze; another Command takes no such lock, and a failing lock fails the Snooze.
+func TestSnoozeSharesWhoSnoozes(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	for _, c := range []struct {
+		name   string
+		caller Caller
+		lock   string
+	}{{"a user", alice, "ShareUser"}, {"a service account", robot, "ShareServiceAccount"}} {
+		g := h.firing(t, c.name)
+		var before int
+		h.db.before["LockGroups"] = func() { before = h.db.calls[c.lock] }
+		if _, err := h.do(c.caller, CommandSnooze, g); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if before != 1 || g.Status != "snoozed" {
+			t.Errorf("%s: %d share locks before the alert group, %s", c.name, before, g.Status)
+		}
+		delete(h.db.before, "LockGroups")
+		if _, err := h.do(c.caller, CommandUnsnooze, g); err != nil || h.db.calls[c.lock] != 1 {
+			t.Errorf("%s: an Unsnooze = %v, %d share locks", c.name, err, h.db.calls[c.lock])
+		}
+		h.db.fail[c.lock] = errBoom
+		if _, err := h.do(c.caller, CommandSnooze, g); !errors.Is(err, errBoom) || g.Status != "firing" {
+			t.Errorf("%s: a failing lock = %v, %s", c.name, err, g.Status)
+		}
+		delete(h.db.fail, c.lock)
 	}
 }

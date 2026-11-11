@@ -212,6 +212,25 @@ FROM users
 WHERE org_id = @org_id AND id = @id AND status = 'active'
 FOR SHARE;
 
+-- ShareUser locks the row of a User who snoozes, FOR SHARE, before the Alert Group, as LockActiveUser does for who
+-- acknowledges: a change of the User's display name or Account links, which locks the row and then writes the
+-- re-render of the open Alert Groups whose footer names them, waits for the Snooze, whose Alert Group it then finds,
+-- or the Snooze renders the footer after the change.
+-- name: ShareUser :many
+SELECT id
+FROM users
+WHERE org_id = @org_id AND id = @id
+FOR SHARE;
+
+-- ShareServiceAccount locks the row of a Service account that snoozes, FOR SHARE, before the Alert Group: a rename of
+-- it, which locks the row and then writes the re-render of the open Alert Groups it snoozed, waits for the Snooze, or
+-- the Snooze renders the footer after the rename.
+-- name: ShareServiceAccount :many
+SELECT id
+FROM service_accounts
+WHERE org_id = @org_id AND id = @id
+FOR SHARE;
+
 -- InsertMemberships adds Alerts to Alert Groups, firing.
 -- name: InsertMemberships :exec
 INSERT INTO alert_group_alerts (org_id, alert_group_id, alert_id, episode, state, joined_at, starts_at, annotations)
@@ -1059,8 +1078,9 @@ WHERE org_id = @org_id AND id = @id;
 -- by id in batches, and is deleted with its last batch.
 
 -- ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
--- the public_id of its Route, its Destination or its Team, if any, for its log lines; another claimer skips the row
--- this one locked. A row of a kind that a later version adds waits for a replica that handles it.
+-- the public_id of its Route, its Destination, its Team, its User or its Service account, if any, for its log lines;
+-- another claimer skips the row this one locked. A row of a kind that a later version adds waits for a replica that
+-- handles it.
 -- name: ClaimOpenGroupUpdate :many
 WITH due AS MATERIALIZED (
     SELECT d.id
@@ -1085,12 +1105,19 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
                     WHERE d.org_id = @org_id AND d.id = u.destination_id), '')::text AS destination_public_id,
           coalesce((SELECT t.public_id
                     FROM teams t
-                    WHERE t.org_id = @org_id AND t.id = u.team_id), '')::text AS team_public_id;
+                    WHERE t.org_id = @org_id AND t.id = u.team_id), '')::text AS team_public_id,
+          u.user_id, u.service_account_id,
+          coalesce((SELECT p.public_id
+                    FROM users p
+                    WHERE p.org_id = @org_id AND p.id = u.user_id), '')::text AS user_public_id,
+          coalesce((SELECT a.public_id
+                    FROM service_accounts a
+                    WHERE a.org_id = @org_id AND a.id = u.service_account_id), '')::text AS service_account_public_id;
 
 -- LockOpenGroupUpdate locks a claimed row in the transaction of a batch while its lease is still this replica's at
 -- now, and reads where its run stands; no row when the lease was lost.
 -- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, destination_id, team_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, team_id, user_id, service_account_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = @org_id AND id = @id AND leased_by = @owner::text AND lease_until > @now::timestamptz
 FOR NO KEY UPDATE;
@@ -1184,9 +1211,30 @@ WHERE org_id = @org_id AND status <> 'resolved' AND id > @after_id
 ORDER BY id
 LIMIT @lim;
 
+-- ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names the User
+-- (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed — which a change of the User's display
+-- name or Account links re-renders.
+-- name: ListOpenGroupsOfUserAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = @org_id AND status <> 'resolved' AND id > @after_id
+  AND (owner_user_id = @user_id OR snoozed_by_user_id = @user_id)
+ORDER BY id
+LIMIT @lim;
+
+-- ListOpenGroupsOfServiceAccountAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names
+-- the Service account, who snoozed them, which a rename of it re-renders.
+-- name: ListOpenGroupsOfServiceAccountAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = @org_id AND status <> 'resolved' AND id > @after_id
+  AND snoozed_by_service_account_id = @service_account_id
+ORDER BY id
+LIMIT @lim;
+
 -- LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
--- keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings, team_name
--- or organization_links lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared
+-- keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings, team_name,
+-- organization_links, user_name, account_links or service_account_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared
 -- for before it reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created
 -- or changed.
 -- name: LockTeamEvaluation :exec

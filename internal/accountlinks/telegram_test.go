@@ -167,6 +167,10 @@ func TestLinkTelegram(t *testing.T) {
 		e.store.hints[0].ID != e.store.links[0].publicID {
 		t.Errorf("hints %+v", e.store.hints)
 	}
+	// The new link re-renders the open Root messages whose footer names the User, who is mentioned now (C-12.FR-12).
+	if !slices.Equal(e.store.rerenders, []int64{aliceID}) || e.store.notified != 1 {
+		t.Errorf("re-renders %v, %d wakes", e.store.rerenders, e.store.notified)
+	}
 	if !strings.Contains(e.log.String(), `"event":"account_link_linked","messenger":"telegram","connection":"`+tgPID+
 		`","user":"`+alicePID+`"}`) || strings.Contains(e.log.String(), tok) {
 		t.Errorf("log %s", e.log)
@@ -223,6 +227,10 @@ func TestLinkTelegram(t *testing.T) {
 		all[1].Details["replaced"] != all[0].Resource {
 		t.Fatalf("a replacement: links %+v, entries %+v", e.store.links, all)
 	}
+	// The rejected tokens re-rendered nothing; the replacement re-renders once.
+	if !slices.Equal(e.store.rerenders, []int64{aliceID, aliceID}) || e.store.notified != 2 {
+		t.Errorf("after the replacement: re-renders %v, %d wakes", e.store.rerenders, e.store.notified)
+	}
 	if !strings.Contains(e.log.String(), `"event":"account_link_unlinked","messenger":"telegram","connection":"`+tgPID+
 		`","user":"`+alicePID+`","reason":"replaced"`) {
 		t.Errorf("log %s", e.log)
@@ -261,6 +269,10 @@ func TestLinkSameAccount(t *testing.T) {
 		tg2PID+`","user":"`+alicePID+`"}`) || strings.Contains(e.log.String(), "account_link_unlinked") {
 		t.Errorf("log %s", e.log)
 	}
+	// A new username re-renders the open Root messages whose footer names the User (C-12.FR-12).
+	if !slices.Equal(e.store.rerenders, []int64{aliceID}) {
+		t.Errorf("a new username: re-renders %v", e.store.rerenders)
+	}
 	e.addLink(aliceID, MessengerMattermost, mmID, "u-dana", ptr("dana"))
 	ms := e.startMM(t, alice, "dana")
 	ml, err := e.s.ConfirmMattermost(t.Context(), alice, ms.RequestPublicID, e.mm.code(t))
@@ -270,6 +282,18 @@ func TestLinkSameAccount(t *testing.T) {
 		e.mm.sent[len(e.mm.sent)-1].text != "Linked to Muster user Alice Smith" {
 		t.Fatalf("Confirm = %+v, %v; entries %+v", ml, err, got)
 	}
+	// The same username and display name again: a footer shows nothing new, so nothing re-renders.
+	if len(e.store.rerenders) != 1 {
+		t.Errorf("the same account again: re-renders %v", e.store.rerenders)
+	}
+	e.store.fail["InsertAccountLinksUpdate"] = errBoom
+	tok = e.start(t, alice)
+	if err := e.s.LinkTelegram(t.Context(), TelegramConnection{ID: tgID, PublicID: tgPID}, tok,
+		TelegramAccount{ID: 7001, Username: "alice_t3"}, r.reply); !errors.Is(err, errBoom) ||
+		*e.store.links[0].username != "alice_t2" || len(e.store.audit) != 2 {
+		t.Errorf("a failed re-render of a new username = %v, links %+v", err, e.store.links)
+	}
+	delete(e.store.fail, "InsertAccountLinksUpdate")
 	e.store.fail["UpdateAccountLink"] = errBoom
 	tok = e.start(t, alice)
 	if err := e.s.LinkTelegram(t.Context(), TelegramConnection{ID: tgID, PublicID: tgPID}, tok,
@@ -315,7 +339,7 @@ func TestLinkTelegramConflict(t *testing.T) {
 func TestLinkTelegramFailures(t *testing.T) {
 	for _, name := range []string{"GetLinkConnection", "GetTelegramRequestByHash", "LockLinkUser", "LockLinkRequest",
 		"InsertAuditEntry", "GetAccountLinkBySpace", "GetUserLinkInSpace", "DeleteAccountLink", "InsertAccountLink",
-		"ConsumeLinkRequest", "Notify"} {
+		"ConsumeLinkRequest", "InsertAccountLinksUpdate", "NotifyOpenGroupUpdates", "Notify"} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t)
 			e.addLink(aliceID, MessengerTelegram, tgID, "7000", nil)

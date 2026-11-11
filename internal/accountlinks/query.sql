@@ -277,3 +277,27 @@ WITH doomed AS MATERIALIZED (
 DELETE FROM account_link_requests r
 USING doomed d
 WHERE r.org_id = @org_id AND r.id = d.id;
+
+-- InsertAccountLinksUpdate requests, in the transaction of a new, replaced, changed or removed Account link of a User,
+-- that it reach the open Root messages whose footer names the User (C-12.FR-12), whose Mention of them the link makes,
+-- with a row account_links with the User in user_id, which the open_group_updates worker of any replica claims; its
+-- run walks the open Alert Groups whose Owner or snoozer the User is. A row account_links or user_name of the User that
+-- no worker has claimed yet already covers the change, since its run renders the name and the links as they are then:
+-- it is locked, so that no worker claims it before this transaction commits, and no second one is inserted. The row is
+-- written even while no open Alert Group names the User: a Snapshot in flight may be giving one back its Owner or
+-- snoozer, which the run waits for under the lock of the evaluation.
+-- name: InsertAccountLinksUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind IN ('user_name', 'account_links') AND u.user_id = @user_id
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, user_id, requested_at)
+SELECT @org_id, 'account_links', @user_id, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

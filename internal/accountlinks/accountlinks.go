@@ -74,6 +74,15 @@ const (
 // HintType is the live-update hint of a User whose Account link appeared, changed or disappeared; it names the link.
 const HintType = "account-links"
 
+// KindAccountLinks is the kind of the open_group_updates row that a new, replaced, changed or removed Account link
+// writes, whose run re-renders the open Root messages whose footer names the link's User, by the Mention the link makes
+// (C-12.FR-12), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which
+// claim it.
+const (
+	KindAccountLinks        = "account_links"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
+
 // The Audit log actions and resource of C-18.FR-9.
 const (
 	ActionLink         = "account_link.link"
@@ -224,6 +233,8 @@ type Queries interface {
 	DeleteUserAccountLinks(ctx context.Context, arg dbgen.DeleteUserAccountLinksParams) (
 		[]dbgen.DeleteUserAccountLinksRow, error)
 	VoidUserLinkRequests(ctx context.Context, arg dbgen.VoidUserLinkRequestsParams) (int64, error)
+	InsertAccountLinksUpdate(ctx context.Context, arg dbgen.InsertAccountLinksUpdateParams) (int64, error)
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 	// Notify sends a live-update hint in the transaction of the queries, so that it reaches the streams once that
 	// commits.
@@ -424,6 +435,14 @@ func (s *Service) unlink(ctx context.Context, r Requester, ownerID int64, ownerP
 	}
 	var gone dbgen.GetAccountLinkOfUserRow
 	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
+		// The links of one User change under the lock of the User, which a Command that makes a footer name them holds
+		// FOR SHARE until it commits (requestRerender).
+		if _, err := q.LockLinkUser(ctx, dbgen.LockLinkUserParams{OrgID: s.cfg.OrgID, ID: ownerID}); errors.Is(err,
+			pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("lock the user: %w", err)
+		}
 		l, err := q.GetAccountLinkOfUser(ctx, dbgen.GetAccountLinkOfUserParams{OrgID: s.cfg.OrgID, UserID: ownerID,
 			PublicID: norm})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -438,6 +457,9 @@ func (s *Service) unlink(ctx context.Context, r Requester, ownerID int64, ownerP
 		v := viewOf(l.Messenger, l.ConnectionPublicID, l.ExternalID, textPtr(l.Username), textPtr(l.DisplayName))
 		if err := s.record(ctx, q, r.Actor, r.Transport, r.Address, ActionUnlink, linkResource(l.PublicID, v),
 			removed(v), details(v, "", "", ownerPublicID)); err != nil {
+			return err
+		}
+		if err := s.requestRerender(ctx, q, ownerID); err != nil {
 			return err
 		}
 		gone = l
@@ -482,6 +504,9 @@ func (s *Service) removeUserLinks(ctx context.Context, q Queries, userID int64, 
 	}
 	if len(rows) == 0 {
 		return nil, nil
+	}
+	if err := s.requestRerender(ctx, q, userID); err != nil {
+		return nil, err
 	}
 	if err := q.Notify(ctx, s.hint(u.PublicID, "")); err != nil {
 		return nil, err
@@ -591,6 +616,9 @@ func (s *Service) insertLink(ctx context.Context, q Queries, u dbgen.LockLinkUse
 		details(v, "", replaced, u.PublicID)); err != nil {
 		return Link{}, nil, err
 	}
+	if err := s.requestRerender(ctx, q, u.ID); err != nil {
+		return Link{}, nil, err
+	}
 	return l, old, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
 }
 
@@ -609,10 +637,46 @@ func (s *Service) relink(ctx context.Context, q Queries, u dbgen.LockLinkUserRow
 		details(v, "", "", u.PublicID)); err != nil {
 		return Link{}, nil, err
 	}
+	// A footer writes the link's User by its username and display name, never by its Connection, so only a change of
+	// those re-renders (C-12.FR-12).
+	if !sameText(prev.Username, a.username) || !sameText(prev.DisplayName, a.displayName) {
+		if err := s.requestRerender(ctx, q, u.ID); err != nil {
+			return Link{}, nil, err
+		}
+	}
 	l := Link{PublicID: prev.PublicID, Messenger: a.messenger, ConnectionPublicID: a.conn.publicID,
 		ConnectionName: a.conn.name, ExternalID: a.external, Username: a.username, DisplayName: a.displayName,
 		LastUsedAt: timePtr(prev.LastUsedAt), CreatedAt: prev.CreatedAt.UTC()}
 	return l, nil, q.Notify(ctx, s.hint(u.PublicID, l.PublicID))
+}
+
+// requestRerender, in the transaction of q that changed the Account links of the User userID under the lock of their
+// row, asks the workers of internal/groups to re-render the open Root messages whose footer names them, whose Mention
+// of them the links make (C-12.FR-12): one open_group_updates row KindAccountLinks, unless one of the User is still
+// unclaimed, requested at the business time of the change, and a notification that wakes them once the transaction
+// commits. A Command that makes the footer name the User holds their row FOR SHARE until it commits, so the run finds
+// its Alert Group.
+func (s *Service) requestRerender(ctx context.Context, q Queries, userID int64) error {
+	n, err := q.InsertAccountLinksUpdate(ctx, dbgen.InsertAccountLinksUpdateParams{OrgID: s.cfg.OrgID,
+		UserID: pgtype.Int8{Int64: userID, Valid: true}, RequestedAt: s.now()})
+	if err != nil {
+		return fmt.Errorf("re-render the open root messages for the account links of user %d: %w", userID, err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
+}
+
+// sameText reports whether a stored text and a value are the same, both absent included.
+func sameText(stored pgtype.Text, v *string) bool {
+	if v == nil {
+		return !stored.Valid
+	}
+	return stored.Valid && stored.String == *v
 }
 
 // logLinked logs a link that committed, with the link it replaced, and the error of the bot's confirmation, if any.

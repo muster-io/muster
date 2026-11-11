@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/muster-io/muster/internal/devmode"
 	"github.com/muster-io/muster/internal/fakes/faketelegram"
 )
 
@@ -336,5 +337,154 @@ func TestRouteSettingsAndLinksRerender(t *testing.T) {
 	}, "https://dash.example.org/pods/")
 	if n := messageSettingsDone(h, "organization_links"); n != 2 {
 		t.Errorf("%d runs of organization_links, want 2", n)
+	}
+}
+
+// TestFooterUserRerender is the Verification of the re-render of open Root messages after a change of whom their
+// footer names (C-12.FR-12), against `muster dev` and the fake Mattermost and Telegram servers: the bootstrap Admin
+// acknowledges one Alert Group and snoozes another, a Service account snoozes a third, and a fourth fires. A rename of
+// the Admin through the profile and by an Admin edits the Root messages of the first two once each, Quietly — no new
+// post, no notification — to show the new name, and not those of the other two; a Telegram Account link of the Admin
+// edits only their Telegram Root messages, whose footer now mentions the account, and its removal edits them back; a
+// rename of the Service account edits the third Alert Group's Root messages. A second save of the same values writes no
+// row and edits nothing.
+func TestFooterUserRerender(t *testing.T) {
+	h := Start(t, DevProcess)
+	r := h.Replicas[0]
+	c, dests := newCompact(t, h, r)
+	c.routeOf("Footer", "footer", []string{"alertname", "system"}, dests[:2], "")
+	labels := func(pod string) map[string]string {
+		return map[string]string{"category": "footer", "system": "kubernetes", "severity": "warning", "pod": pod}
+	}
+	ids := []string{c.fire("fu1", "FooterAcked", nil, labels("a")), c.fire("fu2", "FooterSnoozed", nil, labels("b")),
+		c.fire("fu3", "FooterRobot", nil, labels("c")), c.fire("fu4", "FooterControl", nil, labels("d"))}
+	ns := make([]int, len(ids))
+	for i, id := range ids {
+		ns[i] = c.number(id)
+		c.tgText(ns[i])
+	}
+	session := newAgentSignedIn(t, r)
+	me := session.json(http.MethodGet, "/api/v1/me", "", http.StatusOK)["user"].(map[string]any)
+	adminID := me["id"].(string)
+	sa := c.api.json(http.MethodPost, "/api/v1/service-accounts", `{"name":"footer-robot","role":"responder"}`,
+		http.StatusCreated)["id"].(string)
+	robot := patClient{t: t, base: r.App, token: session.json(http.MethodPost, "/api/v1/service-accounts/"+sa+"/tokens",
+		`{"name":"footer"}`, http.StatusCreated)["value"].(string)}
+	if out := c.command(ids[0], "acknowledge"); out != "done" {
+		t.Fatalf("acknowledge #%d: %s", ns[0], out)
+	}
+	c.api.json(http.MethodPost, "/api/v1/alert-groups/"+ids[1]+"/snooze", `{"no_end":true}`, http.StatusOK)
+	robot.json(http.MethodPost, "/api/v1/alert-groups/"+ids[2]+"/snooze", `{"no_end":true}`, http.StatusOK)
+	eventually(t, "the root messages of the commands", func() bool {
+		return h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`) == 0 &&
+			h.count(t, `SELECT count(*) FROM open_group_updates`) == 0
+	})
+
+	shows := func(n int) string {
+		b, _ := json.Marshal(c.root(n))
+		return string(b) + "\n" + c.tgPost(n).Text
+	}
+	// quiet runs save and checks that it edited the Root messages of each Alert Group as want says, Mattermost and
+	// Telegram apart, until they show text, with no new post and no notification.
+	quiet := func(t *testing.T, what string, save func(), text string, want map[int]rootEdits) {
+		t.Helper()
+		posts, tgPosts := len(c.posts()), len(c.tg.messages(faketelegram.ChannelID))
+		notified, tgNotified := len(c.notifications()), len(c.tg.notifications())
+		before := c.edits(ns...)
+		save()
+		eventually(t, what, func() bool {
+			if h.count(t, `SELECT count(*) FROM open_group_updates`) != 0 ||
+				h.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'`) != 0 {
+				return false
+			}
+			for n := range want {
+				if !strings.Contains(shows(n), text) {
+					return false
+				}
+			}
+			return true
+		})
+		after := c.edits(ns...)
+		for _, n := range ns {
+			if d := (rootEdits{mm: after[n].mm - before[n].mm, tg: after[n].tg - before[n].tg}); d != want[n] {
+				t.Errorf("%s: #%d edited %+v times, want %+v", what, n, d, want[n])
+			}
+		}
+		if len(c.posts()) != posts || len(c.tg.messages(faketelegram.ChannelID)) != tgPosts ||
+			len(c.notifications()) != notified || len(c.tg.notifications()) != tgNotified {
+			t.Errorf("%s: %d new posts, %d new telegram posts, %d notifications, %d telegram notifications", what,
+				len(c.posts())-posts, len(c.tg.messages(faketelegram.ChannelID))-tgPosts,
+				len(c.notifications())-notified, len(c.tg.notifications())-tgNotified)
+		}
+		for _, n := range ns {
+			for _, everyone := range []string{"@channel", "@here", "@all"} {
+				if strings.Contains(shows(n), everyone) {
+					t.Errorf("%s: #%d shows %s", what, n, everyone)
+				}
+			}
+		}
+	}
+	same := func(t *testing.T, what string, save func()) {
+		t.Helper()
+		before := c.edits(ns...)
+		save()
+		if n := h.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+			t.Errorf("%s again wrote %d rows", what, n)
+		}
+		if after := c.edits(ns...); !maps.Equal(after, before) {
+			t.Errorf("%s again edited: %+v, before %+v", what, after, before)
+		}
+	}
+	both := rootEdits{mm: 1, tg: 1}
+	admin := map[int]rootEdits{ns[0]: both, ns[1]: both}
+
+	profile := func() { session.json(http.MethodPut, "/api/v1/me", `{"name":"Footer Admin"}`, http.StatusOK) }
+	quiet(t, "a profile rename", profile, "Footer Admin", admin)
+	same(t, "a profile rename", profile)
+	update := func() {
+		c.api.json(http.MethodPut, "/api/v1/users/"+adminID, `{"name":"Footer Renamed","role":"admin"}`,
+			http.StatusOK, "If-Match", "*")
+	}
+	quiet(t, "an admin's rename", update, "Footer Renamed", admin)
+	same(t, "an admin's rename", update)
+
+	// A Telegram Account link: only the Telegram Root messages show the footer's Mention of the account.
+	link := func() {
+		m := session.json(http.MethodPost, "/api/v1/me/account-links/telegram", `{"connection_id":"`+c.tg.conn+`"}`,
+			http.StatusCreated)
+		got := deepLink.FindStringSubmatch(fmt.Sprint(m["deep_link"]))
+		if got == nil {
+			t.Fatalf("deep link %v", m["deep_link"])
+		}
+		body, _ := json.Marshal(map[string]any{"token": devmode.TelegramConnectionBotToken,
+			"from": map[string]any{"id": 7105, "username": "footer_admin"}, "text": "/start " + got[1]})
+		c.fake(http.MethodPost, c.tg.ftg+"/private", string(body))
+	}
+	tgOnly := map[int]rootEdits{ns[0]: {tg: 1}, ns[1]: {tg: 1}}
+	quiet(t, "a telegram link", link, "tg://user?id=7105", tgOnly)
+	links := session.json(http.MethodGet, "/api/v1/me/account-links", "", http.StatusOK)["items"].([]any)
+	if len(links) != 1 {
+		t.Fatalf("account links %v", links)
+	}
+	linkID := links[0].(map[string]any)["id"].(string)
+	quiet(t, "an unlink", func() {
+		session.json(http.MethodDelete, "/api/v1/me/account-links/"+linkID, "", http.StatusNoContent)
+	}, "Footer Renamed", tgOnly)
+	for _, n := range ns {
+		if strings.Contains(c.tgPost(n).Text, "tg://user?id=7105") {
+			t.Errorf("#%d still mentions the unlinked account", n)
+		}
+	}
+
+	rename := func() {
+		c.api.json(http.MethodPut, "/api/v1/service-accounts/"+sa, `{"name":"footer-terraform","role":"responder"}`,
+			http.StatusOK, "If-Match", "*")
+	}
+	quiet(t, "a service account rename", rename, "footer-terraform", map[int]rootEdits{ns[2]: both})
+	same(t, "a service account rename", rename)
+	for kind, want := range map[string]int{"user_name": 2, "account_links": 2, "service_account_name": 1} {
+		if n := messageSettingsDone(h, kind); n != want {
+			t.Errorf("%d runs of %s, want %d", n, kind, want)
+		}
 	}
 }

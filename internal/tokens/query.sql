@@ -142,3 +142,27 @@ WHERE org_id = @org_id AND id = @id;
 UPDATE service_accounts
 SET status = 'deleted', deleted_at = @now::timestamptz, updated_at = @now::timestamptz, version = version + 1
 WHERE org_id = @org_id AND id = @id;
+
+-- InsertServiceAccountNameUpdate requests, in the transaction of a rename of a Service account, that it reach the open
+-- Root messages whose footer names it (C-12.FR-12), with a row service_account_name with the Service account in
+-- service_account_id, which the open_group_updates worker of any replica claims; its run walks the open Alert Groups
+-- the Service account snoozed. A row of the same Service account that no worker has claimed yet already covers the
+-- rename, since its run renders the name as it is then: it is locked, so that no worker claims it before this
+-- transaction commits, and no second one is inserted. The row is written even while no open Alert Group names the
+-- Service account: a Snapshot in flight may be giving one back its snoozer, which the run waits for under the lock of
+-- the evaluation.
+-- name: InsertServiceAccountNameUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind = 'service_account_name' AND u.service_account_id = @service_account_id
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, service_account_id, requested_at)
+SELECT @org_id, 'service_account_name', @service_account_id, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

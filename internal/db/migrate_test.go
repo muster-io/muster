@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (39)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (40)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":39`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":40`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":39`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":40`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (39)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (40)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":39`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":40`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3892,6 +3892,129 @@ func TestIntegrationRouteSettingsAndLinksUpdates(t *testing.T) {
 		}
 		if err := insert(t, "organization_links", false); err != nil {
 			t.Errorf("up again: a row of organization_links: %v", err)
+		}
+	})
+}
+
+// TestIntegrationFooterUserUpdates runs 0040 over a database at 39 with a User, a Service account and rows of the
+// kinds of 0039: up keeps the rows, adds the partial indexes on who snoozed an Alert Group, validates
+// open_group_updates_kind_v8_check, the scope CHECKs and the foreign keys, and drops the kind CHECK of 0039, so that a
+// row of user_name or account_links with its User and one of service_account_name with its Service account are taken,
+// while one without its scope, one of an unknown User and an unknown kind are not; a removed User takes its row along.
+// Down deletes the rows of the new kinds, keeps the older ones, restores the kind CHECK of 0039, validated, and drops
+// the columns, the CHECKs and the indexes; up again works.
+func TestIntegrationFooterUserUpdates(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 39)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SRAAAAAAAAAAF1', 'footer', 'footer', 'responder', 'local', 'active', '2026-11-11', '2026-11-11'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT id, 'SRAAAAAAAAAAF2', 'gone', 'gone', 'responder', 'local', 'active', '2026-11-11', '2026-11-11'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO service_accounts (org_id, public_id, name, role, status, created_at, updated_at)
+			SELECT id, 'SAAAAAAAAAAAF1', 'robot', 'responder', 'active', '2026-11-11', '2026-11-11' FROM organizations`)
+		for _, kind := range []string{"organization_links", "organization_message_settings"} {
+			e.exec(t, `INSERT INTO open_group_updates (org_id, kind, requested_at)
+				SELECT id, '`+kind+`', '2026-11-11' FROM organizations`)
+		}
+		refused := func(t *testing.T, name string, err error, code, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != code || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, requested_at)
+			SELECT id, 'user_name', '2026-11-11' FROM organizations`); err != nil {
+			refused(t, "a row of user_name before up", err, "23514", "open_group_updates_kind_v7_check")
+		} else {
+			t.Error("a row of user_name before up was taken")
+		}
+
+		if err := e.mm.Migrate(40); err != nil {
+			t.Fatalf("up to 40: %v", err)
+		}
+		insert := func(t *testing.T, kind, user, account string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, user_id,
+				service_account_id, requested_at)
+				SELECT o.id, $1, (SELECT id FROM users WHERE public_id = $2),
+					(SELECT id FROM service_accounts WHERE public_id = $3), '2026-11-11'
+				FROM organizations o`, kind, user, account)
+			return err
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after up: %d rows, want the 2 of 0039", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v8_check:true" {
+			t.Errorf("after up: the kind checks %q", got)
+		}
+		for _, c := range []string{"open_group_updates_user_scope_check", "open_group_updates_service_account_scope_check",
+			"open_group_updates_user_id_fkey", "open_group_updates_service_account_id_fkey"} {
+			if got := e.constraints(t, []string{"open_group_updates"}, c); got != "open_group_updates."+c+":true" {
+				t.Errorf("after up: %s %q", c, got)
+			}
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_indexes WHERE tablename = 'alert_groups'
+			AND indexname IN ('alert_groups_snoozed_by_user_idx', 'alert_groups_snoozed_by_service_account_idx')
+			AND indexdef LIKE '%status <> ''resolved''%'`); n != 2 {
+			t.Errorf("after up: %d of the 2 indexes on the open alert groups", n)
+		}
+		for _, c := range []struct{ kind, user, account string }{{"user_name", "SRAAAAAAAAAAF1", ""},
+			{"account_links", "SRAAAAAAAAAAF1", ""}, {"service_account_name", "", "SAAAAAAAAAAAF1"},
+			{"user_name", "SRAAAAAAAAAAF2", ""}} {
+			if err := insert(t, c.kind, c.user, c.account); err != nil {
+				t.Errorf("a row of %s: %v", c.kind, err)
+			}
+		}
+		refused(t, "a row of user_name without its user", insert(t, "user_name", "", ""), "23514",
+			"open_group_updates_user_scope_check")
+		refused(t, "a row of account_links without its user", insert(t, "account_links", "", ""), "23514",
+			"open_group_updates_user_scope_check")
+		refused(t, "a row of service_account_name without its service account",
+			insert(t, "service_account_name", "", ""), "23514", "open_group_updates_service_account_scope_check")
+		refused(t, "a row of an unknown kind", insert(t, "user_links", "SRAAAAAAAAAAF1", ""), "23514",
+			"open_group_updates_kind_v8_check")
+		if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, user_id, requested_at)
+			SELECT id, 'user_name', -1, '2026-11-11' FROM organizations`); err != nil {
+			refused(t, "a row of an unknown user", err, "23503", "open_group_updates_user_id_fkey")
+		} else {
+			t.Error("a row of an unknown user was taken")
+		}
+		e.exec(t, `DELETE FROM users WHERE public_id = 'SRAAAAAAAAAAF2'`)
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates WHERE kind IN ('user_name', 'account_links',
+			'service_account_name')`); n != 3 {
+			t.Errorf("after the removal of a user: %d rows of the new kinds, want 3", n)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 40 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after down: %d rows, want the 2 of 0039", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v7_check:true" {
+			t.Errorf("after down: the kind checks %q", got)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_user"); got != "" {
+			t.Errorf("after down: %q", got)
+		}
+		if n := e.count(t, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'open_group_updates'
+			AND column_name IN ('user_id', 'service_account_id')`); n != 0 {
+			t.Errorf("after down: %d of the new columns are left", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'alert_groups_snoozed_by_%'`); n != 0 {
+			t.Errorf("after down: %d of the indexes are left", n)
+		}
+
+		if err := e.mm.Migrate(40); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if err := insert(t, "account_links", "SRAAAAAAAAAAF1", ""); err != nil {
+			t.Errorf("up again: a row of account_links: %v", err)
 		}
 	})
 }

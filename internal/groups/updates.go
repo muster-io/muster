@@ -39,8 +39,9 @@ import (
 // Team, its deletion included (C-26.FR-6, C-25.FR-10), which teams writes; a changed language, Snooze durations or
 // root_message or line template of a Route, which its Root messages show (C-12.FR-2, FR-3, C-10.FR-6), which routing
 // writes, and a created, changed or deleted Link rule or Lookup table, from which the links of every Root message are
-// computed (C-12.FR-9), which links writes; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the
-// workers of every replica when a row is inserted.
+// computed (C-12.FR-9), which links writes; a changed display name or Account links of a User, and a renamed Service
+// account, whom the footer of a Root message names (C-12.FR-12), which users, accountlinks and tokens write; and
+// OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity        = "route_minimum_severity"
 	KindRouteMessageLabels          = "route_message_labels"
@@ -52,6 +53,9 @@ const (
 	KindTeamDestinations            = "team_destinations"
 	KindRouteMessageSettings        = "route_message_settings"
 	KindOrganizationLinks           = "organization_links"
+	KindUserName                    = "user_name"
+	KindAccountLinks                = "account_links"
+	KindServiceAccountName          = "service_account_name"
 	OpenGroupUpdatesChannel         = "muster_open_group_updates"
 )
 
@@ -59,7 +63,7 @@ const (
 // of a kind a later version adds waits for a replica that knows it.
 var updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
 	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindTeamDestinations,
-	KindRouteMessageSettings, KindOrganizationLinks}
+	KindRouteMessageSettings, KindOrganizationLinks, KindUserName, KindAccountLinks, KindServiceAccountName}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -89,20 +93,25 @@ type updateQueries interface {
 	ListEvaluatedGroupsAfter(ctx context.Context, arg dbgen.ListEvaluatedGroupsAfterParams) ([]int64, error)
 	ListOpenGroupsOfTeamAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfTeamAfterParams) ([]int64, error)
 	ListOpenGroupsAfter(ctx context.Context, arg dbgen.ListOpenGroupsAfterParams) ([]int64, error)
+	ListOpenGroupsOfUserAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfUserAfterParams) ([]int64, error)
+	ListOpenGroupsOfServiceAccountAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfServiceAccountAfterParams) (
+		[]int64, error)
 	LockTeamEvaluation(ctx context.Context, arg dbgen.LockTeamEvaluationParams) error
 	GetTeamsStamp(ctx context.Context, orgID int64) (dbgen.GetTeamsStampRow, error)
 	AddAlertTeams(ctx context.Context, arg dbgen.AddAlertTeamsParams) error
 }
 
-// update is a claimed open_group_updates row: its kind and the Route, the Destination or the Team its kind names, with
-// their public_ids for the log lines.
+// update is a claimed open_group_updates row: its kind and the Route, the Destination, the Team, the User or the
+// Service account its kind names, with their public_ids for the log lines.
 type update struct {
-	id             int64
-	kind           string
-	routeID        int64
-	routePID       string
-	destinationPID string
-	teamPID        string
+	id                int64
+	kind              string
+	routeID           int64
+	routePID          string
+	destinationPID    string
+	teamPID           string
+	userPID           string
+	serviceAccountPID string
 }
 
 // minimumSeverityChanged is the system transition of an open Alert Group whose Route's Minimum severity changed
@@ -211,13 +220,14 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // rerender runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids, locked
 // in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
 // (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), language, Snooze durations or templates, of the Link
-// rules or Lookup tables, or of what else the Root messages show (evaluateAndRerender, KindTeamName): delivery edits,
-// Quietly, each Root message whose Desired state the change changed and leaves the others, whose hashes are unchanged,
-// so that a second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no
-// live-update hint is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that
-// failed recorded, as the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which
-// changes no Desired state, records nothing. It returns how many Alert Groups had a Desired state changed; after
-// collects what runs once the transaction committed.
+// rules or Lookup tables, of the name or Account links of the user a footer names (C-12.FR-12), or of what else the
+// Root messages show (evaluateAndRerender, KindTeamName): delivery edits, Quietly, each Root message whose Desired
+// state the change changed and leaves the others, whose hashes are unchanged, so that a second run changes nothing.
+// The Alert Groups themselves do not change, so nothing is saved and no live-update hint is sent. Only when the
+// re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as the dispatcher
+// records it, with the Alert Group's live-update hint, so that a second run, which changes no Desired state, records
+// nothing. It returns how many Alert Groups had a Desired state changed; after collects what runs once the transaction
+// committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	changed, err := s.rerenderIDs(ctx, q, ids, rerendering{}, after)
 	return len(changed), err
@@ -403,7 +413,8 @@ func (s *Service) claimUpdate(ctx context.Context, l db.Lease) (update, bool, er
 	}
 	r := rows[0]
 	return update{id: r.ID, kind: r.Kind, routeID: r.RouteID.Int64, routePID: r.RoutePublicID,
-		destinationPID: r.DestinationPublicID, teamPID: r.TeamPublicID}, true, nil
+		destinationPID: r.DestinationPublicID, teamPID: r.TeamPublicID, userPID: r.UserPublicID,
+		serviceAccountPID: r.ServiceAccountPublicID}, true, nil
 }
 
 // batchOutcome is what one batch of a claimed row did: how many Alert Groups it changed, whether it was the last,
@@ -489,6 +500,29 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
 				return err
 			}
+		case KindUserName, KindAccountLinks:
+			// The scope CHECK gives these rows their User; one without would have nothing to render and is done.
+			if row.UserID.Valid {
+				if ids, err = q.ListOpenGroupsOfUserAfter(ctx, dbgen.ListOpenGroupsOfUserAfterParams{OrgID: s.orgID,
+					UserID: row.UserID, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+					return fmt.Errorf("list the open alert groups of user %d: %w", row.UserID.Int64, err)
+				}
+			}
+			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindServiceAccountName:
+			if row.ServiceAccountID.Valid {
+				if ids, err = q.ListOpenGroupsOfServiceAccountAfter(ctx,
+					dbgen.ListOpenGroupsOfServiceAccountAfterParams{OrgID: s.orgID,
+						ServiceAccountID: row.ServiceAccountID, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+					return fmt.Errorf("list the open alert groups of service account %d: %w",
+						row.ServiceAccountID.Int64, err)
+				}
+			}
+			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
+				return err
+			}
 		case KindTeamEvaluation:
 			if ids, err = q.ListEvaluatedGroupsAfter(ctx, dbgen.ListEvaluatedGroupsAfterParams{OrgID: s.orgID,
 				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
@@ -565,11 +599,19 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 // evaluationBarrier reports whether the batches of a kind wait for the Snapshots in flight before they list their
 // Alert Groups (updateBatch): those whose change a Snapshot that read the Teams, the Organization's settings, the
 // names of the Teams or the Link rules and Lookup tables before the save could miss — the evaluation of the Teams, the
-// Organization's message settings, the name of a Team and the links. The kinds of a Route need none: grouping holds
-// the Route FOR SHARE until the Snapshot commits, and its update takes it FOR UPDATE.
+// Organization's message settings, the name of a Team and the links — and those of the user a footer names, since a
+// Snapshot that reopens an Alert Group gives it back its Owner or who snoozed it, and renders their name and links,
+// without a lock of their row. The Commands that make the footer name someone lock that row FOR SHARE before the
+// Alert Group (lockActive, sharePerson), and the changes of a name or of Account links lock it before they write their
+// row, so those need no barrier. The kinds of a Route need none: grouping holds the Route FOR SHARE until the Snapshot
+// commits, and its update takes it FOR UPDATE.
 func evaluationBarrier(kind string) bool {
-	return kind == KindTeamEvaluation || kind == KindOrganizationMessageSettings || kind == KindTeamName ||
-		kind == KindOrganizationLinks
+	switch kind {
+	case KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindOrganizationLinks, KindUserName,
+		KindAccountLinks, KindServiceAccountName:
+		return true
+	}
+	return false
 }
 
 // nextUpdate is how long until a row can be claimed, at most limit: none when one is free, else until the end of the
@@ -713,6 +755,12 @@ func scopeOf(u update) []logging.Field {
 	}
 	if u.teamPID != "" {
 		out = append(out, logging.F("team", u.teamPID))
+	}
+	if u.userPID != "" {
+		out = append(out, logging.F("user", u.userPID))
+	}
+	if u.serviceAccountPID != "" {
+		out = append(out, logging.F("service_account", u.serviceAccountPID))
 	}
 	return out
 }

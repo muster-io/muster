@@ -114,8 +114,11 @@ The open Root messages also follow the other settings that they show: a change o
 durations, or its Root message or line template edits the open Root messages of the Route once, Quietly; a change of
 the [severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day
 of the week](organization.md), or of a [Link rule or a Lookup table](#links), edits every open Root message once,
-Quietly; and a rename of a Team edits those of the open Alert Groups that have the Team. A message the change does not
-alter is not edited, and no change sends a new message or a Mention.
+Quietly; a rename of a Team edits those of the open Alert Groups that have the Team; and a new display name of a User
+or of a Service account, or a new, changed or removed [Account link](../messengers/account-links.md) of a User, edits
+those whose footer names them, as the Owner or as who snoozed the Alert Group, so that the footer shows the new name or
+mentions them by the new link. A message the change does not alter is not edited, and no change sends a new message or
+a Mention.
 
 ## What you can change, and what you cannot
 

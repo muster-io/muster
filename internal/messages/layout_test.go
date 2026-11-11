@@ -192,3 +192,30 @@ func TestLayoutInTheDesiredState(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyFooterIn is C-12.FR-12 for the Desired state of one Destination: the footer and the user of its identity space
+// are kept, those of the other spaces dropped, so that a link there changes nothing it stores; without an entry for the
+// space only the footer that names the user by their Muster display name is left, and WithFooterIn lays both out as
+// it lays out the message with every space. A message without footers by identity space is returned as it is.
+func TestOnlyFooterIn(t *testing.T) {
+	token := templates.MentionToken(templates.Token{Name: FooterUserToken})
+	m := Message{Footer: "Acknowledged by Alice", Footers: map[string]string{"mattermost:3": "Acknowledged by " + token,
+		"telegram": "Acknowledged by " + token}, FooterUsers: map[string]FooterUser{
+		"mattermost:3": {Name: "Alice", Username: "alice"}, "telegram": {Name: "Alice", ExternalID: "7001"}}}
+	mention := func(u mentions.User) string { return "@" + u.Username + u.ExternalID }
+	for _, space := range []string{"mattermost:3", "telegram", "slack:9"} {
+		got := m.OnlyFooterIn(space)
+		if _, ok := m.Footers[space]; ok != (len(got.Footers) == 1 && len(got.FooterUsers) == 1) ||
+			(!ok && (got.Footers != nil || got.FooterUsers != nil)) || got.Footer != m.Footer {
+			t.Errorf("%s: %+v", space, got)
+		}
+		if a, b := m.WithFooterIn(space, mention), got.WithFooterIn(space, mention); a.Footer != b.Footer ||
+			a.FooterMention != b.FooterMention || a.FooterName != b.FooterName {
+			t.Errorf("%s: laid out %+v, want %+v", space, b, a)
+		}
+	}
+	plain := Message{Footer: "Acknowledged by Alice"}
+	if got := plain.OnlyFooterIn("telegram"); !reflect.DeepEqual(got, plain) {
+		t.Errorf("a message without footers by space: %+v", got)
+	}
+}

@@ -30,6 +30,13 @@ type stubRenderer struct {
 	failure  *messages.Failure
 	err      error
 	afterRan *int
+	// footer, when set, is the user the footer of an acknowledged Alert Group names and, with a username, their
+	// Account link in the identity space of the Mattermost Connection of the fixtures, as the renderer writes them
+	// (C-12.FR-12); elsewhere, when set, is the same user's Account link in the identity space of Telegram, and others
+	// their links in further identity spaces.
+	footer    *messages.FooterUser
+	elsewhere *messages.FooterUser
+	others    map[string]messages.FooterUser
 }
 
 var stubStatus = map[groups.Status]string{groups.StatusFiring: "Firing", groups.StatusAcknowledged: "Acknowledged",
@@ -57,6 +64,24 @@ func (s stubRenderer) Roots(_ context.Context, _ messages.DBTX, g delivery.Group
 		Lines: []string{fmt.Sprintf("#%d %s", g.Number, g.Title), status}, Buttons: []messages.Button{}}
 	for _, c := range stubButtons[g.Status] {
 		m.Buttons = append(m.Buttons, messages.Button{Command: c, Label: c})
+	}
+	if s.footer != nil && g.Status == groups.StatusAcknowledged {
+		m.Footer = "Acknowledged by " + s.footer.Name
+		token := "Acknowledged by " + templates.MentionToken(templates.Token{Name: messages.FooterUserToken})
+		if s.footer.Username != "" {
+			space := fmt.Sprintf("mattermost:%d", connID)
+			m.Footers = map[string]string{space: token}
+			m.FooterUsers = map[string]messages.FooterUser{space: *s.footer}
+		}
+		if s.elsewhere != nil && s.elsewhere.ExternalID != "" {
+			if m.Footers == nil {
+				m.Footers, m.FooterUsers = map[string]string{}, map[string]messages.FooterUser{}
+			}
+			m.Footers["telegram"], m.FooterUsers["telegram"] = token, *s.elsewhere
+		}
+		for space, u := range s.others {
+			m.Footers[space], m.FooterUsers[space] = token, u
+		}
 	}
 	out := delivery.Roots{Messages: map[messages.Markup]messages.Rendered{}, Language: "en",
 		Data: &templates.Data{Status: string(g.Status), AlertGroup: templates.AlertGroup{Number: g.Number,

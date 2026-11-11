@@ -169,6 +169,8 @@ type Queries interface {
 	UpdateServiceAccount(ctx context.Context, arg dbgen.UpdateServiceAccountParams) error
 	SetServiceAccountStatus(ctx context.Context, arg dbgen.SetServiceAccountStatusParams) error
 	DeleteServiceAccount(ctx context.Context, arg dbgen.DeleteServiceAccountParams) error
+	InsertServiceAccountNameUpdate(ctx context.Context, arg dbgen.InsertServiceAccountNameUpdateParams) (int64, error)
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 }
 
