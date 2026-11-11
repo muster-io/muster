@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright The Muster Authors
+
+# MusterIngestSnapshotFailed fires at once when a Stored Snapshot of an Integration failed within 15 minutes. Ranges
+# leave out their start, so a failure between 0m and 1m counts until 14m and no longer at 15m.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a failed Snapshot fires at once and counts for 15 minutes, per Integration over two replicas
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_failed_snapshots_total{job="muster",instance="10.0.0.1:8082",integration="int_1"}'
+        values: '0 1x20'
+      - series: 'muster_ingest_failed_snapshots_total{job="muster",instance="10.0.0.2:8082",integration="int_1"}'
+        values: '0 0x20'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: int_1
+            exp_annotations:
+              summary: Muster could not process Stored Snapshots
+              description: >-
+                In the last 15m Stored Snapshots of the Integration in the label integration failed in processing,
+                for example because a custom sender left out groupKey; the sender still got 202. First open the
+                Integration page for the error of its newest Stored Snapshot.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed/
+      - eval_time: 14m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              integration: int_1
+            exp_annotations:
+              summary: Muster could not process Stored Snapshots
+              description: >-
+                In the last 15m Stored Snapshots of the Integration in the label integration failed in processing,
+                for example because a custom sender left out groupKey; the sender still got 202. First open the
+                Integration page for the error of its newest Stored Snapshot.
+              runbook_url: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed/
+      - eval_time: 15m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts: []
+  - name: a flat counter and another job's failure stay silent
+    interval: 1m
+    input_series:
+      - series: 'muster_ingest_failed_snapshots_total{job="muster",instance="10.0.0.1:8082",integration="int_1"}'
+        values: '5x20'
+      - series: 'muster_ingest_failed_snapshots_total{job="other",instance="10.0.0.9:8082",integration="int_2"}'
+        values: '0 1x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: MusterIngestSnapshotFailed
+        exp_alerts: []

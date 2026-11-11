@@ -1116,6 +1116,11 @@ func (s *probeIntegrationStore) CountTruncatedGroupsOf(context.Context, intdb.Co
 	return nil, nil
 }
 
+func (s *probeIntegrationStore) ListFailedLatestSnapshots(context.Context, intdb.ListFailedLatestSnapshotsParams) (
+	[]intdb.ListFailedLatestSnapshotsRow, error) {
+	return nil, nil
+}
+
 func (s *probeIntegrationStore) ListLongRepeatRoutes(context.Context, intdb.ListLongRepeatRoutesParams) (
 	[]intdb.ListLongRepeatRoutesRow, error) {
 	return nil, nil

@@ -63,6 +63,7 @@
   "fix.slack_scopes": "messengers/slack.md#the-scopes",
   "fix.slack_server": "messengers/slack.md#the-proxy",
   "fix.slack_tokens": "messengers/slack.md#install-the-app-and-create-the-tokens",
+  "fix.snapshot_failed": "integrations/alertmanager.md#what-the-body-needs",
   "fix.telegram_admin": "messengers/telegram.md#make-the-bot-an-admin-of-the-channel-and-of-the-group",
   "fix.telegram_base_url": "messengers/telegram-restricted-networks.md",
   "fix.telegram_comments": "messengers/telegram.md#enable-comments-on-the-channel",

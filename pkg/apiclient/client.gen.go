@@ -1138,6 +1138,7 @@ const (
 	IntegrationWarningKindHeartbeatNotConfigured IntegrationWarningKind = "heartbeat_not_configured"
 	IntegrationWarningKindHeartbeatWaiting       IntegrationWarningKind = "heartbeat_waiting"
 	IntegrationWarningKindLongRepeatInterval     IntegrationWarningKind = "long_repeat_interval"
+	IntegrationWarningKindSnapshotFailed         IntegrationWarningKind = "snapshot_failed"
 	IntegrationWarningKindSnapshotTruncated      IntegrationWarningKind = "snapshot_truncated"
 )
 
@@ -1151,6 +1152,8 @@ func (e IntegrationWarningKind) Valid() bool {
 	case IntegrationWarningKindHeartbeatWaiting:
 		return true
 	case IntegrationWarningKindLongRepeatInterval:
+		return true
+	case IntegrationWarningKindSnapshotFailed:
 		return true
 	case IntegrationWarningKindSnapshotTruncated:
 		return true
@@ -5722,14 +5725,19 @@ type IntegrationTokenList struct {
 
 // IntegrationWarning defines model for IntegrationWarning.
 type IntegrationWarning struct {
-	Kind                  IntegrationWarningKind `json:"kind"`
-	RepeatIntervalSeconds nullable.Nullable[int] `json:"repeat_interval_seconds,omitempty"`
+	// Error For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.
+	Error                 nullable.Nullable[string] `json:"error,omitempty"`
+	Kind                  IntegrationWarningKind    `json:"kind"`
+	RepeatIntervalSeconds nullable.Nullable[int]    `json:"repeat_interval_seconds,omitempty"`
 
 	// RoutePath For `long_repeat_interval`; the Alertmanager route.
 	RoutePath nullable.Nullable[string] `json:"route_path,omitempty"`
 
-	// Since For `heartbeat_lost`.
+	// Since For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.
 	Since nullable.Nullable[time.Time] `json:"since,omitempty"`
+
+	// SnapshotId For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.
+	SnapshotId nullable.Nullable[string] `json:"snapshot_id,omitempty"`
 
 	// TruncatedGroupCount For `snapshot_truncated`.
 	TruncatedGroupCount nullable.Nullable[int] `json:"truncated_group_count,omitempty"`

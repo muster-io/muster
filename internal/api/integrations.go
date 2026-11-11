@@ -401,6 +401,10 @@ func (s *Server) integrationOf(in integrations.Integration, openAlertGroups int6
 			if w.Since != nil {
 				item.Since.Set(w.Since.UTC())
 			}
+		case integrations.WarningSnapshotFailed:
+			item.Since.Set(w.Since.UTC())
+			item.SnapshotId.Set(w.SnapshotID)
+			item.Error.Set(w.Error)
 		}
 		out.Warnings = append(out.Warnings, item)
 	}

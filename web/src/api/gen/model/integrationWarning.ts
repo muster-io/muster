@@ -19,8 +19,18 @@ export interface IntegrationWarning {
   /** @nullable */
   repeat_interval_seconds?: number | null;
   /**
-     * For `heartbeat_lost`.
+     * For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.
      * @nullable
      */
   since?: string | null;
+  /**
+     * For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.
+     * @nullable
+     */
+  snapshot_id?: string | null;
+  /**
+     * For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.
+     * @nullable
+     */
+  error?: string | null;
 }
