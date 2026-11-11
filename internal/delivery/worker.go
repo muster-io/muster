@@ -215,20 +215,27 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 	}
 }
 
-// Round probes every Broken Destination whose probe is due, then attempts, of every Organization, every due delivery
-// that is not configuration only, every due Thread reply, every due head event of an outgoing webhook and last every
-// due configuration edit (ClaimDueDeliveries), claiming Batch at a time, and returns how long until the next one can be
-// claimed, at most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes on.
+// Round probes every Broken Destination whose probe is due, then attempts the due work of every Organization, claiming
+// Batch at a time, in this order: the Urgent deliveries that are not configuration only, the Urgent configuration
+// edits (ClaimDueDeliveries), the other deliveries that are not configuration only, the Thread replies, the head events
+// of outgoing webhooks and last the other configuration edits. It returns how long until the next one can be claimed,
+// at most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes on.
 //
-// The four share the buckets of each Destination and Connection, and the order decides who gets a token: a row denied
-// one is due again at the token's time plus TokenMargin, as every row denied before that token is, and the round at
-// that time claims them in this order, so the token goes to the first rank, then to a Thread reply or an event, and to
-// a configuration edit only when nothing else waits for it. Configuration edits take every token the rest leaves, and
-// none is dropped; a Thread reply waits only while the first rank uses up the limiter, and the Thread batching window
-// keeps the replies of new Alerts to one per window and delivery. Within one replica the order is strict. Across
-// replicas it is likely but not strict: one whose configuration pass reaches the bucket first can take the token ahead
-// of a reply that another replica claimed, and each such race costs the reply one token interval, as a Publication can
-// lose one to a configuration edit that another replica claimed just before it came due.
+// They share the buckets of each Destination and Connection, and the order decides who gets a token: a row denied one
+// is due again at the token's time plus TokenMargin, as every row denied before that token is, and the round at that
+// time claims them in this order. Configuration edits take every token the rest leaves, and none is dropped; a Thread
+// reply waits only while the deliveries that are not configuration only and the Urgent configuration edits use up the
+// limiter, and the Thread batching window keeps the replies of new Alerts to one per window and delivery. Within one
+// replica the order is strict. Across replicas it is likely but not strict: one whose configuration pass reaches the
+// bucket first can take the token ahead of a reply that another replica claimed, and each such race costs the reply
+// one token interval, as a Publication can lose one to a configuration edit that another replica claimed just before
+// it came due.
+//
+// A configuration pass works one batch at a time and goes back to the top of the order after each full one, so that
+// new work of a higher rank waits at most one batch behind a large re-render (reconcile). Both passes claim only the
+// edits due when the round started: an edit denied a token is due again after the start, so each is claimed at most
+// once a round and the round ends after at most one batch per Batch edits due at its start, whatever the size of the
+// re-render and however long it takes. The other passes drain as they always did, until a claim comes back short.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -237,9 +244,7 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	next := w.maxWait()
 	var errs []error
 	for _, org := range orgs {
-		errs = append(errs, w.probe(ctx, org), w.drain(ctx, org, w.claimDeliveries(false), w.deliver),
-			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent),
-			w.drain(ctx, org, w.claimDeliveries(true), w.deliver))
+		errs = append(errs, w.probe(ctx, org), w.reconcile(ctx, org))
 		n, err := w.next(ctx, org, next)
 		if err != nil {
 			errs = append(errs, err)
@@ -250,43 +255,72 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	return next, errors.Join(errs...)
 }
 
-// drain claims Batch rows at a time with claim and works each with work until a claim comes back short.
-func (w *Worker) drain(ctx context.Context, org int64,
-	claim func(ctx context.Context, org int64) ([]int64, error), work func(ctx context.Context, org, id int64)) error {
+// reconcile works the due deliveries, Thread replies and webhook events of the Organization in the order of Round.
+func (w *Worker) reconcile(ctx context.Context, org int64) error {
+	start := w.Lease.Clocks.Business.Now()
+	var errs []error
 	for {
-		ids, err := claim(ctx, org)
-		if err != nil {
-			return err
+		errs = append(errs, w.drain(ctx, org, w.claimDeliveries(true, false, time.Time{}), w.deliver))
+		full, err := w.batchOnce(ctx, org, w.claimDeliveries(true, true, start), w.deliver)
+		errs = append(errs, err)
+		if full {
+			continue
 		}
-		for _, id := range ids {
-			work(ctx, org, id)
-		}
-		if len(ids) < int(w.batch()) {
-			return nil
+		errs = append(errs, w.drain(ctx, org, w.claimDeliveries(false, false, time.Time{}), w.deliver),
+			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent))
+		full, err = w.batchOnce(ctx, org, w.claimDeliveries(false, true, start), w.deliver)
+		errs = append(errs, err)
+		if !full {
+			return errors.Join(errs...)
 		}
 	}
 }
 
-// claimDeliveries is the claim of the due deliveries of an Organization of one rank, the configuration edits or the
-// rest, in the order of ClaimDueDeliveries: Urgent first, then the earliest, then the one delivered longest ago.
-func (w *Worker) claimDeliveries(configurationOnly bool) func(ctx context.Context, org int64) ([]int64, error) {
+// drain claims Batch rows at a time with claim and works each with work until a claim comes back short.
+func (w *Worker) drain(ctx context.Context, org int64,
+	claim func(ctx context.Context, org int64) ([]int64, error), work func(ctx context.Context, org, id int64)) error {
+	for {
+		full, err := w.batchOnce(ctx, org, claim, work)
+		if err != nil || !full {
+			return err
+		}
+	}
+}
+
+// batchOnce claims one batch with claim and works each row with work; full says whether the claim took Batch rows.
+func (w *Worker) batchOnce(ctx context.Context, org int64,
+	claim func(ctx context.Context, org int64) ([]int64, error), work func(ctx context.Context, org, id int64)) (bool,
+	error) {
+	ids, err := claim(ctx, org)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		work(ctx, org, id)
+	}
+	return len(ids) == int(w.batch()), nil
+}
+
+// claimDeliveries is the claim of the due deliveries of an Organization of one rank — Urgent or not, configuration
+// edits or the rest — in the order of ClaimDueDeliveries: the earliest first, then the one delivered longest ago. A
+// non-zero until claims only the deliveries due by then.
+func (w *Worker) claimDeliveries(urgent, configurationOnly bool, until time.Time) func(ctx context.Context,
+	org int64) ([]int64, error) {
 	return func(ctx context.Context, org int64) ([]int64, error) {
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueDeliveriesRow, error) {
+				due := p.Due
+				if !until.IsZero() && until.Before(due) {
+					due = until
+				}
 				return w.Store.queries(tx).ClaimDueDeliveries(ctx, dbgen.ClaimDueDeliveriesParams{OrgID: org,
-					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now,
+					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: due, Now: p.Now, Urgent: urgent,
 					ConfigurationOnly: configurationOnly, Lim: p.Limit})
 			})
 		if err != nil {
 			return nil, fmt.Errorf("claim the due deliveries: %w", err)
 		}
 		slices.SortFunc(rows, func(a, b dbgen.ClaimDueDeliveriesRow) int {
-			if a.Urgent != b.Urgent {
-				if a.Urgent {
-					return -1
-				}
-				return 1
-			}
 			if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
 				return c
 			}

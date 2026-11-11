@@ -171,11 +171,12 @@ func TestIntegrationConfigurationEditsLast(t *testing.T) {
 }
 
 // TestIntegrationRepliesBeforeConfigurationEdits is C-11.FR-3 and FR-4 on PostgreSQL, for a re-render of many open
-// Root messages: 100 open Alert Groups, one of them Urgent, are published in one Telegram channel; a change of the
+// Root messages: 100 open Alert Groups, 11 of them Urgent, are published in one Telegram channel; a change of the
 // Destination's button set re-renders them, and the channel's limiter (10 per minute) lets the first 10 edits through,
-// the Urgent one first. New Alerts join the open Rep050 and the Urgent RepU then: their Root-message edits and their
-// alerts_added Thread replies are the next four calls to the channel, before the 89 remaining edits of the re-render
-// (the edit of Rep050's new Alerts takes the place of its own), which then all go out.
+// all Urgent. New Alerts join the open Rep050 and an Urgent one whose edit of the re-render went out: the edit of the
+// Urgent one comes first, then the last Urgent configuration edit, then the edit of Rep050 (which takes the place of
+// its edit of the re-render), then the two alerts_added Thread replies, all before the 88 remaining configuration edits
+// that are not Urgent, which then all go out.
 func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -186,15 +187,18 @@ func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 		w.Adapters[delivery.TypeTelegram] = l.rec
 		updates := l.updates()
 		alerts := []alert{{name: "RepU/a", team: "db", severity: "critical"}}
-		for i := range 99 {
+		for i := range 10 {
+			alerts = append(alerts, alert{name: fmt.Sprintf("RepV%d/a", i), team: "db", severity: "critical"})
+		}
+		for i := range 89 {
 			alerts = append(alerts, alert{name: fmt.Sprintf("Rep%03d/a", i), team: "db"})
 		}
 		l.fireAlerts(t, "rep", alerts...)
 		l.round(t, w)
 		if n := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'delivered'`,
 			dest); n != 100 || l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND urgent`,
-			dest) != 1 {
-			t.Fatalf("%d of 100 published, the Urgent one among them\n%s", n, l.log)
+			dest) != 11 {
+			t.Fatalf("%d of 100 published, the 11 Urgent ones among them\n%s", n, l.log)
 		}
 		// Past telegram.copy_wait, a reply starts a chain at once instead of waiting for the automatic copy.
 		l.business.Advance(delivery.CopyWait)
@@ -208,17 +212,30 @@ func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 		l.rec.Reset()
 		l.business.Advance(time.Second)
 		l.round(t, w)
-		if n := l.rec.Count(deliverytest.MethodUpdate); n != 10 || l.marked(t, dest) != 90 ||
-			!strings.Contains(head(l.rec.Calls()[0].Message), " RepU") {
-			t.Fatalf("%d edits within the bucket, %d marked, the first %q; want 10, 90, RepU", n, l.marked(t, dest),
-				head(l.rec.Calls()[0].Message))
+		if n := l.rec.Count(deliverytest.MethodUpdate); n != 10 || l.marked(t, dest) != 90 {
+			t.Fatalf("%d edits within the bucket, %d marked; want 10, 90", n, l.marked(t, dest))
+		}
+		for _, c := range l.rec.Calls() {
+			if h := head(c.Message); !strings.Contains(h, " RepU") && !strings.Contains(h, " RepV") {
+				t.Fatalf("an edit that is not Urgent went first: %q", h)
+			}
+		}
+		var last string
+		if err := l.d.Pool.QueryRow(ctx, `SELECT split_part(g.title, ' ', 1) FROM deliveries d
+			JOIN alert_groups g ON g.id = d.alert_group_id WHERE d.destination_id = $1 AND d.state = 'pending'
+			AND d.urgent AND d.configuration_only`, dest).Scan(&last); err != nil {
+			t.Fatalf("the last Urgent configuration edit: %v", err)
+		}
+		urgent := "RepU"
+		if last == urgent {
+			urgent = "RepV0"
 		}
 
-		// New Alerts join the open Rep050, whose edit of the re-render still waits and becomes theirs, and the Urgent
-		// RepU, whose edit of the re-render went out.
+		// New Alerts join the open Rep050, whose edit of the re-render still waits and becomes theirs, and an Urgent
+		// one whose edit of the re-render went out.
 		l.business.Advance(time.Second)
 		l.fire(t, "rep-050", "Rep050/b")
-		l.fireAlerts(t, "rep-u", alert{name: "RepU/b", team: "db", severity: "critical"})
+		l.fireAlerts(t, "rep-u", alert{name: urgent + "/b", team: "db", severity: "critical"})
 		if n := l.count(t, `SELECT count(*) FROM thread_replies WHERE destination_id = $1 AND state = 'pending'
 			AND event = 'alerts_added' AND next_attempt_at <= $2`, dest, l.business.Now()); n != 2 {
 			t.Fatalf("%d alerts_added replies due, want 2\n%s", n, l.log)
@@ -257,11 +274,12 @@ func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 		for _, c := range l.rec.Calls() {
 			order = append(order, c.Method+" "+titles[c.MessageID])
 		}
-		first := slices.Clone(order[:min(len(order), 4)])
-		slices.Sort(first)
-		if want := []string{deliverytest.MethodReply + " Rep050", deliverytest.MethodReply + " RepU",
-			deliverytest.MethodUpdate + " Rep050", deliverytest.MethodUpdate + " RepU"}; !slices.Equal(first, want) {
-			t.Fatalf("the first calls after the new Alerts: %q", order[:min(len(order), 6)])
+		first := slices.Clone(order[:min(len(order), 5)])
+		slices.Sort(first[3:])
+		if want := []string{deliverytest.MethodUpdate + " " + urgent, deliverytest.MethodUpdate + " " + last,
+			deliverytest.MethodUpdate + " Rep050", deliverytest.MethodReply + " Rep050",
+			deliverytest.MethodReply + " " + urgent}; !slices.Equal(first, want) {
+			t.Fatalf("the first calls after the new Alerts: %q, want %q", order[:min(len(order), 7)], want)
 		}
 		if n := l.rec.Count(deliverytest.MethodUpdate); n != 91 || l.rec.Count(deliverytest.MethodReply) != 2 {
 			t.Errorf("%d edits and %d replies after the new Alerts, want 91 and 2", n,

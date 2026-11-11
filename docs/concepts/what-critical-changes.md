@@ -14,10 +14,11 @@ Route. It follows the Alerts as they fire and resolve, so an Alert Group may bec
 The order of the delivery queue
 :   The delivery queue of a Destination takes Urgent Alert Groups first. They never pass the rate limit of the
     Destination: an Urgent Alert Group waits for its place within the limit like any other, only before the rest.
-    The edits of Root messages that only a change of configuration made, such as a new button set, come last, Urgent
-    ones first among them: after the Root messages of new Alert Groups, the edits of Root messages that Alerts and
-    Commands make and the Thread replies, Urgent or not, for as long as those use up the rate limit
-    ([Organization](../configure/organization.md#alert-handling)).
+    The edits of Root messages that only a change of configuration made, such as a new button set, come after the other
+    work of their urgency: those of Urgent Alert Groups right after the Root messages of Urgent Alert Groups and the
+    edits that Alerts and Commands make to them, and before anything that is not Urgent; those of the other Alert Groups
+    last, after the Root messages, the edits, the Thread replies and the events of outgoing webhooks of the other Alert
+    Groups, for as long as those use up the rate limit ([Organization](../configure/organization.md#alert-handling)).
     After an outage of a Destination, the Alert Groups that were not published are published Urgent first
     ([Broken Destinations](broken-destinations.md#what-is-sent-after-recovery)).
 

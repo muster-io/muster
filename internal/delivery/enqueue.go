@@ -801,10 +801,11 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 // the dispatcher marks it so (groups.Rendering.Configuration), as the evaluation of the Teams of the open Alert Groups
 // on a save (C-25.FR-13) and the re-render of a changed button set, or it has no lifecycle event, or only rises that
 // the Route's Minimum severity made (groups.ReasonMinimumSeverity). Such a change publishes Quietly, and its edit of a
-// published Root message is claimed after the other due deliveries and the Thread replies (SetDesired,
-// ClaimDueDeliveries, Worker.Round). A change that Alerts or a Command make always records a lifecycle event — new,
-// continued or resolved Alerts, changed annotations, a rise, a change of status — so a rendering without one is a
-// re-render of configuration, the mark of the first Publication or the end of a Reopen window or a Grace period.
+// published Root message is claimed after the other due deliveries of its urgency and, when it is not Urgent, after the
+// Thread replies and webhook events (SetDesired, ClaimDueDeliveries, Worker.Round). A change that Alerts or a Command
+// make always records a lifecycle event — new, continued or resolved Alerts, changed annotations, a rise, a change of
+// status — so a rendering without one is a re-render of configuration, the mark of the first Publication or the end of
+// a Reopen window or a Grace period.
 func configurationOnly(r groups.Rendering) bool {
 	if r.Configuration {
 		return true
