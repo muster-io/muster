@@ -195,12 +195,13 @@ SELECT pg_notify(@channel::text, '');
 -- rank: Urgent or not (@urgent), and configuration only or not (@configuration_only, which a change of configuration
 -- alone sets, SetDesired). Within the rank, the earliest first, then the one delivered longest ago, so that deliveries
 -- waiting for the same token take turns; another claimer skips the rows this one locked. The worker's round claims the
--- Urgent deliveries that are not configuration only, then the Urgent configuration edits, then the other deliveries
--- that are not configuration only, the Thread replies and the head events of outgoing webhooks, and last the other
--- configuration edits (Round), so that a re-render of every open Root message never delays a Publication, an edit of a
--- Root message that an Alert or a Command made, or a Thread reply of its urgency or below, and the Root messages of
--- Urgent Alert Groups wait behind work that is not Urgent for at most one claimed batch of it; Thread replies and
--- webhook events, Urgent or not, come after the Root-message work of both. The order is order only and strict:
+-- Urgent deliveries that are not configuration only, then the Urgent configuration edits, both due now; then, due by
+-- the start of the round, the other deliveries that are not configuration only, the Thread replies and the head events
+-- of outgoing webhooks, which take turns by batch, and last the other configuration edits (Round), so that a re-render
+-- of every open Root message never delays a Publication, an edit of a Root message that an Alert or a Command made, or
+-- a Thread reply of its urgency or below, and the Root messages of Urgent Alert Groups wait behind work that is not
+-- Urgent for at most one claimed batch of it; Thread replies and webhook events, Urgent or not, come after the Urgent
+-- Root-message work and wait for at most one claimed batch of the other. The order is order only and strict:
 -- configuration edits wait as long as the work before them uses up the limiter — Alert Groups that keep flapping, for
 -- one — and none is dropped: an edit that waits is carried by the next change of its Alert Group, which ends the
 -- mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due when the token is
@@ -667,10 +668,11 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject_id = @subjec
 
 -- ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
 -- delivery's replies in id order: a reply waits while an earlier one of its delivery is pending. A collecting batch
--- that comes due closes: it becomes pending, and new Alerts start the next batch. The worker's round claims them after
--- the deliveries that are not configuration only and the Urgent configuration edits, and before the other configuration
--- edits (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as
--- the inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up.
+-- that comes due closes: it becomes pending, and new Alerts start the next batch. The worker's round claims them, due
+-- by its start, after the Urgent deliveries, by batch in turns with the other deliveries that are not configuration
+-- only and the webhook events, and before the other configuration edits (ClaimDueDeliveries, Round). The choice is a
+-- materialized CTE, run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it
+-- ran once per row and took seconds once replies had piled up.
 -- name: ClaimDueReplies :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -1871,10 +1873,11 @@ ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
 
 -- ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
 -- with the lowest sequence of its Alert Group and Destination, whose lease is free or ran out; the next one waits until
--- it is delivered or Not delivered, while the events of other Alert Groups go on. The worker's round claims them before
--- the configuration edits that are not Urgent (Round): a Destination in the mode both shares its bucket with its Root
--- requests, which a change of configuration can re-render. The choice is a materialized CTE, run once, as in
--- ClaimDueDeliveries.
+-- it is delivered or Not delivered, while the events of other Alert Groups go on. The worker's round claims them, due
+-- by its start, by batch in turns with the deliveries that are neither Urgent nor configuration only and the Thread
+-- replies, and before the configuration edits that are not Urgent (Round): a Destination in the mode both shares its
+-- bucket with its Root requests, which a change of configuration can re-render. The choice is a materialized CTE, run
+-- once, as in ClaimDueDeliveries.
 -- name: ClaimDueWebhookEvents :many
 WITH due AS MATERIALIZED (
     SELECT x.id

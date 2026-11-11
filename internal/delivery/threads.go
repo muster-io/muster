@@ -45,21 +45,24 @@ func (s *Service) ReminderReached(ctx context.Context, db groups.DBTX, groupID, 
 	return reached, nil
 }
 
-// claimReplies leases the due Thread replies of the Organization.
-func (w *Worker) claimReplies(ctx context.Context, org int64) ([]int64, error) {
-	rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
-		func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueRepliesRow, error) {
-			return w.Store.queries(tx).ClaimDueReplies(ctx, dbgen.ClaimDueRepliesParams{OrgID: org, Owner: p.Owner,
-				LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
-		})
-	if err != nil {
-		return nil, fmt.Errorf("claim the due thread replies: %w", err)
+// claimReplies is the claim of the due Thread replies of an Organization; a non-zero until claims only the replies
+// due by then.
+func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
+	return func(ctx context.Context, org int64) ([]int64, error) {
+		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
+			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueRepliesRow, error) {
+				return w.Store.queries(tx).ClaimDueReplies(ctx, dbgen.ClaimDueRepliesParams{OrgID: org,
+					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: dueBy(p.Due, until), Now: p.Now, Lim: p.Limit})
+			})
+		if err != nil {
+			return nil, fmt.Errorf("claim the due thread replies: %w", err)
+		}
+		ids := make([]int64, len(rows))
+		for i, r := range rows {
+			ids[i] = r.ID
+		}
+		return ids, nil
 	}
-	ids := make([]int64, len(rows))
-	for i, r := range rows {
-		ids[i] = r.ID
-	}
-	return ids, nil
 }
 
 // replyAttempt is a Thread reply that has its tokens and is about to be sent: under root, and as a link of an

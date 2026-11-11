@@ -293,6 +293,95 @@ func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 	})
 }
 
+// TestIntegrationReplyWithinOneBatchOfABacklog is C-11.FR-3 and FR-4 on PostgreSQL for #540: 150 open Alert Groups are
+// published in one Mattermost channel and acknowledged, and the channel's limiter (5 a second) holds back the 150 edits
+// that the Acknowledges made; a new Alert then joins an Alert Group of another Route in another channel. Its
+// alerts_added Thread reply is sent after at most one claimed batch of the edits — the others not attempted yet — and
+// before the edit of the other Root message, which waits behind the edits due before it; every edit due at the start
+// is attempted in that round, and every edit goes out in the next rounds.
+func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		dest := l.dests[0]
+		other := l.newDestNamed(t, "DSAAAAAAAAAAO1")
+		l.newRoute(t, "other", 1_000_000, "DSAAAAAAAAAAO1")
+		w := l.worker("backlog")
+		const n = 150
+		names := make([]string, n)
+		for i := range names {
+			names[i] = fmt.Sprintf("Bl%03d/a", i)
+		}
+		l.fire(t, "backlog", names...)
+		l.fireAlerts(t, "other", alert{name: "Other/a", team: "other"})
+		l.round(t, w)
+		if p := l.rec.Count(deliverytest.MethodPublish); p != n+1 {
+			t.Fatalf("%d of %d published\n%s", p, n+1, l.log)
+		}
+		for _, name := range names {
+			l.ack(t, l.group(t, strings.TrimSuffix(name, "/a")))
+		}
+		pending := func(dest int64) int64 {
+			t.Helper()
+			return l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
+				AND NOT configuration_only AND NOT urgent`, dest)
+		}
+		if p := pending(dest); p != n {
+			t.Fatalf("%d edits of the Acknowledges pending, want %d", p, n)
+		}
+		l.exec(t, `UPDATE destinations SET limiter_limit = 5, limiter_per_seconds = 1 WHERE id = $1`, dest)
+		l.exec(t, `DELETE FROM rate_limit_buckets`)
+		l.business.Advance(time.Second)
+		l.fireAlerts(t, "other", alert{name: "Other/b", team: "other"})
+		if r := l.count(t, `SELECT count(*) FROM thread_replies WHERE destination_id = $1 AND event = 'alerts_added'
+			AND state = 'pending' AND next_attempt_at <= $2`, other, l.business.Now()); r != 1 {
+			t.Fatalf("%d alerts_added replies due in the other channel, want 1\n%s", r, l.log)
+		}
+		start := l.business.Now()
+		// The edits of the channel not attempted in the round yet, when the reply is in flight.
+		untouched := int64(-1)
+		l.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+			Then: func() {
+				untouched = l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1
+					AND state = 'pending' AND next_attempt_at <= $2`, dest, start)
+			}})
+		l.rec.Reset()
+		l.round(t, w)
+		var order []string
+		reply, otherEdit, before := -1, -1, 0
+		for i, c := range l.rec.Calls() {
+			order = append(order, c.Method+" "+head(c.Message))
+			switch {
+			case c.Method == deliverytest.MethodReply:
+				reply = i
+			case c.Destination.ID == other && otherEdit < 0:
+				otherEdit = i
+			case c.Destination.ID == dest && reply < 0:
+				before++
+			}
+		}
+		if reply < 0 || untouched < 0 || n-untouched > int64(delivery.Batch) || before > int(delivery.Batch) {
+			t.Fatalf("the reply at %d with %d edits attempted before it and %d sent; calls %q", reply, n-untouched,
+				before, order[:min(len(order), 12)])
+		}
+		if otherEdit >= 0 && otherEdit < reply {
+			t.Errorf("the edit of the other channel at %d went before the reply at %d", otherEdit, reply)
+		}
+		if a := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
+			AND next_attempt_at <= $2`, dest, start); a != 0 {
+			t.Errorf("%d edits of the channel not attempted in the round", a)
+		}
+		for i := 0; pending(dest)+pending(other) > 0; i++ {
+			if i == 100 {
+				t.Fatalf("still %d edits pending after 100 rounds", pending(dest))
+			}
+			l.business.Advance(time.Second + delivery.TokenMargin)
+			l.round(t, w)
+		}
+		l.noDeadlock(t)
+	})
+}
+
 // telegramChannel creates a Telegram Connection and Destination, both at 1000 per second, and puts the Destination
 // alone on the Route db.
 func (l *live) telegramChannel(t *testing.T) int64 {

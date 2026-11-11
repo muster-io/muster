@@ -16,7 +16,10 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
 
 - The messages of that Destination fall further and further behind: new Alert Groups and their changes appear late.
   Deliveries are still made; nothing is lost.
-- Other Destinations, the UI and the API keep working.
+- Other Destinations, the UI and the API keep working. Each round of the delivery worker tries each waiting delivery
+  once, so the queue holds up the new Root messages and edits of other Destinations by about one round, a few seconds
+  for thousands of waiting deliveries, and their Thread replies and the events of outgoing webhooks by at most one batch
+  of it, about ten calls.
 
 ## Diagnosis
 

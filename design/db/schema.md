@@ -1822,20 +1822,27 @@ other deliveries that are not configuration only, the Thread replies, the outgoi
 configuration edits. Each claim is an equality on `urgent` and `configuration_only`, a range of `deliveries_due_v2_idx`;
 an `OR` of ranks would filter every pending delivery instead. Every row denied a token is due again at that token's
 time, so the order of the claims decides who gets it. Urgent Root messages wait behind those that are not Urgent for at
-most one claimed batch of a later pass; Thread replies, Urgent or not, come after both. The order is order only and
+most one claimed batch of a later pass; Thread replies and webhook events, Urgent or not, come after the Urgent ones and
+take turns by batch with the other Root-message work. The order is order only and
 strict: configuration edits wait for as long as the work before them uses up the limiter, take every token it leaves, by
 age, and an edit that waits is carried by the next change of its Alert Group, which clears the mark. The configuration
 edits that are not Urgent wait while Root-message work, Thread replies and webhook events together use up the limiter:
 in a Telegram chat at 10 calls a minute, about three Alert Groups a minute that resolve and open again, each taking up
-to four calls (a Root message edit and a Thread reply each time), leave them nothing. Every claim after the first takes
-one batch and the round then goes back to the first, so new Urgent Root-message work waits at most one claimed batch of
-a later rank, and, since the buckets refill continuously on the business clock, a token that comes free between a
-refusal and a later claim of the same round goes to that claim, while the refused row waits for the next token. The
-claim of the configuration edits that are not Urgent takes only the edits due when the round started, so each is
-attempted at most once a round, unless its lease runs out within it; the other claims take what is due now, an Urgent
-configuration edit queued during the round included, and end, as before, on a short claim. A `RetryAfter` sets
-`next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
-`first_failed_at`; running out of either makes the Destination Broken.
+to four calls (a Root message edit and a Thread reply each time), leave them nothing. The two Urgent claims take what is
+due now, an Urgent configuration edit queued during the round included: the first is drained, the second takes one batch
+at a time, with the first drained again after a full one, until it comes back short. The four later claims take only the
+rows due when the round started. The other deliveries that are not configuration only, the Thread replies and the
+webhook events take turns, one batch each, again while any of them came back full, and the other configuration edits
+start only once all three came back short in the same turn; after every later batch that claimed a row the round goes
+back to the Urgent claims. So new Urgent Root-message work waits at most one claimed batch of a later rank, a backlog of
+one of these three ranks on any Destination delays the other two by at most one batch of it per batch of theirs, and,
+since the buckets refill continuously on the business clock, a token that comes free between a refusal and a later claim
+of the same round goes to that claim, while the refused row waits for the next token. A row denied a token is due again
+after the start, so each row of the later claims is attempted at most once a round, unless its lease runs out within it,
+and a round ends after about one limiter take per row due at its start; work that is not Urgent and comes due during the
+round goes in the next one. A `RetryAfter` sets `next_attempt_at` exactly and does not touch `attempts`; `Transient`
+increments `attempts` and starts the time budget at `first_failed_at`; running out of either makes the Destination
+Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

@@ -192,21 +192,24 @@ func (s *Service) PruneWebhookEvents(ctx context.Context, now time.Time) (int64,
 	return total, nil
 }
 
-// claimEvents leases the due head events of the Organization.
-func (w *Worker) claimEvents(ctx context.Context, org int64) ([]int64, error) {
-	rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
-		func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueWebhookEventsRow, error) {
-			return w.Store.queries(tx).ClaimDueWebhookEvents(ctx, dbgen.ClaimDueWebhookEventsParams{OrgID: org,
-				Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
-		})
-	if err != nil {
-		return nil, fmt.Errorf("claim the due webhook events: %w", err)
+// claimEvents is the claim of the due head events of an Organization; a non-zero until claims only the events due by
+// then.
+func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
+	return func(ctx context.Context, org int64) ([]int64, error) {
+		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
+			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueWebhookEventsRow, error) {
+				return w.Store.queries(tx).ClaimDueWebhookEvents(ctx, dbgen.ClaimDueWebhookEventsParams{OrgID: org,
+					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: dueBy(p.Due, until), Now: p.Now, Lim: p.Limit})
+			})
+		if err != nil {
+			return nil, fmt.Errorf("claim the due webhook events: %w", err)
+		}
+		ids := make([]int64, len(rows))
+		for i, r := range rows {
+			ids[i] = r.ID
+		}
+		return ids, nil
 	}
-	ids := make([]int64, len(rows))
-	for i, r := range rows {
-		ids[i] = r.ID
-	}
-	return ids, nil
 }
 
 // eventAttempt is an event that has its token and is about to be sent.
