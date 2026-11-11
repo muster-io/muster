@@ -304,8 +304,8 @@ func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 		l := setupLive(t, s)
 		l.fresh(t, 1000, 1)
 		dest := l.dests[0]
-		other := l.newDestNamed(t, "DSAAAAAAAAAAO1")
-		l.newRoute(t, "other", 1_000_000, "DSAAAAAAAAAAO1")
+		other := l.newDestNamed(t, "DSAAAAAAAAAAR1")
+		l.newRoute(t, "other", 1_000_000, "DSAAAAAAAAAAR1")
 		w := l.worker("backlog")
 		const n = 150
 		names := make([]string, n)
