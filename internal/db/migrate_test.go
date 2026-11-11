@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (37)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (38)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":37`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":38`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":37`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":38`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (37)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (38)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":37`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":38`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3726,6 +3726,79 @@ func TestIntegrationNotificationRules(t *testing.T) {
 			t.Errorf("after down: %d organizations", got)
 		}
 		if err := e.mm.Migrate(37); err != nil {
+			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationDeliveriesConfigurationOnly runs 0038 over a database at 37 with a pending delivery: the delivery
+// reads configuration_only false; deliveries_due_v2_idx orders the pending deliveries by urgency, then
+// configuration_only, then next_attempt_at, and deliveries_due_idx is gone; down restores deliveries_due_idx and drops
+// the column and the new index, keeping the delivery; up again works.
+func TestIntegrationDeliveriesConfigurationOnly(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 37)
+		e.exec(t, `INSERT INTO integrations (org_id, public_id, name, connection_mode, static_labels,
+			duplicate_window_seconds, heartbeat_enabled, heartbeat_timeout_seconds, heartbeat_state, created_at,
+			updated_at)
+			SELECT id, 'NT0000000000C1', 'am', 'webhook_only', '{}', 45, false, 300, 'not_configured', '2026-11-11',
+				'2026-11-11'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000C1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-11-11', '2026-11-11'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO destinations (org_id, public_id, type, name, webhook_mode, webhook_events_config,
+			signing_secret_ciphertext, signing_secret_key_id, signing_secret_updated_at, mentions, limiter_limit,
+			limiter_per_seconds, health, created_at, updated_at)
+			SELECT id, 'DS0000000000C1', 'webhook', 'hook', 'events', '{}', '\x00', 'k1', '2026-11-11', '{}', 1, 1,
+				'healthy', '2026-11-11', '2026-11-11'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			created_at, last_changed_at)
+			SELECT org_id, 'AG0000000000C1', 1, id, '{alertname}', '{}', sha256('c1'), 't', '{}', '{}',
+				ARRAY[(SELECT id FROM integrations)], 'firing', 'warning', false, '2026-11-11', '2026-11-11'
+			FROM routes`)
+		e.exec(t, `INSERT INTO deliveries (org_id, destination_id, alert_group_id, state, urgent, next_attempt_at,
+			created_at, updated_at)
+			SELECT g.org_id, d.id, g.id, 'pending', false, '2026-11-11', '2026-11-11', '2026-11-11'
+			FROM alert_groups g, destinations d`)
+		index := func(name, columns string) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = '`+name+`'
+				AND indexdef LIKE '%`+columns+`) WHERE (state = ''pending''::text)'`)
+		}
+		const oldColumns, newColumns = "(org_id, urgent DESC, next_attempt_at", "(org_id, urgent DESC, configuration_only, next_attempt_at"
+		if err := e.mm.Migrate(38); err != nil {
+			t.Fatalf("up to 38: %v", err)
+		}
+		if got := e.count(t, `SELECT count(*) FROM deliveries WHERE NOT configuration_only`); got != 1 {
+			t.Errorf("the existing delivery: %d with configuration_only false", got)
+		}
+		if got := index("deliveries_due_v2_idx", newColumns); got != 1 {
+			t.Errorf("deliveries_due_v2_idx: %d", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'deliveries_due_idx'`); got != 0 {
+			t.Errorf("deliveries_due_idx after up: %d", got)
+		}
+		e.exec(t, `UPDATE deliveries SET configuration_only = true`)
+		e.step(t, -1)
+		if got := index("deliveries_due_idx", oldColumns); got != 1 {
+			t.Errorf("deliveries_due_idx after down: %d", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'deliveries_due_v2_idx'`) +
+			e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_name = 'deliveries' AND column_name = 'configuration_only'`); got != 0 {
+			t.Errorf("after down: %d of the index and the column left", got)
+		}
+		if got := e.count(t, `SELECT count(*) FROM deliveries`); got != 1 {
+			t.Errorf("after down: %d deliveries", got)
+		}
+		if err := e.mm.Migrate(38); err != nil {
 			t.Errorf("up again: %v", err)
 		}
 	})

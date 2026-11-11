@@ -367,7 +367,7 @@ WITH due AS MATERIALIZED (
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
       AND x.held_by_storm_id IS NULL
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
-    ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
+    ORDER BY x.urgent DESC, x.configuration_only, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT $6
     FOR UPDATE OF x SKIP LOCKED
 )
@@ -375,7 +375,7 @@ UPDATE deliveries d
 SET lease_owner = $1::text, lease_until = $2::timestamptz
 FROM due
 WHERE d.org_id = $3 AND d.id = due.id
-RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at
+RETURNING d.id, d.urgent, d.configuration_only, d.next_attempt_at, d.last_delivered_at
 `
 
 type ClaimDueDeliveriesParams struct {
@@ -388,21 +388,30 @@ type ClaimDueDeliveriesParams struct {
 }
 
 type ClaimDueDeliveriesRow struct {
-	ID              int64
-	Urgent          bool
-	NextAttemptAt   time.Time
-	LastDeliveredAt pgtype.Timestamptz
+	ID                int64
+	Urgent            bool
+	ConfigurationOnly bool
+	NextAttemptAt     time.Time
+	LastDeliveredAt   pgtype.Timestamptz
 }
 
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
-// first, then the earliest, then the one delivered longest ago, so that deliveries waiting for the same token take
-// turns; another claimer skips the rows this one locked. A delivery a Storm holds waits for its Storm, and one of a
+// first, then the edits that are not configuration only before those a change of configuration alone made
+// (configuration_only, SetDesired), then the earliest, then the one delivered longest ago, so that deliveries waiting
+// for the same token take turns; another claimer skips the rows this one locked. The rank is order only: a re-render of
+// every open Root message never delays a Publication or the change of an Alert or a Command in the same Destination,
+// and it takes every token they leave, its edits by age. Their demand per Destination is bounded — new Alert Groups
+// beyond a Route's Storm threshold wait in its Storm summary — and an edit that waits is not lost: the next change of
+// its Alert Group carries the configuration with it and ends the mark. A claimed edit without a token is released at
+// once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against a
+// Publication. A delivery a Storm holds waits for its Storm, and one of a
 // deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
 // that read the Destination's entries before its deletion committed can create one after the deletion ended the
 // others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
-// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row. The claims of
-// ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape; a fix of it
-// applies to them too.
+// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row; the order
+// follows deliveries_due_v2_idx. The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers
+// (internal/timers) copy this shape, without the rank of configuration_only, which only Root messages have; a fix of
+// it applies to them too.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,
@@ -422,6 +431,7 @@ func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveries
 		if err := rows.Scan(
 			&i.ID,
 			&i.Urgent,
+			&i.ConfigurationOnly,
 			&i.NextAttemptAt,
 			&i.LastDeliveredAt,
 		); err != nil {
@@ -4638,6 +4648,7 @@ SET message_id               = CASE WHEN state IN ('retired', 'withheld') THEN N
     republished_after_delete = CASE WHEN state IN ('retired', 'withheld') THEN false ELSE republished_after_delete END,
     late_note                = false,
     desired_retire           = false,
+    configuration_only       = false,
     held_by_storm_id         = CASE WHEN state IN ('retired', 'withheld') THEN $2::bigint END,
     state                    = 'pending',
     next_attempt_at          = $3,
@@ -4977,6 +4988,7 @@ SET message_id               = NULL,
     republished_after_delete = true,
     publication_loud         = false,
     late_note                = false,
+    configuration_only       = false,
     state                    = 'pending',
     attempts                 = 0,
     first_failed_at          = NULL,
@@ -5034,6 +5046,7 @@ const retireDeliveries = `-- name: RetireDeliveries :many
 UPDATE deliveries
 SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
+    configuration_only = false,
     held_by_storm_id = NULL,
     next_attempt_at  = $1,
     updated_at       = $1
@@ -5075,6 +5088,7 @@ const retireDestinationDeliveries = `-- name: RetireDestinationDeliveries :many
 UPDATE deliveries d
 SET state            = CASE WHEN d.published_at IS NULL AND d.publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (d.published_at IS NULL AND d.publication_started_at IS NULL),
+    configuration_only = false,
     held_by_storm_id = NULL,
     next_attempt_at  = $1,
     updated_at       = $1
@@ -5115,6 +5129,7 @@ const retireGroupDeliveries = `-- name: RetireGroupDeliveries :many
 UPDATE deliveries
 SET state            = CASE WHEN published_at IS NULL AND publication_started_at IS NULL THEN 'withheld' ELSE 'pending' END,
     desired_retire   = NOT (published_at IS NULL AND publication_started_at IS NULL),
+    configuration_only = false,
     held_by_storm_id = NULL,
     next_attempt_at  = $1,
     updated_at       = $1
@@ -5260,26 +5275,29 @@ SET desired_version     = desired_version + 1,
                               ELSE publication_loud
                           END,
     late_note           = CASE WHEN $6::boolean THEN false ELSE late_note END,
-    urgent              = $9,
-    next_attempt_at     = $10,
-    updated_at          = $10
-WHERE org_id = $11 AND id = $12
+    configuration_only  = $9::boolean AND published_at IS NOT NULL AND NOT desired_retire
+                          AND (state = 'delivered' OR (state = 'pending' AND configuration_only)),
+    urgent              = $10,
+    next_attempt_at     = $11,
+    updated_at          = $11
+WHERE org_id = $12 AND id = $13
 RETURNING state
 `
 
 type SetDesiredParams struct {
-	DesiredText    string
-	DesiredPayload []byte
-	DesiredHash    []byte
-	ButtonKeyID    pgtype.Text
-	ReceivedAt     pgtype.Timestamptz
-	Open           bool
-	Quiet          bool
-	Firing         bool
-	Urgent         bool
-	Now            time.Time
-	OrgID          int64
-	ID             int64
+	DesiredText       string
+	DesiredPayload    []byte
+	DesiredHash       []byte
+	ButtonKeyID       pgtype.Text
+	ReceivedAt        pgtype.Timestamptz
+	Open              bool
+	Quiet             bool
+	Firing            bool
+	ConfigurationOnly bool
+	Urgent            bool
+	Now               time.Time
+	OrgID             int64
+	ID                int64
 }
 
 // SetDesired stores a new Desired state: the next version, its text, payload and hash, the key that signed its
@@ -5290,6 +5308,11 @@ type SetDesiredParams struct {
 // change is one of configuration (@quiet: a re-render without lifecycle events, or only rises that the Route's Minimum
 // severity made). An open Alert Group carries no late note: a late Publication whose Alert Group opened again
 // before it was made loses the note and takes the loudness of the recovery rule, Loud when @firing (C-11.FR-11).
+// configuration_only marks the edit of a published Root message that a change of configuration alone made
+// (@configuration_only, configurationOnly in enqueue.go), which ClaimDueDeliveries takes after the rest: set only on a
+// delivered row, kept on a pending row that had it, and cleared by any other change, so that a Publication, a final
+// edit, a delivery restarted after Not delivered and a re-render on top of the pending change of an Alert or a Command
+// keep their place.
 func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string, error) {
 	row := q.db.QueryRow(ctx, setDesired,
 		arg.DesiredText,
@@ -5300,6 +5323,7 @@ func (q *Queries) SetDesired(ctx context.Context, arg SetDesiredParams) (string,
 		arg.Open,
 		arg.Quiet,
 		arg.Firing,
+		arg.ConfigurationOnly,
 		arg.Urgent,
 		arg.Now,
 		arg.OrgID,

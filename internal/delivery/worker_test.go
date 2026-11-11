@@ -141,6 +141,8 @@ type (
 		supersededKeys []string
 		// entries are the entries that reached the delivery, as deliveries.entries stores them.
 		entries []byte
+		// configOnly is configuration_only: the pending work is an edit that a change of configuration alone made.
+		configOnly bool
 	}
 	fakeReply struct {
 		id, delivery, group, dest int64
@@ -473,6 +475,8 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	if arg.Open {
 		d.lateNote = false
 	}
+	d.configOnly = arg.ConfigurationOnly && d.publishedAt != nil && !d.desiredRetire &&
+		(d.state == "delivered" || (d.state == "pending" && d.configOnly))
 	switch {
 	case d.state == "deleted_in_messenger" || d.state == "retired":
 	case d.state == "withheld" && !arg.Open:
@@ -593,6 +597,12 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 			}
 			return 1
 		}
+		if a.configOnly != b.configOnly {
+			if b.configOnly {
+				return -1
+			}
+			return 1
+		}
 		if (a.lastDelivered == nil) != (b.lastDelivered == nil) {
 			if a.lastDelivered == nil {
 				return -1
@@ -612,8 +622,8 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 			break
 		}
 		d.owner, d.until = arg.Owner, arg.LeaseUntil
-		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, Urgent: d.urgent, NextAttemptAt: d.next,
-			LastDeliveredAt: tz(d.lastDelivered)})
+		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, Urgent: d.urgent, ConfigurationOnly: d.configOnly,
+			NextAttemptAt: d.next, LastDeliveredAt: tz(d.lastDelivered)})
 	}
 	// The order of RETURNING is not guaranteed; the worker sorts.
 	slices.Reverse(out)
@@ -1420,7 +1430,7 @@ func (f *fakeDB) ResetForRepublish(_ context.Context, arg dbgen.ResetForRepublis
 	d.messageID, d.messageURL, d.actualVersion, d.actualHash, d.started = nil, nil, 0, nil, nil
 	d.publishedAt, d.responseValues, d.threadOpened, d.actualKey = nil, nil, false, nil
 	d.actualStatus, d.pastEditWindow, d.restarted = nil, false, nil
-	d.threadState, d.anchorID, d.chainLastID, d.republished = "none", nil, nil, true
+	d.threadState, d.anchorID, d.chainLastID, d.republished, d.configOnly = "none", nil, nil, true, false
 	d.loud, d.lateNote, d.state, d.attempts, d.firstFailed = pgtype.Bool{Bool: false, Valid: true}, false, "pending",
 		0, nil
 	d.errorClass, d.lastError, d.next, d.owner, d.until, d.updated = nil, nil, arg.Now, "", time.Time{}, arg.Now
@@ -2062,6 +2072,86 @@ func TestUrgentFirst(t *testing.T) {
 	}
 	if waiting != 3 {
 		t.Errorf("waiting %d", waiting)
+	}
+}
+
+// TestConfigurationEditsLast is C-11.FR-3 and FR-15: an edit of a published Root message that a change of
+// configuration alone made is claimed after the Publication of a new Alert Group and the edits of Alerts, of the same
+// urgency, and takes the tokens they leave; a re-render on top of a pending edit of Alerts keeps that edit's place, and
+// an edit of Alerts on top of a pending re-render takes it. With a batch of one, the claim alone decides the order.
+func TestConfigurationEditsLast(t *testing.T) {
+	for _, batch := range []int32{0, 1} {
+		t.Run(fmt.Sprintf("batch %d", batch), func(t *testing.T) { configurationEditsLast(t, batch) })
+	}
+}
+
+func configurationEditsLast(t *testing.T, batch int32) {
+	e := newEnv(t)
+	e.w.Batch = batch
+	group := func(i int64, title string) *groups.Group {
+		gid := groupID + i
+		if e.db.groups[gid] == nil {
+			e.db.groups[gid] = &fakeGroup{id: gid, publicID: fmt.Sprintf("AGAAAAAAAAAA%dB", i),
+				number: 10 + i, status: "firing", route: routeID, created: e.business.Now()}
+		}
+		e.db.groups[gid].title = title
+		return &groups.Group{ID: gid, PublicID: e.db.groups[gid].publicID, Number: 10 + i, RouteID: routeID,
+			Title: title, Status: groups.StatusFiring}
+	}
+	render := func(r groups.Rendering) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, r); err != nil {
+			t.Fatal(err)
+		}
+		e.business.Advance(time.Millisecond)
+	}
+	annotated := groups.Recorded{Seq: 2, Event: groups.EventAnnotationsChanged, Loudness: groups.Quiet}
+	for i := range int64(4) {
+		render(groups.Rendering{Group: group(i, "g"), Actor: groups.System, Events: []groups.Recorded{created()}})
+	}
+	e.round(t)
+	if len(e.rec.Calls()) != 4 {
+		t.Fatalf("publications %+v", e.rec.Calls())
+	}
+	for i := range int64(3) {
+		render(groups.Rendering{Group: group(i, "renamed"), Actor: groups.System, Configuration: true})
+	}
+	render(groups.Rendering{Group: group(1, "annotated"), Actor: groups.System, Events: []groups.Recorded{annotated}})
+	render(groups.Rendering{Group: group(3, "annotated"), Actor: groups.System, Events: []groups.Recorded{annotated}})
+	render(groups.Rendering{Group: group(3, "annotated, renamed"), Actor: groups.System, Configuration: true})
+	render(groups.Rendering{Group: group(4, "new"), Actor: groups.System, Events: []groups.Recorded{created()}})
+	for i, want := range []bool{true, false, true, false, false} {
+		if d := e.db.deliveries[i]; d.configOnly != want || d.state != "pending" {
+			t.Errorf("delivery of #%d: configuration only %v, %s; want %v", 10+i, d.configOnly, d.state, want)
+		}
+	}
+	e.db.dests[destMM].limit = 3
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	calls := e.rec.Calls()[4:]
+	var first []string
+	for _, c := range calls {
+		first = append(first, c.Method+" "+strings.Fields(textOf(c))[0])
+	}
+	slices.Sort(first)
+	if want := []string{deliverytest.MethodPublish + " #14", deliverytest.MethodUpdate + " #11",
+		deliverytest.MethodUpdate + " #13"}; !slices.Equal(first, want) {
+		t.Fatalf("first calls %q, want %q", first, want)
+	}
+	for _, i := range []int{0, 2} {
+		if d := e.db.deliveries[i]; d.state != "pending" || !d.configOnly || !d.next.After(e.business.Now()) {
+			t.Errorf("the re-render of #%d: %s, configuration only %v, due %v", 10+i, d.state, d.configOnly, d.next)
+		}
+	}
+	e.business.Advance(time.Minute)
+	e.round(t)
+	for i, d := range e.db.deliveries {
+		if d.state != "delivered" {
+			t.Errorf("delivery of #%d: %s", 10+i, d.state)
+		}
+	}
+	if n := len(e.rec.Calls()); n != 9 {
+		t.Errorf("calls %d, want 9", n)
 	}
 }
 

@@ -147,7 +147,7 @@ func (s *Service) rerenderGroup(ctx context.Context, id int64, activeKeyID strin
 			if _, err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: r.ID, DesiredText: msg.text,
 				DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), Open: true,
 				Firing: deliveryEvent(DeliveryAfterRecovery).loud(status == groups.StatusFiring), Urgent: g.Urgent,
-				Now: now}); err != nil {
+				ConfigurationOnly: true, Now: now}); err != nil {
 				return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 			}
 			changed++

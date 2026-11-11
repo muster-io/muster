@@ -853,7 +853,7 @@ sequenceDiagram
     participant MS as messenger or endpoint
 
     DB-->>DW: NOTIFY, or next_attempt_at reached
-    DW->>DB: claim a due delivery row, Urgent first<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
+    DW->>DB: claim a due delivery row, Urgent first,<br/>edits of a change of configuration last<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
     DW->>DB: read the latest Desired state (text, buttons, hash)
     alt the actual message already matches
         DW->>DB: nothing to do
