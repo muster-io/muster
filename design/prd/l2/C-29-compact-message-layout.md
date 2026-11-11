@@ -60,7 +60,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   (FR-3), `organization.time_zone` (item 2), and `organization.workday_start` and `organization.week_start`, which
   label the Snooze presets (C-10.FR-18) — re-renders every open Root message of the Organization, and a rename of a
   Team those of the open Alert Groups that have it (item 2), Quietly and as edits; a Root message the change does not
-  alter is not edited.
+  alter is not edited. _Revised (2026-11-11, #503):_ a change of a Route's language (`route.language`), Snooze
+  durations (`route.snooze_durations`) or `root_message` or `line` template re-renders the open Root messages of the
+  Route, and a creation, change or deletion of a Link rule or a Lookup table re-renders every open Root message of the
+  Organization, the same way.
 - **C-29.FR-3** The Alerts of item 5 are named by their distinguishing label: the first of the Organization's Instance
   labels (`organization.instance_labels`) whose values differ among the Alerts, else the first label, by name, whose
   values differ (_provisional_, P-67). The line lists up to `message.compact_alerts_listed` values, firing Alerts first

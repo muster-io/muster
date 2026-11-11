@@ -47,14 +47,22 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   documented limit where one exists. Urgent Alert Groups go first in the queue but never bypass a limiter. Rate-limit
   pressure delays updates; it never drops them.
   _Revised for L2 (2026-10-26):_ from 0.2.0 the Urgent Alert Groups that go first are the critical ones (C-26.FR-8).
-  _Revised for L2 (2026-11-11, #504):_ within each urgency, an edit of a published Root message that only a change of
-  configuration made — the re-render of the open Root messages after a change of a button set, of the message settings,
-  of a Route's "Labels in the message" or of a Team's name, the evaluation of the Teams, a raised Minimum severity, or
-  the re-render after a key rotation — goes after the Publications, the final edits and the edits of Root messages that
-  Alerts, Commands and timers with a lifecycle event make, of the same urgency. The order is strict among Root
-  messages: configuration edits wait for as long as that work uses up the limiter, for example while Alert Groups keep
-  flapping, and drain after it, with the tokens it leaves, oldest first. None is dropped: one that waits is carried by
-  the next change of its Alert Group. Thread replies are not part of this order.
+  _Revised for L2 (2026-11-11, #504, #534, #503):_ within each urgency, an edit of a published Root message that only
+  a change of configuration made — the re-render of the open Root messages after a change of a button set, of the
+  message settings, of a Route's "Labels in the message", language, Snooze durations or templates, of a Link rule or a
+  Lookup table, or of a Team's name, the evaluation of the Teams, a raised Minimum severity, or the re-render after a
+  key rotation — goes after the Publications, the final edits and the edits of Root messages that Alerts, Commands and
+  timers with a lifecycle event make, of the same urgency. The delivery work that shares a Destination's and a
+  Connection's limiters goes in this order: the Publications, final edits and edits of Root messages that Alerts,
+  Commands and timers with a lifecycle event make, of Urgent Alert Groups; the configuration edits of Urgent Alert
+  Groups; the same work of the other Alert Groups; the Thread replies; the events of outgoing webhooks; the
+  configuration edits of the other Alert Groups. Each rank goes oldest first. Every rank after the first is claimed one
+  batch at a time, so the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one
+  claimed batch of it, and a re-render delays the work before it by at most one claimed batch of its edits; Thread
+  replies and webhook events, Urgent or not, come after the Root-message work of both. Configuration edits that are not
+  Urgent wait as long as the work before them uses up the limiter, which in a Telegram chat at 10 calls a minute is
+  about three Alert Groups a minute that resolve and reopen; none is dropped, and one that waits is carried by the next
+  change of its Alert Group.
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again
@@ -207,6 +215,13 @@ every error class, and a virtual clock; messenger-specific checks are in C-13 to
   of the same urgency is published, and the Root message of an acknowledged one is edited, before the remaining
   configuration edits; configuration edits wait while such Root-message work uses up the chat's limiter, and every one
   of them is still made afterwards.
+- **C-11.AC-16** During a re-render of 100 open Alert Groups in one Telegram chat, 11 of them Urgent, the edits of the
+  Urgent ones go first. When new Alerts then join an Urgent and a non-urgent open Alert Group, the Root-message edit of
+  the Urgent one, the remaining Urgent configuration edit, the edit of the other one and both `alerts_added` Thread
+  replies are made before the remaining configuration edits that are not Urgent, and every configuration edit is still
+  made afterwards. A Publication that comes due during a re-render of 200 open Root messages, and an Urgent Publication
+  or Urgent configuration edit that comes due while 200 Publications or Thread replies that are not Urgent are
+  attempted, goes out within one claimed batch of them.
 
 ## Related ADRs
 
