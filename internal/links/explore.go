@@ -70,6 +70,9 @@ var previousExploreTemplates = []string{
 // the start with ErrRuleNameTaken.
 func EnsureExplore(ctx context.Context, s Store, orgID int64, now time.Time) error {
 	return s.InTx(ctx, func(q Queries) error {
+		if err := lockLinkChanges(ctx, q, orgID); err != nil {
+			return err
+		}
 		row, err := q.EnsureExploreRule(ctx, dbgen.EnsureExploreRuleParams{OrgID: orgID,
 			PublicID: publicid.New(publicid.LinkRule), Name: ExploreName, UrlTemplate: ExploreTemplate, Now: now.UTC(),
 			PreviousTemplates: previousExploreTemplates})
