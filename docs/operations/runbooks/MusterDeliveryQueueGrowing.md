@@ -19,7 +19,8 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
 - Other Destinations, the UI and the API keep working. Each round of the delivery worker tries each waiting delivery
   once, so the queue holds up the new Root messages and edits of other Destinations by about one round, a few seconds
   for thousands of waiting deliveries, and their Thread replies and the events of outgoing webhooks by at most one batch
-  of it, about ten calls.
+  of it, about ten calls, once a round reaches them: one that comes due during a round first waits for the rest of
+  that round.
 
 ## Diagnosis
 

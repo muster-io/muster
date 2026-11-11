@@ -102,13 +102,14 @@ many open Alert Groups, as the messengers' rate limits allow. A Destination send
 after their Root messages and the edits that Alerts and Commands make to them, and before anything about the other Alert
 Groups, so the Root message of an Urgent Alert Group waits for work that is not Urgent at most one batch of it, about
 ten calls; Thread replies, Urgent or not, come after the Root messages of Urgent Alert Groups and wait for those of the
-other Alert Groups at most one such batch, whatever their number in any Destination. The edits of the other Alert
-Groups come last: they never hold up the Root messages of new Alert Groups, the edits of Root messages that Alerts and
-Commands make, the Thread replies, such as the one about new Alerts, or the events of outgoing webhooks. A Destination
-sends those first, for as long as they use up its rate limit, and these edits with the rest; none is dropped. Alert
-Groups that keep flapping can hold them up for a long time: a Telegram chat takes 10 calls a minute, and an Alert Group
-that resolves and opens again takes up to four of them, a Root message edit and a Thread reply each time, so about three
-such Alert Groups a minute leave nothing for these edits until they calm down.
+other Alert Groups at most one such batch, whatever their number in any Destination; a reply that comes due while
+Muster is working through such a backlog first waits for the rest of that pass, a few seconds for thousands of waiting
+edits. The edits of the other Alert Groups come last: they never hold up the Root messages of new Alert Groups, the
+edits of Root messages that Alerts and Commands make, the Thread replies, such as the one about new Alerts, or the
+events of outgoing webhooks. A Destination sends those first, for as long as they use up its rate limit, and these edits
+with the rest; none is dropped. Alert Groups that keep flapping can hold them up for a long time: a Telegram chat takes
+10 calls a minute, and an Alert Group that resolves and opens again takes up to four of them, a Root message edit and a
+Thread reply each time, so about three such Alert Groups a minute leave nothing for these edits until they calm down.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.

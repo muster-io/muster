@@ -225,14 +225,16 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // They share the buckets of each Destination and Connection, and the order decides who gets a token: a row denied one
 // is due again at the token's time plus TokenMargin, as every row denied before that token is, and the next round
 // claims them in this order. Configuration edits take every token the rest leaves, and none is dropped; a Thread reply
-// waits only while the Urgent work and at most one claimed batch of the other Root-message work use up the limiter,
-// and the Thread batching window keeps the replies of new Alerts to one per window and delivery. Within one replica the
-// order holds for every token that is free when the round reaches a rank. The buckets refill continuously on the
-// business clock, so a token that comes free between a refusal and a later pass of the same round, a few milliseconds
-// later, goes to that pass: the refused row is due at the token's time plus TokenMargin, and waits one token interval
-// more. Across replicas the order is likely but not strict: one whose configuration pass reaches the bucket first can
-// take the token ahead of a reply that another replica claimed, and each such race costs the reply one token interval,
-// as a Publication can lose one to a configuration edit that another replica claimed just before it came due.
+// due when a round starts waits only while the Urgent work and at most one claimed batch of the other Root-message work
+// per batch of replies use up the limiter, and one that comes due during the turns of ranks 3 to 5 first waits for the
+// rest of that round, about one limiter take per waiting row; the Thread batching window keeps the replies of new
+// Alerts to one per window and delivery. Within one replica the order holds for every token that is free when the round
+// reaches a rank. The buckets refill continuously on the business clock, so a token that comes free between a refusal
+// and a later pass of the same round, a few milliseconds later, goes to that pass: the refused row is due at the
+// token's time plus TokenMargin, and waits one token interval more. Across replicas the order is likely but not strict:
+// one whose configuration pass reaches the bucket first can take the token ahead of a reply that another replica
+// claimed, and each such race costs the reply one token interval, as a Publication can lose one to a configuration edit
+// that another replica claimed just before it came due.
 //
 // The Urgent ranks claim what is due now: rank 1 is drained, then rank 2 is claimed one batch at a time, with rank 1
 // drained again after each full one, until a claim of rank 2 comes back short. Ranks 3 to 6 claim only the rows due
@@ -245,22 +247,26 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // batch at a time and, after a full one, behind another turn of ranks 3 to 5 due by the start and then one batch each
 // of ranks 3, 4 and 5 due now, so it stays last among them: a Publication, an edit that Alerts or a Command made, a
 // Thread reply or a webhook event that comes due during a long pass of configuration edits goes within one batch of
-// them, and a row of ranks 3 to 5 denied a token earlier in the round can take one that comes free during the pass
-// ahead of the configuration edits.
+// configuration edits per batch of its rank, as rows of its rank denied a token earlier and due again sort ahead of it,
+// and a row of ranks 3 to 5 denied a token earlier in the round can take one that comes free during the pass ahead of
+// the configuration edits.
 //
 // Termination. A row of ranks 3 to 6 due at the start that a batch bounded by the start claimed leaves those claims for
 // the round: it is delivered or ended; or rescheduled — to its token's time plus TokenMargin, a backoff or a
-// Retry-After — after the start; or it keeps a lease past now; or its Destination became Broken or its Root message is
-// gone, which the claims skip. A row that comes due during the round, a Root message published again included, is due
-// after the start. So each row of ranks 3 to 6 due at the start is claimed at most once a round by those claims, unless
-// its lease runs out within it, and the turns and the batches of rank 6 end after at most the rows due at the start,
-// divided by Batch and rounded up, plus those lease expiries, full batches. The batches due now of ranks 3 to 5 come
-// only between two batches of rank 6, one of each rank and never repeated while full, so they add at most 3 times Batch
-// limiter takes per full batch of rank 6. A round thus takes at most one limiter take per row of ranks 3 to 6 due at
-// its start, plus those, plus the Urgent ranks, and holds the next Organization about that many takes, not the whole
-// backlog; work that is not Urgent and comes due during the turns of ranks 3 to 5 goes in the next round, MinWait
-// later. A large Urgent backlog, configuration edits included, keeps the round at the Urgent ranks until it is short,
-// as the decided order wants.
+// Retry-After — after the start; or it keeps a lease past now; or its Destination became Broken, its Root message is
+// gone or a Storm holds it, which the claims skip. A row that comes due during the round, a Root message published
+// again included, is due after the start. So each row of ranks 3 to 6 due at the start is claimed at most once a round
+// by those claims, unless its lease runs out within it, and the turns and the batches of rank 6 end after at most the
+// rows due at the start, divided by Batch and rounded up, plus those lease expiries, full batches. The batches due now
+// of ranks 3 to 5 come only between two batches of rank 6, one of each rank and never repeated while full, so they add
+// at most 3 times Batch limiter takes per full batch of rank 6. A round thus takes at most one limiter take per row of
+// ranks 3 to 6 due at its start, plus those, plus the Urgent ranks, and, without an Urgent backlog, holds the next
+// Organization about that many takes, not the whole backlog; work that is not Urgent and comes due during the turns of
+// ranks 3 to 5 goes in the next round, MinWait later. A large Urgent backlog, configuration edits included, keeps the
+// round at the Urgent ranks until it is short, as the decided order wants: rank 2 claims what is due now, so the Urgent
+// configuration edits of a re-render on one rate-limited Destination, after a key rotation over a hundred Urgent Root
+// messages in Mattermost at 5 a second for one, hold the Thread replies of the other Destinations and the next
+// Organization, as before, until a claim of them comes back short.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {

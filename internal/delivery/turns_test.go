@@ -24,9 +24,9 @@ const (
 	routeHook  = 3
 )
 
-// annotatedEvent changes a Root message and makes no Thread reply.
-func annotatedEvent(seq int64) groups.Recorded {
-	return groups.Recorded{Seq: seq, Event: groups.EventAnnotationsChanged, Loudness: groups.Quiet}
+// annotatedEvent, the second event of an Alert Group, changes its Root message and makes no Thread reply.
+func annotatedEvent() groups.Recorded {
+	return groups.Recorded{Seq: 2, Event: groups.EventAnnotationsChanged, Loudness: groups.Quiet}
 }
 
 // groupOn is the Alert Group i of Route route, not Urgent.
@@ -85,7 +85,7 @@ func backlog(t *testing.T, n int, batch int32) (*eventsEnv, *groups.Group, *grou
 	}
 	e.rec.Reset()
 	for i := range n {
-		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent(2))
+		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent())
 	}
 	for i, d := range e.db.deliveries[:n] {
 		if d.state != "pending" || d.configOnly || d.urgent {
@@ -195,7 +195,7 @@ func TestTurnsOncePerRound(t *testing.T) {
 	}
 	e.rec.Reset()
 	for i := range n {
-		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent(2))
+		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent())
 		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System,
 			alertsAdded(3, groups.StatusFiring, fmt.Sprintf("fp%d", i)))
 	}
@@ -274,7 +274,7 @@ func TestConfigurationEditsAfterTurns(t *testing.T) {
 	}
 	e.rec.Reset()
 	for i := range n {
-		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent(2))
+		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System, annotatedEvent())
 		e.enqueue(t, newGroup(e.env, i, "annotated"), groups.System,
 			alertsAdded(3, groups.StatusFiring, fmt.Sprintf("fp%d", i)))
 	}
@@ -342,5 +342,43 @@ func TestUrgentPublicationDuringEvents(t *testing.T) {
 	}
 	if s := len(e.sender.calls); s != n {
 		t.Errorf("%d events in the round, want %d", s, n)
+	}
+}
+
+// TestUrgentAfterAShortBatch is C-11.FR-3: the round goes back to the Urgent ranks after every batch of ranks 3 to 6
+// that claimed a row, a short one included. An Urgent Publication that comes due during a batch of one edit that
+// Alerts made goes out before the full batch of Thread replies that follows it.
+func TestUrgentAfterAShortBatch(t *testing.T) {
+	e := turnsEnv(t, 0)
+	const n = 15
+	for i := range n {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != n {
+		t.Fatalf("%d of %d published", p, n)
+	}
+	e.rec.Reset()
+	e.enqueue(t, newGroup(e.env, 0, "annotated"), groups.System, annotatedEvent())
+	for i := 1; i < n; i++ {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System,
+			alertsAdded(2, groups.StatusFiring, fmt.Sprintf("fp%d", i)))
+	}
+	e.db.before["TakeTokens"] = func() {
+		g := newGroupOf(e.env, n, "urgent", true)
+		e.enqueue(t, g, groups.System, created())
+	}
+	e.round(t)
+	calls := e.rec.Calls()
+	urgent := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
+	})
+	reply := slices.IndexFunc(calls, func(c deliverytest.Call) bool { return c.Method == deliverytest.MethodReply })
+	var order []string
+	for _, c := range calls[:min(len(calls), 4)] {
+		order = append(order, c.Method+" "+strings.Fields(textOf(c))[0])
+	}
+	if len(calls) == 0 || !strings.Contains(textOf(calls[0]), "annotated") || urgent != 1 || reply != 2 {
+		t.Fatalf("the Urgent Publication at %d and the first reply at %d; first calls %q", urgent, reply, order)
 	}
 }

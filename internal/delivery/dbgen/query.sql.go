@@ -406,20 +406,21 @@ type ClaimDueDeliveriesRow struct {
 // three, due now, between two of their batches (Round), so that a re-render of every open Root message never delays a
 // Publication, an edit of a Root message that an Alert or a Command made, or a Thread reply of its urgency or below,
 // and the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one claimed batch of it;
-// Thread replies and webhook events, Urgent or not, come after the Urgent Root-message work and wait for at most one
-// claimed batch of the other. The order is order only and strict: configuration edits wait as long as the work before
-// them uses up the limiter — Alert Groups that keep flapping, for one — and none is dropped: an edit that waits is
-// carried by the next change of its Alert Group, which ends the mark, and a delivered edit ends it too. A claimed edit
-// without a token is released at once, due when the token is (RescheduleDelivery), so a claimed batch never holds a
-// token or a lease against the work before it. A delivery a Storm holds waits for its Storm, and one of a deleted
-// Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue that read
-// the Destination's entries before its deletion committed can create one after the deletion ended the others, and a
-// Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once:
-// as a subquery in FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per
-// row. The two equalities bound a range of deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would
-// be a filter over every pending delivery. The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of
-// ClaimDueTimers (internal/timers) copy this shape, without the ranks, which only Root messages have; a fix of it
-// applies to them too.
+// Thread replies and webhook events, Urgent or not, come after the Urgent Root-message work and, due when a round
+// starts, wait for at most one claimed batch of the other per batch of their own; one that comes due during the turns
+// waits for the rest of that round, about one limiter take per waiting row, and then the same. The order is order only
+// and strict: configuration edits wait as long as the work before them uses up the limiter — Alert Groups that keep
+// flapping, for one — and none is dropped: an edit that waits is carried by the next change of its Alert Group, which
+// ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due when the
+// token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work before it. A
+// delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its final edit or,
+// never published there, to end it (prepare): an Enqueue that read the Destination's entries before its deletion
+// committed can create one after the deletion ended the others, and a Publication claimed before it committed can fail
+// meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
+// the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
+// deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
+// The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
+// without the ranks, which only Root messages have; a fix of it applies to them too.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,

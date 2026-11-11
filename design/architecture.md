@@ -846,10 +846,11 @@ deliveries, then the Urgent edits of a change of configuration, both due now; th
 other deliveries, the Thread replies and the outgoing webhook events, one batch of each in turn, and last the other
 edits of a change of configuration, with one batch each of the three before, due now, between two of their batches.
 After every later batch that claimed a row the round goes back to the Urgent claims, so that Urgent Root messages wait
-behind the rest for at most one claimed batch, a Thread reply or a webhook event waits for at most one batch of the
-other deliveries per batch of its own kind, whatever their backlog on any Destination, work that comes due during a
-re-render waits at most one batch of it, a round ends after about one take per row due at its start, and a re-render of
-every open Root message takes only the tokens the work before it leaves.
+behind the rest for at most one claimed batch, a Thread reply or a webhook event due when a round starts waits for at
+most one batch of the other deliveries per batch of its own kind, whatever their backlog on any Destination, while one
+that comes due during the turns waits for the rest of that round, about one take per waiting row, work that comes due
+during a re-render waits at most one batch of it per batch of its own kind, a round ends after about one take per row
+due at its start, and a re-render of every open Root message takes only the tokens the work before it leaves.
 
 ```mermaid
 sequenceDiagram
