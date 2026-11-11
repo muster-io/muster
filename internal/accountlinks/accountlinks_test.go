@@ -131,6 +131,37 @@ type fakeStore struct {
 	next       int64
 	inTx       bool
 	savepoints int
+	// rerenders are the Users whose open Root messages a change of their links asked to re-render, and notified the
+	// wakes sent; pending answers 0 rows, as an unclaimed row of the User does.
+	rerenders []int64
+	notified  int
+	pending   bool
+}
+
+func (s *fakeStore) InsertAccountLinksUpdate(_ context.Context, arg dbgen.InsertAccountLinksUpdateParams) (int64,
+	error) {
+	if err := s.err("InsertAccountLinksUpdate"); err != nil {
+		return 0, err
+	}
+	if arg.OrgID != org || !arg.UserID.Valid || arg.RequestedAt.IsZero() {
+		return 0, errors.New("a re-render of another organization, without a user or a time")
+	}
+	if s.pending {
+		return 0, nil
+	}
+	s.rerenders = append(s.rerenders, arg.UserID.Int64)
+	return 1, nil
+}
+
+func (s *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.err("NotifyOpenGroupUpdates"); err != nil {
+		return err
+	}
+	if channel != OpenGroupUpdatesChannel {
+		return errors.New("the wrong channel")
+	}
+	s.notified++
+	return nil
 }
 
 func newStore() *fakeStore {
@@ -862,6 +893,11 @@ func TestUnlink(t *testing.T) {
 	if !slices.Equal(e.store.hints, []db.Hint{{OrgID: org, Type: HintType, ID: tl.publicID, User: alicePID}}) {
 		t.Errorf("hints %+v", e.store.hints)
 	}
+	// The unlink locks the User first and re-renders the open Root messages whose footer names them (C-12.FR-12).
+	if !slices.Equal(e.store.rerenders, []int64{aliceID}) || e.store.notified != 1 ||
+		!slices.Contains(e.store.locks, "user") {
+		t.Errorf("re-renders %v, %d wakes, locks %v", e.store.rerenders, e.store.notified, e.store.locks)
+	}
 	if !strings.Contains(e.log.String(), `"event":"account_link_unlinked","messenger":"telegram","connection":"`+
 		tgPID+`","user":"`+alicePID+`","reason":"removed"`) {
 		t.Errorf("log %s", e.log)
@@ -887,7 +923,20 @@ func TestUnlink(t *testing.T) {
 		e.store.hints[1].User != bobPID || e.store.hints[1].ID != ml.publicID {
 		t.Errorf("an Admin's unlink: %+v, hints %+v", last, e.store.hints)
 	}
-	for _, name := range []string{"GetAccountLinkOfUser", "DeleteAccountLink"} {
+	if !slices.Equal(e.store.rerenders, []int64{aliceID, bobID}) || e.store.notified != 2 {
+		t.Errorf("an Admin's unlink: re-renders %v, %d wakes", e.store.rerenders, e.store.notified)
+	}
+	// A row of the User that no worker claimed yet covers the unlink: nothing is inserted, and no wake is sent.
+	e.store.pending = true
+	l := e.addLink(aliceID, MessengerTelegram, tgID, "7001", nil)
+	if err := e.s.Unlink(t.Context(), alice, l.publicID); err != nil || len(e.store.rerenders) != 2 ||
+		e.store.notified != 2 {
+		t.Errorf("an unlink with a pending row = %v, re-renders %v, %d wakes", err, e.store.rerenders,
+			e.store.notified)
+	}
+	e.store.pending = false
+	for _, name := range []string{"LockLinkUser", "GetAccountLinkOfUser", "DeleteAccountLink",
+		"InsertAccountLinksUpdate", "NotifyOpenGroupUpdates"} {
 		l := e.addLink(aliceID, MessengerTelegram, tgID, "7001", nil)
 		e.store.fail[name] = errBoom
 		if err := e.s.Unlink(t.Context(), alice, l.publicID); !errors.Is(err, errBoom) {
@@ -931,6 +980,9 @@ func TestRemoveUserLinks(t *testing.T) {
 	if strings.Contains(e.log.String(), "account_link_unlinked") {
 		t.Fatal("logged before the commit")
 	}
+	if !slices.Equal(e.store.rerenders, []int64{bobID}) || e.store.notified != 1 {
+		t.Errorf("re-renders %v, %d wakes", e.store.rerenders, e.store.notified)
+	}
 	after(t.Context())
 	if strings.Count(e.log.String(), `"event":"account_link_unlinked"`) != 2 {
 		t.Errorf("log %s", e.log)
@@ -940,7 +992,7 @@ func TestRemoveUserLinks(t *testing.T) {
 		t.Errorf("RemoveUserLinks over a failing transaction = %v", err)
 	}
 	for _, name := range []string{"LockLinkUser", "DeleteUserAccountLinks", "InsertAuditEntry", "VoidUserLinkRequests",
-		"Notify"} {
+		"InsertAccountLinksUpdate", "NotifyOpenGroupUpdates", "Notify"} {
 		e.addLink(aliceID, MessengerMattermost, mmID, "u-alice", nil)
 		e.store.fail[name] = errBoom
 		_, err := e.s.removeUserLinks(t.Context(), e.store, aliceID, admin.Actor, admin.Transport, admin.Address)
@@ -950,9 +1002,10 @@ func TestRemoveUserLinks(t *testing.T) {
 		delete(e.store.fail, name)
 		e.store.links = nil
 	}
+	rerenders := len(e.store.rerenders)
 	if after, err := e.s.removeUserLinks(t.Context(), e.store, aliceID, admin.Actor, admin.Transport,
-		admin.Address); err != nil || after != nil {
-		t.Errorf("a User without links = %v", err)
+		admin.Address); err != nil || after != nil || len(e.store.rerenders) != rerenders {
+		t.Errorf("a User without links = %v, re-renders %v", err, e.store.rerenders)
 	}
 }
 

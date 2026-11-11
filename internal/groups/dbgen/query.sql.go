@@ -172,7 +172,14 @@ RETURNING u.id, u.kind, u.route_id, u.requested_at, u.after_alert_group_id,
                     WHERE d.org_id = $3 AND d.id = u.destination_id), '')::text AS destination_public_id,
           coalesce((SELECT t.public_id
                     FROM teams t
-                    WHERE t.org_id = $3 AND t.id = u.team_id), '')::text AS team_public_id
+                    WHERE t.org_id = $3 AND t.id = u.team_id), '')::text AS team_public_id,
+          u.user_id, u.service_account_id,
+          coalesce((SELECT p.public_id
+                    FROM users p
+                    WHERE p.org_id = $3 AND p.id = u.user_id), '')::text AS user_public_id,
+          coalesce((SELECT a.public_id
+                    FROM service_accounts a
+                    WHERE a.org_id = $3 AND a.id = u.service_account_id), '')::text AS service_account_public_id
 `
 
 type ClaimOpenGroupUpdateParams struct {
@@ -184,24 +191,29 @@ type ClaimOpenGroupUpdateParams struct {
 }
 
 type ClaimOpenGroupUpdateRow struct {
-	ID                  int64
-	Kind                string
-	RouteID             pgtype.Int8
-	RequestedAt         time.Time
-	AfterAlertGroupID   int64
-	RoutePublicID       string
-	DestinationID       pgtype.Int8
-	TeamID              pgtype.Int8
-	DestinationPublicID string
-	TeamPublicID        string
+	ID                     int64
+	Kind                   string
+	RouteID                pgtype.Int8
+	RequestedAt            time.Time
+	AfterAlertGroupID      int64
+	RoutePublicID          string
+	DestinationID          pgtype.Int8
+	TeamID                 pgtype.Int8
+	DestinationPublicID    string
+	TeamPublicID           string
+	UserID                 pgtype.Int8
+	ServiceAccountID       pgtype.Int8
+	UserPublicID           string
+	ServiceAccountPublicID string
 }
 
 // The queue of the changes of configuration that reach the open Alert Groups after the save (open_group_updates,
 // schema.md §5): a row is claimed by one worker with a lease on the real clock, walks the open Alert Groups of its scope
 // by id in batches, and is deleted with its last batch.
 // ClaimOpenGroupUpdate leases the earliest row of the kinds this replica handles whose lease is free or ran out, with
-// the public_id of its Route, its Destination or its Team, if any, for its log lines; another claimer skips the row
-// this one locked. A row of a kind that a later version adds waits for a replica that handles it.
+// the public_id of its Route, its Destination, its Team, its User or its Service account, if any, for its log lines;
+// another claimer skips the row this one locked. A row of a kind that a later version adds waits for a replica that
+// handles it.
 func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUpdateParams) ([]ClaimOpenGroupUpdateRow, error) {
 	rows, err := q.db.Query(ctx, claimOpenGroupUpdate,
 		arg.Owner,
@@ -228,6 +240,10 @@ func (q *Queries) ClaimOpenGroupUpdate(ctx context.Context, arg ClaimOpenGroupUp
 			&i.TeamID,
 			&i.DestinationPublicID,
 			&i.TeamPublicID,
+			&i.UserID,
+			&i.ServiceAccountID,
+			&i.UserPublicID,
+			&i.ServiceAccountPublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -3288,6 +3304,49 @@ func (q *Queries) ListOpenGroupsOfRouteAfter(ctx context.Context, arg ListOpenGr
 	return items, nil
 }
 
+const listOpenGroupsOfServiceAccountAfter = `-- name: ListOpenGroupsOfServiceAccountAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND status <> 'resolved' AND id > $2
+  AND snoozed_by_service_account_id = $3
+ORDER BY id
+LIMIT $4
+`
+
+type ListOpenGroupsOfServiceAccountAfterParams struct {
+	OrgID            int64
+	AfterID          int64
+	ServiceAccountID pgtype.Int8
+	Lim              int32
+}
+
+// ListOpenGroupsOfServiceAccountAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names
+// the Service account, who snoozed them, which a rename of it re-renders.
+func (q *Queries) ListOpenGroupsOfServiceAccountAfter(ctx context.Context, arg ListOpenGroupsOfServiceAccountAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfServiceAccountAfter,
+		arg.OrgID,
+		arg.AfterID,
+		arg.ServiceAccountID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupsOfTeamAfter = `-- name: ListOpenGroupsOfTeamAfter :many
 SELECT g.id
 FROM alert_groups g
@@ -3313,6 +3372,50 @@ func (q *Queries) ListOpenGroupsOfTeamAfter(ctx context.Context, arg ListOpenGro
 		arg.OrgID,
 		arg.AfterID,
 		arg.TeamID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenGroupsOfUserAfter = `-- name: ListOpenGroupsOfUserAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND status <> 'resolved' AND id > $2
+  AND (owner_user_id = $3 OR snoozed_by_user_id = $3)
+ORDER BY id
+LIMIT $4
+`
+
+type ListOpenGroupsOfUserAfterParams struct {
+	OrgID   int64
+	AfterID int64
+	UserID  pgtype.Int8
+	Lim     int32
+}
+
+// ListOpenGroupsOfUserAfter lists, by id after a cursor, a batch of the open Alert Groups whose footer names the User
+// (C-12.FR-12) — their Owner while acknowledged, who snoozed them while snoozed — which a change of the User's display
+// name or Account links re-renders.
+func (q *Queries) ListOpenGroupsOfUserAfter(ctx context.Context, arg ListOpenGroupsOfUserAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsOfUserAfter,
+		arg.OrgID,
+		arg.AfterID,
+		arg.UserID,
 		arg.Lim,
 	)
 	if err != nil {
@@ -4669,7 +4772,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 }
 
 const lockOpenGroupUpdate = `-- name: LockOpenGroupUpdate :one
-SELECT id, kind, route_id, destination_id, team_id, after_alert_group_id
+SELECT id, kind, route_id, destination_id, team_id, user_id, service_account_id, after_alert_group_id
 FROM open_group_updates
 WHERE org_id = $1 AND id = $2 AND leased_by = $3::text AND lease_until > $4::timestamptz
 FOR NO KEY UPDATE
@@ -4688,6 +4791,8 @@ type LockOpenGroupUpdateRow struct {
 	RouteID           pgtype.Int8
 	DestinationID     pgtype.Int8
 	TeamID            pgtype.Int8
+	UserID            pgtype.Int8
+	ServiceAccountID  pgtype.Int8
 	AfterAlertGroupID int64
 }
 
@@ -4707,6 +4812,8 @@ func (q *Queries) LockOpenGroupUpdate(ctx context.Context, arg LockOpenGroupUpda
 		&i.RouteID,
 		&i.DestinationID,
 		&i.TeamID,
+		&i.UserID,
+		&i.ServiceAccountID,
 		&i.AfterAlertGroupID,
 	)
 	return i, err
@@ -4848,8 +4955,8 @@ type LockTeamEvaluationParams struct {
 }
 
 // LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
-// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings, team_name
-// or organization_links lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared
+// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings, team_name,
+// organization_links, user_name, account_links or service_account_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared
 // for before it reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created
 // or changed.
 func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
@@ -5279,6 +5386,41 @@ func (q *Queries) ShareRouteStorm(ctx context.Context, arg ShareRouteStormParams
 	return items, nil
 }
 
+const shareServiceAccount = `-- name: ShareServiceAccount :many
+SELECT id
+FROM service_accounts
+WHERE org_id = $1 AND id = $2
+FOR SHARE
+`
+
+type ShareServiceAccountParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// ShareServiceAccount locks the row of a Service account that snoozes, FOR SHARE, before the Alert Group: a rename of
+// it, which locks the row and then writes the re-render of the open Alert Groups it snoozed, waits for the Snooze, or
+// the Snooze renders the footer after the rename.
+func (q *Queries) ShareServiceAccount(ctx context.Context, arg ShareServiceAccountParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, shareServiceAccount, arg.OrgID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const shareTeamMembership = `-- name: ShareTeamMembership :exec
 SELECT pg_advisory_xact_lock_shared($1::int, hashint8($2::bigint))
 `
@@ -5294,6 +5436,42 @@ type ShareTeamMembershipParams struct {
 func (q *Queries) ShareTeamMembership(ctx context.Context, arg ShareTeamMembershipParams) error {
 	_, err := q.db.Exec(ctx, shareTeamMembership, arg.LockClass, arg.TeamID)
 	return err
+}
+
+const shareUser = `-- name: ShareUser :many
+SELECT id
+FROM users
+WHERE org_id = $1 AND id = $2
+FOR SHARE
+`
+
+type ShareUserParams struct {
+	OrgID int64
+	ID    int64
+}
+
+// ShareUser locks the row of a User who snoozes, FOR SHARE, before the Alert Group, as LockActiveUser does for who
+// acknowledges: a change of the User's display name or Account links, which locks the row and then writes the
+// re-render of the open Alert Groups whose footer names them, waits for the Snooze, whose Alert Group it then finds,
+// or the Snooze renders the footer after the change.
+func (q *Queries) ShareUser(ctx context.Context, arg ShareUserParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, shareUser, arg.OrgID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateMemberships = `-- name: UpdateMemberships :exec

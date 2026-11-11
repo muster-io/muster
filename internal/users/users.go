@@ -35,6 +35,14 @@ var Languages = []string{"en", "ru"}
 // maxNameLength bounds a display name, in characters.
 const maxNameLength = 200
 
+// KindUserName is the kind of the open_group_updates row that a change of a User's display name writes, whose run
+// re-renders the open Root messages whose footer names the User (C-12.FR-12), and OpenGroupUpdatesChannel the
+// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+const (
+	KindUserName            = "user_name"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
+
 // ErrNotFound is a user that does not exist in the Organization.
 var ErrNotFound = errors.New("no such user")
 
@@ -93,7 +101,35 @@ type Queries interface {
 	UpdateProfile(ctx context.Context, arg dbgen.UpdateProfileParams) (int64, error)
 	CountAdmins(ctx context.Context, orgID int64) (int64, error)
 	CreateUser(ctx context.Context, arg dbgen.CreateUserParams) (int64, error)
+	rerenderQueries
 	audit.Store
+}
+
+// rerenderQueries are the queries that ask the workers of internal/groups to re-render the open Root messages whose
+// footer names a User.
+type rerenderQueries interface {
+	InsertUserNameUpdate(ctx context.Context, arg dbgen.InsertUserNameUpdateParams) (int64, error)
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
+}
+
+// requestRerender, in the transaction of q that changed the display name of the User userID after locking their row,
+// asks the workers of internal/groups to re-render the open Root messages whose footer names them (C-12.FR-12): one
+// open_group_updates row KindUserName, unless one of the User is still unclaimed, requested at the business time now,
+// and a notification that wakes them once the transaction commits. A Command that makes the footer name the User holds
+// their row FOR SHARE until it commits, so the run finds its Alert Group.
+func requestRerender(ctx context.Context, q rerenderQueries, orgID, userID int64, now time.Time) error {
+	n, err := q.InsertUserNameUpdate(ctx, dbgen.InsertUserNameUpdateParams{OrgID: orgID, UserID: pgtype.Int8{
+		Int64: userID, Valid: true}, RequestedAt: now.UTC()})
+	if err != nil {
+		return fmt.Errorf("re-render the open root messages for the name of user %d: %w", userID, err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
 }
 
 // Store runs the queries alone or in one transaction.
@@ -199,7 +235,8 @@ func (p Profile) Validate() error {
 }
 
 // UpdateProfile changes the profile of the user id, which is the actor, and records user.profile_updated with the
-// diff of what changed.
+// diff of what changed. A new display name re-renders the open Root messages whose footer names the user
+// (C-12.FR-12).
 func (s *Service) UpdateProfile(ctx context.Context, id int64, actor audit.Actor, p Profile,
 	addr netip.Addr) (User, error) {
 	if err := p.Validate(); err != nil {
@@ -223,6 +260,11 @@ func (s *Service) UpdateProfile(ctx context.Context, id int64, actor audit.Actor
 		}
 		if updated, err = get(ctx, q, s.orgID, id); err != nil {
 			return err
+		}
+		if updated.Name != before.Name {
+			if err := requestRerender(ctx, q, s.orgID, id, s.clock.Now()); err != nil {
+				return err
+			}
 		}
 		var diff []audit.Change
 		diff = append(diff, audit.Changed("/name", before.Name, updated.Name)...)

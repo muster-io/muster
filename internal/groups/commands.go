@@ -438,6 +438,11 @@ func (s *Service) transact(ctx context.Context, c Caller, cmd Command, publicID 
 				return err
 			}
 		}
+		if cmd == CommandSnooze {
+			if err := s.sharePerson(ctx, q, c); err != nil {
+				return err
+			}
+		}
 		routeDeleted := false
 		if cmd == CommandUnresolve {
 			if routeDeleted, err = s.lockForUnresolve(ctx, q, row.ID); err != nil {
@@ -553,6 +558,27 @@ func (s *Service) lockActive(ctx context.Context, q Queries, c Caller) error {
 	}
 	if len(ids) == 0 {
 		return &ForbiddenError{Permission: PermissionAcknowledge}
+	}
+	return nil
+}
+
+// sharePerson locks the row of the User or the Service account who snoozes, FOR SHARE, before the Alert Group, as
+// lockActive does for who acknowledges: the footer of a snoozed Alert Group names who snoozed it (C-12.FR-12), and a
+// change of their name or Account links locks that row before it writes the re-render of the open Alert Groups whose
+// footer names them, so it either waits for the Snooze and then finds its Alert Group, or the Snooze renders the
+// footer after the change.
+func (s *Service) sharePerson(ctx context.Context, q Queries, c Caller) error {
+	var err error
+	switch c.Actor.Kind {
+	case audit.ActorUser:
+		_, err = q.ShareUser(ctx, dbgen.ShareUserParams{OrgID: s.orgID, ID: c.Actor.ID})
+	case audit.ActorServiceAccount:
+		_, err = q.ShareServiceAccount(ctx, dbgen.ShareServiceAccountParams{OrgID: s.orgID, ID: c.Actor.ID})
+	default:
+		// The system and the CLI have no row that a footer names.
+	}
+	if err != nil {
+		return fmt.Errorf("lock who snoozes: %w", err)
 	}
 	return nil
 }

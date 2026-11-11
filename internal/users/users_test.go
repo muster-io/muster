@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,31 @@ type fakeStore struct {
 	audit   []auditdb.InsertAuditEntryParams
 	admins  int64
 	fail    map[string]error
+	// rerenders are the Users whose open Root messages a change asked to re-render, and notified the wakes sent.
+	rerenders []int64
+	notified  int
+}
+
+func (s *fakeStore) InsertUserNameUpdate(_ context.Context, arg dbgen.InsertUserNameUpdateParams) (int64, error) {
+	if err := s.fail["InsertUserNameUpdate"]; err != nil {
+		return 0, err
+	}
+	if arg.OrgID != orgID || !arg.UserID.Valid {
+		return 0, errors.New("a re-render of another organization or without a user")
+	}
+	s.rerenders = append(s.rerenders, arg.UserID.Int64)
+	return 1, nil
+}
+
+func (s *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	if channel != OpenGroupUpdatesChannel {
+		return errors.New("the wrong channel")
+	}
+	s.notified++
+	return nil
 }
 
 func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
@@ -160,6 +186,14 @@ func TestUpdateProfile(t *testing.T) {
 	if !strings.Contains(log.String(), `"action":"user.profile_updated"`) {
 		t.Error("the entry was not logged")
 	}
+	if !slices.Equal(s.rerenders, []int64{1}) || s.notified != 1 {
+		t.Errorf("a new name asked to re-render %v, %d wakes", s.rerenders, s.notified)
+	}
+	// The same name, with a new time zone or language only, asks for no re-render (C-12.FR-12).
+	if _, err := svc.UpdateProfile(t.Context(), 1, audit.User(1, "SRAAAAAAAAAAAA"),
+		Profile{Name: "Alice B", Language: ptr("en")}, addr); err != nil || len(s.rerenders) != 1 || s.notified != 1 {
+		t.Errorf("the same name: %v, re-renders %v, %d wakes", err, s.rerenders, s.notified)
+	}
 
 	for name, c := range map[string]struct {
 		p       Profile
@@ -187,7 +221,8 @@ func TestUpdateProfile(t *testing.T) {
 }
 
 func TestUpdateProfileFailures(t *testing.T) {
-	for _, method := range []string{"InTx", "GetUser", "UpdateProfile", "InsertAuditEntry"} {
+	for _, method := range []string{"InTx", "GetUser", "UpdateProfile", "InsertUserNameUpdate",
+		"NotifyOpenGroupUpdates", "InsertAuditEntry"} {
 		s := &fakeStore{users: []dbgen.GetUserRow{alice()}, fail: map[string]error{method: errors.New("boom")}}
 		svc, _ := newService(s)
 		if _, err := svc.UpdateProfile(t.Context(), 1, audit.User(1, "SRAAAAAAAAAAAA"), Profile{Name: "A"},

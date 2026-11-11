@@ -233,3 +233,27 @@ WHERE org_id = @org_id AND id = @id AND status <> 'deleted';
 -- name: DeleteOIDCCheck :exec
 DELETE FROM oidc_checks
 WHERE org_id = @org_id AND user_id = @user_id;
+
+-- InsertUserNameUpdate requests, in the transaction of a change of a User's display name — a profile update, an update
+-- by an Admin or the pseudonym of a deletion — that it reach the open Root messages whose footer names the User
+-- (C-12.FR-12), with a row user_name with the User in user_id, which the open_group_updates worker of any replica
+-- claims; its run walks the open Alert Groups whose Owner or snoozer the User is. A row user_name or account_links of
+-- the User that no worker has claimed yet already covers the change, since its run renders the name and the Account
+-- links as they are then: it is locked, so that no worker claims it before this transaction commits, and no second one
+-- is inserted. The row is written even while no open Alert Group names the User: a Snapshot in flight may be giving
+-- one back its Owner or snoozer, which the run waits for under the lock of the evaluation.
+-- name: InsertUserNameUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind IN ('user_name', 'account_links') AND u.user_id = @user_id
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, user_id, requested_at)
+SELECT @org_id, 'user_name', @user_id, @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

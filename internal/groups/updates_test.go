@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/accountlinks"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
@@ -26,6 +27,8 @@ import (
 	"github.com/muster-io/muster/internal/routing"
 	"github.com/muster-io/muster/internal/teams"
 	teamsdb "github.com/muster-io/muster/internal/teams/dbgen"
+	"github.com/muster-io/muster/internal/tokens"
+	"github.com/muster-io/muster/internal/users"
 )
 
 // fakeUpdate is an open_group_updates row.
@@ -33,6 +36,7 @@ type fakeUpdate struct {
 	id, routeID, after int64
 	destinationID      int64
 	teamID             int64
+	userID, accountID  int64
 	kind               string
 	requested          time.Time
 	leasedBy           string
@@ -70,10 +74,14 @@ func (f *fakeDB) ClaimOpenGroupUpdate(_ context.Context, arg dbgen.ClaimOpenGrou
 		}
 		return []dbgen.ClaimOpenGroupUpdateRow{{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
 			Valid: u.routeID != 0}, RequestedAt: u.requested, AfterAlertGroupID: u.after, RoutePublicID: route,
-			DestinationID:       pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
-			DestinationPublicID: destinationPublicID(u.destinationID),
-			TeamID:              pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0},
-			TeamPublicID:        f.teamsOf().refs[u.teamID].PublicID}}, nil
+			DestinationID:          pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
+			DestinationPublicID:    destinationPublicID(u.destinationID),
+			TeamID:                 pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0},
+			TeamPublicID:           f.teamsOf().refs[u.teamID].PublicID,
+			UserID:                 pgtype.Int8{Int64: u.userID, Valid: u.userID != 0},
+			UserPublicID:           f.users[u.userID].PublicID,
+			ServiceAccountID:       pgtype.Int8{Int64: u.accountID, Valid: u.accountID != 0},
+			ServiceAccountPublicID: f.accounts[u.accountID].PublicID}}, nil
 	}
 	return nil, nil
 }
@@ -123,6 +131,12 @@ func TestUpdateNames(t *testing.T) {
 		links.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel {
 		t.Error("routing, links and groups name the open alert group updates of the route settings and links differently")
 	}
+	if users.KindUserName != KindUserName || users.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel ||
+		accountlinks.KindAccountLinks != KindAccountLinks ||
+		accountlinks.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel ||
+		tokens.KindServiceAccountName != KindServiceAccountName || tokens.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel {
+		t.Error("users, accountlinks, tokens and groups name the open alert group updates of the footer differently")
+	}
 }
 
 func (f *fakeDB) update(id int64) *fakeUpdate {
@@ -148,7 +162,9 @@ func (f *fakeDB) LockOpenGroupUpdate(_ context.Context, arg dbgen.LockOpenGroupU
 	}
 	return dbgen.LockOpenGroupUpdateRow{ID: u.id, Kind: u.kind, RouteID: pgtype.Int8{Int64: u.routeID,
 		Valid: u.routeID != 0}, DestinationID: pgtype.Int8{Int64: u.destinationID, Valid: u.destinationID != 0},
-		TeamID: pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0}, AfterAlertGroupID: u.after}, nil
+		TeamID:           pgtype.Int8{Int64: u.teamID, Valid: u.teamID != 0},
+		UserID:           pgtype.Int8{Int64: u.userID, Valid: u.userID != 0},
+		ServiceAccountID: pgtype.Int8{Int64: u.accountID, Valid: u.accountID != 0}, AfterAlertGroupID: u.after}, nil
 }
 
 func (f *fakeDB) AdvanceOpenGroupUpdate(_ context.Context, arg dbgen.AdvanceOpenGroupUpdateParams) error {
@@ -269,6 +285,40 @@ func (f *fakeDB) ListOpenGroupsAfter(_ context.Context, arg dbgen.ListOpenGroups
 	return out[:min(len(out), int(arg.Lim))], nil
 }
 
+func (f *fakeDB) ListOpenGroupsOfUserAfter(_ context.Context, arg dbgen.ListOpenGroupsOfUserAfterParams) ([]int64,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsOfUserAfter"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID && arg.UserID.Valid &&
+			(g.OwnerUserID == arg.UserID || g.SnoozedByUserID == arg.UserID) {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(arg.Lim))], nil
+}
+
+func (f *fakeDB) ListOpenGroupsOfServiceAccountAfter(_ context.Context,
+	arg dbgen.ListOpenGroupsOfServiceAccountAfterParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsOfServiceAccountAfter"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID && arg.ServiceAccountID.Valid &&
+			g.SnoozedByServiceAccountID == arg.ServiceAccountID {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(arg.Lim))], nil
+}
+
 func (f *fakeDB) ListOpenGroupsOfTeamAfter(_ context.Context, arg dbgen.ListOpenGroupsOfTeamAfterParams) ([]int64,
 	error) {
 	f.mu.Lock()
@@ -336,6 +386,14 @@ func newUpdates(t *testing.T) *updates {
 	h.snooze(u.snoozed, t0.Add(time.Hour), false)
 	u.worker = u.workerOf("replica-a")
 	return u
+}
+
+// firingOn starts a firing Alert Group of one warning Alert on the Route with the key cluster and returns it.
+func (h *harness) firingOn(t *testing.T, route int64, cluster string) *dbgen.LockGroupsRow {
+	t.Helper()
+	a := h.alert(route, "warning", map[string]string{"alertname": "A", "cluster": cluster})
+	h.changes(t, ingest.ChangeFired, a)
+	return h.groupOf(t, a)
 }
 
 func (u *updates) workerOf(owner string) *UpdateWorker {
@@ -1128,6 +1186,120 @@ func TestMessageLabelsUpdate(t *testing.T) {
 	}
 }
 
+// TestFooterUserUpdate is C-12.FR-12 on the worker: a row user_name or account_links, which a change of a User's
+// display name or Account links writes, and a row service_account_name, which a rename of a Service account writes,
+// take the lock of the evaluation before they list each batch, so that they see an Alert Group that a Snapshot in
+// flight gave back its Owner or snoozer, then run the re-render step without a lifecycle event, marked as a change of
+// configuration, on the open Alert Groups whose footer names that User — their Owner while acknowledged, who snoozed
+// them while snoozed — or that Service account, by id in batches, and on no other: a firing Alert Group, one another
+// person snoozed and a resolved one the User resolved are not rendered. They save no Alert Group, record no Timeline
+// entry and send no live-update hint; each is deleted with its last batch and logged with its User or Service account
+// and the number of Alert Groups whose Desired state changed, none on a second run. A failing lock or list fails the
+// batch and leaves the row; a row without its User or Service account is done.
+func TestFooterUserUpdate(t *testing.T) {
+	for _, c := range []struct {
+		kind, scope, list string
+		row               func(u *updates) *fakeUpdate
+		named             func(u *updates) []int64
+	}{
+		{KindUserName, `"user":"SRAAAAAAAAAAA9"`, "ListOpenGroupsOfUserAfter",
+			func(*updates) *fakeUpdate { return &fakeUpdate{kind: KindUserName, userID: owner} },
+			func(u *updates) []int64 { return []int64{u.acked.ID, u.snoozed.ID} }},
+		{KindAccountLinks, `"user":"SRAAAAAAAAAAA9"`, "ListOpenGroupsOfUserAfter",
+			func(*updates) *fakeUpdate { return &fakeUpdate{kind: KindAccountLinks, userID: owner} },
+			func(u *updates) []int64 { return []int64{u.acked.ID, u.snoozed.ID} }},
+		{KindServiceAccountName, `"service_account":"SAAAAAAAAAAA20"`, "ListOpenGroupsOfServiceAccountAfter",
+			func(*updates) *fakeUpdate { return &fakeUpdate{kind: KindServiceAccountName, accountID: robotID} },
+			func(u *updates) []int64 { return []int64{u.firing.ID} }},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			u := newUpdates(t)
+			u.people()
+			// The firing Alert Group of the Route db is snoozed by the Service account instead; a resolved one the
+			// User resolved, and one another User snoozed, are named by no footer the rows re-render.
+			u.firing.Status, u.firing.SnoozeUntil, u.firing.SnoozedByServiceAccountID = "snoozed", ts(t0.Add(time.Hour)),
+				i8(robotID)
+			bobs := u.firingOn(t, 3, "e")
+			bobs.Status, bobs.SnoozeUntil, bobs.SnoozedByUserID = "snoozed", ts(t0.Add(time.Hour)), i8(bobID)
+			gone := u.firingOn(t, 3, "f")
+			gone.Status, gone.ResolvedByUserID = "resolved", i8(owner)
+			var rendered []int64
+			changed := true
+			u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+				if len(r.Events) != 0 || r.Actor != System || !r.Configuration {
+					t.Errorf("a re-render with events %+v as %+v, configuration %v", r.Events, r.Actor, r.Configuration)
+				}
+				rendered = append(rendered, r.Group.ID)
+				if changed {
+					r.Changed()
+				}
+				return nil
+			})
+			entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
+			u.worker.Batch = 1
+			var listedAfter []int
+			var listed func()
+			listed = func() {
+				listedAfter = append(listedAfter, u.db.calls["LockTeamEvaluation"])
+				u.db.before[c.list] = listed
+			}
+			u.db.before[c.list] = listed
+			locks := u.db.calls["LockTeamEvaluation"]
+			add := func() {
+				r := c.row(u)
+				r.id, r.requested = u.db.id(), u.clock.Now()
+				u.db.updates = append(u.db.updates, r)
+			}
+			add()
+			u.round(t, u.worker)
+			want := c.named(u)
+			if !slices.Equal(rendered, want) {
+				t.Errorf("rendered %v, want %v", rendered, want)
+			}
+			// Batches of one: each takes the lock before it lists, the last one finding nothing more.
+			if wantLocks := len(want) + 1; len(listedAfter) != wantLocks || listedAfter[0] != locks+1 ||
+				listedAfter[wantLocks-1] != locks+wantLocks {
+				t.Errorf("listed after the locks %v, from %d", listedAfter, locks)
+			}
+			delete(u.db.before, c.list)
+			if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
+				len(u.db.hints) != hints || !strings.Contains(u.log.String(), `"event":"open_group_update_done","kind":"`+
+				c.kind+`",`+c.scope+fmt.Sprintf(`,"alert_groups":%d`, len(want))) {
+				t.Errorf("rows %d, entries %d, saves %d, hints %d, log %s", len(u.db.updates),
+					len(u.db.entries)-entries, u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.log)
+			}
+			rendered, changed = nil, false
+			add()
+			u.round(t, u.worker)
+			if !slices.Equal(rendered, want) || !strings.Contains(u.log.String(),
+				`"kind":"`+c.kind+`",`+c.scope+`,"alert_groups":0`) {
+				t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
+			}
+			for _, fail := range []string{"LockTeamEvaluation", c.list} {
+				u.log.Reset()
+				u.db.fail[fail] = errBoom
+				u.db.updates = nil
+				add()
+				u.round(t, u.worker)
+				if len(u.db.updates) != 1 || !strings.Contains(u.log.String(),
+					`"event":"open_group_update_failed","kind":"`+c.kind+`"`) {
+					t.Errorf("%s fails: rows %d, log %s", fail, len(u.db.updates), u.log)
+				}
+				delete(u.db.fail, fail)
+				u.real.Advance(UpdateLease)
+			}
+			u.round(t, u.worker)
+			// A row whose User or Service account is gone renders nothing and is done.
+			rendered = nil
+			u.db.updates = []*fakeUpdate{{id: u.db.id(), kind: c.kind, requested: u.clock.Now()}}
+			u.round(t, u.worker)
+			if len(u.db.updates) != 0 || len(rendered) != 0 {
+				t.Errorf("a row without its scope: rows %d, rendered %v", len(u.db.updates), rendered)
+			}
+		})
+	}
+}
+
 // TestLinksUpdate is C-12.FR-9 on the worker: a row organization_links, which a change of a Link rule or of a Lookup
 // table writes, takes the lock of the evaluation before it lists each batch, so that it sees the Alert Groups of the
 // Snapshots in flight that computed their links with the rules before the save, then runs the re-render step without a
@@ -1410,6 +1582,11 @@ func TestUpdateKindsOfOlderVersions(t *testing.T) {
 			KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName,
 			KindTeamDestinations}, []*fakeUpdate{{kind: KindRouteMessageSettings, routeID: 2},
 			{kind: KindOrganizationLinks}}},
+		{"0040", []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
+			KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName,
+			KindTeamDestinations, KindRouteMessageSettings, KindOrganizationLinks}, []*fakeUpdate{
+			{kind: KindUserName, userID: owner}, {kind: KindAccountLinks, userID: owner},
+			{kind: KindServiceAccountName, accountID: robotID}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEvaluation(t)

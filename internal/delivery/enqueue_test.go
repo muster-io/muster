@@ -21,6 +21,9 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
 )
@@ -1444,5 +1447,201 @@ func TestRouteSettingsAndLinksRerenderIsQuiet(t *testing.T) {
 				t.Errorf("published %+v", p)
 			}
 		})
+	}
+}
+
+// TestFooterUserRerenderIsQuiet is C-12.FR-12, C-11.FR-3 and ADR-0018 in delivery: the re-render of the open Root
+// messages after a change of the name or the Account links of the user their footer names (user_name, account_links,
+// service_account_name) has no lifecycle event and is marked as a change of configuration. On a published Root
+// message whose footer the change alters — a new display name, a new username of the Account link that the footer's
+// Mention writes, or a link that appears — it queues one edit marked configuration only, which goes out Quietly with
+// the new footer, no Mention and no new message; the same rendering again sends nothing. On a Not delivered
+// Publication that was never published, created Loud, it publishes it Quietly, once, with no Mention, never Loud.
+func TestFooterUserRerenderIsQuiet(t *testing.T) {
+	space := fmt.Sprintf("mattermost:%d", connID)
+	for _, c := range []struct {
+		name          string
+		before, after *messages.FooterUser
+	}{
+		{groups.KindUserName, &messages.FooterUser{Name: "Alice", Username: "alice"},
+			&messages.FooterUser{Name: "Alice Smith", Username: "alice"}},
+		{groups.KindAccountLinks + "/username", &messages.FooterUser{Name: "Alice", Username: "alice"},
+			&messages.FooterUser{Name: "Alice", Username: "alice.smith"}},
+		{groups.KindAccountLinks + "/new link", &messages.FooterUser{Name: "Alice"},
+			&messages.FooterUser{Name: "Alice", Username: "alice"}},
+		{groups.KindAccountLinks + "/removed link", &messages.FooterUser{Name: "Alice", Username: "alice"},
+			&messages.FooterUser{Name: "Alice"}},
+		{groups.KindServiceAccountName, &messages.FooterUser{Name: "robot"}, &messages.FooterUser{Name: "terraform"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			renderer := stubRenderer{footer: &messages.FooterUser{}}
+			footerEnv := func(t *testing.T) *env {
+				t.Helper()
+				e := newEnv(t)
+				logger := logging.New(e.log, logging.LevelInfo)
+				e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business, Log: logger,
+					Renderer: renderer})
+				e.w.Renderer = renderer
+				return e
+			}
+			set := func(u *messages.FooterUser) { *renderer.footer = *u }
+			rerender := func(t *testing.T, e *env) {
+				t.Helper()
+				if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+					"disk full"), Actor: groups.System, Configuration: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The footer names the user by the Mention of their link, or by their name without one.
+			shows := func(m messages.Message) bool {
+				if c.after.Username == "" {
+					return m.FooterUsers == nil && m.Footer == "Acknowledged by "+c.after.Name
+				}
+				return m.FooterUsers[space] == *c.after && m.Footer == "Acknowledged by "+c.after.Name
+			}
+			e := footerEnv(t)
+			set(c.before)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+			e.round(t)
+			e.rec.Reset()
+			set(c.after)
+			rerender(t, e)
+			d := e.only(t)
+			if d.state != "pending" || !d.configOnly {
+				t.Fatalf("the delivery is %s, configuration only %v", d.state, d.configOnly)
+			}
+			e.round(t)
+			calls := e.rec.Calls()
+			if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate || calls[0].Loudness != groups.Quiet ||
+				len(calls[0].Mentions) != 0 || !shows(calls[0].Message) {
+				t.Fatalf("calls %+v", calls)
+			}
+			version := e.only(t).version
+			e.rec.Reset()
+			rerender(t, e)
+			e.round(t)
+			if d := e.only(t); d.version != version || d.configOnly || len(e.rec.Calls()) != 0 {
+				t.Errorf("a second run: version %d after %d, configuration only %v, calls %+v", d.version, version,
+					d.configOnly, e.rec.Calls())
+			}
+
+			e = footerEnv(t)
+			set(c.before)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+			nd := e.only(t)
+			nd.state, nd.publishedAt = "not_delivered", nil
+			set(c.after)
+			rerender(t, e)
+			if d := e.only(t); d.state != "pending" || d.loud.Bool {
+				t.Fatalf("not delivered revived %s, loud %+v", d.state, d.loud)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet || len(p[0].Mentions) != 0 ||
+				!shows(p[0].Message) {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+}
+
+// TestFooterOfAnotherSpaceChangesNothing is C-12.FR-12 for a footer that names a user with Account links in several
+// identity spaces: the Desired state of a Root message keeps only the footer of its Destination's space, so a link
+// that appears, changes or goes in another space — a Telegram account, for a Mattermost Destination — changes no hash
+// and edits nothing there, while the Mattermost footer, which mentions the user's Mattermost account, is kept.
+func TestFooterOfAnotherSpaceChangesNothing(t *testing.T) {
+	space := fmt.Sprintf("mattermost:%d", connID)
+	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice", Username: "alice"},
+		elsewhere: &messages.FooterUser{}}
+	e := newEnv(t)
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+		Log: logging.New(e.log, logging.LevelInfo), Renderer: renderer})
+	e.w.Renderer = renderer
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.round(t)
+	calls := e.rec.Calls()
+	if len(calls) != 1 || calls[0].Message.FooterUsers[space] != *renderer.footer ||
+		len(calls[0].Message.FooterUsers) != 1 || len(calls[0].Message.Footers) != 1 {
+		t.Fatalf("the publication %+v", calls)
+	}
+	for _, link := range []messages.FooterUser{{Name: "Alice", ExternalID: "7001"}, {Name: "Alice", ExternalID: "7002"},
+		{}} {
+		*renderer.elsewhere = link
+		version := e.only(t).version
+		e.rec.Reset()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+			"disk full"), Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+		e.round(t)
+		if d := e.only(t); d.version != version || d.configOnly || len(e.rec.Calls()) != 0 {
+			t.Errorf("a telegram link %+v: version %d after %d, configuration only %v, calls %+v", link, d.version,
+				version, d.configOnly, e.rec.Calls())
+		}
+	}
+}
+
+// TestFooterAfterConnectionChange is C-12.FR-12 for a Destination moved to another Connection: the stored Desired state
+// keeps the footer of every identity space and the adapter writes the one of the Destination's Connection when it
+// sends, so a Publication queued before the change and sent after it mentions the user as the new Connection's
+// messenger knows them. A Root message published before the change is edited once, Quietly, into the new space's
+// footer at its first rendering after the change, whose hash covers the new space; a second rendering edits nothing.
+func TestFooterAfterConnectionChange(t *testing.T) {
+	moved := int64(connID + 1)
+	space := func(c deliverytest.Call) string {
+		return mentions.IdentitySpace(c.Destination.Type, c.Destination.Connection)
+	}
+	mention := func(c deliverytest.Call) string {
+		return c.Message.WithFooterIn(space(c), func(u mentions.User) string { return "@" + u.Username }).FooterMention
+	}
+	footerEnv := func(t *testing.T) *env {
+		t.Helper()
+		renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice", Username: "alice"},
+			others: map[string]messages.FooterUser{fmt.Sprintf("mattermost:%d", moved): {Name: "Alice",
+				Username: "alice.other"}}}
+		e := newEnv(t)
+		e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+			Log: logging.New(e.log, logging.LevelInfo), Renderer: renderer})
+		e.w.Renderer = renderer
+		return e
+	}
+	rerender := func(t *testing.T, e *env) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+			"disk full"), Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	e := footerEnv(t)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.db.dests[destMM].connection = &moved
+	e.round(t)
+	if p := e.publications(); len(p) != 1 || mention(p[0]) != "@alice.other" {
+		t.Fatalf("a publication queued before the change: %+v", p)
+	}
+
+	e = footerEnv(t)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.round(t)
+	if p := e.publications(); len(p) != 1 || mention(p[0]) != "@alice" {
+		t.Fatalf("the publication before the change: %+v", p)
+	}
+	e.db.dests[destMM].connection = &moved
+	e.rec.Reset()
+	rerender(t, e)
+	if d := e.only(t); d.state != "pending" || !d.configOnly {
+		t.Fatalf("the first rendering after the change: %s, configuration only %v", d.state, d.configOnly)
+	}
+	e.round(t)
+	calls := e.rec.Calls()
+	if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate || calls[0].Loudness != groups.Quiet ||
+		len(calls[0].Mentions) != 0 || mention(calls[0]) != "@alice.other" {
+		t.Fatalf("the edit after the change: %+v", calls)
+	}
+	e.rec.Reset()
+	rerender(t, e)
+	e.round(t)
+	if len(e.rec.Calls()) != 0 {
+		t.Errorf("a second rendering: %+v", e.rec.Calls())
 	}
 }

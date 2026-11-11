@@ -58,6 +58,36 @@ type adminStore struct {
 	revoked map[int64]int64
 	// inTx is set while InTx runs f.
 	inTx bool
+	// rerenders are the Users whose open Root messages a change asked to re-render, and notified the wakes sent;
+	// dedup answers 0 rows, as a pending row of the User does.
+	rerenders []int64
+	notified  int
+	dedup     bool
+}
+
+func (s *adminStore) InsertUserNameUpdate(_ context.Context, arg dbgen.InsertUserNameUpdateParams) (int64, error) {
+	if err := s.fail["InsertUserNameUpdate"]; err != nil {
+		return 0, err
+	}
+	if arg.OrgID != orgID || !arg.UserID.Valid || !s.inTx {
+		return 0, errors.New("a re-render of another organization, without a user or outside the change")
+	}
+	if s.dedup {
+		return 0, nil
+	}
+	s.rerenders = append(s.rerenders, arg.UserID.Int64)
+	return 1, nil
+}
+
+func (s *adminStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	if channel != OpenGroupUpdatesChannel {
+		return errors.New("the wrong channel")
+	}
+	s.notified++
+	return nil
 }
 
 // fakeTx is the transaction an adminStore hands out through Tx.
@@ -80,11 +110,12 @@ func (s *adminStore) InTx(_ context.Context, f func(AdminQueries) error) error {
 	for k, v := range s.sessions {
 		sessions[k] = v
 	}
-	audits := len(s.audit)
+	audits, rerenders, notified := len(s.audit), len(s.rerenders), s.notified
 	s.inTx = true
 	defer func() { s.inTx = false }()
 	if err := f(s); err != nil {
 		s.users, s.setups, s.sessions, s.audit = users, setups, sessions, s.audit[:audits]
+		s.rerenders, s.notified = s.rerenders[:rerenders], notified
 		return err
 	}
 	return nil
@@ -561,6 +592,11 @@ func TestUpdate(t *testing.T) {
 	if e.Action != audit.ActionUserUpdated || len(diff) != 1 || diff[0].Pointer != "/name" || diff[0].Before != "bob" {
 		t.Errorf("entry %s %+v", e.Action, diff)
 	}
+	// A new name re-renders the open Root messages whose footer names the user (C-12.FR-12); a Role or email change
+	// with the same name below, and a save that changes nothing, ask for none.
+	if !slices.Equal(s.rerenders, []int64{2}) || s.notified != 1 {
+		t.Errorf("a new name asked to re-render %v, %d wakes", s.rerenders, s.notified)
+	}
 	if _, err := a.Update(t.Context(), byAdmin, bobID, &v, Changes{Name: "x", Role: auth.RoleViewer}); !errors.Is(err,
 		ErrVersionMismatch) {
 		t.Errorf("a stale version: %v", err)
@@ -579,6 +615,16 @@ func TestUpdate(t *testing.T) {
 		u.Version != 3 || len(s.audit) != entries {
 		t.Errorf("an update that changes nothing = %+v, %v, %d entries", u, err, len(s.audit)-entries)
 	}
+	if len(s.rerenders) != 1 || s.notified != 1 {
+		t.Errorf("updates with the same name asked to re-render %v, %d wakes", s.rerenders, s.notified)
+	}
+	// A row of the user that no worker claimed yet covers a second rename: nothing is inserted, and no wake is sent.
+	s.dedup = true
+	if u, err = a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "Bob C", Role: auth.RoleResponder}); err != nil ||
+		u.Name != "Bob C" || len(s.rerenders) != 1 || s.notified != 1 {
+		t.Errorf("a rename with a pending row = %+v, %v, re-renders %v, %d wakes", u, err, s.rerenders, s.notified)
+	}
+	s.dedup = false
 	if _, err := a.Update(t.Context(), byAdmin, bobID, nil, Changes{Name: "", Role: auth.RoleViewer}); err == nil {
 		t.Error("an empty name")
 	}
@@ -598,7 +644,7 @@ func TestUpdate(t *testing.T) {
 
 func TestUpdateFailures(t *testing.T) {
 	for _, method := range []string{"LockActiveAdmins", "LockUser", "GetUser", "UpdateUser", "EndSessionsOfUser",
-		"InsertAuditEntry"} {
+		"InsertUserNameUpdate", "NotifyOpenGroupUpdates", "InsertAuditEntry"} {
 		s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "bob")},
 			fail: map[string]error{method: errors.New("boom")}}
 		a, _ := newAdmin(t, s)
@@ -690,6 +736,10 @@ func TestDisableEnableDelete(t *testing.T) {
 	if s.revoked[2] != 2 || len(s.tokens) != 0 {
 		t.Errorf("the tokens of the deleted user: %v revoked, %v left", s.revoked, s.tokens)
 	}
+	// The pseudonym re-renders the open Root messages whose footer names the user, as who snoozed them.
+	if !slices.Equal(s.rerenders, []int64{2}) || s.notified != 1 {
+		t.Errorf("the delete asked to re-render %v, %d wakes", s.rerenders, s.notified)
+	}
 	b := s.user(2)
 	if b.Status != StatusDeleted || b.Name != "deleted-user-"+bobID || b.Login != b.Name || b.Email.Valid ||
 		s.sessions[2] != 0 || s.reasons[len(s.reasons)-1] != auth.EndUserDeleted || !s.setups[0].superseded {
@@ -719,7 +769,8 @@ func TestStatusFailures(t *testing.T) {
 		"delete":  func(a *Admin) error { return a.Delete(t.Context(), byAdmin, bobID, nil) },
 	}
 	for _, method := range []string{"SetUserStatus", "EndSessionsOfUser", "GetUser", "InsertAuditEntry", "LockUser",
-		"PseudonymizeUser", "SupersedePasswordSetups", "LockActiveAdmins", "RevokeTokensOfUser"} {
+		"PseudonymizeUser", "SupersedePasswordSetups", "LockActiveAdmins", "RevokeTokensOfUser", "InsertUserNameUpdate",
+		"NotifyOpenGroupUpdates"} {
 		failed := 0
 		for name, op := range ops {
 			s := &adminStore{users: []dbgen.GetUserRow{adminRow(1, adminID, "admin"), adminRow(2, bobID, "bob")},

@@ -93,7 +93,12 @@
   [`0039_route_message_settings_and_links_updates`](../../internal/db/migrations/0039_route_message_settings_and_links_updates.up.sql)
   (the kinds `route_message_settings` and `organization_links` of `open_group_updates`, the re-render of the open Root
   messages after a change of a Route's language, Snooze durations or templates, or of a Link rule or a Lookup table,
-  C-12.FR-2, FR-3, FR-9, C-10.FR-6), in
+  C-12.FR-2, FR-3, FR-9, C-10.FR-6) and
+  [`0040_footer_user_updates`](../../internal/db/migrations/0040_footer_user_updates.up.sql)
+  (the kinds `user_name`, `account_links` and `service_account_name` of `open_group_updates`, with
+  `open_group_updates.user_id` and `service_account_id`, and the indexes `alert_groups_snoozed_by_user_idx` and
+  `alert_groups_snoozed_by_service_account_idx`, partial on the open Alert Groups, the re-render of the open Root messages whose footer names a User or
+  a Service account after a change of their name or of the User's Account links, C-12.FR-12), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -209,7 +214,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), and the Notification rule
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
-| Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams and links insert, `groups` claims and deletes | deleted with the last batch of its run |
+| Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams, links, users, account links and tokens insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
 | Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
@@ -503,6 +508,8 @@ erDiagram
     routes ||--o{ open_group_updates : "changed for its open Alert Groups"
     destinations |o--o{ open_group_updates : "button set changed"
     teams |o--o{ open_group_updates : "saved, open Alert Groups evaluated"
+    users |o--o{ open_group_updates : "name or Account links changed"
+    service_accounts |o--o{ open_group_updates : "renamed"
 
     routes {
         bigint id PK
@@ -778,7 +785,9 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8, C-27.FR-10; [ADR-0008](../adr/0008-spec-f
   within `organizations.oidc_token_grace_seconds`. Deleting a user sets `status = 'deleted'`, renames it
   `deleted-user-<id>` (login too, freeing the unique login) and erases the email (`CHECK`); the row stays because Alert
   Groups, the Timeline and the Audit log point at it and show "(deactivated)". The transaction of the deletion also
-  deletes the user's Notification rules ([4.18](#418-paging)).
+  deletes the user's Notification rules ([4.18](#418-paging)). A change of `name` — a profile update, an update by an
+  Admin, the pseudonym of a deletion — inserts a row `user_name` of `open_group_updates` in its transaction, after the
+  row is locked, unless one of the User is still unclaimed (migration 0040, [section 5](#5-queues-and-claims)).
 - **`user_totp`** — the TOTP seed (a Secret) once enrolled, and a pending seed between "enrol" and "confirm", so
   re-enrolment never loses the active factor before the new one is confirmed. `last_used_step` rejects a replayed code.
 - **`user_recovery_codes`** — single-use codes, argon2id-hashed; regenerating deletes the unused ones.
@@ -847,7 +856,9 @@ Serves C-03 (FR-3–FR-27), C-18.FR-8, C-27.FR-10; [ADR-0008](../adr/0008-spec-f
 Serves C-04; [ADR-0011](../adr/0011-application-level-secret-encryption.md).
 
 - **`service_accounts`** — name (unique among non-deleted), Role, `active`/`disabled`/`deleted`. A Service account can
-  never be an Owner: `alert_groups.owner_user_id` references `users` only.
+  never be an Owner: `alert_groups.owner_user_id` references `users` only. A rename inserts a row
+  `service_account_name` of `open_group_updates` in its transaction, unless one of the Service account is still
+  unclaimed (migration 0040, [section 5](#5-queues-and-claims)).
 - **`api_tokens`** — Personal access tokens and Service account tokens in one table, so authentication is one lookup by
   hash and the Audit log references one table. `CHECK` ties `kind` to exactly one owner. The token prefix (`mstr_pat_`,
   `mstr_sat_`) tells the authenticator the kind before the lookup and lets scanners find leaked tokens. `last_used_at`
@@ -953,7 +964,10 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   the deliveries, events and Audit log entries that point at it.
 - **`destination_secrets`** — the named Secrets of an outgoing webhook, referenced as `{{ .Secrets.<name> }}`; the name
   is checked to be a template identifier.
-- **`account_links`** — the identity space is a stored generated column: `'telegram'` for every Telegram link,
+- **`account_links`** — a new, replaced or removed link, and a link made again whose username or display name
+  changed, insert a row `account_links` of `open_group_updates` in the transaction of the change, under the lock of
+  the User, unless one of the User is still unclaimed (migration 0040, [section 5](#5-queues-and-claims)). The identity
+  space is a stored generated column: `'telegram'` for every Telegram link,
   `'<messenger>:<connection_id>'` for the others — `'mattermost:<connection_id>'` for a Mattermost link,
   `'bridge:<connection_id>'` for a Bridge one (migration 0011, C-22.FR-15), and `'slack:<connection_id>'` for a Slack
   one (migration 0018, C-24.FR-12), with the expression of 0011 unchanged. Two unique constraints carry the rules of
@@ -1223,7 +1237,8 @@ Indexes and the queries they serve:
 | `alert_groups_started_idx`, `alert_groups_changed_idx` | lists sorted by start or last change, cursor on `(created_at, id)` or `(last_changed_at, id)` |
 | `alert_groups_resolved_idx` `(org_id, resolved_at) WHERE status = 'resolved'` | the time-range overlap (not resolved before `from`), resolved-by filters, summary retention |
 | `alert_groups_route_idx` | Route filter, statistics per Route and day |
-| `alert_groups_owner_idx` | Owner filter and "Mine" |
+| `alert_groups_owner_idx` | Owner filter and "Mine"; the open Alert Groups whose footer names a User (`user_name`, `account_links`) — it holds only acknowledged Alert Groups, since `alert_groups_owner_check` sets `owner_user_id` only while acknowledged |
+| `alert_groups_snoozed_by_user_idx` `(org_id, snoozed_by_user_id) WHERE snoozed_by_user_id IS NOT NULL AND status <> 'resolved'`, `alert_groups_snoozed_by_service_account_idx` `(org_id, snoozed_by_service_account_id) WHERE snoozed_by_service_account_id IS NOT NULL AND status <> 'resolved'` | the open Alert Groups whose footer names who snoozed them, a User or a Service account (`user_name`, `account_links`, `service_account_name`, migration 0040) |
 | trigram GIN on `title` and on `summary` | search by text, case-insensitive, parts of words (`ILIKE '%…%'`) |
 | GIN `jsonb_path_ops` on `common_labels` | label filters, which match the common labels (a label the Alerts do not share counts as absent), so they also work after the details are removed: `=` by containment; `!=`, `=~`, `!~` are filtered row-wise after the other conditions |
 | GIN on `integration_ids` | Integration filter, statistics per Integration (an Alert Group counts for each of its Integrations) |
@@ -1886,8 +1901,13 @@ the name of a Team (`team_name`, with the Team in `team_id`) from migration 0031
 (`team_destinations`, with the Team in `team_id`), which the kind `CHECK` takes from migration 0032, and the language,
 Snooze durations, `root_message` or `line` template of a Route (`route_message_settings`, with its Route in
 `route_id`, which `open_group_updates_route_settings_scope_check` requires) and the Link rules and Lookup tables
-(`organization_links`, without a scope) from migration 0039 — more kinds as later stories add them to the kind
-`CHECK`, versioned `open_group_updates_kind_v7_check` since migration 0039 — is one row of
+(`organization_links`, without a scope) from migration 0039, and the display name of a User (`user_name`), the Account
+links of a User (`account_links`), both with the User in `user_id`, which `open_group_updates_user_scope_check`
+requires, and the name of a Service account (`service_account_name`, with it in `service_account_id`, which
+`open_group_updates_service_account_scope_check` requires) from migration 0040, whom the footer of a Root message
+names (C-12.FR-12); both foreign keys are `ON DELETE CASCADE`, as Users and Service accounts are deleted softly and a
+row without its person has nothing to render — more kinds as later stories add them to the kind `CHECK`, versioned
+`open_group_updates_kind_v8_check` since migration 0040 — is one row of
 `open_group_updates`, inserted in the transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The
 worker of every replica — not a Leader task — is woken at start, by that notification and by the development clock, and
 claims one row at a time:
@@ -1899,7 +1919,8 @@ WITH due AS MATERIALIZED (
      ORDER BY requested_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
 UPDATE open_group_updates u SET leased_by = $replica, lease_until = $real_now + $lease
   FROM due WHERE u.org_id = $1 AND u.id = due.id
-RETURNING u.id, u.kind, u.route_id, u.destination_id, u.team_id, u.after_alert_group_id;
+RETURNING u.id, u.kind, u.route_id, u.destination_id, u.team_id, u.user_id, u.service_account_id,
+          u.after_alert_group_id;
 ```
 
 A replica claims only the kinds it handles, so a row of a kind added by a later 0.2.x waits for a replica that knows it.
@@ -1944,11 +1965,26 @@ each delivery
 whose `entries` hold an entry of the Team when no entry of its Route or, while the Route delivers to the Teams, of one
 of its Teams still names that Destination (C-26.FR-6); a second run changes nothing. It needs no barrier: the Team's
 membership lock orders the save against the Snapshots that read its entries. A save inserts no second row while one
-of the same Team and Destination is still unclaimed. The re-render step of every batch, and every batch of
+of the same Team and Destination is still unclaimed. A row `user_name` or `account_links` walks the open Alert Groups
+whose footer names its User — `owner_user_id` while acknowledged, `snoozed_by_user_id` while snoozed — and a row
+`service_account_name` those with its Service account in `snoozed_by_service_account_id`, and each only runs the
+re-render step on them, so delivery edits only the Root messages whose footer changed: the Desired state of a Root
+message stores the footer of every identity space, and the adapter writes the one of the Destination's Connection when
+it sends, so that an edit queued before a change of the Connection and sent after it is right, but its hash covers only
+the footer of the Destination's identity space, so a link in another space edits nothing there. A change of a User's
+display name — a profile update, an update by an Admin, the pseudonym of a deletion — inserts `user_name`, a new,
+replaced, changed or removed Account link `account_links`, and a rename of a Service account `service_account_name`,
+each in the transaction of the change and none while a row of the same person is still unclaimed (`user_name` and `account_links`
+count as one, as both render the name and the links as they are when the row runs). Each batch of the three kinds
+waits for the Snapshots in flight under the lock of the evaluation, as `team_name` does, since a Snapshot that reopens
+an Alert Group gives it back its Owner or snoozer without a lock of that person's row; the Commands that make a footer
+name someone, Acknowledge and Snooze, lock that User's or Service account's row `FOR SHARE` before the Alert Group,
+and the changes lock it before they insert, so a change either waits for the Command and then sees its Alert Group, or
+the Command renders after the change. The re-render step of every batch, and every batch of
 `team_evaluation` and `organization_message_settings`, takes the membership locks of the batch's Routes, then of their
 Teams and of the Teams the evaluation brings, shared and in id order, before its first change.
-Each batch of `team_evaluation`, `organization_message_settings`, `team_name` and `organization_links` takes
-the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by `hashint8` of the
+Each batch of `team_evaluation`, `organization_message_settings`, `team_name`, `organization_links`, `user_name`,
+`account_links` and `service_account_name` takes the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by `hashint8` of the
 Organization) exclusively before it lists its Alert Groups, and routing takes it shared before a Snapshot reads the
 stamp of the classification, holding it until the Snapshot commits: a Snapshot that read the Teams, the settings, the
 names or the Link rules and Lookup tables before a save commits the Alert Groups it creates or changes before the
@@ -1960,8 +1996,10 @@ in order once it commits, and a run of many batches stalls them once per batch, 
 `team_evaluation` row of the Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so
 no worker claims it before the save commits, and its run classifies with every save before it. A row
 `organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
-`team_name` while one of the same Team is, and a row `organization_links` while one of the Organization is: the run
-renders with the settings, the name, the rules and the tables as they are then.
+`team_name` while one of the same Team is, a row `organization_links` while one of the Organization is, a row
+`user_name` or `account_links` while one of either kind of the same User is, and a row `service_account_name` while
+one of the same Service account is: the run renders with the settings, the name, the rules, the tables and the links
+as they are then.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

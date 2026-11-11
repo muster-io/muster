@@ -193,6 +193,41 @@ func (q *Queries) InsertServiceAccount(ctx context.Context, arg InsertServiceAcc
 	return id, err
 }
 
+const insertServiceAccountNameUpdate = `-- name: InsertServiceAccountNameUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = 'service_account_name' AND u.service_account_id = $2
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, service_account_id, requested_at)
+SELECT $1, 'service_account_name', $2, $3::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertServiceAccountNameUpdateParams struct {
+	OrgID            int64
+	ServiceAccountID pgtype.Int8
+	RequestedAt      time.Time
+}
+
+// InsertServiceAccountNameUpdate requests, in the transaction of a rename of a Service account, that it reach the open
+// Root messages whose footer names it (C-12.FR-12), with a row service_account_name with the Service account in
+// service_account_id, which the open_group_updates worker of any replica claims; its run walks the open Alert Groups
+// the Service account snoozed. A row of the same Service account that no worker has claimed yet already covers the
+// rename, since its run renders the name as it is then: it is locked, so that no worker claims it before this
+// transaction commits, and no second one is inserted. The row is written even while no open Alert Group names the
+// Service account: a Snapshot in flight may be giving one back its snoozer, which the run waits for under the lock of
+// the evaluation.
+func (q *Queries) InsertServiceAccountNameUpdate(ctx context.Context, arg InsertServiceAccountNameUpdateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertServiceAccountNameUpdate, arg.OrgID, arg.ServiceAccountID, arg.RequestedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertToken = `-- name: InsertToken :one
 
 INSERT INTO api_tokens (org_id, public_id, kind, user_id, service_account_id, name, token_hash, expires_at, created_at)
@@ -443,6 +478,16 @@ func (q *Queries) LockServiceAccount(ctx context.Context, arg LockServiceAccount
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const revokeServiceAccountToken = `-- name: RevokeServiceAccountToken :one

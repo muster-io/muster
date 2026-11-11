@@ -624,6 +624,41 @@ func (q *Queries) InsertAccountLink(ctx context.Context, arg InsertAccountLinkPa
 	return id, err
 }
 
+const insertAccountLinksUpdate = `-- name: InsertAccountLinksUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind IN ('user_name', 'account_links') AND u.user_id = $2
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, user_id, requested_at)
+SELECT $1, 'account_links', $2, $3::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertAccountLinksUpdateParams struct {
+	OrgID       int64
+	UserID      pgtype.Int8
+	RequestedAt time.Time
+}
+
+// InsertAccountLinksUpdate requests, in the transaction of a new, replaced, changed or removed Account link of a User,
+// that it reach the open Root messages whose footer names the User (C-12.FR-12), whose Mention of them the link makes,
+// with a row account_links with the User in user_id, which the open_group_updates worker of any replica claims; its
+// run walks the open Alert Groups whose Owner or snoozer the User is. A row account_links or user_name of the User that
+// no worker has claimed yet already covers the change, since its run renders the name and the links as they are then:
+// it is locked, so that no worker claims it before this transaction commits, and no second one is inserted. The row is
+// written even while no open Alert Group names the User: a Snapshot in flight may be giving one back its Owner or
+// snoozer, which the run waits for under the lock of the evaluation.
+func (q *Queries) InsertAccountLinksUpdate(ctx context.Context, arg InsertAccountLinksUpdateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertAccountLinksUpdate, arg.OrgID, arg.UserID, arg.RequestedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertLinkRequest = `-- name: InsertLinkRequest :one
 INSERT INTO account_link_requests (org_id, public_id, user_id, messenger, connection_id, method, secret_hash,
                                    target_external_id, target_username, target_display_name, created_at, expires_at)
@@ -922,6 +957,16 @@ func (q *Queries) LookupAccountLink(ctx context.Context, arg LookupAccountLinkPa
 		&i.LastUsedAt,
 	)
 	return i, err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const pruneLinkRequests = `-- name: PruneLinkRequests :execrows

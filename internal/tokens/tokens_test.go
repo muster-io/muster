@@ -71,6 +71,37 @@ type fakeStore struct {
 	grace   time.Duration
 	touches int
 	nextID  int64
+	// rerenders are the Service accounts whose open Root messages a rename asked to re-render, notified the wakes
+	// sent; dedup answers 0 rows, as a pending row of the Service account does.
+	rerenders []int64
+	notified  int
+	dedup     bool
+}
+
+func (s *fakeStore) InsertServiceAccountNameUpdate(_ context.Context,
+	arg dbgen.InsertServiceAccountNameUpdateParams) (int64, error) {
+	if err := s.fail["InsertServiceAccountNameUpdate"]; err != nil {
+		return 0, err
+	}
+	if arg.OrgID != orgID || !arg.ServiceAccountID.Valid || !arg.RequestedAt.Equal(t0) {
+		return 0, errors.New("a re-render of another organization, without a service account or at another time")
+	}
+	if s.dedup {
+		return 0, nil
+	}
+	s.rerenders = append(s.rerenders, arg.ServiceAccountID.Int64)
+	return 1, nil
+}
+
+func (s *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := s.fail["NotifyOpenGroupUpdates"]; err != nil {
+		return err
+	}
+	if channel != OpenGroupUpdatesChannel {
+		return errors.New("the wrong channel")
+	}
+	s.notified++
+	return nil
 }
 
 func newStore() *fakeStore {
@@ -92,13 +123,15 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	if err := s.fail["InTx"]; err != nil {
 		return err
 	}
-	tokens, sas, audits := len(s.tokens), cloneSAs(s.sas), len(s.audit)
+	tokens, sas, audits, rerenders, notified := len(s.tokens), cloneSAs(s.sas), len(s.audit), len(s.rerenders),
+		s.notified
 	revoked := make([]*time.Time, len(s.tokens))
 	for i, t := range s.tokens {
 		revoked[i] = t.revoked
 	}
 	if err := f(s); err != nil {
 		s.tokens, s.sas, s.audit = s.tokens[:tokens], sas, s.audit[:audits]
+		s.rerenders, s.notified = s.rerenders[:rerenders], notified
 		for i, t := range s.tokens {
 			t.revoked = revoked[i]
 		}
@@ -618,10 +651,31 @@ func TestServiceAccountLifecycle(t *testing.T) {
 		!strings.Contains(string(e.Diff), `"before":"terraform"`) {
 		t.Errorf("entry %s %s", e.Action, e.Diff)
 	}
+	// The rename re-renders the open Root messages whose footer names the Service account (C-12.FR-12).
+	if !slices.Equal(s.rerenders, []int64{sa.ID}) || s.notified != 1 {
+		t.Errorf("the rename asked to re-render %v, %d wakes", s.rerenders, s.notified)
+	}
 	entries := len(s.audit)
 	if same, err := svc.UpdateServiceAccount(ctx, byAdmin, sa.PublicID, nil, ServiceAccountInput{Name: "tf",
 		Role: auth.RoleResponder}); err != nil || same.Version != 2 || len(s.audit) != entries {
 		t.Errorf("an update without changes = %+v, %v", same, err)
+	}
+	// A new Role alone asks for no re-render; a rename while a row of the Service account is still unclaimed inserts
+	// none and sends no wake.
+	if _, err := svc.UpdateServiceAccount(ctx, byAdmin, sa.PublicID, nil, ServiceAccountInput{Name: "tf",
+		Role: auth.RoleViewer}); err != nil || len(s.rerenders) != 1 || s.notified != 1 {
+		t.Errorf("a new role: %v, re-renders %v, %d wakes", err, s.rerenders, s.notified)
+	}
+	s.dedup = true
+	if renamed, err := svc.UpdateServiceAccount(ctx, byAdmin, sa.PublicID, nil, ServiceAccountInput{Name: "tf-2",
+		Role: auth.RoleResponder}); err != nil || renamed.Name != "tf-2" || len(s.rerenders) != 1 || s.notified != 1 {
+		t.Errorf("a rename with a pending row = %+v, %v, re-renders %v, %d wakes", renamed, err, s.rerenders,
+			s.notified)
+	}
+	s.dedup = false
+	if _, err := svc.UpdateServiceAccount(ctx, byAdmin, sa.PublicID, nil, ServiceAccountInput{Name: "tf",
+		Role: auth.RoleResponder}); err != nil {
+		t.Fatal(err)
 	}
 
 	created, err := svc.CreateServiceAccountToken(ctx, byAdmin, sa.PublicID, NewToken{Name: "ci"})
@@ -798,7 +852,8 @@ func TestStoreFailures(t *testing.T) {
 	for _, method := range []string{"InTx", "InsertToken", "InsertTokenPermissions", "ListUserTokens",
 		"RevokeUserToken", "InsertServiceAccount", "ListServiceAccounts", "GetServiceAccount", "LockServiceAccount",
 		"UpdateServiceAccount", "SetServiceAccountStatus", "DeleteServiceAccount", "RevokeServiceAccountTokens",
-		"ListServiceAccountTokens", "RevokeServiceAccountToken", "InsertAuditEntry", "GetTokenByHash", "TouchToken"} {
+		"ListServiceAccountTokens", "RevokeServiceAccountToken", "InsertAuditEntry", "GetTokenByHash", "TouchToken",
+		"InsertServiceAccountNameUpdate", "NotifyOpenGroupUpdates"} {
 		failed := 0
 		for name, op := range ops {
 			s := seeded(t)

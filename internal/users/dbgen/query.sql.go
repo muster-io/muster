@@ -375,6 +375,41 @@ func (q *Queries) InsertPasswordSetup(ctx context.Context, arg InsertPasswordSet
 	return err
 }
 
+const insertUserNameUpdate = `-- name: InsertUserNameUpdate :execrows
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind IN ('user_name', 'account_links') AND u.user_id = $2
+      AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, user_id, requested_at)
+SELECT $1, 'user_name', $2, $3::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertUserNameUpdateParams struct {
+	OrgID       int64
+	UserID      pgtype.Int8
+	RequestedAt time.Time
+}
+
+// InsertUserNameUpdate requests, in the transaction of a change of a User's display name — a profile update, an update
+// by an Admin or the pseudonym of a deletion — that it reach the open Root messages whose footer names the User
+// (C-12.FR-12), with a row user_name with the User in user_id, which the open_group_updates worker of any replica
+// claims; its run walks the open Alert Groups whose Owner or snoozer the User is. A row user_name or account_links of
+// the User that no worker has claimed yet already covers the change, since its run renders the name and the Account
+// links as they are then: it is locked, so that no worker claims it before this transaction commits, and no second one
+// is inserted. The row is written even while no open Alert Group names the User: a Snapshot in flight may be giving
+// one back its Owner or snoozer, which the run waits for under the lock of the evaluation.
+func (q *Queries) InsertUserNameUpdate(ctx context.Context, arg InsertUserNameUpdateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertUserNameUpdate, arg.OrgID, arg.UserID, arg.RequestedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listUserDirectory = `-- name: ListUserDirectory :many
 SELECT u.id, u.public_id, u.login, u.name, u.status, lower(u.name)::text AS sort_name
 FROM users u
@@ -622,6 +657,16 @@ func (q *Queries) MarkPasswordSetupUsed(ctx context.Context, arg MarkPasswordSet
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const prunePasswordSetups = `-- name: PrunePasswordSetups :execrows

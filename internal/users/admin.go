@@ -89,6 +89,7 @@ type AdminQueries interface {
 	GetPasswordSetup(ctx context.Context, arg dbgen.GetPasswordSetupParams) (dbgen.GetPasswordSetupRow, error)
 	MarkPasswordSetupUsed(ctx context.Context, arg dbgen.MarkPasswordSetupUsedParams) (int64, error)
 	ListUserDirectory(ctx context.Context, arg dbgen.ListUserDirectoryParams) ([]dbgen.ListUserDirectoryRow, error)
+	rerenderQueries
 	// Tx is the connection the queries run on: inside InTx, its transaction, which the OwnerReleaser joins.
 	Tx() dbgen.DBTX
 	audit.Store
@@ -395,7 +396,8 @@ type Changes struct {
 }
 
 // Update changes the name, the email and the Role of the user id at version, the version its If-Match names, or at
-// any version when version is nil. A Role change ends the user's sessions; giving the last active Admin a lower Role
+// any version when version is nil. A new name re-renders the open Root messages whose footer names the user
+// (C-12.FR-12). A Role change ends the user's sessions; giving the last active Admin a lower Role
 // is ErrLastAdmin, and changing the Role of an account that signs in through OIDC while OIDC and oidc.sync_role are
 // both on is ErrRoleLocked. Nothing changes, and nothing is recorded, when the values are the ones the user has.
 func (a *Admin) Update(ctx context.Context, r Requester, id string, version *int64, c Changes) (User, error) {
@@ -445,6 +447,11 @@ func (a *Admin) Update(ctx context.Context, r Requester, id string, version *int
 		}
 		if n == 0 {
 			return ErrVersionMismatch
+		}
+		if after.Name != before.Name {
+			if err := requestRerender(ctx, q, a.orgID, before.ID, now); err != nil {
+				return err
+			}
 		}
 		action, details := audit.ActionUserUpdated, map[string]any{}
 		if after.Role != before.Role {
@@ -539,8 +546,8 @@ func (a *Admin) setStatus(ctx context.Context, r Requester, id, status string) (
 // revoked with the reason owner_deleted (C-04.FR-1), open password setup links are superseded, their acknowledged
 // Alert Groups are released, their Account links removed (C-03.FR-13), they leave every Team (C-25.FR-3), their iCal
 // feed is deleted (C-27.FR-10), their contacts at Notification gateways are erased (C-30.FR-3) and their Notification
-// rules deleted (C-31.FR-5). The Audit log keeps
-// the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
+// rules deleted (C-31.FR-5); the open Root messages whose footer names them re-render with the pseudonym
+// (C-12.FR-12). The Audit log keeps the user's earlier entries, which show the new name. A non-nil version must be the user's; deleting the last active
 // Admin is ErrLastAdmin.
 func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int64) error {
 	var committed []func(context.Context)
@@ -562,6 +569,10 @@ func (a *Admin) Delete(ctx context.Context, r Requester, id string, version *int
 			OrgID: a.orgID, ID: before.ID, Pseudonym: pseudonym, Now: now,
 		}); err != nil {
 			return fmt.Errorf("delete the user %s: %w", before.PublicID, err)
+		}
+		// The footer of an Alert Group the user snoozed names them by the pseudonym from now on.
+		if err := requestRerender(ctx, q, a.orgID, before.ID, now); err != nil {
+			return err
 		}
 		if err := a.release(ctx, q, before, ReleaseDeleted, &committed); err != nil {
 			return err

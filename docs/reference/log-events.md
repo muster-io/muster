@@ -490,15 +490,15 @@ An OIDC sign-in ended at the sign-in page, or the linking of an OIDC identity at
 
 ### `open_group_update_done`
 
-INFO · fields: `kind`, `route`, `destination`, `team`, `alert_groups` · C-26
+INFO · fields: `kind`, `route`, `destination`, `team`, `user`, `service_account`, `alert_groups` · C-26
 
-A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as route_minimum_severity; the scope is named by route, destination or team, the public_id of the Route, the Destination or the Team, whichever the kind has, and by none for the Organization; alert_groups is how many open Alert Groups it changed.
+A change of configuration reached the open Alert Groups of its scope: kind is the kind of the change, such as route_minimum_severity; the scope is named by route, destination, team, user or service_account, the public_id of the Route, the Destination, the Team, the User or the Service account, whichever the kind has, and by none for the Organization; alert_groups is how many open Alert Groups it changed.
 
 ### `open_group_update_failed`
 
-WARN · fields: `kind`, `route`, `destination`, `team`, `error` · C-26
+WARN · fields: `kind`, `route`, `destination`, `team`, `user`, `service_account`, `error` · C-26
 
-A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, route, destination or team names its scope as in open_group_update_done, and error is what failed. Any replica runs it again from the last Alert Group it reached once its lease runs out.
+A change of configuration could not reach the open Alert Groups of its scope: kind is the kind of the change, route, destination, team, user or service_account names its scope as in open_group_update_done, and error is what failed. Any replica runs it again from the last Alert Group it reached once its lease runs out.
 
 ### `organization_created`
 

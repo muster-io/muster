@@ -12,6 +12,7 @@ import (
 	"github.com/muster-io/muster/internal/buttons"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/templates"
 )
@@ -222,11 +223,21 @@ func (s *Service) encodeRequest(ctx context.Context, db dbgen.DBTX, destinationI
 }
 
 // desiredOf is the Desired state of an Alert Group rendered as roots in the Destination d, through db: its Root
-// message in the markup of d with only the buttons of d's button set, or for an outgoing webhook its request state.
-// The buttons the set does not show are dropped before the hash, so that a set that changes nothing changes no hash.
+// message in the markup of d with only the buttons of d's button set, or for an outgoing webhook its request state. The
+// buttons the set does not show are dropped before the hash, so that a set that changes nothing changes no hash. The
+// stored message keeps the footer of every identity space, and the adapter writes the one of the Destination's
+// Connection when it sends, so that an edit queued before a change of the Connection, or retried after it, names the
+// user as the new Connection's messenger mentions them; the hash covers only the footer of d's identity space as it is
+// now, so that an Account link in another space changes no hash, and the first rendering after a change of the
+// Connection edits the Root message into the new space's footer (C-12.FR-12).
 func (s *Service) desiredOf(ctx context.Context, db dbgen.DBTX, d Destination, roots Roots) (encoded, error) {
 	if !sendsRequests(d.Type) {
-		return encodeShown(roots.Messages[markupOf(d.Type)], d.Buttons, roots.SnoozeSeconds), nil
+		rd := roots.Messages[markupOf(d.Type)]
+		e := encodeShown(rd, d.Buttons, roots.SnoozeSeconds)
+		own := rd
+		own.Message = rd.Message.OnlyFooterIn(mentions.IdentitySpace(d.Type, d.Connection))
+		e.hash = encodeShown(own, d.Buttons, roots.SnoozeSeconds).hash
+		return e, nil
 	}
 	return s.encodeRequest(ctx, db, d.ID, RequestState{Language: roots.Language, Group: roots.Data})
 }

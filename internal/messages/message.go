@@ -164,6 +164,26 @@ func (m Message) WithFooterIn(space string, mention func(mentions.User) string) 
 	return cp
 }
 
+// OnlyFooterIn is m with the footer and the user of the identity space space alone, from which the hash of the Desired
+// state of a Root message in a Destination of that space is computed: an Account link in another space changes nothing
+// that its messenger shows, so it must change no hash either (C-12.FR-12). WithFooterIn lays it out as it lays out m.
+// A message without footers by identity space, or without one for space, keeps only Footer, which names the user by
+// their Muster display name.
+func (m Message) OnlyFooterIn(space string) Message {
+	if m.Footers == nil && m.FooterUsers == nil {
+		return m
+	}
+	cp := m
+	cp.Footers, cp.FooterUsers = nil, nil
+	if f, ok := m.Footers[space]; ok {
+		cp.Footers = map[string]string{space: f}
+	}
+	if u, ok := m.FooterUsers[space]; ok {
+		cp.FooterUsers = map[string]FooterUser{space: u}
+	}
+	return cp
+}
+
 // FooterText is the footer of m laid out by esc: its text escaped as a whole, and the token of its user — which
 // survives the escaping of every markup — then the Mention that WithFooterIn chose, as it is.
 func (m Message) FooterText(esc func(string) string) string {

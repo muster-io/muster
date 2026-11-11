@@ -4352,6 +4352,14 @@ func (s *probeLinkStore) LockLinkUser(context.Context, alinkdb.LockLinkUserParam
 	return alinkdb.LockLinkUserRow{ID: 1, PublicID: "SRAAAAAAAAAAA1", Login: "bob", Name: "Bob", Status: "active"}, nil
 }
 
+// InsertAccountLinksUpdate asks for no re-render: the probe has no open Alert Group.
+func (s *probeLinkStore) InsertAccountLinksUpdate(context.Context, alinkdb.InsertAccountLinksUpdateParams) (int64,
+	error) {
+	return 0, nil
+}
+
+func (s *probeLinkStore) NotifyOpenGroupUpdates(context.Context, string) error { return nil }
+
 func (s *probeLinkStore) InsertLinkRequest(_ context.Context, a alinkdb.InsertLinkRequestParams) (int64, error) {
 	id := int64(len(s.reqs) + 1)
 	s.reqs = append(s.reqs, probeLinkRequest{row: alinkdb.LockLinkRequestRow{ID: id, SecretHash: a.SecretHash,

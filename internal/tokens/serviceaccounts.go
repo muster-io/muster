@@ -27,6 +27,14 @@ const (
 	StatusDeleted  = "deleted"
 )
 
+// KindServiceAccountName is the kind of the open_group_updates row that a rename of a Service account writes, whose
+// run re-renders the open Root messages whose footer names it, as who snoozed them (C-12.FR-12), and
+// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim it.
+const (
+	KindServiceAccountName  = "service_account_name"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
+)
+
 // ServiceAccount is a non-person identity with a Role and tokens (C-04.FR-2). It never signs in to the UI, has no
 // profile and no Account links, and never becomes the Owner of an Alert Group.
 type ServiceAccount struct {
@@ -180,7 +188,8 @@ func (s *Service) CreateServiceAccount(ctx context.Context, r Requester, in Serv
 }
 
 // UpdateServiceAccount changes the name and the Role of the Service account publicID; a non-nil version must be its
-// current one (If-Match).
+// current one (If-Match). A new name re-renders the open Root messages whose footer names the Service account
+// (C-12.FR-12).
 func (s *Service) UpdateServiceAccount(ctx context.Context, r Requester, publicID string, version *int64,
 	in ServiceAccountInput) (ServiceAccount, error) {
 	if err := s.checkInput(in); err != nil {
@@ -203,6 +212,11 @@ func (s *Service) UpdateServiceAccount(ctx context.Context, r Requester, publicI
 			OrgID: s.orgID, ID: before.ID, Name: in.Name, Role: in.Role, Now: s.clock.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("update the service account %s: %w", before.PublicID, nameTaken(err))
+		}
+		if before.Name != in.Name {
+			if err := s.requestRerender(ctx, q, before.ID); err != nil {
+				return err
+			}
 		}
 		if updated, err = s.get(ctx, q, before.PublicID); err != nil {
 			return err
@@ -398,4 +412,24 @@ type view struct {
 
 func viewOf(sa ServiceAccount) view {
 	return view{Name: sa.Name, Role: sa.Role, Status: sa.Status}
+}
+
+// requestRerender, in the transaction of q that renamed the Service account id under the lock of its row, asks the
+// workers of internal/groups to re-render the open Root messages whose footer names it (C-12.FR-12): one
+// open_group_updates row KindServiceAccountName, unless one of it is still unclaimed, requested at the business time of
+// the rename, and a notification that wakes them once the transaction commits. A Snooze by the Service account holds
+// its row FOR SHARE until it commits, so the run finds its Alert Group.
+func (s *Service) requestRerender(ctx context.Context, q Queries, id int64) error {
+	n, err := q.InsertServiceAccountNameUpdate(ctx, dbgen.InsertServiceAccountNameUpdateParams{OrgID: s.orgID,
+		ServiceAccountID: pgtype.Int8{Int64: id, Valid: true}, RequestedAt: s.clock.Now().UTC()})
+	if err != nil {
+		return fmt.Errorf("re-render the open root messages for the name of service account %d: %w", id, err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
 }
