@@ -367,54 +367,57 @@ WITH due AS MATERIALIZED (
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND ds.health = 'healthy'
       AND x.held_by_storm_id IS NULL
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
-    ORDER BY x.urgent DESC, x.configuration_only, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
-    LIMIT $6
+      AND x.urgent = $6::boolean AND x.configuration_only = $7::boolean
+    ORDER BY x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
+    LIMIT $8
     FOR UPDATE OF x SKIP LOCKED
 )
 UPDATE deliveries d
 SET lease_owner = $1::text, lease_until = $2::timestamptz
 FROM due
 WHERE d.org_id = $3 AND d.id = due.id
-RETURNING d.id, d.urgent, d.configuration_only, d.next_attempt_at, d.last_delivered_at
+RETURNING d.id, d.next_attempt_at, d.last_delivered_at
 `
 
 type ClaimDueDeliveriesParams struct {
-	Owner      string
-	LeaseUntil time.Time
-	OrgID      int64
-	Due        time.Time
-	Now        time.Time
-	Lim        int32
+	Owner             string
+	LeaseUntil        time.Time
+	OrgID             int64
+	Due               time.Time
+	Now               time.Time
+	Urgent            bool
+	ConfigurationOnly bool
+	Lim               int32
 }
 
 type ClaimDueDeliveriesRow struct {
-	ID                int64
-	Urgent            bool
-	ConfigurationOnly bool
-	NextAttemptAt     time.Time
-	LastDeliveredAt   pgtype.Timestamptz
+	ID              int64
+	NextAttemptAt   time.Time
+	LastDeliveredAt pgtype.Timestamptz
 }
 
-// ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
-// first, then the edits that are not configuration only before those a change of configuration alone made
-// (configuration_only, SetDesired), then the earliest, then the one delivered longest ago, so that deliveries waiting
-// for the same token take turns; another claimer skips the rows this one locked. The rank is order only and strict:
-// among the Root messages of one urgency, configuration edits always come last: a re-render of every open Root message
-// never delays a Publication or an edit of a Root message that an Alert or a Command made, of the same urgency in the
-// same Destination, and it takes every token they leave, its edits by age. Its edits wait as long as Publications and
-// those edits use up the limiter — Alert Groups that keep flapping, for one — and none is dropped: an edit that waits
-// is carried by the next change of its Alert Group, which ends the mark, and a delivered edit ends it too. Thread
-// replies are claimed after the deliveries (Round), so they still wait behind the edits of a re-render that take the
-// tokens first. A claimed edit without a token is released at once, due when the token is (RescheduleDelivery), so a
-// claimed batch never holds a token or a lease against a Publication. A delivery a Storm holds waits for its Storm, and
-// one of a
-// deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
-// that read the Destination's entries before its deletion committed can create one after the deletion ended the
-// others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
-// FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row; the order
-// follows deliveries_due_v2_idx. The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers
-// (internal/timers) copy this shape, without the rank of configuration_only, which only Root messages have; a fix of
-// it applies to them too.
+// ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, of one
+// rank: Urgent or not (@urgent), and configuration only or not (@configuration_only, which a change of configuration
+// alone sets, SetDesired). Within the rank, the earliest first, then the one delivered longest ago, so that deliveries
+// waiting for the same token take turns; another claimer skips the rows this one locked. The worker's round claims the
+// Urgent deliveries that are not configuration only, then the Urgent configuration edits, then the other deliveries
+// that are not configuration only, the Thread replies and the head events of outgoing webhooks, and last the other
+// configuration edits (Round), so that a re-render of every open Root message never delays a Publication, an edit of a
+// Root message that an Alert or a Command made, or a Thread reply of its urgency or below, and the Root messages of
+// Urgent Alert Groups wait behind work that is not Urgent for at most one claimed batch of it; Thread replies and
+// webhook events, Urgent or not, come after the Root-message work of both. The order is order only and strict:
+// configuration edits wait as long as the work before them uses up the limiter — Alert Groups that keep flapping, for
+// one — and none is dropped: an edit that waits is carried by the next change of its Alert Group, which ends the
+// mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due when the token is
+// (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work before it. A delivery a
+// Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its final edit or, never
+// published there, to end it (prepare): an Enqueue that read the Destination's entries before its deletion committed
+// can create one after the deletion ended the others, and a Publication claimed before it committed can fail meanwhile
+// (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as the inner
+// side of a nested loop over every delivery, run once per row. The two equalities bound a range of
+// deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
+// The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
+// without the ranks, which only Root messages have; a fix of it applies to them too.
 func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveriesParams) ([]ClaimDueDeliveriesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueDeliveries,
 		arg.Owner,
@@ -422,6 +425,8 @@ func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveries
 		arg.OrgID,
 		arg.Due,
 		arg.Now,
+		arg.Urgent,
+		arg.ConfigurationOnly,
 		arg.Lim,
 	)
 	if err != nil {
@@ -431,13 +436,7 @@ func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveries
 	items := []ClaimDueDeliveriesRow{}
 	for rows.Next() {
 		var i ClaimDueDeliveriesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Urgent,
-			&i.ConfigurationOnly,
-			&i.NextAttemptAt,
-			&i.LastDeliveredAt,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.NextAttemptAt, &i.LastDeliveredAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -488,9 +487,10 @@ type ClaimDueRepliesRow struct {
 
 // ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
 // delivery's replies in id order: a reply waits while an earlier one of its delivery is pending. A collecting batch
-// that comes due closes: it becomes pending, and new Alerts start the next batch. The choice is a materialized CTE,
-// run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it ran once per row
-// and took seconds once replies had piled up.
+// that comes due closes: it becomes pending, and new Alerts start the next batch. The worker's round claims them after
+// the deliveries that are not configuration only and the Urgent configuration edits, and before the other configuration
+// edits (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as
+// the inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up.
 func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams) ([]ClaimDueRepliesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueReplies,
 		arg.Owner,
@@ -557,8 +557,10 @@ type ClaimDueWebhookEventsRow struct {
 
 // ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
 // with the lowest sequence of its Alert Group and Destination, whose lease is free or ran out; the next one waits until
-// it is delivered or Not delivered, while the events of other Alert Groups go on. The choice is a materialized CTE,
-// run once, as in ClaimDueDeliveries.
+// it is delivered or Not delivered, while the events of other Alert Groups go on. The worker's round claims them before
+// the configuration edits that are not Urgent (Round): a Destination in the mode both shares its bucket with its Root
+// requests, which a change of configuration can re-render. The choice is a materialized CTE, run once, as in
+// ClaimDueDeliveries.
 func (q *Queries) ClaimDueWebhookEvents(ctx context.Context, arg ClaimDueWebhookEventsParams) ([]ClaimDueWebhookEventsRow, error) {
 	rows, err := q.db.Query(ctx, claimDueWebhookEvents,
 		arg.Owner,

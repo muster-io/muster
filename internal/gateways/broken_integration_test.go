@@ -113,17 +113,24 @@ func (e *brokenIntEnv) raises(t *testing.T, status string) int {
 		status)
 }
 
-// claimDelivery claims the pending delivery of the Destination, as the delivery worker does, and frees it again.
+// claimDelivery claims the pending deliveries of the Destination of every rank, as the delivery worker does, and frees
+// them again.
 func (e *brokenIntEnv) claimDelivery(t *testing.T) int {
 	t.Helper()
-	rows, err := deliverydb.New(e.d.Pool).ClaimDueDeliveries(t.Context(), deliverydb.ClaimDueDeliveriesParams{
-		OrgID: e.orgID, Owner: "w1", LeaseUntil: e.real.Now().Add(time.Minute), Due: e.business.Now(),
-		Now: e.real.Now(), Lim: 10})
-	if err != nil {
-		t.Fatal(err)
+	n := 0
+	for _, urgent := range []bool{true, false} {
+		for _, configurationOnly := range []bool{false, true} {
+			rows, err := deliverydb.New(e.d.Pool).ClaimDueDeliveries(t.Context(), deliverydb.ClaimDueDeliveriesParams{
+				OrgID: e.orgID, Owner: "w1", LeaseUntil: e.real.Now().Add(time.Minute), Due: e.business.Now(),
+				Now: e.real.Now(), Urgent: urgent, ConfigurationOnly: configurationOnly, Lim: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			n += len(rows)
+		}
 	}
 	e.exec(t, `UPDATE deliveries SET lease_owner = NULL, lease_until = NULL`)
-	return len(rows)
+	return n
 }
 
 // TestIntegrationGatewayBroken is C-30.FR-8 and AC-5 on PostgreSQL, with a bridge of both roles: a call the gateway

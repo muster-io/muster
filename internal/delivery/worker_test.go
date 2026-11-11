@@ -586,23 +586,11 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 	var due []*fakeDelivery
 	for _, d := range f.deliveries {
 		if d.state == "pending" && !d.next.After(arg.Due) && (d.owner == "" || !d.until.After(arg.Now)) &&
-			f.healthy(d.dest) && f.work(d) {
+			f.healthy(d.dest) && f.work(d) && d.urgent == arg.Urgent && d.configOnly == arg.ConfigurationOnly {
 			due = append(due, d)
 		}
 	}
 	slices.SortFunc(due, func(a, b *fakeDelivery) int {
-		if a.urgent != b.urgent {
-			if a.urgent {
-				return -1
-			}
-			return 1
-		}
-		if a.configOnly != b.configOnly {
-			if b.configOnly {
-				return -1
-			}
-			return 1
-		}
 		if (a.lastDelivered == nil) != (b.lastDelivered == nil) {
 			if a.lastDelivered == nil {
 				return -1
@@ -622,8 +610,8 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 			break
 		}
 		d.owner, d.until = arg.Owner, arg.LeaseUntil
-		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, Urgent: d.urgent, ConfigurationOnly: d.configOnly,
-			NextAttemptAt: d.next, LastDeliveredAt: tz(d.lastDelivered)})
+		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, NextAttemptAt: d.next,
+			LastDeliveredAt: tz(d.lastDelivered)})
 	}
 	// The order of RETURNING is not guaranteed; the worker sorts.
 	slices.Reverse(out)
@@ -2155,6 +2143,321 @@ func configurationEditsLast(t *testing.T, batch int32) {
 	}
 }
 
+// TestRepliesBeforeConfigurationEdits is C-11.FR-3 and FR-4: within a Destination's buckets the round attempts the
+// Urgent work first, its configuration edits included, then the other deliveries that are not configuration only,
+// then the Thread replies, then the other configuration edits. With three tokens, the Urgent configuration edit takes
+// the first, ahead of the edit of new Alerts of an Alert Group that is not Urgent and its alerts_added reply, which
+// take the next two; the reply of the Urgent Alert Group and the configuration edit that is not Urgent take the tokens
+// after them, in this order. With a batch of one, the round alone decides the order.
+func TestRepliesBeforeConfigurationEdits(t *testing.T) {
+	for _, batch := range []int32{0, 1} {
+		t.Run(fmt.Sprintf("batch %d", batch), func(t *testing.T) { repliesBeforeConfigurationEdits(t, batch) })
+	}
+}
+
+func repliesBeforeConfigurationEdits(t *testing.T, batch int32) {
+	e := newEnv(t)
+	e.w.Batch = batch
+	e.db.dests[destMM].limit = 600
+	group := func(i int64, title string) *groups.Group {
+		gid := groupID + i
+		if e.db.groups[gid] == nil {
+			e.db.groups[gid] = &fakeGroup{id: gid, publicID: fmt.Sprintf("AGAAAAAAAAAA%dC", i),
+				number: 10 + i, status: "firing", route: routeID, created: e.business.Now(), urgent: i == 2}
+		}
+		e.db.groups[gid].title = title
+		return &groups.Group{ID: gid, PublicID: e.db.groups[gid].publicID, Number: 10 + i, RouteID: routeID,
+			Title: title, Status: groups.StatusFiring, Urgent: i == 2}
+	}
+	render := func(r groups.Rendering) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, r); err != nil {
+			t.Fatal(err)
+		}
+		e.business.Advance(time.Millisecond)
+	}
+	// #10 and #11 are not urgent, #12 is Urgent.
+	for i := range int64(3) {
+		render(groups.Rendering{Group: group(i, "g"), Actor: groups.System, Events: []groups.Recorded{created()}})
+	}
+	e.round(t)
+	if len(e.rec.Calls()) != 3 {
+		t.Fatalf("publications %+v", e.rec.Calls())
+	}
+	e.rec.Reset()
+	// A re-render of #10 and #12; new Alerts in #11, which change its Root message, and in #12, which leave its Root
+	// message as the re-render made it.
+	render(groups.Rendering{Group: group(0, "renamed"), Actor: groups.System, Configuration: true})
+	render(groups.Rendering{Group: group(2, "renamed"), Actor: groups.System, Configuration: true})
+	render(groups.Rendering{Group: group(1, "more alerts"), Actor: groups.System,
+		Events: []groups.Recorded{alertsAdded(2, groups.StatusFiring, "fp11")}})
+	render(groups.Rendering{Group: group(2, "renamed"), Actor: groups.System,
+		Events: []groups.Recorded{alertsAdded(2, groups.StatusFiring, "fp12")}})
+	for i, want := range []bool{true, false, true} {
+		if d := e.db.deliveries[i]; d.configOnly != want || d.state != "pending" {
+			t.Fatalf("delivery of #%d: configuration only %v, %s; want %v", 10+i, d.configOnly, d.state, want)
+		}
+	}
+	calls := func() []string {
+		var out []string
+		for _, c := range e.rec.Calls() {
+			out = append(out, c.Method+" "+strings.Fields(textOf(c))[0])
+		}
+		return out
+	}
+	e.db.dests[destMM].limit = 3
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	if want := []string{deliverytest.MethodUpdate + " #12", deliverytest.MethodUpdate + " #11",
+		deliverytest.MethodReply + " #11"}; !slices.Equal(calls(), want) {
+		t.Fatalf("first calls %q, want %q", calls(), want)
+	}
+	if d := e.db.deliveries[0]; d.state != "pending" || !d.configOnly || !d.next.After(e.business.Now()) {
+		t.Errorf("the re-render of #10: %s, configuration only %v, due %v", d.state, d.configOnly, d.next)
+	}
+	e.business.Advance(time.Minute)
+	e.round(t)
+	if want := []string{deliverytest.MethodUpdate + " #12", deliverytest.MethodUpdate + " #11",
+		deliverytest.MethodReply + " #11", deliverytest.MethodReply + " #12",
+		deliverytest.MethodUpdate + " #10"}; !slices.Equal(calls(), want) {
+		t.Fatalf("calls %q, want %q", calls(), want)
+	}
+	for i, d := range e.db.deliveries {
+		if d.state != "delivered" || d.configOnly {
+			t.Errorf("delivery of #%d: %s, configuration only %v", 10+i, d.state, d.configOnly)
+		}
+	}
+}
+
+// TestConfigurationPassOneBatch is C-11.FR-3 for a large re-render, with the business clock moving 10 ms a token as on
+// a running replica: a Publication that comes due while 200 configuration edits are attempted goes out within one batch
+// of them, and every edit still goes out in the same round.
+func TestConfigurationPassOneBatch(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	const n = 200
+	rerendered(t, e, n)
+	takes, injected := 0, -1
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(10 * time.Millisecond)
+		if takes == 25 {
+			injected = len(e.rec.Calls())
+			e.enqueue(t, newGroup(e, n, "new"), groups.System, created())
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	calls := e.rec.Calls()
+	published := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish
+	})
+	if injected < 0 || published < 0 {
+		t.Fatalf("the Publication did not go out in the round (injected after %d of %d calls)", injected, len(calls))
+	}
+	if published-injected > int(delivery.Batch) {
+		t.Fatalf("the Publication went out after %d edits of the re-render", published-injected)
+	}
+	if u := e.rec.Count(deliverytest.MethodUpdate); u != n {
+		t.Errorf("%d edits of the re-render in the round, want %d", u, n)
+	}
+}
+
+// TestConfigurationPassOncePerRound is C-11.FR-3 for a large re-render that the limiter holds back, with the business
+// clock moving 50 ms a token: an edit denied a token is due again within the round, but a round attempts each edit of
+// the re-render at most once and ends; the next rounds send every edit as the tokens come.
+func TestConfigurationPassOncePerRound(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	const n = 50
+	rerendered(t, e, n)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes := 0
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(50 * time.Millisecond)
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	if takes > n {
+		t.Fatalf("%d attempts of %d edits in one round", takes, n)
+	}
+	for i := 0; e.rec.Count(deliverytest.MethodUpdate) < n; i++ {
+		if i == 2*n {
+			t.Fatalf("%d of %d edits after %d rounds", e.rec.Count(deliverytest.MethodUpdate), n, i)
+		}
+		e.business.Advance(time.Second + delivery.TokenMargin)
+		e.round(t)
+	}
+}
+
+// newGroup is the Alert Group i of a large set, not Urgent, on Route 1.
+func newGroup(e *env, i int, title string) *groups.Group {
+	return newGroupOf(e, i, title, false)
+}
+
+// newGroupOf is the Alert Group i of a large set on Route 1, Urgent or not.
+func newGroupOf(e *env, i int, title string, urgent bool) *groups.Group {
+	gid := groupID + 1000 + int64(i)
+	if e.db.groups[gid] == nil {
+		e.db.groups[gid] = &fakeGroup{id: gid, publicID: fmt.Sprintf("AG%012d", 1000+i), number: 1000 + int64(i),
+			status: "firing", route: routeID, created: e.business.Now(), urgent: urgent}
+	}
+	e.db.groups[gid].title = title
+	return &groups.Group{ID: gid, PublicID: e.db.groups[gid].publicID, Number: 1000 + int64(i), RouteID: routeID,
+		Title: title, Status: groups.StatusFiring, Urgent: urgent}
+}
+
+// urgentWithinOneBatch runs one round with the business clock moving 10 ms a token, as on a running replica, and the
+// Publication of a new Urgent Alert Group queued at the 25th token, and checks that it goes out within one batch of
+// the calls before it.
+func urgentWithinOneBatch(t *testing.T, e *env, n int) {
+	t.Helper()
+	withinOneBatch(t, e, "the Urgent Publication", func() {
+		e.enqueue(t, newGroupOf(e, n, "urgent", true), groups.System, created())
+	}, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
+	})
+}
+
+// withinOneBatch runs one round with the business clock moving 10 ms a token, as on a running replica, queues what
+// inject queues at the 25th token, and checks that the call that match finds goes out within one batch of the calls
+// before it.
+func withinOneBatch(t *testing.T, e *env, what string, inject func(), match func(deliverytest.Call) bool) {
+	t.Helper()
+	takes, injected := 0, -1
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(10 * time.Millisecond)
+		if takes == 25 {
+			injected = len(e.rec.Calls())
+			inject()
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	calls := e.rec.Calls()
+	at := slices.IndexFunc(calls, match)
+	if injected < 0 || at < 0 {
+		t.Fatalf("%s did not go out in the round (injected after %d of %d calls)", what, injected, len(calls))
+	}
+	if at-injected > int(delivery.Batch) {
+		t.Fatalf("%s went out after %d calls", what, at-injected)
+	}
+}
+
+// TestUrgentConfigurationEditDuringPublications is C-11.FR-3: an edit of an Urgent Root message that a change of
+// configuration alone made, queued while 200 Publications that are not Urgent are attempted, goes out within one batch
+// of them.
+func TestUrgentConfigurationEditDuringPublications(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	r := e.db.routes[routeID]
+	r.threshold = 1_000_000
+	e.db.routes[routeID] = r
+	const n = 200
+	e.enqueue(t, newGroupOf(e, n, "urgent", true), groups.System, created())
+	e.round(t)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != 1 {
+		t.Fatalf("%d publications of the Urgent Alert Group", p)
+	}
+	e.rec.Reset()
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	withinOneBatch(t, e, "the Urgent configuration edit", func() {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e, n, "urgent renamed", true),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+		if d := e.db.deliveries[0]; !d.urgent || !d.configOnly || d.state != "pending" {
+			t.Fatalf("the re-render of the Urgent Alert Group: urgent %v, configuration only %v, %s", d.urgent,
+				d.configOnly, d.state)
+		}
+	}, func(c deliverytest.Call) bool { return c.Method == deliverytest.MethodUpdate })
+	if p, u := e.rec.Count(deliverytest.MethodPublish), e.rec.Count(deliverytest.MethodUpdate); p != n || u != 1 {
+		t.Errorf("%d publications and %d edits in the round, want %d and 1", p, u, n)
+	}
+}
+
+// TestUrgentPublicationDuringPublications is C-11.FR-3: an Urgent Publication that comes due while 200 Publications
+// that are not Urgent are attempted goes out within one batch of them.
+func TestUrgentPublicationDuringPublications(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	r := e.db.routes[routeID]
+	r.threshold = 1_000_000
+	e.db.routes[routeID] = r
+	const n = 200
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	urgentWithinOneBatch(t, e, n)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != n+1 {
+		t.Errorf("%d publications in the round, want %d", p, n+1)
+	}
+}
+
+// TestUrgentPublicationDuringReplies is C-11.FR-3 and FR-4: an Urgent Publication that comes due while 200 Thread
+// replies are attempted goes out within one batch of them.
+func TestUrgentPublicationDuringReplies(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	r := e.db.routes[routeID]
+	r.threshold = 1_000_000
+	e.db.routes[routeID] = r
+	const n = 200
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	// New Alerts that leave every Root message as it is: only their Thread replies are due.
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, alertsAdded(2, groups.StatusFiring, fmt.Sprintf("fp%d", i)))
+	}
+	if d := slices.IndexFunc(e.db.deliveries, func(d *fakeDelivery) bool { return d.state == "pending" }); d >= 0 {
+		t.Fatalf("a delivery is pending before the replies: %+v", e.db.deliveries[d])
+	}
+	urgentWithinOneBatch(t, e, n)
+	if r := len(e.replies()); r != n {
+		t.Errorf("%d replies in the round, want %d", r, n)
+	}
+}
+
+// rerendered publishes n Alert Groups on Route 1, then re-renders them by a change of configuration.
+func rerendered(t *testing.T, e *env, n int) {
+	t.Helper()
+	// No Storm holds them.
+	r := e.db.routes[routeID]
+	r.threshold = 1_000_000
+	e.db.routes[routeID] = r
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != n {
+		t.Fatalf("%d of %d published", p, n)
+	}
+	e.rec.Reset()
+	for i := range n {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroup(e, i, "renamed"),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestRecordOutcomes: a RetryAfter waits exactly as asked, leaves attempts untouched and, since the messenger did not
 // take the Publication, clears its start; the other outcomes have their rules in outcomes_test.go.
 func TestRecordOutcomes(t *testing.T) {
@@ -2343,7 +2646,9 @@ func TestDrainBatches(t *testing.T) {
 			groups.System, created())
 	}
 	e.round(t)
-	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 3 {
+	// The round goes back to the first pass after each full batch: three times the Urgent passes, empty, and the claim
+	// of the five, the last one short, then the empty claim of the configuration edits that are not Urgent.
+	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 10 {
 		t.Errorf("%d publications in %d claims", e.rec.Count(deliverytest.MethodPublish),
 			e.db.calls["ClaimDueDeliveries"])
 	}
