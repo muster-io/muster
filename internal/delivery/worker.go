@@ -302,8 +302,8 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 			}
 		}
 	}
-	// once claims one batch of the rank i, from 3 on, and goes back to the Urgent ranks when it claimed a row; it says
-	// whether the batch was full.
+	// once claims one batch of passes[i], rank i+1 of ranks 3 to 6, and goes back to the Urgent ranks when it claimed a
+	// row; it says whether the batch was full.
 	once := func(i int) bool {
 		n, err := w.batchOnce(ctx, org, passes[i].claim, passes[i].work)
 		keep(i, err)
