@@ -255,7 +255,8 @@ func (w *Worker) drain(ctx context.Context, org int64,
 	}
 }
 
-// claimDeliveries leases the due deliveries of the Organization, Urgent first.
+// claimDeliveries leases the due deliveries of the Organization in the order of ClaimDueDeliveries: Urgent first, then
+// the edits that are not configuration only.
 func (w *Worker) claimDeliveries(ctx context.Context, org int64) ([]int64, error) {
 	rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 		func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueDeliveriesRow, error) {
@@ -268,6 +269,12 @@ func (w *Worker) claimDeliveries(ctx context.Context, org int64) ([]int64, error
 	slices.SortFunc(rows, func(a, b dbgen.ClaimDueDeliveriesRow) int {
 		if a.Urgent != b.Urgent {
 			if a.Urgent {
+				return -1
+			}
+			return 1
+		}
+		if a.ConfigurationOnly != b.ConfigurationOnly {
+			if b.ConfigurationOnly {
 				return -1
 			}
 			return 1

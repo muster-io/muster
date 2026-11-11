@@ -188,8 +188,9 @@ func (e *env) deliveryTo(t *testing.T, dest int64) *fakeDelivery {
 // TestRerenderAfterRotation covers C-20.FR-7 and AC-5 with the delivery worker: the re-render selects only the
 // deliveries signed by another key, recomputes their Desired state with buttons the active key signs in the
 // dispatcher's lock order, wakes the worker and sends the organization hint; the worker edits the Root messages and
-// records the new key, and the outcome that replaces the last carrier of the old key sends the organization hint. An
-// outgoing webhook carries no buttons and is never selected; a second run changes nothing.
+// records the new key, and the outcome that replaces the last carrier of the old key sends the organization hint; its
+// edits are configuration only. An outgoing webhook carries no buttons and is never selected; a second run changes
+// nothing.
 func TestRerenderAfterRotation(t *testing.T) {
 	e, key := rotationEnv(t)
 	if k := e.deliveryTo(t, destMM).actualKey; k == nil || *k != "k-old" {
@@ -213,8 +214,10 @@ func TestRerenderAfterRotation(t *testing.T) {
 		t.Errorf("lock order %v", order)
 	}
 	for _, dest := range []int64{destMM, destMM2} {
-		if d := e.deliveryTo(t, dest); d.buttonKeyID != "k-new" || d.state != "pending" {
-			t.Errorf("delivery to %d: key %s, %s", dest, d.buttonKeyID, d.state)
+		// A re-signing is a change of configuration: its edits wait for the rest (ClaimDueDeliveries).
+		if d := e.deliveryTo(t, dest); d.buttonKeyID != "k-new" || d.state != "pending" || !d.configOnly {
+			t.Errorf("delivery to %d: key %s, %s, configuration only %v", dest, d.buttonKeyID, d.state,
+				d.configOnly)
 		}
 	}
 	if e.db.notified != notified+1 || e.organizationHints() != 1 {

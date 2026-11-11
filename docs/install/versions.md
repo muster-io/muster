@@ -165,6 +165,15 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Mention — and the rules of each User, none at first, so that every User follows the Organization's. It is expand
       only: a 0.1 replica, or one of a development image without it, reads and writes nothing of either, and an
       Organization it creates gets the default rules.
+    - Migration 0038 marks the edits of open Root messages that a change of configuration alone made — a new button
+      set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them after
+      the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the same
+      urgency; no data is migrated, and a
+      re-render still pending at the upgrade keeps its place. It is expand only: a 0.1 replica, or one of a development
+      image without it, claims in its own order and never writes the mark, so an edit, a final edit or a republication
+      it queues for a Root message whose re-render a 0.2.0 replica queued — still pending, or already delivered by the
+      older replica — waits behind the other pending deliveries of its urgency until it is delivered; a delivery by a
+      0.2.0 replica clears the mark.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -541,6 +550,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     `UPDATE schema_migrations SET version = 36, dirty = false;` and start the 0.2.0 replica again, or run
     `muster migrate`. Going back below 0037 loses every User's own Notification rules and the Organization's default
     rules; once 0037 is back, every User follows the Organization's rules, which are the defaults again.
+
+    Migration 0038 adds the mark of configuration edits and its claim index to the deliveries in one transaction: a
+    failure leaves nothing of it, but the schema recorded as dirty at version 38. To recover, with the same database
+    role as Muster, run `UPDATE schema_migrations SET version = 37, dirty = false;` and start the 0.2.0 replica again,
+    or run `muster migrate`. Going back below 0038 loses no delivery: the pending edits of a re-render are sent again
+    in the order of urgency and due time alone.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

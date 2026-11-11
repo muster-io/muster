@@ -42,7 +42,7 @@ func retire(d *fakeDelivery, now time.Time) {
 	} else {
 		d.state, d.desiredRetire = "pending", true
 	}
-	d.heldBy, d.next, d.updated = 0, now, now
+	d.heldBy, d.configOnly, d.next, d.updated = 0, false, now, now
 }
 
 func (f *fakeDB) open(group int64) bool {
@@ -93,6 +93,7 @@ func (f *fakeDB) RejoinDelivery(_ context.Context, arg dbgen.RejoinDeliveryParam
 			d.actualStatus, d.pastEditWindow, d.restarted = nil, false, nil
 		}
 		d.lateNote, d.desiredRetire, d.state, d.next, d.updated = false, false, "pending", arg.Now, arg.Now
+		d.configOnly = false
 		return 1, nil
 	}
 	return 0, nil
