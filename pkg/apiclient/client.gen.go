@@ -14961,6 +14961,13 @@ type ClientInterface interface {
 	// Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 	DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RevokeUserIcalFeed Revoke a user's iCal feed
+	//
+	// Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+	//
+	// Corresponds with DELETE /users/{user_id}/ical-feed (the `RevokeUserIcalFeed` operationId).
+	RevokeUserIcalFeed(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetUserNotificationRules Read a user's Notification rules
 	//
 	// The rules of a User, as `getMyNotificationRules` reads them for the caller (C-31.FR-4); a deleted User answers `404`.
@@ -19602,6 +19609,23 @@ func (c *Client) CreateUserGatewayContact(ctx context.Context, userId UserId, bo
 // Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 func (c *Client) DeleteUserGatewayContact(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteUserGatewayContactRequest(c.Server, userId, gatewayContactId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RevokeUserIcalFeed Revoke a user's iCal feed
+//
+// Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+//
+// Corresponds with DELETE /users/{user_id}/ical-feed (the `RevokeUserIcalFeed` operationId).
+func (c *Client) RevokeUserIcalFeed(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokeUserIcalFeedRequest(c.Server, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -29060,6 +29084,40 @@ func NewDeleteUserGatewayContactRequest(server string, userId UserId, gatewayCon
 	return req, nil
 }
 
+// NewRevokeUserIcalFeedRequest constructs an http.Request for the RevokeUserIcalFeed method
+func NewRevokeUserIcalFeedRequest(server string, userId UserId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "user_id", userId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/users/%s/ical-feed", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetUserNotificationRulesRequest constructs an http.Request for the GetUserNotificationRules method
 func NewGetUserNotificationRulesRequest(server string, userId UserId) (*http.Request, error) {
 	var err error
@@ -31536,6 +31594,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id} (the `DeleteUserGatewayContact` operationId).
 	DeleteUserGatewayContactWithResponse(ctx context.Context, userId UserId, gatewayContactId GatewayContactId, reqEditors ...RequestEditorFn) (*DeleteUserGatewayContactResponse, error)
+
+	// RevokeUserIcalFeedWithResponse Revoke a user's iCal feed
+	//
+	// Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /users/{user_id}/ical-feed (the `RevokeUserIcalFeed` operationId).
+	RevokeUserIcalFeedWithResponse(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*RevokeUserIcalFeedResponse, error)
 
 	// GetUserNotificationRulesWithResponse Read a user's Notification rules
 	//
@@ -47558,6 +47625,75 @@ func (r DeleteUserGatewayContactResponse) ContentType() string {
 	return ""
 }
 
+// RevokeUserIcalFeedResponse429Headers the declared response headers of an HTTP 429 response for RevokeUserIcalFeed
+type RevokeUserIcalFeedResponse429Headers struct {
+	RetryAfter *int
+}
+
+type RevokeUserIcalFeedResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON404 the response for an HTTP 404 `application/problem+json` response
+	ApplicationproblemJSON404 *NotFound
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *RevokeUserIcalFeedResponse429Headers
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r RevokeUserIcalFeedResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r RevokeUserIcalFeedResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON404 returns the response for an HTTP 404 `application/problem+json` response
+func (r RevokeUserIcalFeedResponse) GetApplicationproblemJSON404() *NotFound {
+	return r.ApplicationproblemJSON404
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r RevokeUserIcalFeedResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r RevokeUserIcalFeedResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokeUserIcalFeedResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokeUserIcalFeedResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevokeUserIcalFeedResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetUserNotificationRulesResponse200Headers the declared response headers of an HTTP 200 response for GetUserNotificationRules
 type GetUserNotificationRulesResponse200Headers struct {
 	ETag *string
@@ -51727,6 +51863,21 @@ func (c *ClientWithResponses) DeleteUserGatewayContactWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseDeleteUserGatewayContactResponse(rsp)
+}
+
+// RevokeUserIcalFeedWithResponse Revoke a user's iCal feed
+//
+// Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /users/{user_id}/ical-feed (the `RevokeUserIcalFeed` operationId).
+func (c *ClientWithResponses) RevokeUserIcalFeedWithResponse(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*RevokeUserIcalFeedResponse, error) {
+	rsp, err := c.RevokeUserIcalFeed(ctx, userId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokeUserIcalFeedResponse(rsp)
 }
 
 // GetUserNotificationRulesWithResponse Read a user's Notification rules
@@ -66350,6 +66501,69 @@ func ParseDeleteUserGatewayContactResponse(rsp *http.Response) (*DeleteUserGatew
 	switch {
 	case rsp.StatusCode == 429:
 		var headers DeleteUserGatewayContactResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseRevokeUserIcalFeedResponse parses an HTTP response from a RevokeUserIcalFeedWithResponse call
+func ParseRevokeUserIcalFeedResponse(rsp *http.Response) (*RevokeUserIcalFeedResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokeUserIcalFeedResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers RevokeUserIcalFeedResponse429Headers
 		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
 			var value int
 			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {

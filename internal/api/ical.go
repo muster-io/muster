@@ -13,6 +13,7 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/schedules"
 )
 
@@ -21,6 +22,7 @@ type IcalFeeds interface {
 	Get(ctx context.Context, userID int64) (schedules.Feed, error)
 	Issue(ctx context.Context, r schedules.Requester, u schedules.FeedUser) (schedules.IssuedFeed, error)
 	Revoke(ctx context.Context, r schedules.Requester, u schedules.FeedUser) error
+	RevokeOfUser(ctx context.Context, r schedules.Requester, userPublicID string) error
 	Lookup(ctx context.Context, value string) (schedules.FeedUser, error)
 	Calendar(ctx context.Context, u schedules.FeedUser) ([]byte, error)
 }
@@ -37,6 +39,15 @@ const contentTypeCalendar = "text/calendar; charset=utf-8"
 type IcalHandler struct {
 	Feeds IcalFeeds
 	Log   *logging.Logger
+}
+
+// NewIcalHandler is the IcalHandler over feeds and log, with the series of muster_ical_feed_requests_total at zero from
+// the start, so that increase() sees the first fetch of each outcome.
+func NewIcalHandler(feeds IcalFeeds, log *logging.Logger) IcalHandler {
+	for _, outcome := range metrics.IcalFeedOutcomes {
+		metrics.IcalFeedRequests.With(outcome)
+	}
+	return IcalHandler{Feeds: feeds, Log: log}
 }
 
 func (h IcalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -62,14 +73,17 @@ func (h IcalHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case errors.Is(err, schedules.ErrFeedNotFound):
+		metrics.IcalFeedRequests.With("not_found").Inc()
 		h.Log.Log(r.Context(), logging.IcalFeedNotFound, h.fields(user)...)
 		writeIcalProblem(w, http.StatusNotFound, typeNotFound, "No such iCal feed.")
 		return
 	case err != nil:
+		metrics.IcalFeedRequests.With("failed").Inc()
 		h.Log.Log(r.Context(), logging.IcalFeedFailed, append(h.fields(user), logging.F("error", err.Error()))...)
 		writeIcalProblem(w, http.StatusInternalServerError, typeInternal, "The iCal feed cannot be read now.")
 		return
 	}
+	metrics.IcalFeedRequests.With("served").Inc()
 	header.Set("Content-Type", contentTypeCalendar)
 	header.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)

@@ -1278,7 +1278,11 @@ func probeIcalFeed(ctx context.Context, secrets []string, log io.Writer) error {
 	store.fail, store.listFail = nil, errors.New("the database is unavailable")
 	send(value)
 	store.listFail = nil
-	errs = append(errs, feeds.Revoke(ctx, by, user))
+	// An Admin's revoke names the User, never the token; a secret as the id is refused without echoing it.
+	for _, secret := range secrets {
+		errs = append(errs, feeds.RevokeOfUser(ctx, by, secret))
+	}
+	errs = append(errs, feeds.RevokeOfUser(ctx, by, user.PublicID), feeds.Revoke(ctx, by, user))
 	send(value)
 	errs = append(errs, fmt.Errorf("answers: %s", strings.Join(answers, " | ")))
 	out := errors.Join(errs...)
@@ -1325,6 +1329,13 @@ func (s *probeFeedStore) GetIcalFeed(context.Context, scdb.GetIcalFeedParams) (t
 func (s *probeFeedStore) DeleteIcalFeed(context.Context, scdb.DeleteIcalFeedParams) (int64, error) {
 	s.hash = nil
 	return 1, nil
+}
+
+func (s *probeFeedStore) GetFeedUser(_ context.Context, arg scdb.GetFeedUserParams) (scdb.GetFeedUserRow, error) {
+	if arg.PublicID != "SRAAAAAAAAAAAA" {
+		return scdb.GetFeedUserRow{}, pgx.ErrNoRows
+	}
+	return scdb.GetFeedUserRow{ID: 1, PublicID: arg.PublicID}, nil
 }
 
 func (s *probeFeedStore) FindIcalFeed(_ context.Context, hash []byte) (scdb.FindIcalFeedRow, error) {

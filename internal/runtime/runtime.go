@@ -734,7 +734,7 @@ func (p *process) serve(ctx context.Context) error {
 	srv, err := server.Start(context.WithoutCancel(ctx), server.Addresses{
 		App: p.cfg.ListenApp, Ingest: p.cfg.ListenIngest, Internal: p.cfg.ListenInternal,
 	}, server.Handlers{
-		App: server.App(p.api, api.IcalHandler{Feeds: p.icalFeeds, Log: p.log}, web.Dist(),
+		App: server.App(p.api, api.NewIcalHandler(p.icalFeeds, p.log), web.Dist(),
 			p.cfg.PublicURL.Scheme == "https"),
 		Ingest: server.Ingest(ingest.NewHandler(ingest.HandlerConfig{
 			Auth: p.integrations, Snapshots: p.snapshots, Log: p.log, Real: p.clocks.Real,

@@ -471,6 +471,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_request_log_write_failures_total` | counter | `direction` (`outbound`, `inbound`) — records that could not be written and were dropped | C-23 |
 | `muster_request_log_pruned_total` | counter | — (records the Leader deleted past `request_log.max_records` or `request_log.max_age`, `request_log_pruning`) | C-23 |
 | `muster_team_info` | gauge | `team`, `name` | C-25 |
+| `muster_ical_feed_requests_total` | counter | `outcome` (`served`, `not_found`, `failed`) — `not_found` is a malformed, unknown or revoked token, or one of a disabled or deleted User; `failed` a feed that could not be read | C-27 |
 | `muster_schedule_info` | gauge | `schedule`, `name` | C-27 |
 | `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while the Schedule, whose gap alert is active, has a gap now or one that starts within `schedule.gap_alert_horizon`, 0 for every other Schedule, those whose gap alert is not active included | C-27 |
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) — every attempt of a call through a Notification gateway that ended, a replayed answer counted as accepted | C-30 |

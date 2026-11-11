@@ -176,5 +176,21 @@ func TestIntegrationFeeds(t *testing.T) {
 			e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked'`) != 1 {
 			t.Errorf("after revoking: %+v, %v", f, err)
 		}
+		third, err := feeds.Issue(ctx, by, petr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := feeds.RevokeOfUser(ctx, by, petr.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := feeds.Lookup(ctx, token(third)); !errors.Is(err, schedules.ErrFeedNotFound) {
+			t.Errorf("a token revoked by an Admin: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked' AND details->>'reason' = 'revoked_by_admin'`); n != 1 {
+			t.Errorf("revoked_by_admin entries = %d", n)
+		}
+		if err := feeds.RevokeOfUser(ctx, by, "SR000000000000"); !errors.Is(err, schedules.ErrFeedUserNotFound) {
+			t.Errorf("an unknown User: %v", err)
+		}
 	})
 }

@@ -93,6 +93,18 @@ func (s *fakeFeedStore) GetIcalFeed(_ context.Context, arg dbgen.GetIcalFeedPara
 	return f.issued, nil
 }
 
+func (s *fakeFeedStore) GetFeedUser(_ context.Context, arg dbgen.GetFeedUserParams) (dbgen.GetFeedUserRow, error) {
+	if err := s.err("GetFeedUser"); err != nil {
+		return dbgen.GetFeedUserRow{}, err
+	}
+	for _, u := range s.users {
+		if u.PublicID == arg.PublicID && u.Status != "deleted" && arg.OrgID == orgID {
+			return dbgen.GetFeedUserRow{ID: u.ID, PublicID: u.PublicID}, nil
+		}
+	}
+	return dbgen.GetFeedUserRow{}, pgx.ErrNoRows
+}
+
 func (s *fakeFeedStore) DeleteIcalFeed(_ context.Context, arg dbgen.DeleteIcalFeedParams) (int64, error) {
 	if err := s.err("DeleteIcalFeed"); err != nil {
 		return 0, err
@@ -343,6 +355,48 @@ func TestRemoveUserFeed(t *testing.T) {
 	if len(store.feeds) != 0 || len(store.audit) != 2 || store.audit[1].Action != ActionFeedRevoked ||
 		string(store.audit[1].Details) != `{"reason":"user_deleted"}` || store.audit[1].ActorUserID.Int64 != ann.ID {
 		t.Errorf("feeds %v, audit %+v", store.feeds, store.audit)
+	}
+}
+
+// TestRevokeOfUser is the Admin's revoke of the feed of a User: it stops the link at once, records ical_feed.revoked
+// with the reason revoked_by_admin by the Admin, does nothing for a User without a feed, and refuses an unknown or
+// malformed id; a failure of the lookup or the delete leaves the feed.
+func TestRevokeOfUser(t *testing.T) {
+	ctx := t.Context()
+	feeds, _, store, _ := newFeeds(t)
+	issued, err := feeds.Issue(ctx, asPetr, feedOfPetr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := tokenOf(t, issued)
+	if err := feeds.RevokeOfUser(ctx, admin, petr.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := feeds.Lookup(ctx, token); !errors.Is(err, ErrFeedNotFound) {
+		t.Errorf("the revoked token: %v", err)
+	}
+	if err := feeds.RevokeOfUser(ctx, admin, petr.PublicID); err != nil {
+		t.Errorf("without a feed: %v", err)
+	}
+	last := store.audit[len(store.audit)-1]
+	if len(store.audit) != 2 || last.Action != ActionFeedRevoked || string(last.Details) != `{"reason":"revoked_by_admin"}` ||
+		last.ActorUserID.Int64 != ann.ID || last.ResourcePublicID.String != petr.PublicID ||
+		bytes.Contains(last.Details, []byte(tokens.PrefixIcal)) {
+		t.Errorf("audit %+v", store.audit)
+	}
+	for _, id := range []string{"garbage", "SR000000000000"} {
+		if err := feeds.RevokeOfUser(ctx, admin, id); !errors.Is(err, ErrFeedUserNotFound) {
+			t.Errorf("%q: %v", id, err)
+		}
+	}
+	if _, err := feeds.Issue(ctx, asPetr, feedOfPetr); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"GetFeedUser", "DeleteIcalFeed", "InsertAuditEntry"} {
+		store.fail = map[string]error{name: errBoom}
+		if err := feeds.RevokeOfUser(ctx, admin, petr.PublicID); !errors.Is(err, errBoom) || len(store.feeds) != 1 {
+			t.Errorf("%s: %v, %d feeds", name, err, len(store.feeds))
+		}
 	}
 }
 

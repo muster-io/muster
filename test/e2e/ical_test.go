@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -214,6 +215,46 @@ func TestIcalFeed(t *testing.T) {
 			t.Errorf("%s = %d %s", link, a.status, a.body)
 		}
 	}
+
+	// An Admin revokes a User's feed (users:write): the link answers 404 at once, the revoke is recorded with its
+	// reason, a Responder is refused with 403 and the feed stays, and the User issues a new link afterwards; the
+	// counter of fetches moves by outcome.
+	count := func(outcome string) int {
+		n, _ := strconv.Atoi(r.Metric(t, `muster_ical_feed_requests_total{outcome="`+outcome+`"}`))
+		return n
+	}
+	served, notFound := count("served"), count("not_found")
+	url4 := issue()
+	if a := feed(url4); a.status != http.StatusOK {
+		t.Fatalf("the feed before the revoke = %d", a.status)
+	}
+	if a := o.do(http.MethodDelete, "/api/v1/users/"+petr+"/ical-feed", ""); a.status != http.StatusForbidden {
+		t.Errorf("a Responder revokes = %d %s", a.status, a.body)
+	}
+	if a := feed(url4); a.status != http.StatusOK {
+		t.Errorf("the feed after a refused revoke = %d", a.status)
+	}
+	if a := api.do(http.MethodDelete, "/api/v1/users/"+petr+"/ical-feed", ""); a.status != http.StatusNoContent {
+		t.Fatalf("an Admin revokes = %d %s", a.status, a.body)
+	}
+	if a := feed(url4); a.status != http.StatusNotFound {
+		t.Errorf("the feed after the Admin's revoke = %d", a.status)
+	}
+	if got := h.count(t, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked' AND
+		details->>'reason' = 'revoked_by_admin' AND resource_public_id = '`+petr+`'`); got != 1 {
+		t.Errorf("%d revoked_by_admin entries", got)
+	}
+	if a := feed(issue()); a.status != http.StatusOK {
+		t.Errorf("a new link after the revoke = %d", a.status)
+	}
+	if gotServed, gotNotFound := count("served")-served, count("not_found")-notFound; gotServed != 3 ||
+		gotNotFound != 1 {
+		t.Errorf("served %d, not_found %d, want 3 and 1", gotServed, gotNotFound)
+	}
+	if a := api.do(http.MethodDelete, "/api/v1/users/SR000000000000/ical-feed", ""); a.status != http.StatusNotFound {
+		t.Errorf("an unknown User = %d %s", a.status, a.body)
+	}
+	hp.json(http.MethodDelete, "/api/v1/me/ical-feed", "", http.StatusNoContent)
 
 	// C-27.AC-7: a disabled User's link answers 404 and works again once they are enabled; deleting them deletes it.
 	url3 := issue()

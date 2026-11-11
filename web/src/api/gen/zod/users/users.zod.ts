@@ -186,6 +186,19 @@ export const DeleteUserHeader = zod.object({
 export const DeleteUserResponse = zod.void()
 
 /**
+ * Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+ * @summary Revoke a user's iCal feed
+ */
+export const revokeUserIcalFeedPathUserIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const RevokeUserIcalFeedParams = zod.object({
+  "user_id": zod.string().regex(revokeUserIcalFeedPathUserIdRegExp).describe('User `public_id`.')
+})
+
+export const RevokeUserIcalFeedResponse = zod.void()
+
+/**
  * Ends the user's sessions; tokens stop working until the user is enabled again. Every acknowledged Alert Group the user owns becomes firing without an Owner, with an `unacknowledged` Timeline entry by the system and the reason `owner_disabled`; enabling the user again gives no acknowledgement back. The last active Admin cannot be disabled (`409` `last_admin`).
  * @summary Disable a user
  */

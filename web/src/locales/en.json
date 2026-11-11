@@ -3134,9 +3134,12 @@
       "deleteTitle": "Delete {{name}}?",
       "disable": "Disable",
       "enable": "Enable",
+      "icalFeedRevoked": "The iCal feed link no longer works.",
       "newSetupLink": "New password setup link",
       "resetTotp": "Reset TOTP",
       "resetTotpConfirm": "{{name}} loses TOTP and sets it up again at the next sign-in if the policy requires it.",
+      "revokeIcalFeed": "Revoke iCal feed",
+      "revokeIcalFeedConfirm": "The personal iCal feed link of {{name}} stops working at once, for example after it leaked. {{name}} can issue a new one from the profile.",
       "totpReset": "TOTP was reset."
     },
     "create": {

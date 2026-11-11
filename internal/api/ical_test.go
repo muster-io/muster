@@ -16,6 +16,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/metrics"
 	"github.com/muster-io/muster/internal/schedules"
 )
 
@@ -36,6 +37,8 @@ type fakeIcalFeeds struct {
 	err     error
 	// issueErr answers Issue.
 	issueErr error
+	// revokeErr answers RevokeOfUser.
+	revokeErr error
 }
 
 func (f *fakeIcalFeeds) Get(_ context.Context, userID int64) (schedules.Feed, error) {
@@ -58,6 +61,15 @@ func (f *fakeIcalFeeds) Revoke(_ context.Context, r schedules.Requester, u sched
 	f.by, f.users = append(f.by, r), append(f.users, u)
 	f.revoked++
 	f.issued = nil
+	return nil
+}
+
+func (f *fakeIcalFeeds) RevokeOfUser(_ context.Context, r schedules.Requester, userPublicID string) error {
+	f.by, f.users = append(f.by, r), append(f.users, schedules.FeedUser{PublicID: userPublicID})
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
+	f.revoked++
 	return nil
 }
 
@@ -251,6 +263,69 @@ func TestIcalHandler(t *testing.T) {
 	for _, l := range f.looked {
 		if strings.Contains(log.String(), l) {
 			t.Errorf("a log line carries %q", l)
+		}
+	}
+}
+
+// TestRevokeUserIcalFeed is the Admin's revoke of a User's iCal feed: revokeUserIcalFeed answers 204 with users:write,
+// by session or by token, as the actor with its Transport; a Viewer, a token without users:write and a missing CSRF
+// token get 403 and never reach the feeds; an unknown User is 404.
+func TestRevokeUserIcalFeed(t *testing.T) {
+	x, _, _, _ := newTokensAPI(t)
+	f := &fakeIcalFeeds{}
+	x.srv.icalFeeds = f
+	const path = "/api/v1/users/SRBBBBBBBBBBBB/ical-feed"
+	if a := x.mutate(t, adminCookie, http.MethodDelete, path, ""); a.status != http.StatusNoContent || f.revoked != 1 ||
+		f.users[0].PublicID != "SRBBBBBBBBBBBB" || f.by[0].Transport != audit.TransportUI {
+		t.Fatalf("by the session = %d %s %+v", a.status, a.body, f.by)
+	}
+	if a := x.call(t, http.MethodDelete, path, "", bearer(fullToken)...); a.status != http.StatusNoContent ||
+		f.revoked != 2 || f.by[1].Transport != audit.TransportAPI || f.by[1].Actor.TokenName != "full" {
+		t.Errorf("by a token = %d %s %+v", a.status, a.body, f.by[1])
+	}
+	calls := len(f.by)
+	if a := x.mutate(t, viewerCookie, http.MethodDelete, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("a Viewer = %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodDelete, path, "", bearer(readOnlyToken)...); a.status != http.StatusForbidden {
+		t.Errorf("a token without users:write = %d %s", a.status, a.body)
+	}
+	if a := x.call(t, http.MethodDelete, path, "", "Cookie", adminCookie); a.status != http.StatusForbidden ||
+		a.code(t) != codeCSRFInvalid {
+		t.Errorf("without the CSRF token = %d %s", a.status, a.body)
+	}
+	if len(f.by) != calls {
+		t.Errorf("a refused request reached the feeds: %+v", f.by[calls:])
+	}
+	f.revokeErr = schedules.ErrFeedUserNotFound
+	if a := x.mutate(t, adminCookie, http.MethodDelete, path, ""); a.status != http.StatusNotFound {
+		t.Errorf("an unknown User = %d %s", a.status, a.body)
+	}
+}
+
+// TestIcalFeedMetric is the counter of the fetches of the feeds: served for a calendar, not_found for a token that
+// names no feed, failed for a failure, and nothing for a refused method; it has no label for the token or the User.
+func TestIcalFeedMetric(t *testing.T) {
+	f := &fakeIcalFeeds{}
+	h := NewIcalHandler(f, logging.New(&bytes.Buffer{}, logging.LevelInfo))
+	count := func(outcome string) uint64 { return metrics.IcalFeedRequests.With(outcome).Get() }
+	before := map[string]uint64{}
+	for _, o := range metrics.IcalFeedOutcomes {
+		before[o] = count(o)
+	}
+	serve := func(method, path string) {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), method, path, nil))
+	}
+	serve(http.MethodGet, "/ical/"+icalToken+".ics")
+	serve(http.MethodHead, "/ical/"+icalToken+".ics")
+	serve(http.MethodGet, "/ical/"+disabledToken+".ics")
+	serve(http.MethodGet, "/ical/garbage.ics")
+	serve(http.MethodPost, "/ical/"+icalToken+".ics")
+	f.err = errors.New("the database is unavailable")
+	serve(http.MethodGet, "/ical/"+icalToken+".ics")
+	for outcome, want := range map[string]uint64{"served": 2, "not_found": 2, "failed": 1} {
+		if got := count(outcome) - before[outcome]; got != want {
+			t.Errorf("%s = %d, want %d", outcome, got, want)
 		}
 	}
 }
