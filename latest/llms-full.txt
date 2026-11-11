@@ -1125,14 +1125,14 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       only: a 0.1 replica, or one of a development image without it, reads and writes nothing of either, and an
       Organization it creates gets the default rules.
     - Migration 0038 marks the edits of open Root messages that a change of configuration alone made — a new button
-      set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them after
-      the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the same
-      urgency; no data is migrated, and a
-      re-render still pending at the upgrade keeps its place. It is expand only: a 0.1 replica, or one of a development
-      image without it, claims in its own order and never writes the mark, so an edit, a final edit or a republication
-      it queues for a Root message whose re-render a 0.2.0 replica queued — still pending, or already delivered by the
-      older replica — waits behind the other pending deliveries of its urgency until it is delivered; a delivery by a
-      0.2.0 replica clears the mark.
+      set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them
+      after the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the
+      same urgency, and those of Alert Groups that are not Urgent also after the Thread replies and the events of
+      outgoing webhooks; no data is migrated, and a re-render still pending at the upgrade keeps its place. It is expand
+      only: a 0.1 replica, or one of a development image without it, claims in its own order and never writes the mark,
+      so an edit, a final edit or a republication it queues for a Root message whose re-render a 0.2.0 replica queued
+      — still pending, or already delivered by the older replica — waits behind the work that goes before
+      configuration edits of its urgency until it is delivered; a delivery by a 0.2.0 replica clears the mark.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -2023,10 +2023,16 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 [key labels and Alerts](https://muster-io.github.io/muster/latest/configure/messages-and-templates.md#the-default-message): each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow. They never hold up the Root messages of new Alert Groups
-or the edits of Root messages that Alerts and Commands make, of the same urgency: a Destination sends those first, for
-as long as they use up its rate limit — Alert Groups that keep flapping, for example — and these edits with the rest;
-none is dropped. Thread replies wait behind these edits while they are due.
+many open Alert Groups, as the messengers' rate limits allow. A Destination sends the edits of Urgent Alert Groups right
+after their Root messages and the edits that Alerts and Commands make to them, and before anything about the other Alert
+Groups, so the Root message of an Urgent Alert Group waits for work that is not Urgent at most one batch of it, about
+ten calls; Thread replies, Urgent or not, come after the Root messages of both. The edits of the other Alert Groups come
+last: they never hold up the Root messages of new Alert Groups, the edits of Root messages that Alerts and Commands
+make, the Thread replies, such as the one about new Alerts, or the events of outgoing webhooks. A Destination sends
+those first, for as long as they use up its rate limit, and these edits with the rest; none is dropped. Alert Groups
+that keep flapping can hold them up for a long time: a Telegram chat takes 10 calls a minute, and an Alert Group that
+resolves and opens again takes up to four of them, a Root message edit and a Thread reply each time, so about three such
+Alert Groups a minute leave nothing for these edits until they calm down.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.
@@ -10742,10 +10748,11 @@ Route. It follows the Alerts as they fire and resolve, so an Alert Group may bec
 The order of the delivery queue
 :   The delivery queue of a Destination takes Urgent Alert Groups first. They never pass the rate limit of the
     Destination: an Urgent Alert Group waits for its place within the limit like any other, only before the rest.
-    Among the Urgent ones and among the rest, the edits of Root messages that only a change of configuration made, such
-    as a new button set, come last: after the Root messages of new Alert Groups and the edits of Root messages that
-    Alerts and Commands make, for as long as those use up the rate limit, and before the Thread replies
-    ([Organization](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling)).
+    The edits of Root messages that only a change of configuration made, such as a new button set, come after the other
+    work of their urgency: those of Urgent Alert Groups right after the Root messages of Urgent Alert Groups and the
+    edits that Alerts and Commands make to them, and before anything that is not Urgent; those of the other Alert Groups
+    last, after the Root messages, the edits, the Thread replies and the events of outgoing webhooks of the other Alert
+    Groups, for as long as those use up the rate limit ([Organization](https://muster-io.github.io/muster/latest/configure/organization.md#alert-handling)).
     After an outage of a Destination, the Alert Groups that were not published are published Urgent first
     ([Broken Destinations](https://muster-io.github.io/muster/latest/concepts/broken-destinations.md#what-is-sent-after-recovery)).
 
