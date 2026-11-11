@@ -130,7 +130,7 @@ func (f *fakeDB) ClaimDueWebhookEvents(_ context.Context, arg dbgen.ClaimDueWebh
 	for _, e := range f.webhookEvents {
 		ds := f.dests[e.dest]
 		if f.head(e) && !e.next.After(arg.Due) && (e.owner == "" || !e.until.After(arg.Now)) &&
-			ds.health == "healthy" && !ds.deleted {
+			ds.health == "healthy" && !ds.deleted && !slices.Contains(arg.SkipDestinations, e.dest) {
 			due = append(due, e)
 		}
 	}
