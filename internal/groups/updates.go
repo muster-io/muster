@@ -36,8 +36,11 @@ import (
 // label (C-25.FR-13), which teams and organization write, and a changed Severity label, Team label, Instance labels,
 // time zone, start of the working day or first day of the week of the Organization, or a renamed Team, whose values the
 // Root messages show (C-29.FR-1 to FR-3), which organization and teams write, and the changed Destination entries of a
-// Team, its deletion included (C-26.FR-6, C-25.FR-10), which teams writes; and OpenGroupUpdatesChannel, the
-// LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
+// Team, its deletion included (C-26.FR-6, C-25.FR-10), which teams writes; a changed language, Snooze durations or
+// root_message or line template of a Route, which its Root messages show (C-12.FR-2, FR-3, C-10.FR-6), which routing
+// writes, and a created, changed or deleted Link rule or Lookup table, from which the links of every Root message are
+// computed (C-12.FR-9), which links writes; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the
+// workers of every replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity        = "route_minimum_severity"
 	KindRouteMessageLabels          = "route_message_labels"
@@ -47,13 +50,16 @@ const (
 	KindOrganizationMessageSettings = "organization_message_settings"
 	KindTeamName                    = "team_name"
 	KindTeamDestinations            = "team_destinations"
+	KindRouteMessageSettings        = "route_message_settings"
+	KindOrganizationLinks           = "organization_links"
 	OpenGroupUpdatesChannel         = "muster_open_group_updates"
 )
 
 // updateKinds are the kinds of open_group_updates rows this version handles: a replica claims only these, so that a row
 // of a kind a later version adds waits for a replica that knows it.
 var updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
-	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindTeamDestinations}
+	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindTeamDestinations,
+	KindRouteMessageSettings, KindOrganizationLinks}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -82,6 +88,7 @@ type updateQueries interface {
 	ListFiringLevels(ctx context.Context, arg dbgen.ListFiringLevelsParams) ([]dbgen.ListFiringLevelsRow, error)
 	ListEvaluatedGroupsAfter(ctx context.Context, arg dbgen.ListEvaluatedGroupsAfterParams) ([]int64, error)
 	ListOpenGroupsOfTeamAfter(ctx context.Context, arg dbgen.ListOpenGroupsOfTeamAfterParams) ([]int64, error)
+	ListOpenGroupsAfter(ctx context.Context, arg dbgen.ListOpenGroupsAfterParams) ([]int64, error)
 	LockTeamEvaluation(ctx context.Context, arg dbgen.LockTeamEvaluationParams) error
 	GetTeamsStamp(ctx context.Context, orgID int64) (dbgen.GetTeamsStampRow, error)
 	AddAlertTeams(ctx context.Context, arg dbgen.AddAlertTeamsParams) error
@@ -203,13 +210,14 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 
 // rerender runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids, locked
 // in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
-// (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), or of what else the Root messages show
-// (evaluateAndRerender, KindTeamName): delivery edits, Quietly, each Root message whose Desired state the change
-// changed and leaves the others, whose hashes are unchanged, so that a second run changes nothing. The Alert Groups
-// themselves do not change, so nothing is saved and no live-update hint is sent. Only when the re-render changed a
-// Desired state of an Alert Group is a Route template that failed recorded, as the dispatcher records it, with the
-// Alert Group's live-update hint, so that a second run, which changes no Desired state, records nothing. It returns
-// how many Alert Groups had a Desired state changed; after collects what runs once the transaction committed.
+// (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), language, Snooze durations or templates, of the Link
+// rules or Lookup tables, or of what else the Root messages show (evaluateAndRerender, KindTeamName): delivery edits,
+// Quietly, each Root message whose Desired state the change changed and leaves the others, whose hashes are unchanged,
+// so that a second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no
+// live-update hint is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that
+// failed recorded, as the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which
+// changes no Desired state, records nothing. It returns how many Alert Groups had a Desired state changed; after
+// collects what runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	changed, err := s.rerenderIDs(ctx, q, ids, rerendering{}, after)
 	return len(changed), err
@@ -447,7 +455,7 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 			if out.changed, err = s.applyMinimumSeverity(ctx, q, row.RouteID.Int64, ids, &after); err != nil {
 				return err
 			}
-		case KindRouteMessageLabels:
+		case KindRouteMessageLabels, KindRouteMessageSettings:
 			if ids, err = q.ListOpenGroupsOfRouteAfter(ctx, dbgen.ListOpenGroupsOfRouteAfterParams{OrgID: s.orgID,
 				RouteID: row.RouteID.Int64, AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
 				return fmt.Errorf("list the open alert groups of route %d: %w", row.RouteID.Int64, err)
@@ -469,6 +477,14 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 				dbgen.ListOpenGroupsFollowingOrganizationAfterParams{OrgID: s.orgID, AfterID: row.AfterAlertGroupID,
 					Lim: lim}); err != nil {
 				return fmt.Errorf("list the open alert groups that follow the organization's buttons: %w", err)
+			}
+			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
+				return err
+			}
+		case KindOrganizationLinks:
+			if ids, err = q.ListOpenGroupsAfter(ctx, dbgen.ListOpenGroupsAfterParams{OrgID: s.orgID,
+				AfterID: row.AfterAlertGroupID, Lim: lim}); err != nil {
+				return fmt.Errorf("list the open alert groups: %w", err)
 			}
 			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
 				return err
@@ -547,11 +563,13 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 }
 
 // evaluationBarrier reports whether the batches of a kind wait for the Snapshots in flight before they list their
-// Alert Groups (updateBatch): those whose change a Snapshot that read the Teams, the Organization's settings or the
-// names of the Teams before the save could miss — the evaluation of the Teams, the Organization's message settings and
-// the name of a Team.
+// Alert Groups (updateBatch): those whose change a Snapshot that read the Teams, the Organization's settings, the
+// names of the Teams or the Link rules and Lookup tables before the save could miss — the evaluation of the Teams, the
+// Organization's message settings, the name of a Team and the links. The kinds of a Route need none: grouping holds
+// the Route FOR SHARE until the Snapshot commits, and its update takes it FOR UPDATE.
 func evaluationBarrier(kind string) bool {
-	return kind == KindTeamEvaluation || kind == KindOrganizationMessageSettings || kind == KindTeamName
+	return kind == KindTeamEvaluation || kind == KindOrganizationMessageSettings || kind == KindTeamName ||
+		kind == KindOrganizationLinks
 }
 
 // nextUpdate is how long until a row can be claimed, at most limit: none when one is free, else until the end of the

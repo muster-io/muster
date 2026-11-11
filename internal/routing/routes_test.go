@@ -2053,6 +2053,64 @@ func TestRenameRerenders(t *testing.T) {
 	}
 }
 
+// TestMessageSettingsRerender is C-12.FR-2, FR-3 and C-10.FR-6 for the open Root messages: a change of a Route's
+// language, Snooze durations, root_message template or line template, a reset to the built-in one included, on a Route
+// with open Alert Groups writes one row of route_message_settings at the business time of the change, whose run
+// re-renders them; a change of the ack_timeout_notice template, which renders only a Thread reply, a second save of the
+// same values and a change on a Route without open Alert Groups write none, and a save that also changes the labels or
+// the name writes only the row of route_message_labels, which renders with every setting.
+func TestMessageSettingsRerender(t *testing.T) {
+	svc, store, c := newService(t)
+	r, err := svc.Create(t.Context(), by, input("infra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := input("infra")
+	in.Policy.Language = LanguageRussian
+	if _, err := svc.Update(t.Context(), by, r.PublicID, nil, in); err != nil || len(store.updates) != 0 {
+		t.Errorf("a new language without open alert groups: %v, rows %+v", err, store.updates)
+	}
+	store.open[r.ID] = 2
+	for _, tc := range []struct {
+		name   string
+		change func(in *Input)
+		rows   int
+	}{
+		{"language", func(in *Input) { in.Policy.Language = LanguageEnglish }, 1},
+		{"the same language", func(in *Input) { in.Policy.Language = LanguageEnglish }, 0},
+		{"snooze durations", func(in *Input) { in.Policy.SnoozeDurationsSeconds = []int64{3600, 7200} }, 1},
+		{"the same snooze durations", func(in *Input) { in.Policy.SnoozeDurationsSeconds = []int64{3600, 7200} }, 0},
+		{"root_message", func(in *Input) { in.Policy.Templates.RootMessage = ptr("{{ .Title }}") }, 1},
+		{"line", func(in *Input) { in.Policy.Templates.Line = ptr("{{ .Labels.pod }}") }, 1},
+		{"the same templates", func(*Input) {}, 0},
+		{"root_message reset", func(in *Input) { in.Policy.Templates.RootMessage = nil }, 1},
+		{"ack_timeout_notice", func(in *Input) { in.Policy.Templates.AckTimeoutNotice = ptr("late") }, 0},
+		{"the name with a language", func(in *Input) { in.Name, in.Policy.Language = "Infra", LanguageRussian }, 1},
+	} {
+		c.Advance(time.Minute)
+		before := len(store.updates)
+		tc.change(&in)
+		if _, err := svc.Update(t.Context(), by, r.PublicID, nil, in); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := len(store.updates) - before; got != tc.rows {
+			t.Errorf("%s: %d rows, want %d", tc.name, got, tc.rows)
+			continue
+		}
+		if tc.rows == 0 {
+			continue
+		}
+		kind := KindMessageSettings
+		if in.Name != "infra" {
+			kind = KindMessageLabels
+		}
+		if u := store.updates[len(store.updates)-1]; u != (dbgen.InsertOpenGroupUpdateParams{OrgID: orgID, Kind: kind,
+			RouteID: pgtype.Int8{Int64: r.ID, Valid: true}, RequestedAt: c.Now().UTC()}) {
+			t.Errorf("%s: the row %+v", tc.name, u)
+		}
+	}
+}
+
 // TestRouteDestinationEntries is C-26.FR-1, FR-2 and C-08.FR-1 revised: a Route takes destination_entries with their
 // Severity conditions, any by default; destination_ids alone keeps the stored condition of each Destination it keeps
 // and gives a new one any; both together take the entries; neither keeps the stored entries. A changed condition is

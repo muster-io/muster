@@ -341,6 +341,9 @@ func (s *Service) CreateRule(ctx context.Context, r Requester, in RuleInput) (Ru
 		if created, err = s.getRule(ctx, q, id); err != nil {
 			return err
 		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionRuleCreated, Resource: ruleResource(created), Diff: audit.Created(viewOfRule(created)),
 			SourceAddress: r.Address})
@@ -419,6 +422,9 @@ func (s *Service) UpdateRule(ctx context.Context, r Requester, publicID string, 
 		if updated, err = s.getRule(ctx, q, before.PublicID); err != nil {
 			return err
 		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionRuleUpdated, Resource: ruleResource(updated), Diff: changes, SourceAddress: r.Address})
 	})
@@ -444,6 +450,9 @@ func (s *Service) DeleteRule(ctx context.Context, r Requester, publicID string, 
 		}
 		if err := q.DeleteLinkRule(ctx, dbgen.DeleteLinkRuleParams{OrgID: s.orgID, ID: before.ID}); err != nil {
 			return fmt.Errorf("delete the link rule %s: %w", before.PublicID, err)
+		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionRuleDeleted, Resource: ruleResource(before),

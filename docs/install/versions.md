@@ -174,6 +174,10 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       so an edit, a final edit or a republication it queues for a Root message whose re-render a 0.2.0 replica queued
       — still pending, or already delivered by the older replica — waits behind the work that goes before
       configuration edits of its urgency until it is delivered; a delivery by a 0.2.0 replica clears the mark.
+    - Migration 0039 lets a change of a Route's language, Snooze durations, Root message template or line template,
+      and a change of a Link rule or a Lookup table, reach the open Alert Groups: their Root messages are edited once,
+      Quietly, to show the new texts, Snooze buttons, body or links, instead of at each Alert Group's next change; no
+      data is migrated.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -242,9 +246,11 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     messages after a change of the severity label, the Team label, the Instance labels, the time zone, the start of the
     working day or the first day of the week, or a rename of a Team, and neither claims one: such a change saved on one
     of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
-    this version. A 0.1 replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert
-    Groups it changes go to every Destination of their Route, whatever its condition, and not to the Destinations of
-    their Teams, and it records no `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
+    this version. The same holds for a change of a Route's language, Snooze durations or templates, or of a Link rule
+    or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039. A 0.1 replica
+    ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
+    Destination of their Route, whatever its condition, and not to the Destinations of their Teams, and it records no
+    `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
     to the Teams from the label" after every replica runs 0.2.0.
 
     **Role mapping entries with `*`.** From 0.2.0 an entry of the Role mapping that ends in `/*`, which 0.1 matched as
@@ -556,6 +562,33 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     role as Muster, run `UPDATE schema_migrations SET version = 37, dirty = false;` and start the 0.2.0 replica again,
     or run `muster migrate`. Going back below 0038 loses no delivery: the pending edits of a re-render are sent again
     in the order of urgency and due time alone.
+
+    Migration 0039 lets a change of a Route's language, Snooze durations or templates, or of a Link rule or a Lookup
+    table, re-render the open Root messages in three transactions: the first adds the new CHECKs of
+    `open_group_updates`, the second validates them, the third drops the kind CHECK of 0032. A failure leaves the schema
+    recorded as dirty at version 39. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v7_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 38, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v7_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_route_settings_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v6_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0039 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
+    Alert Group's next change; a replica of a version without 0039 neither writes nor claims them.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

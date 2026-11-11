@@ -59,11 +59,13 @@ const (
 )
 
 // KindMinimumSeverity is the kind of the open_group_updates row that a changed Minimum severity writes (C-26.FR-9),
-// KindMessageLabels that of a changed "Labels in the message" (C-29.FR-2), and OpenGroupUpdatesChannel the
-// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
+// KindMessageLabels that of a changed "Labels in the message" or name (C-29.FR-1, FR-2), KindMessageSettings that of a
+// changed language, Snooze durations, root_message or line template (C-12.FR-2, FR-3, C-10.FR-6), and
+// OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
 const (
 	KindMinimumSeverity     = "route_minimum_severity"
 	KindMessageLabels       = "route_message_labels"
+	KindMessageSettings     = "route_message_settings"
 	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
@@ -1329,9 +1331,16 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
-		// The field Route of every open Root message names the Route, so a rename re-renders them too (C-29.FR-1).
-		if !slices.Equal(before.MessageLabels, next.MessageLabels) || before.Name != next.Name {
+		// The field Route of every open Root message names the Route, so a rename re-renders them too (C-29.FR-1). Both
+		// kinds re-render with the Route as it is when the row runs, so a save that changes the labels and a setting
+		// the Root messages show writes one row.
+		switch {
+		case !slices.Equal(before.MessageLabels, next.MessageLabels) || before.Name != next.Name:
 			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMessageLabels); err != nil {
+				return err
+			}
+		case messageSettingsChanged(before.Policy, p):
+			if err := s.requestOpenGroupUpdate(ctx, q, before, KindMessageSettings); err != nil {
 				return err
 			}
 		}
@@ -1355,10 +1364,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 	return updated, nil
 }
 
-// requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity or of its effective
-// "Labels in the message", asks the workers of internal/groups to apply it to the open Alert Groups of r (C-26.FR-9,
-// C-29.FR-2): one open_group_updates row of the kind given, when r has any, and a notification that wakes them once the
-// transaction commits. The row is requested at the business time of the change.
+// requestOpenGroupUpdate, in the transaction of the change of the Route r's Minimum severity, of its effective
+// "Labels in the message" or of another setting its Root messages show, asks the workers of internal/groups to apply it
+// to the open Alert Groups of r (C-26.FR-9, C-29.FR-2): one open_group_updates row of the kind given, when r has any,
+// and a notification that wakes them once the transaction commits. The row is requested at the business time of the
+// change.
 func (s *Service) requestOpenGroupUpdate(ctx context.Context, q Queries, r Route, kind string) error {
 	open, err := q.HasOpenAlertGroups(ctx, dbgen.HasOpenAlertGroupsParams{OrgID: s.orgID, RouteID: r.ID})
 	if err != nil {
@@ -1724,6 +1734,18 @@ func (s *Service) checkTemplates(ctx context.Context, routeID int64, p Policy, b
 		checked[t.kind] = *t.value
 	}
 	return nil
+}
+
+// messageSettingsChanged reports whether an update changes a setting of the Route that its Root messages show besides
+// its name and "Labels in the message": the language of the built-in texts (C-12.FR-3), the Snooze durations, which
+// its Snooze buttons name (C-10.FR-6), and the root_message and line templates (C-12.FR-2). The ack_timeout_notice
+// template renders only a Thread reply.
+func messageSettingsChanged(before, after Policy) bool {
+	if before.Language != after.Language || !slices.Equal(before.SnoozeDurationsSeconds, after.SnoozeDurationsSeconds) {
+		return true
+	}
+	kinds := changedTemplates(before.Templates, after.Templates)
+	return slices.Contains(kinds, TemplateRootMessage) || slices.Contains(kinds, TemplateLine)
 }
 
 // changedTemplates are the kinds of templates whose text changes from before to after, a reset included.

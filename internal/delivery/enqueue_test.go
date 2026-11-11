@@ -1380,3 +1380,69 @@ func TestTeamEvaluatedAfterFall(t *testing.T) {
 		t.Errorf("the evaluated team's destination %+v", c)
 	}
 }
+
+// TestRouteSettingsAndLinksRerenderIsQuiet is C-12.FR-2, FR-3, FR-9, C-10.FR-6 and ADR-0018 in delivery: the
+// re-render of the open Root messages after a change of a Route's language, Snooze durations or templates
+// (route_message_settings) or of the Link rules and Lookup tables (organization_links) has no lifecycle event and is
+// marked as a change of configuration. On a published Root message whose Desired state it changes, it queues one edit
+// marked configuration only, which goes out Quietly with no Mention and no new message; the same rendering again
+// changes nothing and sends nothing. On a Not delivered Publication that was never published, created Loud, it
+// publishes it Quietly, once, and never Loud.
+func TestRouteSettingsAndLinksRerenderIsQuiet(t *testing.T) {
+	for _, c := range []struct{ kind, title string }{
+		{groups.KindRouteMessageSettings + "/language", "диск заполнен"},
+		{groups.KindRouteMessageSettings + "/snooze_durations", "disk full, snooze 1h 2h"},
+		{groups.KindRouteMessageSettings + "/root_message", "disk full: custom body"},
+		{groups.KindOrganizationLinks, "disk full, Dashboard"},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			rerender := func(t *testing.T, e *env) {
+				t.Helper()
+				if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring,
+					c.title), Actor: groups.System, Configuration: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e := newEnv(t)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+			e.round(t)
+			e.rec.Reset()
+			rerender(t, e)
+			d := e.only(t)
+			if d.state != "pending" || !d.configOnly {
+				t.Fatalf("the delivery is %s, configuration only %v", d.state, d.configOnly)
+			}
+			e.round(t)
+			calls := e.rec.Calls()
+			if len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate || calls[0].Loudness != groups.Quiet ||
+				len(calls[0].Mentions) != 0 || !strings.Contains(textOf(calls[0]), c.title) {
+				t.Fatalf("calls %+v", calls)
+			}
+			if d := e.only(t); d.configOnly || d.state != "delivered" {
+				t.Errorf("after the edit: %s, configuration only %v", d.state, d.configOnly)
+			}
+			version := e.only(t).version
+			e.rec.Reset()
+			rerender(t, e)
+			e.round(t)
+			if d := e.only(t); d.version != version || d.configOnly || len(e.rec.Calls()) != 0 {
+				t.Errorf("a second run: version %d after %d, configuration only %v, calls %+v", d.version, version,
+					d.configOnly, e.rec.Calls())
+			}
+
+			e = newEnv(t)
+			e.enqueue(t, e.group(groups.StatusFiring, "disk full"), groups.System, created())
+			nd := e.only(t)
+			nd.state, nd.publishedAt = "not_delivered", nil
+			rerender(t, e)
+			if d := e.only(t); d.state != "pending" || d.loud.Bool {
+				t.Fatalf("not delivered revived %s, loud %+v", d.state, d.loud)
+			}
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || p[0].Loudness != groups.Quiet || len(p[0].Mentions) != 0 ||
+				!strings.Contains(textOf(p[0]), c.title) {
+				t.Errorf("published %+v", p)
+			}
+		})
+	}
+}

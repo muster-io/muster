@@ -25,7 +25,9 @@ func TestMain(m *testing.M) {
 
 // TestIntegrationEnsureExplore: on PostgreSQL the ensure step creates the built-in rule, gives one that still has the
 // previous built-in template the current one as a new version, once, keeps an edited template, and stops on a rule
-// that is not the built-in one and has its name.
+// that is not the built-in one and has its name. Only the rewrite of the template writes an open_group_updates row
+// organization_links, which re-renders the links of the open Root messages: the creation, a second run and an edited
+// template write none (C-12.FR-9).
 func TestIntegrationEnsureExplore(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		ctx := t.Context()
@@ -55,6 +57,16 @@ func TestIntegrationEnsureExplore(t *testing.T) {
 			}
 			return publicID, tmpl, version
 		}
+		rows := func() int64 {
+			t.Helper()
+			var n int64
+			if err := d.Pool.QueryRow(ctx, `SELECT count(*) FROM open_group_updates
+				WHERE org_id = $1 AND kind = 'organization_links' AND requested_at = $2`, org.ID, t0).Scan(
+				&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
 		set := func(tmpl string) {
 			t.Helper()
 			if _, err := d.Pool.Exec(ctx, `UPDATE link_rules SET url_template = $2 WHERE org_id = $1 AND builtin`,
@@ -79,8 +91,8 @@ func TestIntegrationEnsureExplore(t *testing.T) {
 			t.Fatal(err)
 		}
 		id, tmpl, version := read()
-		if tmpl != ExploreTemplate || version != 1 {
-			t.Fatalf("created %s version %d", tmpl, version)
+		if tmpl != ExploreTemplate || version != 1 || rows() != 0 {
+			t.Fatalf("created %s version %d, %d rows", tmpl, version, rows())
 		}
 		set(previousExploreTemplates[0])
 		for range 2 {
@@ -88,15 +100,18 @@ func TestIntegrationEnsureExplore(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if gotID, tmpl, version := read(); gotID != id || tmpl != ExploreTemplate || version != 2 {
-			t.Fatalf("upgraded %s %s version %d", gotID, tmpl, version)
+		if gotID, tmpl, version := read(); gotID != id || tmpl != ExploreTemplate || version != 2 || rows() != 1 {
+			t.Fatalf("upgraded %s %s version %d, %d rows", gotID, tmpl, version, rows())
+		}
+		if _, err := d.Pool.Exec(ctx, `DELETE FROM open_group_updates WHERE org_id = $1`, org.ID); err != nil {
+			t.Fatal(err)
 		}
 		set(previousExploreTemplates[0] + " ")
 		if err := EnsureExplore(ctx, store, org.ID, t0); err != nil {
 			t.Fatal(err)
 		}
-		if _, tmpl, version := read(); tmpl != previousExploreTemplates[0]+" " || version != 2 {
-			t.Errorf("an edited template changed: version %d", version)
+		if _, tmpl, version := read(); tmpl != previousExploreTemplates[0]+" " || version != 2 || rows() != 0 {
+			t.Errorf("an edited template changed: version %d, %d rows", version, rows())
 		}
 	})
 }

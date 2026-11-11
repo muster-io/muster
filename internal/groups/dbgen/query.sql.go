@@ -3089,6 +3089,42 @@ func (q *Queries) ListOpenGroupIDs(ctx context.Context, orgID int64) ([]int64, e
 	return items, nil
 }
 
+const listOpenGroupsAfter = `-- name: ListOpenGroupsAfter :many
+SELECT id
+FROM alert_groups
+WHERE org_id = $1 AND status <> 'resolved' AND id > $2
+ORDER BY id
+LIMIT $3
+`
+
+type ListOpenGroupsAfterParams struct {
+	OrgID   int64
+	AfterID int64
+	Lim     int32
+}
+
+// ListOpenGroupsAfter lists, by id after a cursor, a batch of the open Alert Groups of the Organization, whose links a
+// change of a Link rule or of a Lookup table re-renders.
+func (q *Queries) ListOpenGroupsAfter(ctx context.Context, arg ListOpenGroupsAfterParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listOpenGroupsAfter, arg.OrgID, arg.AfterID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenGroupsFollowingOrganizationAfter = `-- name: ListOpenGroupsFollowingOrganizationAfter :many
 SELECT g.id
 FROM alert_groups g
@@ -4812,9 +4848,10 @@ type LockTeamEvaluationParams struct {
 }
 
 // LockTeamEvaluation takes the transaction advisory lock of the evaluation of the Teams (db.TeamEvaluationLockClass,
-// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings or
-// team_name lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared for before it
-// reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created or changed.
+// keyed by the Organization) exclusively, before a batch of team_evaluation, organization_message_settings, team_name
+// or organization_links lists its Alert Groups: it waits for every Snapshot in flight, which routing takes it shared
+// for before it reads the stamp of the classification, so that the batch lists the Alert Groups those Snapshots created
+// or changed.
 func (q *Queries) LockTeamEvaluation(ctx context.Context, arg LockTeamEvaluationParams) error {
 	_, err := q.db.Exec(ctx, lockTeamEvaluation, arg.LockClass, arg.OrgID)
 	return err

@@ -20,6 +20,7 @@ import (
 	"github.com/muster-io/muster/internal/db"
 	"github.com/muster-io/muster/internal/groups/dbgen"
 	"github.com/muster-io/muster/internal/ingest"
+	"github.com/muster-io/muster/internal/links"
 	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/organization"
 	"github.com/muster-io/muster/internal/routing"
@@ -117,6 +118,10 @@ func TestUpdateNames(t *testing.T) {
 	if teams.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel || teams.KindTeamEvaluation != KindTeamEvaluation ||
 		teams.KindTeamName != KindTeamName {
 		t.Error("teams and groups name the open alert group updates differently")
+	}
+	if routing.KindMessageSettings != KindRouteMessageSettings || links.KindLinks != KindOrganizationLinks ||
+		links.OpenGroupUpdatesChannel != OpenGroupUpdatesChannel {
+		t.Error("routing, links and groups name the open alert group updates of the route settings and links differently")
 	}
 }
 
@@ -243,6 +248,21 @@ func (f *fakeDB) ListEvaluatedGroupsAfter(_ context.Context, arg dbgen.ListEvalu
 	var out []int64
 	for _, g := range f.sortedGroups() {
 		if (g.Status != "resolved" || g.GraceDeadline.Valid) && g.ID > arg.AfterID && arg.OrgID == orgID {
+			out = append(out, g.ID)
+		}
+	}
+	return out[:min(len(out), int(arg.Lim))], nil
+}
+
+func (f *fakeDB) ListOpenGroupsAfter(_ context.Context, arg dbgen.ListOpenGroupsAfterParams) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListOpenGroupsAfter"); err != nil {
+		return nil, err
+	}
+	var out []int64
+	for _, g := range f.sortedGroups() {
+		if g.Status != "resolved" && g.ID > arg.AfterID && arg.OrgID == orgID {
 			out = append(out, g.ID)
 		}
 	}
@@ -1050,54 +1070,138 @@ func TestTeamEvaluationGracePeriod(t *testing.T) {
 	}
 }
 
-// TestMessageLabelsUpdate is C-29.FR-2 and C-29.AC-4 on the worker: a row route_message_labels runs the dispatcher's
-// re-render step, without a lifecycle event, on each open Alert Group of its Route, by id in batches, and on none of
-// another Route, so that delivery edits their Root messages Quietly to show the new labels. It saves no Alert Group,
-// records no Timeline entry and sends no live-update hint; it is deleted with its last batch and logged as
+// TestMessageLabelsUpdate is C-29.FR-2 and C-29.AC-4 on the worker, and the same for a changed language, Snooze
+// durations or template of a Route (C-12.FR-2, FR-3, C-10.FR-6): a row route_message_labels or route_message_settings
+// runs the dispatcher's re-render step, without a lifecycle event, on each open Alert Group of its Route, by id in
+// batches, and on none of another Route, so that delivery edits their Root messages Quietly to show the new labels,
+// texts, buttons or body. It saves no Alert Group, records no Timeline entry, sends no live-update hint and takes no
+// lock of the evaluation, since grouping holds the Route FOR SHARE; it is deleted with its last batch and logged as
 // open_group_update_done with its Route and the number of Alert Groups whose Desired state changed, none on a second
 // run.
 func TestMessageLabelsUpdate(t *testing.T) {
-	u := newUpdates(t)
-	var rendered []int64
-	changed := true
-	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
-		if len(r.Events) != 0 || r.Actor != System || !r.Configuration {
-			t.Errorf("a re-render with events %+v as %+v, configuration %v", r.Events, r.Actor, r.Configuration)
+	for _, kind := range []string{KindRouteMessageLabels, KindRouteMessageSettings} {
+		t.Run(kind, func(t *testing.T) {
+			u := newUpdates(t)
+			var rendered []int64
+			changed := true
+			u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+				if len(r.Events) != 0 || r.Actor != System || !r.Configuration {
+					t.Errorf("a re-render with events %+v as %+v, configuration %v", r.Events, r.Actor, r.Configuration)
+				}
+				rendered = append(rendered, r.Group.ID)
+				if changed {
+					r.Changed()
+				}
+				return nil
+			})
+			entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
+			u.worker.Batch = 2
+			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: kind,
+				requested: u.clock.Now()})
+			u.round(t, u.worker)
+			if want := []int64{u.acked.ID, u.snoozed.ID, u.firing.ID}; !slices.Equal(rendered, want) {
+				t.Errorf("rendered %v, want %v", rendered, want)
+			}
+			if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
+				len(u.db.hints) != hints || u.db.calls["ListOpenGroupsOfRouteAfter"] != 2 ||
+				u.db.calls["LockTeamEvaluation"] != 0 || !strings.Contains(u.log.String(),
+				`"event":"open_group_update_done","kind":"`+kind+`","route":"RTDBAAAAAAAAAA","alert_groups":3`) {
+				t.Errorf("rows %d, entries %d, saves %d, hints %d, calls %v, log %s", len(u.db.updates),
+					len(u.db.entries)-entries, u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.db.calls, u.log)
+			}
+			rendered, changed = nil, false
+			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: kind,
+				requested: u.clock.Now()})
+			u.round(t, u.worker)
+			if len(rendered) != 3 || !strings.Contains(u.log.String(),
+				`"kind":"`+kind+`","route":"RTDBAAAAAAAAAA","alert_groups":0`) {
+				t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
+			}
+			u.db.fail["ListOpenGroupsOfRouteAfter"] = errBoom
+			u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: kind,
+				requested: u.clock.Now()})
+			u.round(t, u.worker)
+			if !strings.Contains(u.log.String(), `"event":"open_group_update_failed","kind":"`+kind+`"`) {
+				t.Errorf("a failing list: %s", u.log)
+			}
+		})
+	}
+}
+
+// TestLinksUpdate is C-12.FR-9 on the worker: a row organization_links, which a change of a Link rule or of a Lookup
+// table writes, takes the lock of the evaluation before it lists each batch, so that it sees the Alert Groups of the
+// Snapshots in flight that computed their links with the rules before the save, then runs the re-render step without a
+// lifecycle event on every open Alert Group of the Organization, by id in batches, whatever its Route, marked as a
+// change of configuration, so that delivery edits Quietly each Root message whose links changed and no other. It
+// evaluates nothing, saves no Alert Group and records no Timeline entry; a resolved Alert Group is not rendered. It is
+// deleted with its last batch and logged with the number of Alert Groups whose Desired state changed, none on a second
+// run; a failing lock, list or re-render fails the batch and leaves the row for any replica.
+func TestLinksUpdate(t *testing.T) {
+	e := newEvaluation(t)
+	var r renders
+	_, g := e.fire(t, 2, map[string]string{"alertname": "Latency", "cluster": "a"})
+	_, other := e.fire(t, 3, map[string]string{"alertname": "Disk", "cluster": "b"})
+	gone, resolved := e.fire(t, 2, map[string]string{"alertname": "Gone", "cluster": "c"})
+	e.resolve(t, gone)
+	if resolved.Status != string(StatusResolved) {
+		t.Fatalf("the alert group is %s", resolved.Status)
+	}
+	r.install(t, e.svc)
+	entries, saves, evaluated := len(e.db.entries), e.db.calls["SaveGroup"], e.db.calls["ListGroupFiringAlerts"]
+	e.worker.Batch = 1
+	// The hook runs once; it arms itself again for the next batch.
+	var listedAfter []int
+	var listed func()
+	listed = func() {
+		listedAfter = append(listedAfter, e.db.calls["LockTeamEvaluation"])
+		e.db.before["ListOpenGroupsAfter"] = listed
+	}
+	e.db.before["ListOpenGroupsAfter"] = listed
+	locks := e.db.calls["LockTeamEvaluation"]
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindOrganizationLinks,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", other.ID)}; !slices.Equal(r.got, want) {
+		t.Errorf("rendered %v, want %v", r.got, want)
+	}
+	// Three batches of one: each takes the lock before it lists.
+	if !slices.Equal(listedAfter, []int{locks + 1, locks + 2, locks + 3}) {
+		t.Errorf("listed after the locks %v, from %d", listedAfter, locks)
+	}
+	delete(e.db.before, "ListOpenGroupsAfter")
+	if len(e.db.entries) != entries || e.db.calls["SaveGroup"] != saves ||
+		e.db.calls["ListGroupFiringAlerts"] != evaluated || len(e.db.updates) != 0 ||
+		!strings.Contains(e.log.String(), `"event":"open_group_update_done","kind":"organization_links",`+
+			`"alert_groups":2`) {
+		t.Errorf("%d entries, %d saves, %d evaluations, rows %d, log %s", len(e.db.entries)-entries,
+			e.db.calls["SaveGroup"]-saves, e.db.calls["ListGroupFiringAlerts"]-evaluated, len(e.db.updates), e.log)
+	}
+
+	r.got = nil
+	e.db.updates = append(e.db.updates, &fakeUpdate{id: e.db.id(), kind: KindOrganizationLinks,
+		requested: e.clock.Now()})
+	e.round(t, e.worker)
+	if want := []string{fmt.Sprintf("%d:", g.ID), fmt.Sprintf("%d:", other.ID)}; !slices.Equal(r.got, want) ||
+		!strings.Contains(e.log.String(), `"kind":"organization_links","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, log %s", r.got, e.log)
+	}
+
+	for _, fail := range []string{"LockTeamEvaluation", "ListOpenGroupsAfter", "render"} {
+		e.log.Reset()
+		if fail == "render" {
+			r.fail = errBoom
+		} else {
+			e.db.fail[fail] = errBoom
 		}
-		rendered = append(rendered, r.Group.ID)
-		if changed {
-			r.Changed()
+		e.db.updates = []*fakeUpdate{{id: e.db.id(), kind: KindOrganizationLinks, requested: e.clock.Now()}}
+		e.round(t, e.worker)
+		if len(e.db.updates) != 1 || !strings.Contains(e.log.String(),
+			`"event":"open_group_update_failed","kind":"organization_links"`) {
+			t.Errorf("%s fails: rows %d, log %s", fail, len(e.db.updates), e.log)
 		}
-		return nil
-	})
-	entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
-	u.worker.Batch = 2
-	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
-		requested: u.clock.Now()})
-	u.round(t, u.worker)
-	if want := []int64{u.acked.ID, u.snoozed.ID, u.firing.ID}; !slices.Equal(rendered, want) {
-		t.Errorf("rendered %v, want %v", rendered, want)
-	}
-	if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
-		len(u.db.hints) != hints || u.db.calls["ListOpenGroupsOfRouteAfter"] != 2 || !strings.Contains(u.log.String(),
-		`"event":"open_group_update_done","kind":"route_message_labels","route":"RTDBAAAAAAAAAA","alert_groups":3`) {
-		t.Errorf("rows %d, entries %d, saves %d, hints %d, calls %v, log %s", len(u.db.updates),
-			len(u.db.entries)-entries, u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.db.calls, u.log)
-	}
-	rendered, changed = nil, false
-	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
-		requested: u.clock.Now()})
-	u.round(t, u.worker)
-	if len(rendered) != 3 || !strings.Contains(u.log.String(),
-		`"kind":"route_message_labels","route":"RTDBAAAAAAAAAA","alert_groups":0`) {
-		t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
-	}
-	u.db.fail["ListOpenGroupsOfRouteAfter"] = errBoom
-	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), routeID: 2, kind: KindRouteMessageLabels,
-		requested: u.clock.Now()})
-	u.round(t, u.worker)
-	if !strings.Contains(u.log.String(), `"event":"open_group_update_failed","kind":"route_message_labels"`) {
-		t.Errorf("a failing list: %s", u.log)
+		delete(e.db.fail, fail)
+		r.fail = nil
+		e.real.Advance(UpdateLease)
 	}
 }
 
@@ -1289,30 +1393,47 @@ func TestTeamNameUpdate(t *testing.T) {
 	}
 }
 
-// TestUpdateKindsOfOlderVersions is the rolling update for the kinds of 0031: a replica of a version that does not
-// know organization_message_settings and team_name — whose kinds end with team_evaluation — never claims a row of
-// them nor waits for one, and a replica of this version claims both.
+// TestUpdateKindsOfOlderVersions is the rolling update for the kinds of 0031 and 0039: a replica of a version that
+// does not know organization_message_settings and team_name — whose kinds end with team_evaluation — or one of 0032
+// that does not know route_message_settings and organization_links — whose kinds end with team_destinations — never
+// claims a row of them nor waits for one, and a replica of this version claims every one.
 func TestUpdateKindsOfOlderVersions(t *testing.T) {
-	e := newEvaluation(t)
-	known := updateKinds
-	t.Cleanup(func() { updateKinds = known })
-	updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
-		KindOrganizationButtons, KindTeamEvaluation}
-	e.db.updates = append(e.db.updates,
-		&fakeUpdate{id: e.db.id(), kind: KindOrganizationMessageSettings, requested: e.clock.Now()},
-		&fakeUpdate{id: e.db.id(), kind: KindTeamName, teamID: search, requested: e.clock.Now()})
-	if _, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease); ok || err != nil {
-		t.Errorf("an older replica claimed a row of a newer kind: %v, %v", ok, err)
-	}
-	if next, err := e.svc.nextUpdate(t.Context(), e.worker.Lease, time.Hour); next != time.Hour || err != nil {
-		t.Errorf("an older replica waits %v for a row of a newer kind, %v", next, err)
-	}
-	updateKinds = known
-	for _, kind := range []string{KindOrganizationMessageSettings, KindTeamName} {
-		u, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease)
-		if !ok || err != nil || u.kind != kind {
-			t.Errorf("claimed %+v, %v, %v; want %s", u, ok, err, kind)
-		}
+	for _, c := range []struct {
+		name  string
+		known []string
+		rows  []*fakeUpdate
+	}{
+		{"0031", []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
+			KindOrganizationButtons, KindTeamEvaluation}, []*fakeUpdate{
+			{kind: KindOrganizationMessageSettings}, {kind: KindTeamName, teamID: search}}},
+		{"0039", []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
+			KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName,
+			KindTeamDestinations}, []*fakeUpdate{{kind: KindRouteMessageSettings, routeID: 2},
+			{kind: KindOrganizationLinks}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEvaluation(t)
+			known := updateKinds
+			t.Cleanup(func() { updateKinds = known })
+			updateKinds = c.known
+			for _, r := range c.rows {
+				r.id, r.requested = e.db.id(), e.clock.Now()
+				e.db.updates = append(e.db.updates, r)
+			}
+			if _, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease); ok || err != nil {
+				t.Errorf("an older replica claimed a row of a newer kind: %v, %v", ok, err)
+			}
+			if next, err := e.svc.nextUpdate(t.Context(), e.worker.Lease, time.Hour); next != time.Hour || err != nil {
+				t.Errorf("an older replica waits %v for a row of a newer kind, %v", next, err)
+			}
+			updateKinds = known
+			for _, r := range c.rows {
+				u, ok, err := e.svc.claimUpdate(t.Context(), e.worker.Lease)
+				if !ok || err != nil || u.kind != r.kind {
+					t.Errorf("claimed %+v, %v, %v; want %s", u, ok, err, r.kind)
+				}
+			}
+		})
 	}
 }
 

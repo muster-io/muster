@@ -213,10 +213,29 @@ func TestExploreRuleUpgrade(t *testing.T) {
 		r.Name != ExploreName || len(r.matchers) != 1 {
 		t.Fatalf("upgraded %+v", f.rules)
 	}
+	// The rewritten template may change the links of the open Root messages: the first run requests their re-render
+	// once, in its transaction; the second, which changes nothing, requests nothing (C-12.FR-9).
+	if len(f.updates) != 1 || f.updates[0] != (dbgen.InsertLinksUpdateParams{OrgID: orgID, RequestedAt: t0}) ||
+		!slices.Equal(f.notified, []string{OpenGroupUpdatesChannel}) {
+		t.Errorf("the upgrade requested %+v, woke %v", f.updates, f.notified)
+	}
 	r.UrlTemplate = previousExploreTemplates[0] + " "
 	if err := EnsureExplore(ctx, f, orgID, t0); err != nil || r.UrlTemplate != previousExploreTemplates[0]+" " ||
-		r.Version != 4 {
-		t.Errorf("an edited template is kept: %v %+v", err, r)
+		r.Version != 4 || len(f.updates) != 1 {
+		t.Errorf("an edited template is kept: %v %+v, requests %+v", err, r, f.updates)
+	}
+	// A failing request fails the step and leaves the template to the next start.
+	for _, name := range []string{"InsertLinksUpdate", "NotifyOpenGroupUpdates"} {
+		g := newFake()
+		old := dbgenRule(1, "KRAAAAAAAAAAAA", ExploreName)
+		old.Builtin, old.UrlTemplate = true, previousExploreTemplates[0]
+		g.rules = []*ruleRow{{GetLinkRuleRow: old}}
+		g.fail[name] = errors.New("boom")
+		err := EnsureExplore(ctx, g, orgID, t0)
+		if err == nil || g.rules[0].UrlTemplate != previousExploreTemplates[0] || len(g.updates) != 0 {
+			t.Errorf("%s failing: %v, template kept %v, requests %+v", name, err,
+				g.rules[0].UrlTemplate == previousExploreTemplates[0], g.updates)
+		}
 	}
 	if ExploreTemplate == previousExploreTemplates[0] {
 		t.Error("the current template is not a previous one")
@@ -238,6 +257,10 @@ func TestExploreRule(t *testing.T) {
 	if len(f.rules) != 1 || !f.rules[0].Builtin || f.rules[0].Name != ExploreName ||
 		f.rules[0].UrlTemplate != ExploreTemplate {
 		t.Fatalf("rules %+v", f.rules)
+	}
+	// A new built-in rule, and one left as it is, request no re-render.
+	if len(f.updates) != 0 || len(f.notified) != 0 {
+		t.Errorf("the ensure requested %+v, woke %v", f.updates, f.notified)
 	}
 	explore, err := s.GetRule(ctx, f.rules[0].PublicID)
 	if err != nil || !explore.Builtin {

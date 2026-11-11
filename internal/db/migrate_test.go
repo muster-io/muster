@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (38)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (39)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":38`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":39`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":38`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":39`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (38)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (39)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":38`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":39`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -3800,6 +3800,98 @@ func TestIntegrationDeliveriesConfigurationOnly(t *testing.T) {
 		}
 		if err := e.mm.Migrate(38); err != nil {
 			t.Errorf("up again: %v", err)
+		}
+	})
+}
+
+// TestIntegrationRouteSettingsAndLinksUpdates runs 0039 over a database at 38 with a Route and rows of the kinds of
+// 0032: up keeps the rows, validates open_group_updates_kind_v7_check and open_group_updates_route_settings_scope_check
+// and drops the kind CHECK of 0032, so that a row of route_message_settings with its Route and one of
+// organization_links without a scope are taken, while a row of route_message_settings without a Route and an unknown
+// kind are not. Down deletes the rows of the new kinds, keeps the older ones and restores the kind CHECK of 0032,
+// validated, without the scope CHECK; up again works.
+func TestIntegrationRouteSettingsAndLinksUpdates(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 38)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000S1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-11-11', '2026-11-11'
+			FROM organizations`)
+		insert := func(t *testing.T, kind string, withRoute bool) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO open_group_updates (org_id, kind, route_id, requested_at)
+				SELECT id, $1, CASE WHEN $2::boolean THEN (SELECT id FROM routes WHERE public_id = 'RT0000000000S1') END,
+					'2026-11-11'
+				FROM organizations`, kind, withRoute)
+			return err
+		}
+		for _, kind := range []string{"route_message_labels", "organization_message_settings"} {
+			if err := insert(t, kind, kind == "route_message_labels"); err != nil {
+				t.Fatalf("a row of %s: %v", kind, err)
+			}
+		}
+		refused := func(t *testing.T, name string, err error, constraint string) {
+			t.Helper()
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" || pe.ConstraintName != constraint {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		refused(t, "a row of organization_links before up", insert(t, "organization_links", false),
+			"open_group_updates_kind_v6_check")
+
+		if err := e.mm.Migrate(39); err != nil {
+			t.Fatalf("up to 39: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after up: %d rows, want the 2 of 0032", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v7_check:true" {
+			t.Errorf("after up: the kind checks %q", got)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_route_settings"); got !=
+			"open_group_updates.open_group_updates_route_settings_scope_check:true" {
+			t.Errorf("after up: the scope check %q", got)
+		}
+		if err := insert(t, "route_message_settings", true); err != nil {
+			t.Errorf("a row of route_message_settings: %v", err)
+		}
+		if err := insert(t, "organization_links", false); err != nil {
+			t.Errorf("a row of organization_links: %v", err)
+		}
+		refused(t, "a row of route_message_settings without its route", insert(t, "route_message_settings", false),
+			"open_group_updates_route_settings_scope_check")
+		refused(t, "a row of an unknown kind", insert(t, "link_rules", false), "open_group_updates_kind_v7_check")
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v >= 39 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates
+			WHERE kind IN ('route_message_settings', 'organization_links')`); n != 0 {
+			t.Errorf("after down: %d rows of the new kinds are left", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM open_group_updates`); n != 2 {
+			t.Errorf("after down: %d rows, want the 2 of 0032", n)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_kind"); got !=
+			"open_group_updates.open_group_updates_kind_v6_check:true" {
+			t.Errorf("after down: the kind checks %q", got)
+		}
+		if got := e.constraints(t, []string{"open_group_updates"}, "open_group_updates_route_settings"); got != "" {
+			t.Errorf("after down: the scope check %q", got)
+		}
+		refused(t, "a row of organization_links after down", insert(t, "organization_links", false),
+			"open_group_updates_kind_v6_check")
+
+		if err := e.mm.Migrate(39); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if err := insert(t, "organization_links", false); err != nil {
+			t.Errorf("up again: a row of organization_links: %v", err)
 		}
 	})
 }
