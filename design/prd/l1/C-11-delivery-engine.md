@@ -47,6 +47,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   documented limit where one exists. Urgent Alert Groups go first in the queue but never bypass a limiter. Rate-limit
   pressure delays updates; it never drops them.
   _Revised for L2 (2026-10-26):_ from 0.2.0 the Urgent Alert Groups that go first are the critical ones (C-26.FR-8).
+  _Revised for L2 (2026-11-11, #504):_ within each urgency, an edit of a published Root message that only a change of
+  configuration made — the re-render of the open Root messages after a change of a button set, of the message settings,
+  of a Route's "Labels in the message" or of a Team's name, the evaluation of the Teams, a raised Minimum severity, or
+  the re-render after a key rotation — goes after the Publications, the final edits and the edits of Root messages that
+  Alerts, Commands and timers with a lifecycle event make, of the same urgency. The order is strict among Root
+  messages: configuration edits wait for as long as that work uses up the limiter, for example while Alert Groups keep
+  flapping, and drain after it, with the tokens it leaves, oldest first. None is dropped: one that waits is carried by
+  the next change of its Alert Group. Thread replies are not part of this order.
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again
@@ -195,6 +203,10 @@ every error class, and a virtual clock; messenger-specific checks are in C-13 to
   Group's Timeline entries.
 - **C-11.AC-14** With a Destination limiter of N calls per minute, N calls in any mix of sends and edits pass, and the
   next call — send or edit — waits for a token.
+- **C-11.AC-15** During a re-render of 100 open Alert Groups in one Telegram chat, the Root message of a new Alert Group
+  of the same urgency is published, and the Root message of an acknowledged one is edited, before the remaining
+  configuration edits; configuration edits wait while such Root-message work uses up the chat's limiter, and every one
+  of them is still made afterwards.
 
 ## Related ADRs
 

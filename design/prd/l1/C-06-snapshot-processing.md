@@ -162,7 +162,7 @@ verified facts of [Alertmanager](../../facts.md#alertmanager) and [Grafana](../.
   payload, or processing fails — is marked `failed` with the error, logged as the registered ingestion event "failed"
   and counted in `muster_ingest_failed_snapshots_total{integration}`; it is never retried by itself and never blocks the
   Snapshots behind it, and `muster ingest replay` reprocesses it after a fix (FR-17). The Stored Snapshot keeps the body
-  as received. _Proposed for the maintainer (issue #506):_ while the newest processed or failed webhook Stored Snapshot
+  as received. While the newest processed or failed webhook Stored Snapshot
   of an Integration is `failed`, the Integration carries the warning `snapshot_failed` with its error, its time and its
   id, on the Integration page, in the Integrations list and in `GET /integrations/{id}`; it clears when a later
   Snapshot is processed, also one from another sender of the same Integration, so the chart rule is the durable
