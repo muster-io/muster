@@ -3934,7 +3934,7 @@ SET actual_version      = CASE WHEN $1::boolean THEN d.actual_version ELSE $2::b
                                   AND NOT $1::boolean THEN 'delivered'
                               ELSE 'pending'
                           END,
-    configuration_only  = d.configuration_only AND (f.ended OR d.desired_version <> $2::bigint
+    configuration_only  = d.configuration_only AND ((f.ended AND NOT f.raced) OR d.desired_version <> $2::bigint
                                                     OR d.desired_retire OR $1::boolean),
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = CASE WHEN $1::boolean THEN d.desired_received_at END,

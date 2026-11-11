@@ -359,7 +359,7 @@ SET actual_version      = CASE WHEN @replayed::boolean THEN d.actual_version ELS
                                   AND NOT @replayed::boolean THEN 'delivered'
                               ELSE 'pending'
                           END,
-    configuration_only  = d.configuration_only AND (f.ended OR d.desired_version <> @version::bigint
+    configuration_only  = d.configuration_only AND ((f.ended AND NOT f.raced) OR d.desired_version <> @version::bigint
                                                     OR d.desired_retire OR @replayed::boolean),
     desired_retire      = d.desired_retire OR (f.raced AND d.storm_id IS NULL AND f.left_destination),
     desired_received_at = CASE WHEN @replayed::boolean THEN d.desired_received_at END,
