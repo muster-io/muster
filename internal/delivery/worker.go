@@ -226,10 +226,11 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // time claims them in this order. Configuration edits take every token the rest leaves, and none is dropped; a Thread
 // reply waits only while the deliveries that are not configuration only and the Urgent configuration edits use up the
 // limiter, and the Thread batching window keeps the replies of new Alerts to one per window and delivery. Within one
-// replica the order is strict. Across replicas it is likely but not strict: one whose configuration pass reaches the
-// bucket first can take the token ahead of a reply that another replica claimed, and each such race costs the reply
-// one token interval, as a Publication can lose one to a configuration edit that another replica claimed just before
-// it came due.
+// replica the order holds for every token that is free when the round reaches a rank; a token that becomes free while
+// the round is past it goes to a later rank, and the row denied it waits one token interval more. Across replicas the
+// order is likely but not strict: one whose configuration pass reaches the bucket first can take the token ahead of a
+// reply that another replica claimed, and each such race costs the reply one token interval, as a Publication can lose
+// one to a configuration edit that another replica claimed just before it came due.
 //
 // A configuration pass works one batch at a time and goes back to the top of the order after each full one, so that
 // new work of a higher rank waits at most one batch behind a large re-render (reconcile). Both passes claim only the
