@@ -242,19 +242,25 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // one of ranks 3, 4 and 5, on any Destination, delays the other two by at most one claimed batch of it per batch of
 // theirs: a Thread reply due at the start with no reply due before it goes after at most one batch of the Root-message
 // work before it, whatever its size. Rank 6 starts only once ranks 3, 4 and 5 all came back short in the same turn, one
-// batch at a time and, after a full one, behind another turn of ranks 3 to 5, so it stays last among them.
+// batch at a time and, after a full one, behind another turn of ranks 3 to 5 due by the start and then one batch each
+// of ranks 3, 4 and 5 due now, so it stays last among them: a Publication, an edit that Alerts or a Command made, a
+// Thread reply or a webhook event that comes due during a long pass of configuration edits goes within one batch of
+// them, and a row of ranks 3 to 5 denied a token earlier in the round can take one that comes free during the pass
+// ahead of the configuration edits.
 //
-// Termination. A row of ranks 3 to 6 due at the start that a batch claimed leaves the claims of the round: it is
-// delivered or ended; or rescheduled — to its token's time plus TokenMargin, a backoff or a Retry-After — after the
-// start; or it keeps a lease past now; or its Destination became Broken or its Root message is gone, which the claims
-// skip. A row that comes due during the round, a Root message published again included, is due after the start. So
-// each row of ranks 3 to 6 due at the start is claimed at most once a round, unless its lease runs out within it, and
-// the turns end after at most the rows due at the start, divided by Batch and rounded up, plus those lease expiries,
-// full batches. A round
-// thus takes at most one limiter take per row of ranks 3 to 6 due at its start, plus the Urgent ranks, and holds the
-// next Organization about that many takes, not the whole backlog: work that comes due during the round, other than
-// Urgent work, goes in the next round, MinWait later. A large Urgent backlog, configuration edits included, keeps the
-// round at the Urgent ranks until it is short, as the decided order wants.
+// Termination. A row of ranks 3 to 6 due at the start that a batch bounded by the start claimed leaves those claims for
+// the round: it is delivered or ended; or rescheduled — to its token's time plus TokenMargin, a backoff or a
+// Retry-After — after the start; or it keeps a lease past now; or its Destination became Broken or its Root message is
+// gone, which the claims skip. A row that comes due during the round, a Root message published again included, is due
+// after the start. So each row of ranks 3 to 6 due at the start is claimed at most once a round by those claims, unless
+// its lease runs out within it, and the turns and the batches of rank 6 end after at most the rows due at the start,
+// divided by Batch and rounded up, plus those lease expiries, full batches. The batches due now of ranks 3 to 5 come
+// only between two batches of rank 6, one of each rank and never repeated while full, so they add at most 3 times Batch
+// limiter takes per full batch of rank 6. A round thus takes at most one limiter take per row of ranks 3 to 6 due at
+// its start, plus those, plus the Urgent ranks, and holds the next Organization about that many takes, not the whole
+// backlog; work that is not Urgent and comes due during the turns of ranks 3 to 5 goes in the next round, MinWait
+// later. A large Urgent backlog, configuration edits included, keeps the round at the Urgent ranks until it is short,
+// as the decided order wants.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -285,6 +291,9 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 		{w.claimDeliveries(true, true, time.Time{}), w.deliver}, {w.claimDeliveries(false, false, start), w.deliver},
 		{w.claimReplies(start), w.reply}, {w.claimEvents(start), w.sendEvent},
 		{w.claimDeliveries(false, true, start), w.deliver}}
+	// Ranks 3, 4 and 5 again, due now: one batch of each between two batches of rank 6.
+	live := []pass{{w.claimDeliveries(false, false, time.Time{}), w.deliver}, {w.claimReplies(time.Time{}), w.reply},
+		{w.claimEvents(time.Time{}), w.sendEvent}}
 	// The first error of each rank, rank 1's at 0: the loops may claim a rank many times.
 	errs := make([]error, len(passes))
 	keep := func(i int, err error) {
@@ -302,10 +311,10 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 			}
 		}
 	}
-	// once claims one batch of passes[i], rank i+1 of ranks 3 to 6, and goes back to the Urgent ranks when it claimed a
-	// row; it says whether the batch was full.
-	once := func(i int) bool {
-		n, err := w.batchOnce(ctx, org, passes[i].claim, passes[i].work)
+	// once claims one batch of p, rank i+1 of ranks 3 to 6, and goes back to the Urgent ranks when it claimed a row; it
+	// says whether the batch was full.
+	once := func(i int, p pass) bool {
+		n, err := w.batchOnce(ctx, org, p.claim, p.work)
 		keep(i, err)
 		if n > 0 {
 			urgent()
@@ -313,14 +322,24 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 		return n == int(w.batch())
 	}
 	urgent()
+	between := false
 	for {
 		full := false
 		for i := 2; i < 5; i++ {
-			full = once(i) || full
+			full = once(i, passes[i]) || full
 		}
-		if !full && !once(5) {
+		if full {
+			continue
+		}
+		if between {
+			for i, p := range live {
+				once(2+i, p)
+			}
+		}
+		if !once(5, passes[5]) {
 			return errors.Join(errs...)
 		}
+		between = true
 	}
 }
 

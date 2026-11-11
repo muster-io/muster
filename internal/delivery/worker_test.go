@@ -2229,19 +2229,14 @@ func repliesBeforeConfigurationEdits(t *testing.T, batch int32) {
 	}
 }
 
-// TestPublicationDuringConfigurationPass is C-11.FR-3 for a large re-render, with the business clock moving 10 ms a
-// token as on a running replica and the limiter letting about half of the 200 configuration edits through: a
-// Publication that comes due while they are attempted goes out first in the next round, ahead of the configuration
-// edits left, as the rows of ranks 3 to 6 that a round claims are those due at its start; the round attempts each edit
-// once. An Urgent one goes within one batch (TestUrgentConfigurationEditDuringPublications,
-// TestUrgentPublicationDuringPublications).
-func TestPublicationDuringConfigurationPass(t *testing.T) {
+// TestConfigurationPassOneBatch is C-11.FR-3 for a large re-render, with the business clock moving 10 ms a token as on
+// a running replica: a Publication that comes due while 200 configuration edits are attempted goes out within one batch
+// of them, and every edit still goes out in the same round.
+func TestConfigurationPassOneBatch(t *testing.T) {
 	e := newEnv(t)
 	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
 	const n = 200
 	rerendered(t, e, n)
-	e.db.dests[destMM].limit, e.db.dests[destMM].per = 50, 1
-	e.db.buckets = map[bucketKey]*fakeBucket{}
 	takes, injected := 0, -1
 	var tick func()
 	tick = func() {
@@ -2256,24 +2251,35 @@ func TestPublicationDuringConfigurationPass(t *testing.T) {
 	e.db.before["TakeTokens"] = tick
 	e.round(t)
 	delete(e.db.before, "TakeTokens")
-	edits := e.rec.Count(deliverytest.MethodUpdate)
-	if injected < 0 || e.rec.Count(deliverytest.MethodPublish) != 0 || takes != n || edits == 0 || edits == n {
-		t.Fatalf("injected after %d calls; %d publications, %d takes and %d edits in the round, want 0, %d and some",
-			injected, e.rec.Count(deliverytest.MethodPublish), takes, edits, n)
-	}
-	e.rec.Reset()
-	e.business.Advance(time.Second + delivery.TokenMargin)
-	e.round(t)
 	calls := e.rec.Calls()
-	if len(calls) < 2 || calls[0].Method != deliverytest.MethodPublish {
-		t.Fatalf("the next round: %d calls, the first %+v", len(calls), calls[:min(len(calls), 1)])
+	published := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish
+	})
+	if injected < 0 || published < 0 {
+		t.Fatalf("the Publication did not go out in the round (injected after %d of %d calls)", injected, len(calls))
 	}
-	for i := 0; edits+e.rec.Count(deliverytest.MethodUpdate) < n; i++ {
-		if i == n {
-			t.Fatalf("%d of %d edits after %d rounds", edits+e.rec.Count(deliverytest.MethodUpdate), n, i)
-		}
-		e.business.Advance(time.Second + delivery.TokenMargin)
-		e.round(t)
+	if published-injected > int(delivery.Batch) {
+		t.Fatalf("the Publication went out after %d edits of the re-render", published-injected)
+	}
+	if u := e.rec.Count(deliverytest.MethodUpdate); u != n {
+		t.Errorf("%d edits of the re-render in the round, want %d", u, n)
+	}
+}
+
+// TestReplyDuringConfigurationPass is C-11.FR-3 and FR-4 for a large re-render, with the business clock moving 10 ms a
+// token as on a running replica: a Thread reply that comes due while 200 configuration edits are attempted goes out
+// within one batch of them, as the round claims one batch of the other ranks, due now, between two batches of the
+// configuration edits.
+func TestReplyDuringConfigurationPass(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	const n = 200
+	rerendered(t, e, n)
+	withinOneBatch(t, e, "the Thread reply", func() {
+		e.enqueue(t, newGroup(e, 0, "renamed"), groups.System, alertsAdded(2, groups.StatusFiring, "fp-new"))
+	}, func(c deliverytest.Call) bool { return c.Method == deliverytest.MethodReply })
+	if u := e.rec.Count(deliverytest.MethodUpdate); u != n {
+		t.Errorf("%d edits of the re-render in the round, want %d", u, n)
 	}
 }
 
