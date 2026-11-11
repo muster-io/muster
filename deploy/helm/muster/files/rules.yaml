@@ -153,6 +153,21 @@ groups:
             First read the log lines ingest_rejected for the client address.
           runbook_url: {{ $runbooks }}/MusterIngestRejected/
 {{- end }}{{ end }}
+{{- with $r.MusterIngestSnapshotFailed }}{{ if .enabled }}
+      - alert: MusterIngestSnapshotFailed
+        expr: >-
+          sum by (integration) (increase(muster_ingest_failed_snapshots_total{ {{- $j }}}[{{ .window }}])) > 0
+        for: {{ .for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: Muster could not process Stored Snapshots
+          description: >-
+            In the last {{ .window }} Stored Snapshots of the Integration in the label integration failed in
+            processing, for example because a custom sender left out groupKey; the sender still got 202. First open the
+            Integration page for the error of its newest Stored Snapshot.
+          runbook_url: {{ $runbooks }}/MusterIngestSnapshotFailed/
+{{- end }}{{ end }}
 {{- with $r.MusterTemplateError }}{{ if .enabled }}
       - alert: MusterTemplateError
         expr: >-

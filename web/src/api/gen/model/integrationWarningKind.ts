@@ -12,4 +12,5 @@ export const IntegrationWarningKind = {
   heartbeat_not_configured: 'heartbeat_not_configured',
   heartbeat_waiting: 'heartbeat_waiting',
   heartbeat_lost: 'heartbeat_lost',
+  snapshot_failed: 'snapshot_failed',
 } as const;

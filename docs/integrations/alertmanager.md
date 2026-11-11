@@ -242,6 +242,31 @@ else to `:8080`. Keep the proxy's body size limit at **16 MB** or more: Muster a
 With one listener for both (`MUSTER_LISTEN_INGEST` equal to `MUSTER_LISTEN_APP`), the same port serves ingestion and
 the API.
 
+## What the body needs
+
+Alertmanager's webhook always has these fields, so only a custom sender, such as a CI job or a script, can miss one.
+Muster reads the body after it has answered, so a body without them is stored, answered with `202` and then rejected:
+
+- At the top level: `groupKey` (a string), `status` (`firing` or `resolved`) and `alerts` (an array).
+- In each Alert: `labels` (an object of strings), `status` (`firing` or `resolved`) and `startsAt` (an RFC 3339 time).
+- Optional: `truncatedAlerts` and `notification_reason` at the top level, `annotations`, `endsAt` and `fingerprint` in
+  an Alert. Other fields, `version` included, are ignored, and `generatorURL` is kept as it is.
+- A body with a negative `truncatedAlerts`, or with a NUL character in `groupKey` or `notification_reason`, is
+  rejected.
+
+A rejected Stored Snapshot is `failed`, with the reason in its `processing_error`, for example `the webhook has no
+groupKey`. It is never retried by itself and creates no Alert Group. Muster shows it in three places:
+
+- The Integration page and `GET /api/v1/integrations/{id}` carry the warning `snapshot_failed` with the error, without
+  the values you sent, and the time of the Snapshot, while the newest Stored Snapshot of the Integration that is
+  processed or failed has failed. It clears when a later Snapshot is processed, also one from another sender of the
+  same Integration. The Integrations list marks the Integration too.
+- **Stored Snapshots** of the Integration lists the Snapshot, `failed`, with its body as received.
+- `muster_ingest_failed_snapshots_total{integration}` counts it, and the chart rule `MusterIngestSnapshotFailed` fires
+  on it; the [runbook](../operations/runbooks/MusterIngestSnapshotFailed.md) has the steps.
+
+After you fix the sender, send a valid body, or run `muster ingest replay` to process the rejected one again.
+
 ## What Muster answers
 
 | Answer | When | Alertmanager |
@@ -252,4 +277,5 @@ the API.
 | `500` | The body could not be written | retries |
 
 Muster never answers `400`: a body that is not JSON, or not an Alertmanager payload, is stored and fails later in
-processing, where the Stored Snapshot shows the error.
+processing, where the Stored Snapshot shows the error and the Integration shows
+[the warning](#what-the-body-needs).

@@ -307,6 +307,7 @@ enrolment of a limited session, the page about a missing Permission, and empty s
 | Destination and its Routes, Broken; Alert Group page, delivery state "Waiting: {Destination} is Broken", or "Not delivered" while the Destination is Broken | `fix.broken` | `concepts/broken-destinations.md#recovery` | S-109 |
 | Alert Group page, delivery state "Not delivered" while the Destination is healthy | `fix.not_delivered` | `concepts/broken-destinations.md#when-a-destination-becomes-broken` | S-109 |
 | Integration, a truncated `groupKey` | `fix.truncated` | `integrations/alertmanager.md#send-every-alert-of-the-group` | S-109 |
+| Integration, the newest Stored Snapshot failed | `fix.snapshot_failed` | `integrations/alertmanager.md#what-the-body-needs` | S-109 |
 | Integration, a long repeat interval | `fix.repeat_interval` | `integrations/alertmanager.md#repeat-intervals` | S-109 |
 | Integration, no Heartbeat · waiting for the first Heartbeat signal · Heartbeat lost | `fix.heartbeat` · `fix.heartbeat_waiting` · `fix.heartbeat_lost` | `integrations/heartbeat.md#turn-it-on` · `integrations/heartbeat.md#the-snippet` · `operations/runbooks/MusterHeartbeatLost.md#fix` | S-109 |
 | Alert Group page, a Replacement happened | `fix.replacement` | `integrations/alertmanager.md#instance-labels-in-informational-alerts` | S-109 |
@@ -494,6 +495,7 @@ users to send the critical rules through an Alertmanager route that bypasses Mus
 | `MusterDeliveryQueueGrowing` | warning | `max by (destination) (muster_delivery_queue{job="muster"}) > 100 and max by (destination) (deriv(muster_delivery_queue{job="muster"}[15m])) > 0` | 15m | a delivery queue keeps growing |
 | `MusterIngestBacklog` | warning | `max(muster_ingest_backlog{job="muster"}) > 1000 or histogram_quantile(0.95, sum by (le) (rate(muster_ingest_processing_delay_seconds_bucket{job="muster"}[5m]))) > 60` | 5m | processing falls behind |
 | `MusterIngestRejected` | warning | `sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="too_large"}[15m])) > 0 or sum by (integration, outcome) (increase(muster_ingest_requests_total{job="muster",outcome="unauthorized"}[15m])) > 10` | 0m | an oversized ingestion request, or more than 10 unauthorized ones, arrived in the last 15 minutes |
+| `MusterIngestSnapshotFailed` | warning | `sum by (integration) (increase(muster_ingest_failed_snapshots_total{job="muster"}[15m])) > 0` | 0m | Stored Snapshots of an Integration failed in processing in the last 15 minutes |
 | `MusterTemplateError` | warning | `sum by (route, destination, template) (increase(muster_template_errors_total{job="muster"}[15m])) > 0` | 0m | templates failed in the last 15 minutes |
 | `MusterClockSkew` | warning | `max by (instance) (abs(muster_clock_skew_seconds{job="muster"})) > 2` | 5m | a replica's clock is off |
 | `MusterLoginFailures` | warning | `sum by (method) (increase(muster_login_failures_total{job="muster"}[10m])) > 20` | 0m | a burst of failed sign-ins |

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The warnings of an Integration (C-06.FR-18): the truncation and long-interval warnings as banners on the Integration
+// The warnings of an Integration (C-06.FR-18): the truncation, long-interval and failed-Snapshot warnings as banners on the Integration
 // page, and as a mark in the Integrations list with the same texts on hover and in the row's details. The Heartbeat
 // kinds (C-07.FR-5) are a banner of their own at the top of the Integration page; in the list the Heartbeat badge
 // stands for them, so the mark leaves them out. On the Integration page each banner ends with "How to fix".
@@ -41,6 +41,8 @@ export function warningText(t: TFunction, warning: IntegrationWarning): string |
       });
     case "long_repeat_interval":
       return longIntervalText(t, warning.route_path ?? "", warning.repeat_interval_seconds ?? 0);
+    case "snapshot_failed":
+      return t("integrationWarnings.snapshotFailed", { error: warning.error ?? "" });
     default:
       // heartbeat_not_configured, heartbeat_waiting and heartbeat_lost have a banner of their own.
       return null;
@@ -162,7 +164,7 @@ function texts(t: TFunction, warnings: readonly IntegrationWarning[]): string[] 
   return warnings.map((w) => warningText(t, w)).filter((text) => text !== null);
 }
 
-/** The "How to fix" of a warning banner: a truncated Snapshot or a long repeat interval. */
+/** The "How to fix" of a warning banner: a truncated Snapshot, a long repeat interval or a rejected one. */
 function WarningFix({ kind }: { kind: IntegrationWarning["kind"] }) {
   const { t } = useTranslation();
   switch (kind) {
@@ -174,6 +176,14 @@ function WarningFix({ kind }: { kind: IntegrationWarning["kind"] }) {
           to="fix.repeat_interval"
           kind="how_to_fix"
           about={t("docs.fixes.repeatInterval")}
+        />
+      );
+    case "snapshot_failed":
+      return (
+        <DocsLink
+          to="fix.snapshot_failed"
+          kind="how_to_fix"
+          about={t("docs.fixes.snapshotFailed")}
         />
       );
     default:

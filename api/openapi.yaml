@@ -11849,6 +11849,7 @@ components:
           - heartbeat_not_configured
           - heartbeat_waiting
           - heartbeat_lost
+          - snapshot_failed
         truncated_group_count:
           type:
           - integer
@@ -11868,7 +11869,20 @@ components:
           - string
           - 'null'
           format: date-time
-          description: For `heartbeat_lost`.
+          description: For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored
+            Snapshot was received.
+        snapshot_id:
+          type:
+          - string
+          - 'null'
+          description: For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning
+            stands until a later Snapshot is processed.
+        error:
+          type:
+          - string
+          - 'null'
+          description: For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example
+            `the webhook has no groupKey`. The sender still got `202`.
     IntegrationBase:
       type: object
       required:

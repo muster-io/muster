@@ -163,6 +163,20 @@ FROM alertmanager_groups g
 WHERE g.org_id = @org_id AND g.integration_id = ANY(@integration_ids::bigint[]) AND g.truncated
 GROUP BY g.integration_id;
 
+-- ListFailedLatestSnapshots returns, for each of the Integrations whose newest processed or failed webhook Stored
+-- Snapshot failed, its public id, its receipt time and its error (the warning snapshot_failed). A Snapshot that is
+-- still pending is skipped, so the warning stands until a later Snapshot is processed.
+-- name: ListFailedLatestSnapshots :many
+SELECT ids.id::bigint AS integration_id, newest.public_id, newest.received_at, newest.processing_error
+FROM unnest(@integration_ids::bigint[]) AS ids (id)
+JOIN LATERAL (
+    SELECT s.public_id, s.received_at, s.state, s.processing_error
+    FROM stored_snapshots s
+    WHERE s.org_id = @org_id AND s.integration_id = ids.id AND s.source = 'webhook' AND s.state <> 'pending'
+    ORDER BY s.received_at DESC, s.id DESC
+    LIMIT 1
+) newest ON newest.state = 'failed';
+
 -- ListLongRepeatRoutes lists the Alertmanager routes of the Integrations whose learned repeat interval is above
 -- @threshold_ms (the warning long_repeat_interval), in the order of their paths.
 -- name: ListLongRepeatRoutes :many

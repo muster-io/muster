@@ -46,11 +46,13 @@ export const ListIntegrationsResponse = zod.object({
   "last_snapshot_at": zod.iso.datetime({"offset":true}).nullish(),
   "snapshot_count": zod.int(),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost']),
+  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost', 'snapshot_failed']),
   "truncated_group_count": zod.int().nullish().describe('For `snapshot_truncated`.'),
   "route_path": zod.string().nullish().describe('For `long_repeat_interval`; the Alertmanager route.'),
   "repeat_interval_seconds": zod.int().nullish(),
-  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`.')
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.'),
+  "snapshot_id": zod.string().nullish().describe('For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.'),
+  "error": zod.string().nullish().describe('For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.')
 })),
   "open_alert_group_count": zod.int().describe('Open Alert Groups that deleting the Integration would resolve.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -106,11 +108,13 @@ export const CreateIntegrationResponse = zod.object({
   "last_snapshot_at": zod.iso.datetime({"offset":true}).nullish(),
   "snapshot_count": zod.int(),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost']),
+  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost', 'snapshot_failed']),
   "truncated_group_count": zod.int().nullish().describe('For `snapshot_truncated`.'),
   "route_path": zod.string().nullish().describe('For `long_repeat_interval`; the Alertmanager route.'),
   "repeat_interval_seconds": zod.int().nullish(),
-  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`.')
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.'),
+  "snapshot_id": zod.string().nullish().describe('For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.'),
+  "error": zod.string().nullish().describe('For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.')
 })),
   "open_alert_group_count": zod.int().describe('Open Alert Groups that deleting the Integration would resolve.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -153,11 +157,13 @@ export const GetIntegrationResponse = zod.object({
   "last_snapshot_at": zod.iso.datetime({"offset":true}).nullish(),
   "snapshot_count": zod.int(),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost']),
+  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost', 'snapshot_failed']),
   "truncated_group_count": zod.int().nullish().describe('For `snapshot_truncated`.'),
   "route_path": zod.string().nullish().describe('For `long_repeat_interval`; the Alertmanager route.'),
   "repeat_interval_seconds": zod.int().nullish(),
-  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`.')
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.'),
+  "snapshot_id": zod.string().nullish().describe('For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.'),
+  "error": zod.string().nullish().describe('For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.')
 })),
   "open_alert_group_count": zod.int().describe('Open Alert Groups that deleting the Integration would resolve.'),
   "created_at": zod.iso.datetime({"offset":true}),
@@ -223,11 +229,13 @@ export const UpdateIntegrationResponse = zod.object({
   "last_snapshot_at": zod.iso.datetime({"offset":true}).nullish(),
   "snapshot_count": zod.int(),
   "warnings": zod.array(zod.object({
-  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost']),
+  "kind": zod.enum(['snapshot_truncated', 'long_repeat_interval', 'heartbeat_not_configured', 'heartbeat_waiting', 'heartbeat_lost', 'snapshot_failed']),
   "truncated_group_count": zod.int().nullish().describe('For `snapshot_truncated`.'),
   "route_path": zod.string().nullish().describe('For `long_repeat_interval`; the Alertmanager route.'),
   "repeat_interval_seconds": zod.int().nullish(),
-  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`.')
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('For `heartbeat_lost`, the time of the last signal; for `snapshot_failed`, the time the failed Stored Snapshot was received.'),
+  "snapshot_id": zod.string().nullish().describe('For `snapshot_failed`; the id of the newest Stored Snapshot of the Integration, which failed. The warning stands until a later Snapshot is processed.'),
+  "error": zod.string().nullish().describe('For `snapshot_failed`; why processing failed, as `processing_error` of that Stored Snapshot, for example `the webhook has no groupKey`. The sender still got `202`.')
 })),
   "open_alert_group_count": zod.int().describe('Open Alert Groups that deleting the Integration would resolve.'),
   "created_at": zod.iso.datetime({"offset":true}),
