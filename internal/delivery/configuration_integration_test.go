@@ -340,12 +340,12 @@ func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 		start := l.business.Now()
 		// The edits of the channel not attempted in the round yet, when the reply is in flight.
 		untouched := int64(-1)
+		l.rec.Reset()
 		l.rec.Script(deliverytest.MethodReply, deliverytest.Answer{Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
 			Then: func() {
 				untouched = l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1
 					AND state = 'pending' AND next_attempt_at <= $2`, dest, start)
 			}})
-		l.rec.Reset()
 		l.round(t, w)
 		var order []string
 		reply, otherEdit, before := -1, -1, 0
