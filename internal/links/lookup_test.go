@@ -685,11 +685,11 @@ func TestLookupTableInUse(t *testing.T) {
 	if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
 		t.Fatalf("a table no rule reads by name: %v", err)
 	}
-	f.fail["ListLinkRuleTemplates"] = errors.New("boom")
 	other, err := s.CreateTable(ctx, by, TableInput{Name: "dc", Columns: []string{"site"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.fail["ListLinkRuleTemplates"] = errors.New("boom")
 	if err := s.DeleteTable(ctx, by, other.PublicID, nil); err == nil || errors.Is(err, ErrInUse) {
 		t.Errorf("a failing read: %v", err)
 	}
@@ -890,55 +890,56 @@ func TestLinksRerender(t *testing.T) {
 			t.Errorf("%s: requested %+v, woke %q", what, u, f.notified[want-1])
 		}
 	}
+	rule, err := s.CreateRule(ctx, by, dashboard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a new rule", 1)
 	table, err := s.CreateTable(ctx, by, grafana())
 	if err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a new table", 1)
+	requests(t, "a new table the rule reads", 2)
 	if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, grafana()); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "the same table again", 1)
+	requests(t, "the same table again", 2)
 	in := grafana()
 	in.Entries[0].Values["datasource_uid"] = "PROM9"
 	if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, in); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a changed row", 2)
-	if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
-		t.Fatal(err)
-	}
-	requests(t, "a deleted table", 3)
-	rule, err := s.CreateRule(ctx, by, dashboard())
-	if err != nil {
-		t.Fatal(err)
-	}
-	requests(t, "a new rule", 4)
+	requests(t, "a changed row", 3)
 	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, dashboard()); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "the same rule again", 4)
+	requests(t, "the same rule again", 3)
 	changed := dashboard()
 	changed.URLTemplate += "&from=now-1h"
 	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, changed); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a changed rule", 5)
+	requests(t, "a changed rule", 4)
 	if err := s.DeleteRule(ctx, by, rule.PublicID, nil); err != nil {
 		t.Fatal(err)
 	}
-	requests(t, "a deleted rule", 6)
+	requests(t, "a deleted rule", 5)
+	if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a deleted table no rule reads", 5)
 
 	for _, name := range []string{"InsertLinksUpdate", "NotifyOpenGroupUpdates"} {
 		f := newFake()
 		s, _ := newService(t, f)
-		table, err := s.CreateTable(ctx, by, grafana())
+		// A rule that reads a table by a computed name, so that every table change is requested and the deletion
+		// of the table is not refused as in use.
+		rule, err := s.CreateRule(ctx, by, RuleInput{Name: "plain", Scope: Scope{Type: ScopeAlertGroup},
+			URLTemplate: `{{ lookup .Labels.t "k" "c" }}`})
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A rule that reads no table, so that the deletion of the table fails only by the request.
-		rule, err := s.CreateRule(ctx, by, RuleInput{Name: "plain", Scope: Scope{Type: ScopeAlertGroup},
-			URLTemplate: "https://x"})
+		table, err := s.CreateTable(ctx, by, grafana())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -966,5 +967,76 @@ func TestLinksRerender(t *testing.T) {
 			t.Errorf("%s failing: %d audit entries, %d requests, %d tables, %d rules", name, len(f.audit),
 				len(f.updates), len(f.tables), len(f.rules))
 		}
+	}
+}
+
+// TestLookupTableRerenderOnlyWhenRead: a change of a Lookup table requests the re-render of the open Root messages
+// only when a Link rule may read the table: it reads the old or the new name literally, or calls `lookup` with a
+// computed name. A table no rule reads, and the same change with no rule at all, request nothing.
+func TestLookupTableRerenderOnlyWhenRead(t *testing.T) {
+	ctx := t.Context()
+	other := func(name string) TableInput { return TableInput{Name: name, Columns: []string{"a"}} }
+	rule := func(tmpl string) RuleInput {
+		return RuleInput{Name: "r", Scope: Scope{Type: ScopeAlertGroup}, URLTemplate: tmpl}
+	}
+	// rows are the requests after create, rename to "renamed", rows changed and delete; a step a rule refuses as in
+	// use ends the case and requests nothing.
+	cases := []struct {
+		name string
+		tmpl string // "" for no rule
+		rows []int
+	}{
+		{name: "no rule", rows: []int{0, 0, 0, 0}},
+		{name: "a rule reading another table", tmpl: `{{ lookup "grafana" .Labels.c "a" }}`, rows: []int{0, 0, 0, 0}},
+		{name: "a rule reading the old name", tmpl: `{{ lookup "unused" .Labels.c "a" }}`, rows: []int{1, 1}},
+		{name: "a rule reading the new name", tmpl: `{{ lookup "renamed" .Labels.c "a" }}`, rows: []int{0, 1, 2, 2}},
+		{name: "a rule with a computed name", tmpl: `{{ lookup .Labels.t .Labels.c "a" }}`, rows: []int{1, 2, 3, 4}},
+		{name: "a rule with a name from a variable", tmpl: `{{ $t := .Labels.t }}{{ lookup $t "k" "a" }}`,
+			rows: []int{1, 2, 3, 4}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFake()
+			s, _ := newService(t, f)
+			if c.tmpl != "" {
+				if _, err := s.CreateRule(ctx, by, rule(c.tmpl)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			base := len(f.updates)
+			check := func(step string, i int) {
+				t.Helper()
+				if got := len(f.updates) - base; got != c.rows[i] || len(f.notified) != len(f.updates) {
+					t.Fatalf("%s: %d requests, %d wakes in all, want %d", step, got, len(f.notified), c.rows[i])
+				}
+			}
+			table, err := s.CreateTable(ctx, by, other("unused"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			check("create", 0)
+			in := other("renamed")
+			if table, err = s.UpdateTable(ctx, by, table.PublicID, nil, in); err != nil {
+				if !errors.Is(err, ErrInUse) {
+					t.Fatalf("rename: %v", err)
+				}
+				check("a refused rename", 1)
+				return
+			}
+			check("rename", 1)
+			in.Entries = []Entry{{Key: "k", Values: map[string]string{"a": "v"}}}
+			if table, err = s.UpdateTable(ctx, by, table.PublicID, nil, in); err != nil {
+				t.Fatal(err)
+			}
+			check("rows", 2)
+			if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
+				if !errors.Is(err, ErrInUse) {
+					t.Fatal(err)
+				}
+				check("a refused delete", 2)
+				return
+			}
+			check("delete", 3)
+		})
 	}
 }

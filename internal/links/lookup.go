@@ -584,7 +584,7 @@ func (s *Service) CreateTable(ctx context.Context, r Requester, in TableInput) (
 		if created, err = s.getTable(ctx, q, id); err != nil {
 			return err
 		}
-		if err := s.requestRerender(ctx, q); err != nil {
+		if err := s.requestTableRerender(ctx, q, in.Name); err != nil {
 			return err
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
@@ -668,7 +668,7 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		if updated, err = s.getTable(ctx, q, before.PublicID); err != nil {
 			return err
 		}
-		if err := s.requestRerender(ctx, q); err != nil {
+		if err := s.requestTableRerender(ctx, q, before.Name, next.Name); err != nil {
 			return err
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
@@ -697,7 +697,7 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 		if err := q.DeleteLookupTable(ctx, dbgen.DeleteLookupTableParams{OrgID: s.orgID, ID: before.ID}); err != nil {
 			return fmt.Errorf("delete the lookup table %s: %w", before.PublicID, err)
 		}
-		if err := s.requestRerender(ctx, q); err != nil {
+		if err := s.requestTableRerender(ctx, q, before.Name); err != nil {
 			return err
 		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
@@ -713,6 +713,29 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 // link, and delivery then edits nothing.
 func (s *Service) requestRerender(ctx context.Context, q Queries) error {
 	return requestRerender(ctx, q, s.orgID, s.business.Now())
+}
+
+// requestTableRerender is requestRerender for a change of the Lookup tables named names (the old and the new name of
+// a rename), made only when it can alter a link: some Link rule reads one of them by a literal name, or calls
+// `lookup` with a computed name and so may read any table. A change that no rule can see edits no message, and the
+// walk over every open Alert Group would take the evaluation lock once per batch for nothing.
+func (s *Service) requestTableRerender(ctx context.Context, q Queries, names ...string) error {
+	rows, err := q.ListLinkRuleTemplates(ctx, s.orgID)
+	if err != nil {
+		return fmt.Errorf("read the link rules: %w", err)
+	}
+	for _, r := range rows {
+		t, err := s.parse(r.UrlTemplate)
+		if err != nil {
+			continue // saved templates parse; one that does not reads nothing
+		}
+		if t.ComputesLookupTable() || slices.ContainsFunc(t.LookupTables(), func(n string) bool {
+			return slices.Contains(names, n)
+		}) {
+			return s.requestRerender(ctx, q)
+		}
+	}
+	return nil
 }
 
 // requestRerender is Service.requestRerender for the Organization orgID at the business time now, which the start-up

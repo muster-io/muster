@@ -445,3 +445,25 @@ func TestSafeURL(t *testing.T) {
 		}
 	}
 }
+
+// TestComputesLookupTable: a template computes a table name when some call of lookup names its table otherwise than
+// by a literal, so that it may read any table.
+func TestComputesLookupTable(t *testing.T) {
+	for src, want := range map[string]bool{
+		`plain`:                                 false,
+		`{{ lookup "dc" "a" "b" }}`:             false,
+		`{{ lookup $.T "k" "c" }}`:              true,
+		`{{ $t := .T }}{{ lookup $t "k" "c" }}`: true,
+		`{{ define "x" }}{{ lookup .T "a" "b" }}{{ end }}{{ lookup "dc" "a" "b" }}`: true,
+		`{{ "k" | lookup "dc" }}`: false,
+		`{{ .T | lookup }}`:       true,
+	} {
+		tmpl, err := sandbox().Parse("t", src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		if got := tmpl.ComputesLookupTable(); got != want {
+			t.Errorf("%s: ComputesLookupTable = %v, want %v", src, got, want)
+		}
+	}
+}
