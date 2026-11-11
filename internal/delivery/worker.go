@@ -236,10 +236,13 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 //
 // Every pass after the first works one batch at a time and the round goes back to the first pass after each full one,
 // so that the Publication or edit of an Urgent Root message that comes due meanwhile waits at most one claimed batch of
-// a later pass (reconcile). The two configuration passes claim only the edits due when the round started: an edit
-// denied a token is due again after the start, so each is claimed at most once a round, unless its lease runs out
-// within it, whatever the size of the re-render. The other passes claim what is due now and end, as the drains before
-// them did, once a claim comes back short; the round ends when every pass after the first comes back short in turn.
+// a later pass (reconcile). The pass of the configuration edits that are not Urgent claims only the edits due when the
+// round started: an edit denied a token is due again after the start, so each is claimed at most once a round, unless
+// its lease runs out within it, whatever the size of the re-render. The other passes claim what is due now, so an
+// Urgent configuration edit queued during the round goes within one batch too, and end, as the drains before them did,
+// once a claim comes back short; a large Urgent backlog, configuration edits included, keeps the round at the Urgent
+// ranks until it is short, as the decided order wants. The round ends when every pass after the first comes back short
+// in turn.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -266,16 +269,22 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 		claim func(ctx context.Context, org int64) ([]int64, error)
 		work  func(ctx context.Context, org, id int64)
 	}
-	later := []pass{{w.claimDeliveries(true, true, start), w.deliver},
+	later := []pass{{w.claimDeliveries(true, true, time.Time{}), w.deliver},
 		{w.claimDeliveries(false, false, time.Time{}), w.deliver}, {w.claimReplies, w.reply},
 		{w.claimEvents, w.sendEvent}, {w.claimDeliveries(false, true, start), w.deliver}}
-	var errs []error
+	// The first error of each pass, the first one's at 0: the loop may run a pass many times.
+	errs := make([]error, 1+len(later))
+	keep := func(i int, err error) {
+		if errs[i] == nil {
+			errs[i] = err
+		}
+	}
 top:
 	for {
-		errs = append(errs, w.drain(ctx, org, w.claimDeliveries(true, false, time.Time{}), w.deliver))
-		for _, p := range later {
+		keep(0, w.drain(ctx, org, w.claimDeliveries(true, false, time.Time{}), w.deliver))
+		for i, p := range later {
 			full, err := w.batchOnce(ctx, org, p.claim, p.work)
-			errs = append(errs, err)
+			keep(i+1, err)
 			if full {
 				continue top
 			}

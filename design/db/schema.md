@@ -1819,11 +1819,12 @@ in a Telegram chat at 10 calls a minute, about three Alert Groups a minute that 
 to four calls (a Root message edit and a Thread reply each time), leave them nothing. Every claim after the first takes
 one batch and the round then goes back to the first, so new Urgent Root-message work waits at most one claimed batch of
 a later rank, and, since the buckets refill continuously on the business clock, a token that comes free between a
-refusal and a later claim of the same round goes to that claim, while the refused row waits for the next token. The two
-configuration claims take only the edits due when the round started, so each is attempted at most once a round, unless
-its lease runs out within it; the other claims take what is due now and end, as before, on a short claim. A `RetryAfter`
-sets `next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time
-budget at `first_failed_at`; running out of either makes the Destination Broken.
+refusal and a later claim of the same round goes to that claim, while the refused row waits for the next token. The
+claim of the configuration edits that are not Urgent takes only the edits due when the round started, so each is
+attempted at most once a round, unless its lease runs out within it; the other claims take what is due now, an Urgent
+configuration edit queued during the round included, and end, as before, on a short claim. A `RetryAfter` sets
+`next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
+`first_failed_at`; running out of either makes the Destination Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

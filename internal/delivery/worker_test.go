@@ -2320,6 +2320,18 @@ func newGroupOf(e *env, i int, title string, urgent bool) *groups.Group {
 // the calls before it.
 func urgentWithinOneBatch(t *testing.T, e *env, n int) {
 	t.Helper()
+	withinOneBatch(t, e, "the Urgent Publication", func() {
+		e.enqueue(t, newGroupOf(e, n, "urgent", true), groups.System, created())
+	}, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
+	})
+}
+
+// withinOneBatch runs one round with the business clock moving 10 ms a token, as on a running replica, queues what
+// inject queues at the 25th token, and checks that the call that match finds goes out within one batch of the calls
+// before it.
+func withinOneBatch(t *testing.T, e *env, what string, inject func(), match func(deliverytest.Call) bool) {
+	t.Helper()
 	takes, injected := 0, -1
 	var tick func()
 	tick = func() {
@@ -2327,7 +2339,7 @@ func urgentWithinOneBatch(t *testing.T, e *env, n int) {
 		e.business.Advance(10 * time.Millisecond)
 		if takes == 25 {
 			injected = len(e.rec.Calls())
-			e.enqueue(t, newGroupOf(e, n, "urgent", true), groups.System, created())
+			inject()
 		}
 		e.db.before["TakeTokens"] = tick
 	}
@@ -2335,15 +2347,46 @@ func urgentWithinOneBatch(t *testing.T, e *env, n int) {
 	e.round(t)
 	delete(e.db.before, "TakeTokens")
 	calls := e.rec.Calls()
-	published := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
-		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
-	})
-	if injected < 0 || published < 0 {
-		t.Fatalf("the Urgent Publication did not go out in the round (injected after %d of %d calls)", injected,
-			len(calls))
+	at := slices.IndexFunc(calls, match)
+	if injected < 0 || at < 0 {
+		t.Fatalf("%s did not go out in the round (injected after %d of %d calls)", what, injected, len(calls))
 	}
-	if published-injected > int(delivery.Batch) {
-		t.Fatalf("the Urgent Publication went out after %d calls", published-injected)
+	if at-injected > int(delivery.Batch) {
+		t.Fatalf("%s went out after %d calls", what, at-injected)
+	}
+}
+
+// TestUrgentConfigurationEditDuringPublications is C-11.FR-3: an edit of an Urgent Root message that a change of
+// configuration alone made, queued while 200 Publications that are not Urgent are attempted, goes out within one batch
+// of them.
+func TestUrgentConfigurationEditDuringPublications(t *testing.T) {
+	e := newEnv(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 100_000, 1
+	r := e.db.routes[routeID]
+	r.threshold = 1_000_000
+	e.db.routes[routeID] = r
+	const n = 200
+	e.enqueue(t, newGroupOf(e, n, "urgent", true), groups.System, created())
+	e.round(t)
+	if p := e.rec.Count(deliverytest.MethodPublish); p != 1 {
+		t.Fatalf("%d publications of the Urgent Alert Group", p)
+	}
+	e.rec.Reset()
+	for i := range n {
+		e.enqueue(t, newGroup(e, i, "g"), groups.System, created())
+	}
+	withinOneBatch(t, e, "the Urgent configuration edit", func() {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e, n, "urgent renamed", true),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+		if d := e.db.deliveries[0]; !d.urgent || !d.configOnly || d.state != "pending" {
+			t.Fatalf("the re-render of the Urgent Alert Group: urgent %v, configuration only %v, %s", d.urgent,
+				d.configOnly, d.state)
+		}
+	}, func(c deliverytest.Call) bool { return c.Method == deliverytest.MethodUpdate })
+	if p, u := e.rec.Count(deliverytest.MethodPublish), e.rec.Count(deliverytest.MethodUpdate); p != n || u != 1 {
+		t.Errorf("%d publications and %d edits in the round, want %d and 1", p, u, n)
 	}
 }
 
