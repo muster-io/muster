@@ -134,6 +134,11 @@ func (s *fakeIntegrationsStore) CountTruncatedGroupsOf(context.Context, idb.Coun
 	return nil, nil
 }
 
+func (s *fakeIntegrationsStore) ListFailedLatestSnapshots(context.Context, idb.ListFailedLatestSnapshotsParams) (
+	[]idb.ListFailedLatestSnapshotsRow, error) {
+	return nil, nil
+}
+
 func (s *fakeIntegrationsStore) ListLongRepeatRoutes(context.Context, idb.ListLongRepeatRoutesParams) (
 	[]idb.ListLongRepeatRoutesRow, error) {
 	return nil, nil
