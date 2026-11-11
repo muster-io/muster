@@ -191,24 +191,24 @@ RETURNING (xmax = 0)::boolean AS inserted;
 -- name: NotifyDelivery :exec
 SELECT pg_notify(@channel::text, '');
 
--- ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
--- first, then the edits that are not configuration only before those a change of configuration alone made
--- (configuration_only, SetDesired), then the earliest, then the one delivered longest ago, so that deliveries waiting
--- for the same token take turns; another claimer skips the rows this one locked. The rank is order only and strict:
--- among the Root messages of one urgency, configuration edits always come last: a re-render of every open Root message
--- never delays a Publication or an edit of a Root message that an Alert or a Command made, of the same urgency in the
--- same Destination, and it takes every token they leave, its edits by age. Its edits wait as long as Publications and
--- those edits use up the limiter — Alert Groups that keep flapping, for one — and none is dropped: an edit that waits
--- is carried by the next change of its Alert Group, which ends the mark, and a delivered edit ends it too. Thread
--- replies are claimed after the deliveries (Round), so they still wait behind the edits of a re-render that take the
--- tokens first. A claimed edit without a token is released at once, due when the token is (RescheduleDelivery), so a
--- claimed batch never holds a token or a lease against a Publication. A delivery a Storm holds waits for its Storm, and
--- one of a
--- deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
--- that read the Destination's entries before its deletion committed can create one after the deletion ended the
--- others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
--- FROM, PostgreSQL may plan it as the inner side of a nested loop over every delivery, run once per row; the order
--- follows deliveries_due_v2_idx. The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers
+-- ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, of one
+-- rank: those that are not configuration only, or with @configuration_only those a change of configuration alone made
+-- (configuration_only, SetDesired). Within the rank, Urgent first, then the earliest, then the one delivered longest
+-- ago, so that deliveries waiting for the same token take turns; another claimer skips the rows this one locked. The
+-- worker's round claims the first rank, then the Thread replies and the head events of outgoing webhooks, then the
+-- configuration edits (Round), so that a re-render of every open Root message never delays a Publication, an edit of a
+-- Root message that an Alert or a Command made, or a Thread reply in the same Destination, Urgent or not, and takes
+-- every token they leave, its edits Urgent first, then by age. The order is order only and strict: configuration edits
+-- wait as long as that work uses up the limiter — Alert Groups that keep flapping, for one — and none is dropped: an
+-- edit that waits is carried by the next change of its Alert Group, which ends the mark, and a delivered edit ends it
+-- too. A claimed edit without a token is released at once, due when the token is (RescheduleDelivery), so a claimed
+-- batch never holds a token or a lease against the work of the first rank or a Thread reply. A delivery a Storm holds
+-- waits for its Storm, and one of a deleted Destination is claimed only for its final edit or, never published there,
+-- to end it (prepare): an Enqueue that read the Destination's entries before its deletion committed can create one
+-- after the deletion ended the others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14).
+-- The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as the inner side of a
+-- nested loop over every delivery, run once per row; the order follows deliveries_due_v2_idx, whose configuration_only
+-- the equality makes a constant. The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers
 -- (internal/timers) copy this shape, without the rank of configuration_only, which only Root messages have; a fix of
 -- it applies to them too.
 -- name: ClaimDueDeliveries :many
@@ -220,7 +220,8 @@ WITH due AS MATERIALIZED (
       AND (x.lease_until IS NULL OR x.lease_until <= @now::timestamptz) AND ds.health = 'healthy'
       AND x.held_by_storm_id IS NULL
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
-    ORDER BY x.urgent DESC, x.configuration_only, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
+      AND x.configuration_only = @configuration_only::boolean
+    ORDER BY x.urgent DESC, x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
     LIMIT @lim
     FOR UPDATE OF x SKIP LOCKED
 )
@@ -228,7 +229,7 @@ UPDATE deliveries d
 SET lease_owner = @owner::text, lease_until = @lease_until::timestamptz
 FROM due
 WHERE d.org_id = @org_id AND d.id = due.id
-RETURNING d.id, d.urgent, d.configuration_only, d.next_attempt_at, d.last_delivered_at;
+RETURNING d.id, d.urgent, d.next_attempt_at, d.last_delivered_at;
 
 -- GetLeasedDelivery reads, and locks, a delivery whose lease this replica still holds at the real time now: its latest
 -- Desired state, whether its next call is the final edit, its actual message — published or not, and for an outgoing
@@ -664,9 +665,10 @@ WHERE org_id = @org_id AND subject_kind = @subject_kind AND subject_id = @subjec
 
 -- ClaimDueReplies leases the due Thread replies whose delivery has a Root message, of healthy Destinations, one
 -- delivery's replies in id order: a reply waits while an earlier one of its delivery is pending. A collecting batch
--- that comes due closes: it becomes pending, and new Alerts start the next batch. The choice is a materialized CTE,
--- run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it ran once per row
--- and took seconds once replies had piled up.
+-- that comes due closes: it becomes pending, and new Alerts start the next batch. The worker's round claims them after
+-- the deliveries that are not configuration only and before the configuration edits (ClaimDueDeliveries, Round), so
+-- a re-render never delays them. The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as the
+-- inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up.
 -- name: ClaimDueReplies :many
 WITH due AS MATERIALIZED (
     SELECT x.id
@@ -1867,8 +1869,9 @@ ON CONFLICT (destination_id, alert_group_id, sequence) DO NOTHING;
 
 -- ClaimDueWebhookEvents leases the due head events of the healthy Destinations that are not deleted: the pending event
 -- with the lowest sequence of its Alert Group and Destination, whose lease is free or ran out; the next one waits until
--- it is delivered or Not delivered, while the events of other Alert Groups go on. The choice is a materialized CTE,
--- run once, as in ClaimDueDeliveries.
+-- it is delivered or Not delivered, while the events of other Alert Groups go on. The worker's round claims them
+-- before the configuration edits (Round): a Destination in the mode both shares its bucket with its Root requests,
+-- which a change of configuration can re-render. The choice is a materialized CTE, run once, as in ClaimDueDeliveries.
 -- name: ClaimDueWebhookEvents :many
 WITH due AS MATERIALIZED (
     SELECT x.id

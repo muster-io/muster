@@ -586,19 +586,13 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 	var due []*fakeDelivery
 	for _, d := range f.deliveries {
 		if d.state == "pending" && !d.next.After(arg.Due) && (d.owner == "" || !d.until.After(arg.Now)) &&
-			f.healthy(d.dest) && f.work(d) {
+			f.healthy(d.dest) && f.work(d) && d.configOnly == arg.ConfigurationOnly {
 			due = append(due, d)
 		}
 	}
 	slices.SortFunc(due, func(a, b *fakeDelivery) int {
 		if a.urgent != b.urgent {
 			if a.urgent {
-				return -1
-			}
-			return 1
-		}
-		if a.configOnly != b.configOnly {
-			if b.configOnly {
 				return -1
 			}
 			return 1
@@ -622,8 +616,8 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 			break
 		}
 		d.owner, d.until = arg.Owner, arg.LeaseUntil
-		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, Urgent: d.urgent, ConfigurationOnly: d.configOnly,
-			NextAttemptAt: d.next, LastDeliveredAt: tz(d.lastDelivered)})
+		out = append(out, dbgen.ClaimDueDeliveriesRow{ID: d.id, Urgent: d.urgent, NextAttemptAt: d.next,
+			LastDeliveredAt: tz(d.lastDelivered)})
 	}
 	// The order of RETURNING is not guaranteed; the worker sorts.
 	slices.Reverse(out)
@@ -2155,6 +2149,93 @@ func configurationEditsLast(t *testing.T, batch int32) {
 	}
 }
 
+// TestRepliesBeforeConfigurationEdits is C-11.FR-3 and FR-4: within a Destination's buckets the round attempts the
+// deliveries that are not configuration only, then the Thread replies, then the configuration edits, Urgent ones
+// included. With three tokens, the edit of new Alerts takes the first and the alerts_added replies of a non-urgent and
+// of an Urgent Alert Group the next two, ahead of the Urgent and the non-urgent configuration edits, which take the
+// tokens after them. With a batch of one, the round alone decides the order.
+func TestRepliesBeforeConfigurationEdits(t *testing.T) {
+	for _, batch := range []int32{0, 1} {
+		t.Run(fmt.Sprintf("batch %d", batch), func(t *testing.T) { repliesBeforeConfigurationEdits(t, batch) })
+	}
+}
+
+func repliesBeforeConfigurationEdits(t *testing.T, batch int32) {
+	e := newEnv(t)
+	e.w.Batch = batch
+	e.db.dests[destMM].limit = 600
+	group := func(i int64, title string) *groups.Group {
+		gid := groupID + i
+		if e.db.groups[gid] == nil {
+			e.db.groups[gid] = &fakeGroup{id: gid, publicID: fmt.Sprintf("AGAAAAAAAAAA%dC", i),
+				number: 10 + i, status: "firing", route: routeID, created: e.business.Now(), urgent: i == 2}
+		}
+		e.db.groups[gid].title = title
+		return &groups.Group{ID: gid, PublicID: e.db.groups[gid].publicID, Number: 10 + i, RouteID: routeID,
+			Title: title, Status: groups.StatusFiring, Urgent: i == 2}
+	}
+	render := func(r groups.Rendering) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, r); err != nil {
+			t.Fatal(err)
+		}
+		e.business.Advance(time.Millisecond)
+	}
+	// #10 and #11 are not urgent, #12 is Urgent.
+	for i := range int64(3) {
+		render(groups.Rendering{Group: group(i, "g"), Actor: groups.System, Events: []groups.Recorded{created()}})
+	}
+	e.round(t)
+	if len(e.rec.Calls()) != 3 {
+		t.Fatalf("publications %+v", e.rec.Calls())
+	}
+	e.rec.Reset()
+	// A re-render of #10 and #12; new Alerts in #11, which change its Root message, and in #12, which leave its Root
+	// message as the re-render made it.
+	render(groups.Rendering{Group: group(0, "renamed"), Actor: groups.System, Configuration: true})
+	render(groups.Rendering{Group: group(2, "renamed"), Actor: groups.System, Configuration: true})
+	render(groups.Rendering{Group: group(1, "more alerts"), Actor: groups.System,
+		Events: []groups.Recorded{alertsAdded(2, groups.StatusFiring, "fp11")}})
+	render(groups.Rendering{Group: group(2, "renamed"), Actor: groups.System,
+		Events: []groups.Recorded{alertsAdded(2, groups.StatusFiring, "fp12")}})
+	for i, want := range []bool{true, false, true} {
+		if d := e.db.deliveries[i]; d.configOnly != want || d.state != "pending" {
+			t.Fatalf("delivery of #%d: configuration only %v, %s; want %v", 10+i, d.configOnly, d.state, want)
+		}
+	}
+	calls := func() []string {
+		var out []string
+		for _, c := range e.rec.Calls() {
+			out = append(out, c.Method+" "+strings.Fields(textOf(c))[0])
+		}
+		return out
+	}
+	e.db.dests[destMM].limit = 3
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	if want := []string{deliverytest.MethodUpdate + " #11", deliverytest.MethodReply + " #11",
+		deliverytest.MethodReply + " #12"}; !slices.Equal(calls(), want) {
+		t.Fatalf("first calls %q, want %q", calls(), want)
+	}
+	for _, i := range []int{0, 2} {
+		if d := e.db.deliveries[i]; d.state != "pending" || !d.configOnly || !d.next.After(e.business.Now()) {
+			t.Errorf("the re-render of #%d: %s, configuration only %v, due %v", 10+i, d.state, d.configOnly, d.next)
+		}
+	}
+	e.business.Advance(time.Minute)
+	e.round(t)
+	if want := []string{deliverytest.MethodUpdate + " #11", deliverytest.MethodReply + " #11",
+		deliverytest.MethodReply + " #12", deliverytest.MethodUpdate + " #12",
+		deliverytest.MethodUpdate + " #10"}; !slices.Equal(calls(), want) {
+		t.Fatalf("calls %q, want %q", calls(), want)
+	}
+	for i, d := range e.db.deliveries {
+		if d.state != "delivered" || d.configOnly {
+			t.Errorf("delivery of #%d: %s, configuration only %v", 10+i, d.state, d.configOnly)
+		}
+	}
+}
+
 // TestRecordOutcomes: a RetryAfter waits exactly as asked, leaves attempts untouched and, since the messenger did not
 // take the Publication, clears its start; the other outcomes have their rules in outcomes_test.go.
 func TestRecordOutcomes(t *testing.T) {
@@ -2343,7 +2424,8 @@ func TestDrainBatches(t *testing.T) {
 			groups.System, created())
 	}
 	e.round(t)
-	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 3 {
+	// Three claims of the first rank, the last one short, and one, empty, of the configuration edits.
+	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 4 {
 		t.Errorf("%d publications in %d claims", e.rec.Count(deliverytest.MethodPublish),
 			e.db.calls["ClaimDueDeliveries"])
 	}

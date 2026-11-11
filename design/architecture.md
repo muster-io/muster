@@ -841,7 +841,9 @@ program on the same app takes some of the presses at random ([F-102](facts.md#so
 The delivery worker brings the actual Root message to the latest Desired state with one call; changes made while a call
 is pending collapse into the next one ([ADR-0005], [C-11].FR-1). The HTTP call is made outside any database transaction
 through the delivery client class, which makes one attempt and leaves the next one to the row ([ADR-0015]). The limiters
-are shared by all replicas: their token buckets live in PostgreSQL ([C-11].FR-3).
+are shared by all replicas: their token buckets live in PostgreSQL ([C-11].FR-3). Each round claims the deliveries
+that are not configuration only, then the Thread replies and the outgoing webhook events, then the edits of a change of
+configuration, so that a re-render of every open Root message takes only the tokens the rest leaves.
 
 ```mermaid
 sequenceDiagram
@@ -853,7 +855,7 @@ sequenceDiagram
     participant MS as messenger or endpoint
 
     DB-->>DW: NOTIFY, or next_attempt_at reached
-    DW->>DB: claim a due delivery row, Urgent first,<br/>edits of a change of configuration last<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
+    DW->>DB: claim a due delivery row, Urgent first,<br/>edits of a change of configuration after the Thread replies<br/>FOR UPDATE SKIP LOCKED, lease, short transaction
     DW->>DB: read the latest Desired state (text, buttons, hash)
     alt the actual message already matches
         DW->>DB: nothing to do

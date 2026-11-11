@@ -1386,8 +1386,8 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
     other change of the Desired state, a final edit, a republication and a rejoin, so that a Publication, a final edit
     and a change of Alerts or a Command keep their place.
   The claim index `deliveries_due_v2_idx` `(org_id, urgent DESC, configuration_only, next_attempt_at) WHERE state =
-  'pending'` (migration 0038, which replaced `deliveries_due_idx` without `configuration_only`) takes Urgent first and,
-  within each urgency, the edits of a change of configuration last; the per-
+  'pending'` (migration 0038, which replaced `deliveries_due_idx` without `configuration_only`) serves the two claims
+  of due deliveries, the edits of a change of configuration and the rest, each Urgent first; the per-
   Destination pending index gives queue depth and the oldest waiting delivery for the Broken probe; `message_id` and
   `thread_anchor_id` indexes resolve incoming Telegram updates and button presses to their delivery;
   `actual_button_key_id` answers "does an open Root message still depend on this key" on the Keyring page;
@@ -1793,25 +1793,29 @@ A failed Snapshot leaves `pending`, so it never blocks the ones behind it (C-06.
 Integration that commit within milliseconds can become visible slightly out of `received_at` order; both fall into one
 duplicate window, where order does not matter, and Alert-level ordering uses `startsAt`/`endsAt` of the same source.
 
-**Delivery** (Urgent first, the edits of a change of configuration last, never past a limiter):
+**Delivery** (one rank at a time, Urgent first within it, never past a limiter):
 
 ```sql
 SELECT d.id FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id
  WHERE d.org_id = $1 AND d.state = 'pending' AND d.next_attempt_at <= $business_now
    AND (d.lease_until IS NULL OR d.lease_until <= $real_now) AND ds.health = 'healthy'
- ORDER BY d.urgent DESC, d.configuration_only, d.next_attempt_at
+   AND d.configuration_only = $configuration_only
+ ORDER BY d.urgent DESC, d.next_attempt_at
  LIMIT $n FOR UPDATE OF d SKIP LOCKED;
 UPDATE deliveries SET lease_owner = $replica, lease_until = $real_now + $lease WHERE id = ANY($ids);
 ```
 
-A delivery whose limiter has no token is rescheduled (`next_attempt_at`), not failed. The rank of `configuration_only`
-is order only and strict: among the Root messages of one urgency, configuration edits always come last; a re-render of
-every open Root message waits for the Publications and the edits of Root messages that Alerts and Commands made, of the
-same urgency, for as long as they use up the limiter, takes every token they leave, by age, and an edit that waits is
-carried by the next change of its Alert Group, which clears the mark. Thread replies are claimed after the deliveries,
-configuration edits included. A `RetryAfter` sets `next_attempt_at` exactly and does not touch `attempts`; `Transient`
-increments `attempts` and starts the time budget at `first_failed_at`; running out of either makes the Destination
-Broken.
+A delivery whose limiter has no token is rescheduled (`next_attempt_at`), not failed. Each round of the delivery worker
+claims the deliveries that are not configuration only, then the Thread replies and the outgoing webhook events, then the
+configuration edits (`$configuration_only` true); `deliveries_due_v2_idx` serves both claims, the equality making
+`configuration_only` a constant of its order. Every row denied a token is due again at that token's time, so the order
+of the claims decides who gets it. The order is order only and strict: a re-render of every open Root message waits for
+the Publications and the edits of Root messages that Alerts and Commands made, and for the Thread replies, Urgent or
+not, for as long as they use up the limiter, and takes every token they leave, Urgent first, then by age; an edit that
+waits is carried by the next change of its Alert Group, which clears the mark. Thread replies wait only while the
+deliveries that are not configuration only use up the limiter. A `RetryAfter` sets `next_attempt_at` exactly and does
+not touch `attempts`; `Transient` increments `attempts` and starts the time budget at `first_failed_at`; running out of
+either makes the Destination Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

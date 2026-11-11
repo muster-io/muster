@@ -215,9 +215,19 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 	}
 }
 
-// Round probes every Broken Destination whose probe is due, then attempts every due delivery, then every due Thread
-// reply, then every due head event of an outgoing webhook, of every Organization, claiming Batch at a time, and returns how long until the next one can be claimed, at
-// most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes on.
+// Round probes every Broken Destination whose probe is due, then attempts, of every Organization, every due delivery
+// that is not configuration only, every due Thread reply, every due head event of an outgoing webhook and last every
+// due configuration edit (ClaimDueDeliveries), claiming Batch at a time, and returns how long until the next one can be
+// claimed, at most MaxWait. A row that fails is logged and attempted again once its lease runs out; the round goes on.
+//
+// The four share the buckets of each Destination and Connection, and the order decides who gets a token: a row denied
+// one is due again at the token's time plus TokenMargin, as every row denied before that token is, and the round at
+// that time claims them in this order, so the token goes to the first rank, then to a Thread reply or an event, and to
+// a configuration edit only when nothing else waits for it. Configuration edits take every token the rest leaves, and
+// none is dropped; a Thread reply waits only while the first rank uses up the limiter, and the Thread batching window
+// keeps it to one reply per window and delivery. With two replicas, one whose configuration pass reaches the bucket
+// first can take the token ahead of a reply that the other replica claimed: the reply loses that one token interval
+// and is due again with the denied edits, ahead of them in the next round of either replica.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -226,8 +236,9 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	next := w.maxWait()
 	var errs []error
 	for _, org := range orgs {
-		errs = append(errs, w.probe(ctx, org), w.drain(ctx, org, w.claimDeliveries, w.deliver),
-			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent))
+		errs = append(errs, w.probe(ctx, org), w.drain(ctx, org, w.claimDeliveries(false), w.deliver),
+			w.drain(ctx, org, w.claimReplies, w.reply), w.drain(ctx, org, w.claimEvents, w.sendEvent),
+			w.drain(ctx, org, w.claimDeliveries(true), w.deliver))
 		n, err := w.next(ctx, org, next)
 		if err != nil {
 			errs = append(errs, err)
@@ -255,49 +266,47 @@ func (w *Worker) drain(ctx context.Context, org int64,
 	}
 }
 
-// claimDeliveries leases the due deliveries of the Organization in the order of ClaimDueDeliveries: Urgent first, then
-// the edits that are not configuration only.
-func (w *Worker) claimDeliveries(ctx context.Context, org int64) ([]int64, error) {
-	rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
-		func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueDeliveriesRow, error) {
-			return w.Store.queries(tx).ClaimDueDeliveries(ctx, dbgen.ClaimDueDeliveriesParams{OrgID: org,
-				Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now, Lim: p.Limit})
+// claimDeliveries is the claim of the due deliveries of an Organization of one rank, the configuration edits or the
+// rest, in the order of ClaimDueDeliveries: Urgent first, then the earliest, then the one delivered longest ago.
+func (w *Worker) claimDeliveries(configurationOnly bool) func(ctx context.Context, org int64) ([]int64, error) {
+	return func(ctx context.Context, org int64) ([]int64, error) {
+		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
+			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueDeliveriesRow, error) {
+				return w.Store.queries(tx).ClaimDueDeliveries(ctx, dbgen.ClaimDueDeliveriesParams{OrgID: org,
+					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: p.Due, Now: p.Now,
+					ConfigurationOnly: configurationOnly, Lim: p.Limit})
+			})
+		if err != nil {
+			return nil, fmt.Errorf("claim the due deliveries: %w", err)
+		}
+		slices.SortFunc(rows, func(a, b dbgen.ClaimDueDeliveriesRow) int {
+			if a.Urgent != b.Urgent {
+				if a.Urgent {
+					return -1
+				}
+				return 1
+			}
+			if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
+				return c
+			}
+			if a.LastDeliveredAt.Valid != b.LastDeliveredAt.Valid {
+				if !a.LastDeliveredAt.Valid {
+					return -1
+				}
+				return 1
+			}
+			return cmp.Or(a.LastDeliveredAt.Time.Compare(b.LastDeliveredAt.Time), cmp.Compare(a.ID, b.ID))
 		})
-	if err != nil {
-		return nil, fmt.Errorf("claim the due deliveries: %w", err)
+		ids := make([]int64, len(rows))
+		for i, r := range rows {
+			ids[i] = r.ID
+		}
+		return ids, nil
 	}
-	slices.SortFunc(rows, func(a, b dbgen.ClaimDueDeliveriesRow) int {
-		if a.Urgent != b.Urgent {
-			if a.Urgent {
-				return -1
-			}
-			return 1
-		}
-		if a.ConfigurationOnly != b.ConfigurationOnly {
-			if b.ConfigurationOnly {
-				return -1
-			}
-			return 1
-		}
-		if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
-			return c
-		}
-		if a.LastDeliveredAt.Valid != b.LastDeliveredAt.Valid {
-			if !a.LastDeliveredAt.Valid {
-				return -1
-			}
-			return 1
-		}
-		return cmp.Or(a.LastDeliveredAt.Time.Compare(b.LastDeliveredAt.Time), cmp.Compare(a.ID, b.ID))
-	})
-	ids := make([]int64, len(rows))
-	for i, r := range rows {
-		ids[i] = r.ID
-	}
-	return ids, nil
 }
 
-// next is how long until a delivery or a Thread reply of the Organization can be claimed, at most limit.
+// next is how long until a delivery, a Thread reply, a head event of an outgoing webhook or a Broken probe of the
+// Organization can be claimed, at most limit (NextDeliveryWork).
 func (w *Worker) next(ctx context.Context, org int64, limit time.Duration) (time.Duration, error) {
 	realNow := w.Lease.Clocks.Real.Now().UTC()
 	r, err := w.Store.q().NextDeliveryWork(ctx, dbgen.NextDeliveryWorkParams{OrgID: org, Now: realNow})

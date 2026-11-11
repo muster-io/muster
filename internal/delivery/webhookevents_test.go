@@ -21,6 +21,7 @@ import (
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/dbgen"
+	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
 	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/outbound"
@@ -706,6 +707,42 @@ func TestWebhookEventsOrder(t *testing.T) {
 		if we.state != "delivered" || we.deliveredAt == nil {
 			t.Errorf("event %+v", we)
 		}
+	}
+}
+
+// TestWebhookEventsBeforeConfigurationEdits is C-11.FR-3 for an outgoing webhook in the mode both: its events share
+// the Destination's bucket with its Root requests, and a request that a change of configuration alone made waits
+// behind an event that is due, then goes with the next token.
+func TestWebhookEventsBeforeConfigurationEdits(t *testing.T) {
+	e := newEventsEnv(t, nil)
+	e.db.dests[destWH].mode = "both"
+	e.w.Adapters[delivery.TypeWebhook] = e.rec
+	e.db.dests[destWH].limit = 600
+	e.enqueue(t, e.group(groups.StatusFiring, "t"), groups.System, created())
+	e.drain(t)
+	if e.rec.Count(deliverytest.MethodPublish) != 1 || len(e.sender.calls) != 1 {
+		t.Fatalf("published %d, events %d", e.rec.Count(deliverytest.MethodPublish), len(e.sender.calls))
+	}
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusFiring, "renamed"),
+		Actor: groups.System, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.enqueue(t, e.group(groups.StatusFiring, "renamed"), groups.System,
+		event(2, groups.EventAnnotationsChanged, groups.VariantAny))
+	if d := e.db.deliveries[0]; d.state != "pending" || !d.configOnly {
+		t.Fatalf("the request of the re-render: %s, configuration only %v", d.state, d.configOnly)
+	}
+	e.db.dests[destWH].limit = 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	if got := e.sender.sent(t); !slices.Equal(got, []string{"created@21", "annotations_changed@21"}) ||
+		e.rec.Count(deliverytest.MethodUpdate) != 0 {
+		t.Fatalf("events %v, %d requests of the re-render", got, e.rec.Count(deliverytest.MethodUpdate))
+	}
+	e.business.Advance(time.Minute + delivery.TokenMargin)
+	e.round(t)
+	if n := e.rec.Count(deliverytest.MethodUpdate); n != 1 || e.db.deliveries[0].state != "delivered" {
+		t.Errorf("%d requests of the re-render, %s", n, e.db.deliveries[0].state)
 	}
 }
 
