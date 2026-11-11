@@ -586,11 +586,16 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 	var due []*fakeDelivery
 	for _, d := range f.deliveries {
 		if d.state == "pending" && !d.next.After(arg.Due) && (d.owner == "" || !d.until.After(arg.Now)) &&
-			f.healthy(d.dest) && f.work(d) && d.urgent == arg.Urgent && d.configOnly == arg.ConfigurationOnly {
+			f.healthy(d.dest) && f.work(d) && d.urgent == arg.Urgent && d.configOnly == arg.ConfigurationOnly &&
+			!slices.Contains(arg.SkipDestinations, d.dest) {
 			due = append(due, d)
 		}
 	}
+	// next_attempt_at, then last_delivered_at NULLS FIRST, then id, as the query orders.
 	slices.SortFunc(due, func(a, b *fakeDelivery) int {
+		if c := a.next.Compare(b.next); c != 0 {
+			return c
+		}
 		if (a.lastDelivered == nil) != (b.lastDelivered == nil) {
 			if a.lastDelivered == nil {
 				return -1
@@ -602,7 +607,7 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 				return c
 			}
 		}
-		return cmp.Or(a.next.Compare(b.next), cmp.Compare(a.id, b.id))
+		return cmp.Compare(a.id, b.id)
 	})
 	var out []dbgen.ClaimDueDeliveriesRow
 	for _, d := range due {
@@ -1008,7 +1013,8 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 	for _, r := range f.replies {
 		d := f.delivery(r.delivery)
 		if (r.state != "collecting" && r.state != "pending") || r.next.After(arg.Due) ||
-			(r.owner != "" && r.until.After(arg.Now)) || d.publishedAt == nil || !f.healthy(r.dest) {
+			(r.owner != "" && r.until.After(arg.Now)) || d.publishedAt == nil || !f.healthy(r.dest) ||
+			slices.Contains(arg.SkipDestinations, r.dest) {
 			continue
 		}
 		if slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
@@ -2126,8 +2132,9 @@ func configurationEditsLast(t *testing.T, batch int32) {
 		deliverytest.MethodUpdate + " #13"}; !slices.Equal(first, want) {
 		t.Fatalf("first calls %q, want %q", first, want)
 	}
+	// Denied a token, or skipped for the round once the limiter of their Destination refused one.
 	for _, i := range []int{0, 2} {
-		if d := e.db.deliveries[i]; d.state != "pending" || !d.configOnly || !d.next.After(e.business.Now()) {
+		if d := e.db.deliveries[i]; d.state != "pending" || !d.configOnly {
 			t.Errorf("the re-render of #%d: %s, configuration only %v, due %v", 10+i, d.state, d.configOnly, d.next)
 		}
 	}
@@ -2212,7 +2219,8 @@ func repliesBeforeConfigurationEdits(t *testing.T, batch int32) {
 		deliverytest.MethodReply + " #11"}; !slices.Equal(calls(), want) {
 		t.Fatalf("first calls %q, want %q", calls(), want)
 	}
-	if d := e.db.deliveries[0]; d.state != "pending" || !d.configOnly || !d.next.After(e.business.Now()) {
+	// Skipped for the round once the limiter of its Destination refused a reply.
+	if d := e.db.deliveries[0]; d.state != "pending" || !d.configOnly {
 		t.Errorf("the re-render of #10: %s, configuration only %v, due %v", d.state, d.configOnly, d.next)
 	}
 	e.business.Advance(time.Minute)

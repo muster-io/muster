@@ -15,8 +15,8 @@ import (
 	"github.com/muster-io/muster/internal/groups"
 )
 
-// The fixtures of the turns: the Mattermost Destination 13 of Connection 6, alone on Route 2, and the outgoing webhook
-// 12 in the events mode, alone on Route 3.
+// The fixtures of the round tests: the Mattermost Destination 13 of Connection 6, alone on Route 2, and the outgoing
+// webhook 12 in the events mode, alone on Route 3.
 const (
 	destOther  = 13
 	connOther  = 6
@@ -41,9 +41,9 @@ func groupOn(e *env, route int64, i int, title string) *groups.Group {
 		Title: title, Status: groups.StatusFiring}
 }
 
-// turnsEnv is the events env with Route 1 on the Mattermost Destination 11 alone, the Destination 13 alone on Route 2
+// roundEnv is the events env with Route 1 on the Mattermost Destination 11 alone, the Destination 13 alone on Route 2
 // and the outgoing webhook 12 in the events mode alone on Route 3, no Storm on any of them and every limiter wide.
-func turnsEnv(t *testing.T, batch int32) *eventsEnv {
+func roundEnv(t *testing.T, batch int32) *eventsEnv {
 	t.Helper()
 	e := newEventsEnv(t, nil)
 	e.w.Batch = batch
@@ -65,12 +65,12 @@ func turnsEnv(t *testing.T, batch int32) *eventsEnv {
 	return e
 }
 
-// backlog is a turnsEnv with n published Alert Groups on Route 1 whose Root messages in Destination 11 each wait for
+// backlog is a roundEnv with n published Alert Groups on Route 1 whose Root messages in Destination 11 each wait for
 // an edit that Alerts made, not a configuration edit, and Destination 11 at 5 calls a second, its bucket full; the
 // Alert Groups "other" on Route 2 and "hook" on Route 3 are published and sent too.
 func backlog(t *testing.T, n int, batch int32) (*eventsEnv, *groups.Group, *groups.Group) {
 	t.Helper()
-	e := turnsEnv(t, batch)
+	e := roundEnv(t, batch)
 	for i := range n {
 		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
 	}
@@ -127,9 +127,10 @@ func takesBefore(t *testing.T, e *eventsEnv, sent func() bool, most int) (before
 }
 
 // TestReplyWithinOneBatchOfABacklog is C-11.FR-3 and FR-4 for #540: while 1000 edits of Root messages that Alerts
-// made wait for the limiter of one Destination, a Thread reply due on another Destination is sent within one claimed
-// batch of them, and each of the edits is attempted at most once in the round. With a batch of one, the round alone
-// decides the order.
+// made wait for the limiter of one Destination, a Thread reply due on another Destination is sent after the edits
+// that got a token and at most one claimed batch of those refused: once the limiter refused one, the round skips the
+// rest of that Destination's rows, untouched, for the next round. With a batch of one, the round alone decides the
+// order.
 func TestReplyWithinOneBatchOfABacklog(t *testing.T) {
 	for _, batch := range []int32{0, 1} {
 		t.Run(fmt.Sprintf("batch %d", batch), func(t *testing.T) {
@@ -145,20 +146,35 @@ func TestReplyWithinOneBatchOfABacklog(t *testing.T) {
 			if b == 0 {
 				b = int(delivery.Batch)
 			}
-			if before < 0 || before > b {
-				t.Fatalf("the Thread reply went out after %d takes of the edits (%d takes in the round), want at most %d",
-					before, takes, b)
+			// The edits that got a token go first, in order; of those refused, at most one claimed batch.
+			calls := e.rec.Calls()
+			sent := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+				return c.Method == deliverytest.MethodReply
+			})
+			if before < 0 || before-sent > b {
+				t.Fatalf("the Thread reply went out after %d takes of the edits, %d of them refused "+
+					"(%d takes in the round), want at most %d refused", before, before-sent, takes, b)
 			}
-			if takes > n+1 {
+			// The 5 tokens of the bucket, at most one batch refused, and the reply.
+			if takes > 5+b+1 {
 				t.Errorf("%d takes in the round for %d edits and a reply", takes, n)
+			}
+			skipped := 0
+			for _, d := range e.db.deliveries[:n] {
+				if d.state == "pending" && d.owner == "" && !d.next.After(e.business.Now()) {
+					skipped++
+				}
+			}
+			if skipped < n-5-b {
+				t.Errorf("%d edits skipped untouched, want at least %d", skipped, n-5-b)
 			}
 		})
 	}
 }
 
 // TestEventWithinOneBatchOfABacklog is C-11.FR-3 and C-15.FR-2 for #540: while 1000 edits of Root messages that
-// Alerts made wait for the limiter of one Destination, an event due for an outgoing webhook is sent within one claimed
-// batch of them.
+// Alerts made wait for the limiter of one Destination, an event due for an outgoing webhook is sent after the edits
+// that got a token and at most one claimed batch of those refused.
 func TestEventWithinOneBatchOfABacklog(t *testing.T) {
 	for _, batch := range []int32{0, 1} {
 		t.Run(fmt.Sprintf("batch %d", batch), func(t *testing.T) {
@@ -170,20 +186,23 @@ func TestEventWithinOneBatchOfABacklog(t *testing.T) {
 			if b == 0 {
 				b = int(delivery.Batch)
 			}
-			if before < 0 || before > b {
-				t.Fatalf("the webhook event went out after %d takes of the edits (%d takes in the round), want at most %d",
-					before, takes, b)
+			// The edits that got a token go first, in order (rank 3 before rank 5); of those refused, at most one
+			// claimed batch.
+			sent := e.rec.Count(deliverytest.MethodUpdate)
+			if before < 0 || before-sent > b {
+				t.Fatalf("the webhook event went out after %d takes of the edits, %d of them refused "+
+					"(%d takes in the round), want at most %d refused", before, before-sent, takes, b)
 			}
 		})
 	}
 }
 
-// TestTurnsOncePerRound is C-11.FR-3 for #540 with every limiter holding back, the business clock moving 50 ms a
+// TestLaterRanksOncePerRound is C-11.FR-3 for #540 with every limiter holding back, the business clock moving 50 ms a
 // token: a row denied a token is due again within the round, but a round attempts each edit that Alerts made, each
-// Thread reply and each webhook event due at its start at most once and ends; the next rounds send them all as the
-// tokens come.
-func TestTurnsOncePerRound(t *testing.T) {
-	e := turnsEnv(t, 0)
+// Thread reply and each webhook event due at its start at most once — and, once a Destination's limiter refused one,
+// none of the rest of its rows — and ends; the next rounds send them all as the tokens come.
+func TestLaterRanksOncePerRound(t *testing.T) {
+	e := roundEnv(t, 0)
 	e.db.routeDests[routeID] = []int64{destMM, destWH}
 	const n = 50
 	for i := range n {
@@ -259,11 +278,12 @@ func TestTurnsOncePerRound(t *testing.T) {
 	}
 }
 
-// TestConfigurationEditsAfterTurns is C-11.FR-3 beyond one batch: ranks 3, 4 and 5 take turns by batch, and the
-// configuration edits that are not Urgent start only once all three came back short, so every edit that Alerts made
-// and every Thread reply goes before every configuration edit, though there are more of each than one batch.
-func TestConfigurationEditsAfterTurns(t *testing.T) {
-	e := turnsEnv(t, 0)
+// TestConfigurationEditsLastBeyondOneBatch is C-11.FR-3 beyond one batch: ranks 3, 4 and 5 go in order, each until a
+// claim comes back short, and the configuration edits that are not Urgent start only after them, so every edit that
+// Alerts made goes before every Thread reply and every reply before every configuration edit, though there are more of
+// each than one batch.
+func TestConfigurationEditsLastBeyondOneBatch(t *testing.T) {
+	e := roundEnv(t, 0)
 	const n = 25
 	for i := range 2 * n {
 		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
@@ -289,11 +309,20 @@ func TestConfigurationEditsAfterTurns(t *testing.T) {
 	firstConfiguration := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
 		return c.Method == deliverytest.MethodUpdate && strings.Contains(textOf(c), "renamed")
 	})
-	var last int
+	var last, lastEdit int
+	firstReply := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodReply
+	})
 	for i, c := range calls {
 		if c.Method == deliverytest.MethodReply || strings.Contains(textOf(c), "annotated") {
 			last = i
 		}
+		if c.Method == deliverytest.MethodUpdate && strings.Contains(textOf(c), "annotated") {
+			lastEdit = i
+		}
+	}
+	if firstReply < 0 || lastEdit > firstReply {
+		t.Errorf("the last edit that Alerts made at %d, the first Thread reply at %d", lastEdit, firstReply)
 	}
 	if len(calls) != 3*n || firstConfiguration < 0 || last > firstConfiguration {
 		t.Fatalf("%d calls, the first configuration edit at %d, the last edit of Alerts or reply at %d", len(calls),
@@ -304,7 +333,7 @@ func TestConfigurationEditsAfterTurns(t *testing.T) {
 // TestUrgentPublicationDuringEvents is C-11.FR-3 and C-15.FR-2: an Urgent Publication that comes due while 200 events
 // of an outgoing webhook are sent goes out within one batch of them.
 func TestUrgentPublicationDuringEvents(t *testing.T) {
-	e := turnsEnv(t, 0)
+	e := roundEnv(t, 0)
 	e.db.routeDests[routeID] = []int64{destWH}
 	e.db.routeDests[routeOther] = []int64{destMM}
 	const n = 200
@@ -349,7 +378,7 @@ func TestUrgentPublicationDuringEvents(t *testing.T) {
 // that claimed a row, a short one included. An Urgent Publication that comes due during a batch of one edit that
 // Alerts made goes out before the full batch of Thread replies that follows it.
 func TestUrgentAfterAShortBatch(t *testing.T) {
-	e := turnsEnv(t, 0)
+	e := roundEnv(t, 0)
 	const n = 15
 	for i := range n {
 		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())

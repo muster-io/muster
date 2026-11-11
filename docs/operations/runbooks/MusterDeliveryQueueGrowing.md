@@ -16,11 +16,11 @@ every 15 seconds: the pending deliveries and Thread replies that are due.
 
 - The messages of that Destination fall further and further behind: new Alert Groups and their changes appear late.
   Deliveries are still made; nothing is lost.
-- Other Destinations, the UI and the API keep working. Each round of the delivery worker tries each waiting delivery
-  once, so the queue holds up the new Root messages and edits of other Destinations by about one round, a few seconds
-  for thousands of waiting deliveries, and their Thread replies and the events of outgoing webhooks by at most one batch
-  of it, about ten calls, once a round reaches them: one that comes due during a round first waits for the rest of
-  that round.
+- Other Destinations, the UI and the API keep working. Once this Destination's limiter refuses a call, each round of
+  the delivery worker leaves the rest of its deliveries untouched until the next round, about a tenth of a second
+  later, so the queue holds up the messages of other Destinations by about one batch of ten calls a round, not by its
+  size. On the Destinations whose limiters have room, Thread replies and the events of outgoing webhooks still wait
+  for the Root messages and edits due before them, as the delivery order says.
 
 ## Diagnosis
 

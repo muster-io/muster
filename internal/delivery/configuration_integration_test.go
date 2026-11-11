@@ -295,10 +295,10 @@ func TestIntegrationRepliesBeforeConfigurationEdits(t *testing.T) {
 
 // TestIntegrationReplyWithinOneBatchOfABacklog is C-11.FR-3 and FR-4 on PostgreSQL for #540: 150 open Alert Groups are
 // published in one Mattermost channel and acknowledged, and the channel's limiter (5 a second) holds back the 150 edits
-// that the Acknowledges made; a new Alert then joins an Alert Group of another Route in another channel. Its
-// alerts_added Thread reply is sent after at most one claimed batch of the edits — the others not attempted yet — and
-// before the edit of the other Root message, which waits behind the edits due before it; every edit due at the start
-// is attempted in that round, and every edit goes out in the next rounds.
+// that the Acknowledges made; a new Alert then joins an Alert Group of another Route in another channel. Once the
+// channel's limiter refuses an edit, the round skips the rest of its rows, untouched: the edit of the other Root
+// message goes next, as the edits that Alerts made go before Thread replies, then the alerts_added Thread reply, after
+// at most one claimed batch of the channel's edits. Every edit goes out in the next rounds.
 func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		l := setupLive(t, s)
@@ -366,12 +366,13 @@ func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 		}
 		t.Logf("the reply is call %d, with %d of %d edits attempted before it and %d sent", reply, n-untouched, n,
 			before)
-		if otherEdit >= 0 && otherEdit < reply {
-			t.Errorf("the edit of the other channel at %d went before the reply at %d", otherEdit, reply)
+		if otherEdit < 0 || otherEdit > reply {
+			t.Errorf("the edit of the other channel at %d, the reply at %d: the edit goes first", otherEdit, reply)
 		}
 		if a := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
-			AND next_attempt_at <= $2`, dest, start); a != 0 {
-			t.Errorf("%d edits of the channel not attempted in the round", a)
+			AND next_attempt_at <= $2 AND lease_owner IS NULL`, dest, start); a < n-int64(delivery.Batch) {
+			t.Errorf("%d edits of the channel skipped untouched in the round, want at least %d", a,
+				n-int64(delivery.Batch))
 		}
 		for i := 0; pending(dest)+pending(other) > 0; i++ {
 			if i == 100 {

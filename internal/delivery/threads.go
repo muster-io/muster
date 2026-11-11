@@ -49,10 +49,12 @@ func (s *Service) ReminderReached(ctx context.Context, db groups.DBTX, groupID, 
 // due by then.
 func (w *Worker) claimReplies(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
 	return func(ctx context.Context, org int64) ([]int64, error) {
+		skip := refusedOf(ctx)
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueRepliesRow, error) {
 				return w.Store.queries(tx).ClaimDueReplies(ctx, dbgen.ClaimDueRepliesParams{OrgID: org,
-					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: dueBy(p.Due, until), Now: p.Now, Lim: p.Limit})
+					Owner: p.Owner, LeaseUntil: p.LeaseUntil, Due: dueBy(p.Due, until), Now: p.Now,
+					SkipDestinations: skip, Lim: p.Limit})
 			})
 		if err != nil {
 			return nil, fmt.Errorf("claim the due thread replies: %w", err)
@@ -136,6 +138,7 @@ func (w *Worker) prepareReply(ctx context.Context, org, id int64) (replyAttempt,
 				At: t.due.Add(TokenMargin)}); err != nil {
 				return fmt.Errorf("reschedule the thread reply: %w", err)
 			}
+			noteRefused(ctx, d.ID)
 			return nil
 		}
 		if err := q.RenewReplyLease(ctx, dbgen.RenewReplyLeaseParams{OrgID: org, ID: id, Owner: w.Lease.Owner,
