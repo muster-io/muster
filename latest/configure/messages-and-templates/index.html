@@ -3346,11 +3346,12 @@ list of its own. The preview under the Root message shows the labels saved on th
 differ, and not at all when no Alert has it. The Route suggests labels from its recent Alert Groups, each with an
 example value (<code>listRouteLabelSuggestions</code>). A change of the list, or of the Group key while the list is the default,
 edits the open Root messages of the Route, Quietly, to show the new labels.</p>
-<p>The open Root messages also follow the Organization's settings and the names of Teams that they show: a change of the
-<a href="../organization/">severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day of
-the week</a> edits every open Root message once, Quietly, and a rename of a Team edits those of the open
-Alert Groups that have the Team. A message the change does not alter is not edited, and no change sends a new message or
-a Mention.</p>
+<p>The open Root messages also follow the other settings that they show: a change of the Route's language, its Snooze
+durations, or its Root message or line template edits the open Root messages of the Route once, Quietly; a change of
+the <a href="../organization/">severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day
+of the week</a>, or of a <a href="#links">Link rule or a Lookup table</a>, edits every open Root message once,
+Quietly; and a rename of a Team edits those of the open Alert Groups that have the Team. A message the change does not
+alter is not edited, and no change sends a new message or a Mention.</p>
 <h2 id="what-you-can-change-and-what-you-cannot">What you can change, and what you cannot<a class="headerlink" href="#what-you-can-change-and-what-you-cannot" title="Permanent link">&para;</a></h2>
 <p>A Route has three templates, under <strong>Routes → a Route → Message</strong>. Each is <strong>Built-in</strong> or <strong>Custom</strong>.</p>
 <dl>
@@ -3459,7 +3460,8 @@ needs an Account link to be mentioned.</p>
 in a template is escaped and mentions nobody.</p>
 <h2 id="links">Links<a class="headerlink" href="#links" title="Permanent link">&para;</a></h2>
 <p>Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
-in the message and as the <strong>Links</strong> block on the Alert Group page.</p>
+in the message and as the <strong>Links</strong> block on the Alert Group page. Creating, changing or deleting a Link rule or a
+Lookup table edits, Quietly, the open Root messages whose links it changes, and no other.</p>
 <h3 id="add-a-lookup-table">Add a Lookup table<a class="headerlink" href="#add-a-lookup-table" title="Permanent link">&para;</a></h3>
 <p>A <strong>Lookup table</strong> is a table of values: a key and one value per named column. Limits: 50 columns and 10,000 rows,
 names and column names up to 200 characters, a description up to 2,000, a key or value up to 4,096
