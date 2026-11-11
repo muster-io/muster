@@ -364,6 +364,8 @@ func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 			t.Fatalf("the reply at %d with %d edits attempted before it and %d sent; calls %q", reply, n-untouched,
 				before, order[:min(len(order), 12)])
 		}
+		t.Logf("the reply is call %d, with %d of %d edits attempted before it and %d sent", reply, n-untouched, n,
+			before)
 		if otherEdit >= 0 && otherEdit < reply {
 			t.Errorf("the edit of the other channel at %d went before the reply at %d", otherEdit, reply)
 		}
