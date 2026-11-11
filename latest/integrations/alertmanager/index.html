@@ -802,6 +802,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-the-body-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the body needs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-muster-answers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2268,6 +2279,8 @@
       
         
       
+        
+      
     
     
     
@@ -2576,6 +2589,33 @@
     
   
   MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestSnapshotFailed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestSnapshotFailed
 
     
   </span>
@@ -3195,6 +3235,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-the-body-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What the body needs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-muster-answers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3427,6 +3478,29 @@ else to <code>:8080</code>. Keep the proxy's body size limit at <strong>16 MB</s
 <code>Authorization</code> header, which proxies do not log by default.</p>
 <p>With one listener for both (<code>MUSTER_LISTEN_INGEST</code> equal to <code>MUSTER_LISTEN_APP</code>), the same port serves ingestion and
 the API.</p>
+<h2 id="what-the-body-needs">What the body needs<a class="headerlink" href="#what-the-body-needs" title="Permanent link">&para;</a></h2>
+<p>Alertmanager's webhook always has these fields, so only a custom sender, such as a CI job or a script, can miss one.
+Muster reads the body after it has answered, so a body without them is stored, answered with <code>202</code> and then rejected:</p>
+<ul>
+<li>At the top level: <code>groupKey</code> (a string), <code>status</code> (<code>firing</code> or <code>resolved</code>) and <code>alerts</code> (an array).</li>
+<li>In each Alert: <code>labels</code> (an object of strings), <code>status</code> (<code>firing</code> or <code>resolved</code>) and <code>startsAt</code> (an RFC 3339 time).</li>
+<li>Optional: <code>truncatedAlerts</code> and <code>notification_reason</code> at the top level, <code>annotations</code>, <code>endsAt</code> and <code>fingerprint</code> in
+  an Alert. Other fields, <code>version</code> included, are ignored, and <code>generatorURL</code> is kept as it is.</li>
+<li>A body with a negative <code>truncatedAlerts</code>, or with a NUL character in <code>groupKey</code> or <code>notification_reason</code>, is
+  rejected.</li>
+</ul>
+<p>A rejected Stored Snapshot is <code>failed</code>, with the reason in its <code>processing_error</code>, for example <code>the webhook has no
+groupKey</code>. It is never retried by itself and creates no Alert Group. Muster shows it in three places:</p>
+<ul>
+<li>The Integration page and <code>GET /api/v1/integrations/{id}</code> carry the warning <code>snapshot_failed</code> with the error, without
+  the values you sent, and the time of the Snapshot, while the newest Stored Snapshot of the Integration that is
+  processed or failed has failed. It clears when a later Snapshot is processed, also one from another sender of the
+  same Integration. The Integrations list marks the Integration too.</li>
+<li><strong>Stored Snapshots</strong> of the Integration lists the Snapshot, <code>failed</code>, with its body as received.</li>
+<li><code>muster_ingest_failed_snapshots_total{integration}</code> counts it, and the chart rule <code>MusterIngestSnapshotFailed</code> fires
+  on it; the <a href="../../operations/runbooks/MusterIngestSnapshotFailed/">runbook</a> has the steps.</li>
+</ul>
+<p>After you fix the sender, send a valid body, or run <code>muster ingest replay</code> to process the rejected one again.</p>
 <h2 id="what-muster-answers">What Muster answers<a class="headerlink" href="#what-muster-answers" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3460,7 +3534,8 @@ the API.</p>
 </tbody>
 </table>
 <p>Muster never answers <code>400</code>: a body that is not JSON, or not an Alertmanager payload, is stored and fails later in
-processing, where the Stored Snapshot shows the error.</p>
+processing, where the Stored Snapshot shows the error and the Integration shows
+<a href="#what-the-body-needs">the warning</a>.</p>
 
 
 

@@ -798,6 +798,30 @@ string · default: `15m`
 
 The window in which rejected requests count.
 
+### `alerting.rules.MusterIngestSnapshotFailed`
+
+object
+
+Stored Snapshots of an Integration failed in processing (warning).
+
+### `alerting.rules.MusterIngestSnapshotFailed.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterIngestSnapshotFailed.for`
+
+string · default: `0m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterIngestSnapshotFailed.window`
+
+string · default: `15m`
+
+The window in which failed Stored Snapshots count.
+
 ### `alerting.rules.MusterTemplateError`
 
 object

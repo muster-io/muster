@@ -164,6 +164,7 @@
 - [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md): A Destination has more than 100 deliveries waiting, and the number keeps growing.
 - [MusterIngestBacklog](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md): Processing falls behind ingestion: more than 1,000 Stored Snapshots wait to be processed, or the 95th percentile of the time from receiving a Snapshot to the end of its processing is above 60 seconds.
 - [MusterIngestRejected](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected.md): Muster refused ingestion requests within 15 minutes: an oversized one, or more than 10 without a valid Integration token, counted per value of the label `integration`.
+- [MusterIngestSnapshotFailed](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md): Stored Snapshots of an Integration failed in processing.
 - [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md): A template failed to render.
 - [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md): A replica's clock differs from the database clock by more than 2 seconds.
 - [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md): A burst of failed sign-ins: more than 20 for one method within 10 minutes.
@@ -184,4 +185,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 919090 bytes, about 229772 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 924462 bytes, about 231115 tokens.

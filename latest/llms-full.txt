@@ -2517,6 +2517,31 @@ else to `:8080`. Keep the proxy's body size limit at **16 MB** or more: Muster a
 With one listener for both (`MUSTER_LISTEN_INGEST` equal to `MUSTER_LISTEN_APP`), the same port serves ingestion and
 the API.
 
+## What the body needs
+
+Alertmanager's webhook always has these fields, so only a custom sender, such as a CI job or a script, can miss one.
+Muster reads the body after it has answered, so a body without them is stored, answered with `202` and then rejected:
+
+- At the top level: `groupKey` (a string), `status` (`firing` or `resolved`) and `alerts` (an array).
+- In each Alert: `labels` (an object of strings), `status` (`firing` or `resolved`) and `startsAt` (an RFC 3339 time).
+- Optional: `truncatedAlerts` and `notification_reason` at the top level, `annotations`, `endsAt` and `fingerprint` in
+  an Alert. Other fields, `version` included, are ignored, and `generatorURL` is kept as it is.
+- A body with a negative `truncatedAlerts`, or with a NUL character in `groupKey` or `notification_reason`, is
+  rejected.
+
+A rejected Stored Snapshot is `failed`, with the reason in its `processing_error`, for example `the webhook has no
+groupKey`. It is never retried by itself and creates no Alert Group. Muster shows it in three places:
+
+- The Integration page and `GET /api/v1/integrations/{id}` carry the warning `snapshot_failed` with the error, without
+  the values you sent, and the time of the Snapshot, while the newest Stored Snapshot of the Integration that is
+  processed or failed has failed. It clears when a later Snapshot is processed, also one from another sender of the
+  same Integration. The Integrations list marks the Integration too.
+- **Stored Snapshots** of the Integration lists the Snapshot, `failed`, with its body as received.
+- `muster_ingest_failed_snapshots_total{integration}` counts it, and the chart rule `MusterIngestSnapshotFailed` fires
+  on it; the [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md) has the steps.
+
+After you fix the sender, send a valid body, or run `muster ingest replay` to process the rejected one again.
+
 ## What Muster answers
 
 | Answer | When | Alertmanager |
@@ -2527,7 +2552,8 @@ the API.
 | `500` | The body could not be written | retries |
 
 Muster never answers `400`: a body that is not JSON, or not an Alertmanager payload, is stored and fails later in
-processing, where the Stored Snapshot shows the error.
+processing, where the Stored Snapshot shows the error and the Integration shows
+[the warning](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#what-the-body-needs).
 
 <!-- Source: https://muster-io.github.io/muster/latest/integrations/grafana.md -->
 # Connect Grafana
@@ -11432,6 +11458,9 @@ What you can tune:
 - Some rules have thresholds: `window` (the range of the `rate` or `increase`), `seconds` (`MusterDeliverySlow`: p95
   delivery latency; `MusterClockSkew`: the skew), `size` (`MusterDeliveryQueueGrowing`), `backlog` and `delaySeconds`
   (`MusterIngestBacklog`), `unauthorized` (`MusterIngestRejected`) and `failures` (`MusterLoginFailures`).
+- `MusterIngestSnapshotFailed` fires for an Integration whose requests were accepted and then rejected in processing,
+  for example a custom sender's body without `groupKey`; it has `for` and `window` and resolves a `window` after the
+  last failure. The Integration page shows the matching warning.
 
 The defaults are in the [chart values reference](https://muster-io.github.io/muster/latest/reference/chart-values.md), and the expression of each rule is on
 its [runbook](https://muster-io.github.io/muster/latest/operations/runbooks/index.md) page. The rules are covered by unit tests in CI.
@@ -12018,6 +12047,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterDeliveryQueueGrowing](https://muster-io.github.io/muster/latest/operations/runbooks/MusterDeliveryQueueGrowing.md) | warning | chart rule |
 | [MusterIngestBacklog](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestBacklog.md) | warning | chart rule |
 | [MusterIngestRejected](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestRejected.md) | warning | chart rule |
+| [MusterIngestSnapshotFailed](https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md) | warning | chart rule |
 | [MusterTemplateError](https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md) | warning | both |
 | [MusterClockSkew](https://muster-io.github.io/muster/latest/operations/runbooks/MusterClockSkew.md) | warning | chart rule |
 | [MusterLoginFailures](https://muster-io.github.io/muster/latest/operations/runbooks/MusterLoginFailures.md) | warning | chart rule |
@@ -12659,6 +12689,52 @@ Integration, or `unknown` when the token matched none — and `outcome`. It is a
 - Traffic from unknown addresses: restrict who may reach the ingest listener (`MUSTER_INGEST_URL`) with a network
   policy or the ingress.
 - `too_large`: split the Alertmanager group with a finer `group_by`, or shorten the annotations that make it large.
+
+<!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterIngestSnapshotFailed.md -->
+# MusterIngestSnapshotFailed
+
+## Meaning
+
+Stored Snapshots of an Integration failed in processing.
+
+Within 15 minutes Muster could not process one: the body was not JSON, lacked a field that an Alertmanager webhook
+has, or processing failed. The chart rule is:
+
+```promql
+sum by (integration) (increase(muster_ingest_failed_snapshots_total{job="muster"}[15m])) > 0
+```
+
+It fires at once (`for: 0m`), with severity `warning` and the label `integration`, the id of the Integration. It is a
+chart rule only. The sender got `202`, because ingestion never answers `400`; the Integration page shows the warning
+`snapshot_failed` instead.
+
+## Impact
+
+- The failed Snapshots create or change no Alert and no Alert Group, so nothing is sent for them, and they are not
+  retried by themselves.
+- Snapshots that arrive later are processed as usual, and the Integration page stops warning once one is processed,
+  also one from another sender of the same Integration. The warning is not a durable signal; this rule is, and it
+  resolves 15 minutes after the last failure.
+- The warning shows the error without the values the sender chose, such as a quoted status. The Stored Snapshot has
+  the full error.
+
+## Diagnosis
+
+1. Open the Integration page (`/integrations/<id>`): the warning `snapshot_failed` shows the error of its newest
+   Stored Snapshot, for example `the webhook has no groupKey`. `GET /api/v1/integrations/<id>` carries the same as
+   `warnings`.
+2. Open **Stored Snapshots** of the Integration, or `GET /api/v1/stored-snapshots?integration=<id>`: the Snapshots in
+   state `failed` keep their body as received and the `processing_error`.
+3. Read the log lines `snapshot_failed` for the Integration.
+4. Compare the body with the [fields a body needs](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#what-the-body-needs): a
+   custom sender must send `groupKey`, `status` and `alerts`, and in each Alert `labels`, `status` and `startsAt`.
+
+## Fix
+
+- Correct the sender so that its body has the required fields, and send it again; the next Snapshot that is processed
+  clears the warning.
+- Run `muster ingest replay --since <duration> --integration <name> --actor <name>` to process the failed Snapshots
+  again after a fix on the Muster side.
 
 <!-- Source: https://muster-io.github.io/muster/latest/operations/runbooks/MusterTemplateError.md -->
 # MusterTemplateError
@@ -15217,6 +15293,30 @@ The number of unauthorized requests of an Integration within the window above wh
 string · default: `15m`
 
 The window in which rejected requests count.
+
+### `alerting.rules.MusterIngestSnapshotFailed`
+
+object
+
+Stored Snapshots of an Integration failed in processing (warning).
+
+### `alerting.rules.MusterIngestSnapshotFailed.enabled`
+
+boolean · default: `true`
+
+Renders the rule.
+
+### `alerting.rules.MusterIngestSnapshotFailed.for`
+
+string · default: `0m`
+
+How long the condition holds before the rule fires.
+
+### `alerting.rules.MusterIngestSnapshotFailed.window`
+
+string · default: `15m`
+
+The window in which failed Stored Snapshots count.
 
 ### `alerting.rules.MusterTemplateError`
 

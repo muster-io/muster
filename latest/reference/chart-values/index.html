@@ -2098,6 +2098,8 @@
       
         
       
+        
+      
     
     
     
@@ -2406,6 +2408,33 @@
     
   
   MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/runbooks/MusterIngestSnapshotFailed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestSnapshotFailed
 
     
   </span>
@@ -4298,6 +4327,50 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         <code>alerting.rules.MusterIngestRejected.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.window</code>
       </span>
     </span>
   </a>
@@ -6198,6 +6271,50 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedenabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.enabled</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedfor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.for</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#alertingrulesmusteringestsnapshotfailedwindow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>alerting.rules.MusterIngestSnapshotFailed.window</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#alertingrulesmustertemplateerror" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -6949,6 +7066,18 @@
 <h3 id="alertingrulesmusteringestrejectedwindow"><code>alerting.rules.MusterIngestRejected.window</code><a class="headerlink" href="#alertingrulesmusteringestrejectedwindow" title="Permanent link">&para;</a></h3>
 <p>string · default: <code>15m</code></p>
 <p>The window in which rejected requests count.</p>
+<h3 id="alertingrulesmusteringestsnapshotfailed"><code>alerting.rules.MusterIngestSnapshotFailed</code><a class="headerlink" href="#alertingrulesmusteringestsnapshotfailed" title="Permanent link">&para;</a></h3>
+<p>object</p>
+<p>Stored Snapshots of an Integration failed in processing (warning).</p>
+<h3 id="alertingrulesmusteringestsnapshotfailedenabled"><code>alerting.rules.MusterIngestSnapshotFailed.enabled</code><a class="headerlink" href="#alertingrulesmusteringestsnapshotfailedenabled" title="Permanent link">&para;</a></h3>
+<p>boolean · default: <code>true</code></p>
+<p>Renders the rule.</p>
+<h3 id="alertingrulesmusteringestsnapshotfailedfor"><code>alerting.rules.MusterIngestSnapshotFailed.for</code><a class="headerlink" href="#alertingrulesmusteringestsnapshotfailedfor" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>0m</code></p>
+<p>How long the condition holds before the rule fires.</p>
+<h3 id="alertingrulesmusteringestsnapshotfailedwindow"><code>alerting.rules.MusterIngestSnapshotFailed.window</code><a class="headerlink" href="#alertingrulesmusteringestsnapshotfailedwindow" title="Permanent link">&para;</a></h3>
+<p>string · default: <code>15m</code></p>
+<p>The window in which failed Stored Snapshots count.</p>
 <h3 id="alertingrulesmustertemplateerror"><code>alerting.rules.MusterTemplateError</code><a class="headerlink" href="#alertingrulesmustertemplateerror" title="Permanent link">&para;</a></h3>
 <p>object</p>
 <p>Templates failed to render (warning).</p>

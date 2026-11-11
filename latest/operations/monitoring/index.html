@@ -2230,6 +2230,8 @@
       
         
       
+        
+      
     
     
     
@@ -2538,6 +2540,33 @@
     
   
   MusterIngestRejected
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runbooks/MusterIngestSnapshotFailed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  MusterIngestSnapshotFailed
 
     
   </span>
@@ -3181,6 +3210,9 @@ operator. Each rule has a <code>description</code> and a <code>runbook_url</code
 <li>Some rules have thresholds: <code>window</code> (the range of the <code>rate</code> or <code>increase</code>), <code>seconds</code> (<code>MusterDeliverySlow</code>: p95
   delivery latency; <code>MusterClockSkew</code>: the skew), <code>size</code> (<code>MusterDeliveryQueueGrowing</code>), <code>backlog</code> and <code>delaySeconds</code>
   (<code>MusterIngestBacklog</code>), <code>unauthorized</code> (<code>MusterIngestRejected</code>) and <code>failures</code> (<code>MusterLoginFailures</code>).</li>
+<li><code>MusterIngestSnapshotFailed</code> fires for an Integration whose requests were accepted and then rejected in processing,
+  for example a custom sender's body without <code>groupKey</code>; it has <code>for</code> and <code>window</code> and resolves a <code>window</code> after the
+  last failure. The Integration page shows the matching warning.</li>
 </ul>
 <p>The defaults are in the <a href="../../reference/chart-values/">chart values reference</a>, and the expression of each rule is on
 its <a href="../runbooks/">runbook</a> page. The rules are covered by unit tests in CI.</p>

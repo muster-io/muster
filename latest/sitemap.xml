@@ -148,6 +148,9 @@
         <loc>https://muster-io.github.io/muster/operations/runbooks/MusterIngestRejected/</loc>
       </url>
       <url>
+        <loc>https://muster-io.github.io/muster/operations/runbooks/MusterIngestSnapshotFailed/</loc>
+      </url>
+      <url>
         <loc>https://muster-io.github.io/muster/operations/runbooks/MusterLoginFailures/</loc>
       </url>
       <url>

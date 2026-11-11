@@ -16,6 +16,7 @@ impact, how to diagnose it and how to fix it.
 | [MusterDeliveryQueueGrowing](MusterDeliveryQueueGrowing.md) | warning | chart rule |
 | [MusterIngestBacklog](MusterIngestBacklog.md) | warning | chart rule |
 | [MusterIngestRejected](MusterIngestRejected.md) | warning | chart rule |
+| [MusterIngestSnapshotFailed](MusterIngestSnapshotFailed.md) | warning | chart rule |
 | [MusterTemplateError](MusterTemplateError.md) | warning | both |
 | [MusterClockSkew](MusterClockSkew.md) | warning | chart rule |
 | [MusterLoginFailures](MusterLoginFailures.md) | warning | chart rule |
