@@ -109,8 +109,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   `[redacted]` wherever the path would be logged (ADR-0011). Issuing a new link revokes the previous one, and a revoked
   token, or the token of a disabled or deleted User, gets `404`. The feed is served on the app listener without a
   session; the owner's issuing and revoking need the web session (C-03.FR-27). An Admin (`users:write`) may revoke
-  any User's feed, by session or token, recorded as `ical_feed.revoked` with the reason `revoked_by_admin`; fetches of feeds are counted by outcome
-  (`muster_ical_feed_requests_total`, no label for the token or the User). Schedules are not imported from iCal.
+  any User's feed, by session or token, recorded as `ical_feed.revoked` with the reason `revoked_by_admin`; fetches of
+  feeds are counted by outcome (`muster_ical_feed_requests_total`, no label for the token or the User). Schedules are
+  not imported from iCal.
 - **C-27.FR-11** Shifts and Overrides send no messages: who is On-call is shown in the UI and the iCal feed, and no
   messenger command answers it.
 - **C-27.FR-12** Deleting a Schedule that an Escalation step names is refused with `409` and the code `schedule_in_use`,

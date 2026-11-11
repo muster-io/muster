@@ -113,7 +113,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Lookup table `grafana`, keyed by the `environment` label, else the `cluster` label, whose columns are `address` (the
   Grafana address) and `datasource_uid`. The annotations `runbook_url` and `dashboard_url`, and `generatorURL` as
   "Source", become links as well. Links appear as one line in the message and as a block on the Alert Group page;
-  message templates do not build them.
+  message templates do not build them. _Revised for L2 (2026-11-11, #503):_ a creation, change or deletion of a Link
+  rule or a Lookup table re-renders every open Root message, Quietly and as edits; a Root message whose links it does
+  not change is not edited.
 - **C-12.FR-10** The Storm summary reads "⛈ Storm on {Route}: K Alert Groups, C urgent — open in Muster" and, in its
   final state, "Storm over: M Alert Groups still open".
 - **C-12.FR-11** A rendered message that exceeds the length limit the adapter declares is shortened by trimming the
