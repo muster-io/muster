@@ -504,9 +504,12 @@ func (f *fakeDB) LinksStore() links.Store { return fakeLinksStore{} }
 
 type fakeLinksStore struct{ links.Store }
 
-func (fakeLinksStore) EnsureExploreRule(context.Context, linksdb.EnsureExploreRuleParams) (string, error) {
-	return "", pgx.ErrNoRows
+func (fakeLinksStore) EnsureExploreRule(context.Context, linksdb.EnsureExploreRuleParams) (
+	linksdb.EnsureExploreRuleRow, error) {
+	return linksdb.EnsureExploreRuleRow{}, pgx.ErrNoRows
 }
+
+func (s fakeLinksStore) InTx(_ context.Context, f func(links.Queries) error) error { return f(s) }
 
 // DestinationsStore has no Destinations.
 func (f *fakeDB) DestinationsStore() destinations.Store { return fakeDestinationsStore{} }

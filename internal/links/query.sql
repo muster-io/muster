@@ -132,14 +132,15 @@ WHERE org_id = @org_id AND id = @id AND NOT builtin;
 
 -- EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one, and gives an existing
 -- one the URL template while it still has one of the previous built-in templates; it returns no row when the rule
--- exists and keeps its template.
+-- exists and keeps its template, and updated true when it gave an existing rule the new template (xmax is set only on
+-- the row an ON CONFLICT update wrote).
 -- name: EnsureExploreRule :one
 INSERT INTO link_rules (org_id, public_id, name, builtin, scope_type, url_template, created_at, updated_at)
 VALUES (@org_id, @public_id, @name, true, 'alert_group', @url_template, @now, @now)
 ON CONFLICT (org_id) WHERE builtin DO UPDATE
 SET url_template = excluded.url_template, updated_at = excluded.updated_at, version = link_rules.version + 1
 WHERE link_rules.org_id = @org_id AND link_rules.url_template = ANY (@previous_templates::text[])
-RETURNING public_id;
+RETURNING public_id, (xmax <> 0)::boolean AS updated;
 
 -- GetLinkSnapshotRetention reads retention.stored_snapshots in days.
 -- name: GetLinkSnapshotRetention :one
@@ -179,3 +180,23 @@ JOIN alerts a ON a.org_id = m.org_id AND a.id = m.alert_id
 WHERE m.org_id = @org_id AND m.alert_group_id = @alert_group_id AND m.state IN ('firing', 'resolved')
 ORDER BY m.state = 'firing' DESC, m.starts_at DESC, m.id DESC
 LIMIT @lim;
+
+-- InsertLinksUpdate requests that a change of a Link rule or of a Lookup table reach the open Root messages, whose
+-- links it may change (C-12.FR-9), with a row organization_links without a scope; the open_group_updates worker of any
+-- replica claims it and re-renders every open Alert Group of the Organization. A row organization_links that no
+-- worker has claimed yet already covers the change, since its run computes the links with the rules and tables as they
+-- are then: it is locked, so that no worker claims it before this transaction commits, and no second one is inserted.
+-- name: InsertLinksUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = @org_id AND u.kind = 'organization_links' AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, requested_at)
+SELECT @org_id, 'organization_links', @requested_at::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending);
+
+-- NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify(@channel::text, '');

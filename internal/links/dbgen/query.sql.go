@@ -82,7 +82,7 @@ VALUES ($1, $2, $3, true, 'alert_group', $4, $5, $5)
 ON CONFLICT (org_id) WHERE builtin DO UPDATE
 SET url_template = excluded.url_template, updated_at = excluded.updated_at, version = link_rules.version + 1
 WHERE link_rules.org_id = $1 AND link_rules.url_template = ANY ($6::text[])
-RETURNING public_id
+RETURNING public_id, (xmax <> 0)::boolean AS updated
 `
 
 type EnsureExploreRuleParams struct {
@@ -94,10 +94,16 @@ type EnsureExploreRuleParams struct {
 	PreviousTemplates []string
 }
 
+type EnsureExploreRuleRow struct {
+	PublicID string
+	Updated  bool
+}
+
 // EnsureExploreRule creates the built-in "Explore" rule of the Organization unless it has one, and gives an existing
 // one the URL template while it still has one of the previous built-in templates; it returns no row when the rule
-// exists and keeps its template.
-func (q *Queries) EnsureExploreRule(ctx context.Context, arg EnsureExploreRuleParams) (string, error) {
+// exists and keeps its template, and updated true when it gave an existing rule the new template (xmax is set only on
+// the row an ON CONFLICT update wrote).
+func (q *Queries) EnsureExploreRule(ctx context.Context, arg EnsureExploreRuleParams) (EnsureExploreRuleRow, error) {
 	row := q.db.QueryRow(ctx, ensureExploreRule,
 		arg.OrgID,
 		arg.PublicID,
@@ -106,9 +112,9 @@ func (q *Queries) EnsureExploreRule(ctx context.Context, arg EnsureExploreRulePa
 		arg.Now,
 		arg.PreviousTemplates,
 	)
-	var public_id string
-	err := row.Scan(&public_id)
-	return public_id, err
+	var i EnsureExploreRuleRow
+	err := row.Scan(&i.PublicID, &i.Updated)
+	return i, err
 }
 
 const getLinkGroup = `-- name: GetLinkGroup :one
@@ -343,6 +349,33 @@ func (q *Queries) InsertLinkRuleMatcher(ctx context.Context, arg InsertLinkRuleM
 		arg.Op,
 		arg.Value,
 	)
+	return err
+}
+
+const insertLinksUpdate = `-- name: InsertLinksUpdate :exec
+WITH pending AS (
+    SELECT u.id
+    FROM open_group_updates u
+    WHERE u.org_id = $1 AND u.kind = 'organization_links' AND u.leased_by IS NULL
+    FOR UPDATE
+)
+INSERT INTO open_group_updates (org_id, kind, requested_at)
+SELECT $1, 'organization_links', $2::timestamptz
+WHERE NOT EXISTS (SELECT 1 FROM pending)
+`
+
+type InsertLinksUpdateParams struct {
+	OrgID       int64
+	RequestedAt time.Time
+}
+
+// InsertLinksUpdate requests that a change of a Link rule or of a Lookup table reach the open Root messages, whose
+// links it may change (C-12.FR-9), with a row organization_links without a scope; the open_group_updates worker of any
+// replica claims it and re-renders every open Alert Group of the Organization. A row organization_links that no
+// worker has claimed yet already covers the change, since its run computes the links with the rules and tables as they
+// are then: it is locked, so that no worker claims it before this transaction commits, and no second one is inserted.
+func (q *Queries) InsertLinksUpdate(ctx context.Context, arg InsertLinksUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertLinksUpdate, arg.OrgID, arg.RequestedAt)
 	return err
 }
 
@@ -764,6 +797,16 @@ func (q *Queries) LockLookupTable(ctx context.Context, arg LockLookupTableParams
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const notifyOpenGroupUpdates = `-- name: NotifyOpenGroupUpdates :exec
+SELECT pg_notify($1::text, '')
+`
+
+// NotifyOpenGroupUpdates wakes the open Alert Group update workers of every replica once the transaction commits.
+func (q *Queries) NotifyOpenGroupUpdates(ctx context.Context, channel string) error {
+	_, err := q.db.Exec(ctx, notifyOpenGroupUpdates, channel)
+	return err
 }
 
 const updateLinkRule = `-- name: UpdateLinkRule :exec

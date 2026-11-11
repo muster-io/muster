@@ -53,6 +53,9 @@ type fakeStore struct {
 	alerts    []dbgen.ListLinkAlertsRow
 	cells     int
 	fail      map[string]error
+	// updates are the open_group_updates rows organization_links requested, and notified the wakes of their workers.
+	updates  []dbgen.InsertLinksUpdateParams
+	notified []string
 }
 
 func newFake() *fakeStore {
@@ -76,13 +79,14 @@ func (f *fakeStore) InTx(_ context.Context, fn func(Queries) error) error {
 }
 
 type snap struct {
-	tables []*tableRow
-	rules  []*ruleRow
-	audit  int
+	tables            []*tableRow
+	rules             []*ruleRow
+	audit             int
+	updates, notified int
 }
 
 func (f *fakeStore) snapshot() snap {
-	s := snap{audit: len(f.audit)}
+	s := snap{audit: len(f.audit), updates: len(f.updates), notified: len(f.notified)}
 	for _, t := range f.tables {
 		c := *t
 		c.entries = map[string][]byte{}
@@ -101,6 +105,7 @@ func (f *fakeStore) snapshot() snap {
 
 func (f *fakeStore) restore(s snap) {
 	f.tables, f.rules, f.audit = s.tables, s.rules, f.audit[:s.audit]
+	f.updates, f.notified = f.updates[:s.updates], f.notified[:s.notified]
 }
 
 func unique(constraint string) error {
@@ -400,26 +405,27 @@ func (f *fakeStore) DeleteLinkRule(_ context.Context, arg dbgen.DeleteLinkRulePa
 	return nil
 }
 
-func (f *fakeStore) EnsureExploreRule(_ context.Context, arg dbgen.EnsureExploreRuleParams) (string, error) {
+func (f *fakeStore) EnsureExploreRule(_ context.Context, arg dbgen.EnsureExploreRuleParams) (
+	dbgen.EnsureExploreRuleRow, error) {
 	if err := f.err("EnsureExploreRule"); err != nil {
-		return "", err
+		return dbgen.EnsureExploreRuleRow{}, err
 	}
 	for _, r := range f.rules {
 		if r.Builtin {
 			if !slices.Contains(arg.PreviousTemplates, r.UrlTemplate) {
-				return "", pgx.ErrNoRows
+				return dbgen.EnsureExploreRuleRow{}, pgx.ErrNoRows
 			}
 			r.UrlTemplate, r.Version = arg.UrlTemplate, r.Version+1
-			return r.PublicID, nil
+			return dbgen.EnsureExploreRuleRow{PublicID: r.PublicID, Updated: true}, nil
 		}
 		if r.Name == arg.Name {
-			return "", unique(ruleNameKey)
+			return dbgen.EnsureExploreRuleRow{}, unique(ruleNameKey)
 		}
 	}
 	f.rules = append(f.rules, &ruleRow{GetLinkRuleRow: dbgen.GetLinkRuleRow{ID: f.id(), PublicID: arg.PublicID,
 		Name: arg.Name, Builtin: true, ScopeType: ScopeAlertGroup, UrlTemplate: arg.UrlTemplate, CreatedAt: arg.Now,
 		Version: 1}})
-	return arg.PublicID, nil
+	return dbgen.EnsureExploreRuleRow{PublicID: arg.PublicID}, nil
 }
 
 func (f *fakeStore) GetLinkSnapshotRetention(context.Context, int64) (int64, error) {
@@ -445,6 +451,22 @@ func (f *fakeStore) GetLinkGroup(context.Context, dbgen.GetLinkGroupParams) (dbg
 
 func (f *fakeStore) ListLinkAlerts(context.Context, dbgen.ListLinkAlertsParams) ([]dbgen.ListLinkAlertsRow, error) {
 	return f.alerts, f.err("ListLinkAlerts")
+}
+
+func (f *fakeStore) InsertLinksUpdate(_ context.Context, arg dbgen.InsertLinksUpdateParams) error {
+	if err := f.err("InsertLinksUpdate"); err != nil {
+		return err
+	}
+	f.updates = append(f.updates, arg)
+	return nil
+}
+
+func (f *fakeStore) NotifyOpenGroupUpdates(_ context.Context, channel string) error {
+	if err := f.err("NotifyOpenGroupUpdates"); err != nil {
+		return err
+	}
+	f.notified = append(f.notified, channel)
+	return nil
 }
 
 func (f *fakeStore) InsertAuditEntry(_ context.Context, arg auditdb.InsertAuditEntryParams) error {
@@ -843,5 +865,106 @@ func TestLookupStoreFailures(t *testing.T) {
 	f.tables[0].entries["bad"] = []byte("[")
 	if _, err := s.GetTable(ctx, table.PublicID); err == nil {
 		t.Error("a row that does not decode")
+	}
+}
+
+// TestLinksRerender is C-12.FR-9 for the open Root messages: each creation, change and deletion of a Lookup table or a
+// Link rule requests, in its transaction, one open_group_updates row organization_links at the business time of the
+// change and wakes the workers on muster_open_group_updates, so that the links of the open Root messages follow it; a
+// save that changes nothing requests nothing, and a failing request or wake fails the change, which then records no
+// Audit log entry.
+func TestLinksRerender(t *testing.T) {
+	ctx := t.Context()
+	f := newFake()
+	s, _ := newService(t, f)
+	requests := func(t *testing.T, what string, want int) {
+		t.Helper()
+		if len(f.updates) != want || len(f.notified) != want {
+			t.Fatalf("%s: %d requests, %d wakes, want %d", what, len(f.updates), len(f.notified), want)
+		}
+		if want == 0 {
+			return
+		}
+		if u := f.updates[want-1]; u != (dbgen.InsertLinksUpdateParams{OrgID: orgID, RequestedAt: t0}) ||
+			f.notified[want-1] != OpenGroupUpdatesChannel {
+			t.Errorf("%s: requested %+v, woke %q", what, u, f.notified[want-1])
+		}
+	}
+	table, err := s.CreateTable(ctx, by, grafana())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a new table", 1)
+	if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, grafana()); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "the same table again", 1)
+	in := grafana()
+	in.Entries[0].Values["datasource_uid"] = "PROM9"
+	if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, in); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a changed row", 2)
+	if err := s.DeleteTable(ctx, by, table.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a deleted table", 3)
+	rule, err := s.CreateRule(ctx, by, dashboard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a new rule", 4)
+	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, dashboard()); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "the same rule again", 4)
+	changed := dashboard()
+	changed.URLTemplate += "&from=now-1h"
+	if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, changed); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a changed rule", 5)
+	if err := s.DeleteRule(ctx, by, rule.PublicID, nil); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, "a deleted rule", 6)
+
+	for _, name := range []string{"InsertLinksUpdate", "NotifyOpenGroupUpdates"} {
+		f := newFake()
+		s, _ := newService(t, f)
+		table, err := s.CreateTable(ctx, by, grafana())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A rule that reads no table, so that the deletion of the table fails only by the request.
+		rule, err := s.CreateRule(ctx, by, RuleInput{Name: "plain", Scope: Scope{Type: ScopeAlertGroup},
+			URLTemplate: "https://x"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.fail[name] = errors.New("boom")
+		if _, err := s.CreateTable(ctx, by, TableInput{Name: "other", Columns: []string{"a"}}); err == nil {
+			t.Errorf("create a table with %s failing", name)
+		}
+		if _, err := s.UpdateTable(ctx, by, table.PublicID, nil, in); err == nil {
+			t.Errorf("update a table with %s failing", name)
+		}
+		if err := s.DeleteTable(ctx, by, table.PublicID, nil); err == nil {
+			t.Errorf("delete a table with %s failing", name)
+		}
+		if _, err := s.CreateRule(ctx, by, RuleInput{Name: "other", Scope: Scope{Type: ScopeAlertGroup},
+			URLTemplate: "https://x"}); err == nil {
+			t.Errorf("create a rule with %s failing", name)
+		}
+		if _, err := s.UpdateRule(ctx, by, rule.PublicID, nil, changed); err == nil {
+			t.Errorf("update a rule with %s failing", name)
+		}
+		if err := s.DeleteRule(ctx, by, rule.PublicID, nil); err == nil {
+			t.Errorf("delete a rule with %s failing", name)
+		}
+		if len(f.audit) != 2 || len(f.updates) != 2 || len(f.tables) != 1 || len(f.rules) != 1 {
+			t.Errorf("%s failing: %d audit entries, %d requests, %d tables, %d rules", name, len(f.audit),
+				len(f.updates), len(f.tables), len(f.rules))
+		}
 	}
 }

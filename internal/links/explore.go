@@ -64,14 +64,24 @@ var previousExploreTemplates = []string{
 // EnsureExplore creates the built-in "Explore" rule once per Organization, as a start-up ensure step: no Matchers, the
 // scope alert_group and ExploreTemplate. When the rule exists, it replaces a URL template that is still one of the
 // previous built-in templates with ExploreTemplate, a new version of the rule, and changes nothing else: an edited
-// template and the Matchers are kept, and a second run changes nothing. A rule that is not the built-in one and
-// already has its name stops the start with ErrRuleNameTaken.
-func EnsureExplore(ctx context.Context, q Queries, orgID int64, now time.Time) error {
-	_, err := q.EnsureExploreRule(ctx, dbgen.EnsureExploreRuleParams{OrgID: orgID,
-		PublicID: publicid.New(publicid.LinkRule), Name: ExploreName, UrlTemplate: ExploreTemplate, Now: now.UTC(),
-		PreviousTemplates: previousExploreTemplates})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("ensure the built-in link rule: %w", nameTaken(err, ruleNameKey, ErrRuleNameTaken))
-	}
-	return nil
+// template and the Matchers are kept, and a second run changes nothing. A replaced template may change the links of
+// the open Root messages, so in the same transaction it requests their re-render (requestRerender, C-12.FR-9); a new
+// rule or one it leaves as it is requests nothing. A rule that is not the built-in one and already has its name stops
+// the start with ErrRuleNameTaken.
+func EnsureExplore(ctx context.Context, s Store, orgID int64, now time.Time) error {
+	return s.InTx(ctx, func(q Queries) error {
+		row, err := q.EnsureExploreRule(ctx, dbgen.EnsureExploreRuleParams{OrgID: orgID,
+			PublicID: publicid.New(publicid.LinkRule), Name: ExploreName, UrlTemplate: ExploreTemplate, Now: now.UTC(),
+			PreviousTemplates: previousExploreTemplates})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("ensure the built-in link rule: %w", nameTaken(err, ruleNameKey, ErrRuleNameTaken))
+		}
+		if !row.Updated {
+			return nil
+		}
+		return requestRerender(ctx, q, orgID, now)
+	})
 }

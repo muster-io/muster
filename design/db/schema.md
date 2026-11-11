@@ -89,7 +89,11 @@
   (`organizations.notification_rules` and the Notification rules of the Users, `notification_rules`, C-31, S-152) and
   [`0038_deliveries_configuration_only`](../../internal/db/migrations/0038_deliveries_configuration_only.up.sql)
   (`deliveries.configuration_only` and the claim index `deliveries_due_v2_idx`, which takes the edits of a change of
-  configuration after the other due deliveries, C-11.FR-3, FR-15), in
+  configuration after the other due deliveries, C-11.FR-3, FR-15) and
+  [`0039_route_message_settings_and_links_updates`](../../internal/db/migrations/0039_route_message_settings_and_links_updates.up.sql)
+  (the kinds `route_message_settings` and `organization_links` of `open_group_updates`, the re-render of the open Root
+  messages after a change of a Route's language, Snooze durations or templates, or of a Link rule or a Lookup table,
+  C-12.FR-2, FR-3, FR-9, C-10.FR-6), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -205,7 +209,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), and the Notification rule
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
-| Open Alert Group updates | `open_group_updates` | routing, organization, destinations and teams insert, `groups` claims and deletes | deleted with the last batch of its run |
+| Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams and links insert, `groups` claims and deletes | deleted with the last batch of its run |
 | Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
 | Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
@@ -1152,7 +1156,10 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
   read, so that a change of the Group key or of a setting is followed. A change of the list, or of the Group key while
   it is computed, on a Route with open Alert Groups inserts a row of `open_group_updates` of the kind
   `route_message_labels` in the same transaction, whose run re-renders their Root messages Quietly
-  ([section 5](#5-queues-and-claims)).
+  ([section 5](#5-queues-and-claims)). A change of the Route's `language`, `snooze_durations_seconds`,
+  `template_root_message` or `template_line`, which its Root messages show, inserts a row of the kind
+  `route_message_settings` the same way (migration 0039); a save that also changes the effective list or the name
+  inserts only the row `route_message_labels`, whose run renders with every setting as it is then.
 
 ### 4.9 Alert Groups, Alerts inside them and the Timeline
 
@@ -1524,6 +1531,10 @@ Serves C-12.FR-9.
 - **`link_rules`** and **`link_rule_matchers`** — name, scope (`alert_group` or `label_value` with its label), URL
   template, and Matchers like a Route's; `builtin` marks the "Explore" rule, at most one per Organization, which cannot
   be deleted.
+- A creation, change or deletion of a Lookup table or a Link rule inserts a row `organization_links` of
+  `open_group_updates` without a scope in the same transaction, unless one of the Organization is still unclaimed
+  (migration 0039, [section 5](#5-queues-and-claims)): its run re-renders every open Root message, whose links it may
+  change.
 
 ### 4.13 Audit log
 
@@ -1857,10 +1868,12 @@ Teams are deleted softly), and "Labels in the message" of a Route (`route_messag
 which `open_group_updates_route_scope_check` requires; it also covers a rename of the Route, which the field Route of
 the messages shows), the Severity label, Team label, Instance labels, time zone, start of the working day or first day
 of the week of the Organization, which the Root messages show (`organization_message_settings`, without a scope), and
-the name of a Team (`team_name`, with the Team in `team_id`) from migration 0031, and the Destinations of a Team
-(`team_destinations`, with the Team in `team_id`), which the kind `CHECK` takes from migration 0032 — more kinds as
-later stories add them to the kind
-`CHECK`, versioned `open_group_updates_kind_v6_check` since migration 0032 — is one row of
+the name of a Team (`team_name`, with the Team in `team_id`) from migration 0031, the Destinations of a Team
+(`team_destinations`, with the Team in `team_id`), which the kind `CHECK` takes from migration 0032, and the language,
+Snooze durations, `root_message` or `line` template of a Route (`route_message_settings`, with its Route in
+`route_id`, which `open_group_updates_route_settings_scope_check` requires) and the Link rules and Lookup tables
+(`organization_links`, without a scope) from migration 0039 — more kinds as later stories add them to the kind
+`CHECK`, versioned `open_group_updates_kind_v7_check` since migration 0039 — is one row of
 `open_group_updates`, inserted in the transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The
 worker of every replica — not a Leader task — is woken at start, by that notification and by the development clock, and
 claims one row at a time:
@@ -1903,8 +1916,14 @@ state over the earlier one before any worker sees either, so a new Team label, w
 `team_evaluation`, edits each Root message once, whichever row runs first. A row `team_name` walks the open Alert Groups
 with an `alert_group_teams` row of its Team and only runs the re-render step on them: the classification is per Team, so
 new Team matchers saved with the name can bring only that Team, which those Alert Groups already have; a row whose Team
-is gone (`team_id` null) is done. A row `team_destinations` walks the same open Alert Groups, runs the re-render step
-on each without a lifecycle event, marked as a change of configuration that may grow the reach by the Team's entry of
+is gone (`team_id` null) is done. A row `route_message_settings` walks the open Alert Groups of its Route, as a row
+`route_message_labels` does, and only runs the re-render step on them; neither needs a barrier, since grouping holds
+the Route `FOR SHARE` until the Snapshot commits and the update of the Route takes it `FOR UPDATE`. A row
+`organization_links` walks every open Alert Group of the Organization and only runs the re-render step on them: the
+links of each are computed from its labels, so the run cannot tell which a change of a rule or a table reaches, and
+delivery edits only the Root messages whose Desired state, and so whose links, changed. A row `team_destinations`
+walks the open Alert Groups that a row `team_name` walks, runs the re-render step on each without a lifecycle event,
+marked as a change of configuration that may grow the reach by the Team's entry of
 the row's Destination (`destination_id`, null for a row that only removes), so delivery publishes it Quietly in that
 Destination when that entry reaches it now and it is not there, and nowhere else, and then gives the final edit to
 each delivery
@@ -1914,19 +1933,21 @@ membership lock orders the save against the Snapshots that read its entries. A s
 of the same Team and Destination is still unclaimed. The re-render step of every batch, and every batch of
 `team_evaluation` and `organization_message_settings`, takes the membership locks of the batch's Routes, then of their
 Teams and of the Teams the evaluation brings, shared and in id order, before its first change.
-Each batch of `team_evaluation`, `organization_message_settings` and `team_name` takes
+Each batch of `team_evaluation`, `organization_message_settings`, `team_name` and `organization_links` takes
 the transaction advisory lock of the class `0x6d75_0008` (`db.TeamEvaluationLockClass`, keyed by `hashint8` of the
 Organization) exclusively before it lists its Alert Groups, and routing takes it shared before a Snapshot reads the
-stamp of the classification, holding it until the Snapshot commits: a Snapshot that read the Teams, the settings or the
-names before a save commits the Alert Groups it creates or changes before the batch lists them, so none is missed. The
-cost is a stall of Snapshot processing, never of ingestion: while a batch holds the lock, the processing of every new
+stamp of the classification, holding it until the Snapshot commits: a Snapshot that read the Teams, the settings, the
+names or the Link rules and Lookup tables before a save commits the Alert Groups it creates or changes before the
+batch lists them, so none is missed. The cost is a stall of Snapshot processing, never of ingestion: while a batch holds
+the lock, the processing of every new
 Snapshot of the Organization waits at its shared lock for the length of the one transaction of the batch, which locks,
 classifies and renders at most 50 Alert Groups (the batch size); the received Snapshots, already stored, are processed
 in order once it commits, and a run of many batches stalls them once per batch, with the gaps between batches free. A save inserts no second row while one
 `team_evaluation` row of the Organization is still unclaimed (`leased_by IS NULL`): it locks that row `FOR UPDATE`, so
 no worker claims it before the save commits, and its run classifies with every save before it. A row
 `organization_message_settings` is inserted the same way while one of the Organization is still unclaimed, and a row
-`team_name` while one of the same Team is: the run renders with the settings and the name as they are then.
+`team_name` while one of the same Team is, and a row `organization_links` while one of the Organization is: the run
+renders with the settings, the name, the rules and the tables as they are then.
 
 **Bridge events** (C-22.FR-11) are claimed rather than queued: the poller and the push callback hand each event to
 one handler, which runs it in a transaction that holds a transaction advisory lock of the class `0x6d75_0007`, keyed by

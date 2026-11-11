@@ -7,7 +7,8 @@
 // sandbox of ADR-0012 — with the built-in "Explore" rule. It computes the links of an Alert Group: one per matching
 // rule, or per value of a label, then the runbook_url and dashboard_url annotations and the generatorURL as "Source",
 // each kept only as an http(s) URL. A rule that fails is left out and counted. Every change of a table or a rule is
-// recorded in the Audit log; neither changes a message by itself.
+// recorded in the Audit log and, in its transaction, asks the open Alert Group updates of internal/groups to re-render
+// the open Root messages Quietly, whose links it may change (KindLinks); delivery edits only those whose links did.
 package links
 
 import (
@@ -47,6 +48,14 @@ const (
 	ActionRuleDeleted  = "link_rule.deleted"
 	ResourceTable      = "lookup_table"
 	ResourceRule       = "link_rule"
+)
+
+// KindLinks is the kind of the open_group_updates row that a change of a Link rule or of a Lookup table writes, whose
+// run re-renders every open Root message of the Organization (C-12.FR-9), and OpenGroupUpdatesChannel the LISTEN/NOTIFY
+// channel that wakes the workers of internal/groups, which claim it.
+const (
+	KindLinks               = "organization_links"
+	OpenGroupUpdatesChannel = "muster_open_group_updates"
 )
 
 // The limits of a Lookup table and of the lookups of one render: names and column names in characters, the
@@ -175,11 +184,13 @@ type Queries interface {
 	DeleteLinkRuleMatchers(ctx context.Context, arg dbgen.DeleteLinkRuleMatchersParams) error
 	InsertLinkRuleMatcher(ctx context.Context, arg dbgen.InsertLinkRuleMatcherParams) error
 	DeleteLinkRule(ctx context.Context, arg dbgen.DeleteLinkRuleParams) error
-	EnsureExploreRule(ctx context.Context, arg dbgen.EnsureExploreRuleParams) (string, error)
+	EnsureExploreRule(ctx context.Context, arg dbgen.EnsureExploreRuleParams) (dbgen.EnsureExploreRuleRow, error)
 	GetLinkSnapshotRetention(ctx context.Context, orgID int64) (int64, error)
 	ListRecentSnapshots(ctx context.Context, arg dbgen.ListRecentSnapshotsParams) ([][]byte, error)
 	GetLinkGroup(ctx context.Context, arg dbgen.GetLinkGroupParams) (dbgen.GetLinkGroupRow, error)
 	ListLinkAlerts(ctx context.Context, arg dbgen.ListLinkAlertsParams) ([]dbgen.ListLinkAlertsRow, error)
+	InsertLinksUpdate(ctx context.Context, arg dbgen.InsertLinksUpdateParams) error
+	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 	audit.Store
 }
 
@@ -573,6 +584,9 @@ func (s *Service) CreateTable(ctx context.Context, r Requester, in TableInput) (
 		if created, err = s.getTable(ctx, q, id); err != nil {
 			return err
 		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionTableCreated, Resource: tableResource(created), Diff: audit.Created(viewOfTable(created)),
 			SourceAddress: r.Address})
@@ -654,6 +668,9 @@ func (s *Service) UpdateTable(ctx context.Context, r Requester, publicID string,
 		if updated, err = s.getTable(ctx, q, before.PublicID); err != nil {
 			return err
 		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionTableUpdated, Resource: tableResource(updated), Diff: changes, SourceAddress: r.Address})
 	})
@@ -680,10 +697,35 @@ func (s *Service) DeleteTable(ctx context.Context, r Requester, publicID string,
 		if err := q.DeleteLookupTable(ctx, dbgen.DeleteLookupTableParams{OrgID: s.orgID, ID: before.ID}); err != nil {
 			return fmt.Errorf("delete the lookup table %s: %w", before.PublicID, err)
 		}
+		if err := s.requestRerender(ctx, q); err != nil {
+			return err
+		}
 		return s.audit.Record(ctx, q, audit.Entry{OrgID: s.orgID, Actor: r.Actor, Transport: r.Transport,
 			Action: ActionTableDeleted, Resource: tableResource(before),
 			Diff: audit.Diff(viewOfTable(before), tableView{}), SourceAddress: r.Address})
 	})
+}
+
+// requestRerender, in the transaction of a change of a Link rule or of a Lookup table, asks the workers of
+// internal/groups to re-render the open Root messages of the Organization, whose links the change may alter
+// (C-12.FR-9): one open_group_updates row KindLinks, unless one is still unclaimed, requested at the business time of
+// the change, and a notification that wakes them once the transaction commits. A table that no rule reads changes no
+// link, and delivery then edits nothing.
+func (s *Service) requestRerender(ctx context.Context, q Queries) error {
+	return requestRerender(ctx, q, s.orgID, s.business.Now())
+}
+
+// requestRerender is Service.requestRerender for the Organization orgID at the business time now, which the start-up
+// step of the built-in rule also calls (EnsureExplore).
+func requestRerender(ctx context.Context, q Queries, orgID int64, now time.Time) error {
+	if err := q.InsertLinksUpdate(ctx, dbgen.InsertLinksUpdateParams{OrgID: orgID,
+		RequestedAt: now.UTC()}); err != nil {
+		return fmt.Errorf("re-render the open root messages for their links: %w", err)
+	}
+	if err := q.NotifyOpenGroupUpdates(ctx, OpenGroupUpdatesChannel); err != nil {
+		return fmt.Errorf("wake the open alert group update workers: %w", err)
+	}
+	return nil
 }
 
 // refuseInUse is an InUseError naming the Link rules whose URL templates call `lookup` with the table's name, or nil

@@ -110,11 +110,12 @@ differ, and not at all when no Alert has it. The Route suggests labels from its 
 example value (`listRouteLabelSuggestions`). A change of the list, or of the Group key while the list is the default,
 edits the open Root messages of the Route, Quietly, to show the new labels.
 
-The open Root messages also follow the Organization's settings and the names of Teams that they show: a change of the
-[severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day of
-the week](organization.md) edits every open Root message once, Quietly, and a rename of a Team edits those of the open
-Alert Groups that have the Team. A message the change does not alter is not edited, and no change sends a new message or
-a Mention.
+The open Root messages also follow the other settings that they show: a change of the Route's language, its Snooze
+durations, or its Root message or line template edits the open Root messages of the Route once, Quietly; a change of
+the [severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day
+of the week](organization.md), or of a [Link rule or a Lookup table](#links), edits every open Root message once,
+Quietly; and a rename of a Team edits those of the open Alert Groups that have the Team. A message the change does not
+alter is not edited, and no change sends a new message or a Mention.
 
 ## What you can change, and what you cannot
 
@@ -244,7 +245,8 @@ in a template is escaped and mentions nobody.
 ## Links
 
 Links to other tools come from data, not from code in a message: Link rules read Lookup tables. They appear as one line
-in the message and as the **Links** block on the Alert Group page.
+in the message and as the **Links** block on the Alert Group page. Creating, changing or deleting a Link rule or a
+Lookup table edits, Quietly, the open Root messages whose links it changes, and no other.
 
 ### Add a Lookup table
 
