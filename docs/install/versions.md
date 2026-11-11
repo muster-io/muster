@@ -167,7 +167,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       Organization it creates gets the default rules.
     - Migration 0038 marks the edits of open Root messages that a change of configuration alone made — a new button
       set, new message settings, a renamed Team, the re-render after a key rotation — so that delivery sends them after
-      the new Alert Groups and the changes of Alerts and Commands of the same urgency; no data is migrated, and a
+      the Publications of new Alert Groups and the edits of Root messages that Alerts and Commands made, of the same
+      urgency; no data is migrated, and a
       re-render still pending at the upgrade keeps its place. It is expand only: a 0.1 replica, or one of a development
       image without it, claims in its own order and never writes the mark, so an edit, a final edit or a republication
       it queues for a Root message whose re-render a 0.2.0 replica queued — still pending, or already delivered by the

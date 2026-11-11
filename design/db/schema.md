@@ -1804,12 +1804,14 @@ SELECT d.id FROM deliveries d JOIN destinations ds ON ds.id = d.destination_id
 UPDATE deliveries SET lease_owner = $replica, lease_until = $real_now + $lease WHERE id = ANY($ids);
 ```
 
-A delivery whose limiter has no token is rescheduled (`next_attempt_at`), not failed. The rank of `configuration_only` is
-order only: a re-render of every open Root message waits for the Publications and the edits of Alerts and Commands of
-the same urgency, takes every token they leave, by age, and an edit that waits is carried by the next change of its
-Alert Group, which clears the mark. A `RetryAfter` sets
-`next_attempt_at` exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
-`first_failed_at`; running out of either makes the Destination Broken.
+A delivery whose limiter has no token is rescheduled (`next_attempt_at`), not failed. The rank of `configuration_only`
+is order only and strict: among the Root messages of one urgency, configuration edits always come last; a re-render of
+every open Root message waits for the Publications and the edits of Root messages that Alerts and Commands made, of the
+same urgency, for as long as they use up the limiter, takes every token they leave, by age, and an edit that waits is
+carried by the next change of its Alert Group, which clears the mark. Thread replies are claimed after the deliveries,
+configuration edits included. A `RetryAfter` sets `next_attempt_at` exactly and does not touch `attempts`; `Transient`
+increments `attempts` and starts the time budget at `first_failed_at`; running out of either makes the Destination
+Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

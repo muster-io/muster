@@ -98,9 +98,10 @@ Organization, as edits that notify nobody. So does a change of the severity labe
 for every open Root message, which shows them in its
 [key labels and Alerts](messages-and-templates.md#the-default-message): each is edited once, and one that the change
 does not alter is left as it is. The edits arrive within seconds on a small installation and over minutes on one with
-many open Alert Groups, as the messengers' rate limits allow. They never hold up new Alert Groups or the changes that
-Alerts and Commands make, of the same urgency: a Destination sends those first and these edits with the rest of its
-rate limit.
+many open Alert Groups, as the messengers' rate limits allow. They never hold up the Root messages of new Alert Groups
+or the edits of Root messages that Alerts and Commands make, of the same urgency: a Destination sends those first, for
+as long as they use up its rate limit — Alert Groups that keep flapping, for example — and these edits with the rest;
+none is dropped. Thread replies wait behind these edits while they are due.
 
 1. Open **Organization → Alert handling**.
 2. Change the **Instance labels**: **Add label** adds one, the × next to a label removes it.

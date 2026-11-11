@@ -398,14 +398,16 @@ type ClaimDueDeliveriesRow struct {
 // ClaimDueDeliveries leases the due pending deliveries of healthy Destinations whose lease is free or ran out, Urgent
 // first, then the edits that are not configuration only before those a change of configuration alone made
 // (configuration_only, SetDesired), then the earliest, then the one delivered longest ago, so that deliveries waiting
-// for the same token take turns; another claimer skips the rows this one locked. The rank is order only: a re-render of
-// every open Root message never delays a Publication or the change of an Alert or a Command of the same urgency in the
-// same Destination, and it takes every token they leave, its edits by age. Its edits wait only while Publications and
-// the edits of Alerts and Commands alone use up the limiter, and those are then backlogged themselves; an edit that
-// waits is not lost: the next change of its Alert Group carries the configuration with it and ends the mark. A
-// delivered edit ends the mark too. A claimed edit without a token is released at
-// once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against a
-// Publication. A delivery a Storm holds waits for its Storm, and one of a
+// for the same token take turns; another claimer skips the rows this one locked. The rank is order only and strict:
+// among the Root messages of one urgency, configuration edits always come last: a re-render of every open Root message
+// never delays a Publication or an edit of a Root message that an Alert or a Command made, of the same urgency in the
+// same Destination, and it takes every token they leave, its edits by age. Its edits wait as long as Publications and
+// those edits use up the limiter — Alert Groups that keep flapping, for one — and none is dropped: an edit that waits
+// is carried by the next change of its Alert Group, which ends the mark, and a delivered edit ends it too. Thread
+// replies are claimed after the deliveries (Round), so they still wait behind the edits of a re-render that take the
+// tokens first. A claimed edit without a token is released at once, due when the token is (RescheduleDelivery), so a
+// claimed batch never holds a token or a lease against a Publication. A delivery a Storm holds waits for its Storm, and
+// one of a
 // deleted Destination is claimed only for its final edit or, never published there, to end it (prepare): an Enqueue
 // that read the Destination's entries before its deletion committed can create one after the deletion ended the
 // others, and a Publication claimed before it committed can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in
