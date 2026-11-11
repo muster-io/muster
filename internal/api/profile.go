@@ -239,6 +239,24 @@ func (s *Server) RevokeMyIcalFeed(ctx context.Context, _ gen.RevokeMyIcalFeedReq
 	return gen.RevokeMyIcalFeed204Response{}, nil
 }
 
+// RevokeUserIcalFeed is revokeUserIcalFeed: an Admin revokes the iCal feed of a User, whose link stops working at once.
+func (s *Server) RevokeUserIcalFeed(ctx context.Context, req gen.RevokeUserIcalFeedRequestObject) (
+	gen.RevokeUserIcalFeedResponseObject, error) {
+	id, err := identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r := schedules.Requester{Actor: id.Actor(), Transport: id.Transport, Address: clientAddress(ctx)}
+	err = s.icalFeeds.RevokeOfUser(ctx, r, req.UserId)
+	if errors.Is(err, schedules.ErrFeedUserNotFound) {
+		return nil, problem(http.StatusNotFound, typeNotFound, "", "No such user.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return gen.RevokeUserIcalFeed204Response{}, nil
+}
+
 // feedCaller is the caller of an operation on their own iCal feed, which only the web session reaches.
 func (s *Server) feedCaller(ctx context.Context) (schedules.Requester, schedules.FeedUser, error) {
 	id, err := identity(ctx)

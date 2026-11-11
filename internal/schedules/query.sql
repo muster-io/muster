@@ -336,6 +336,12 @@ WHERE org_id = @org_id AND user_id = @user_id;
 DELETE FROM ical_feeds
 WHERE org_id = @org_id AND user_id = @user_id;
 
+-- GetFeedUser reads a User who is not deleted by public_id, for an Admin's revoke of their iCal feed.
+-- name: GetFeedUser :one
+SELECT id, public_id
+FROM users
+WHERE org_id = @org_id AND public_id = @public_id AND status <> 'deleted';
+
 -- FindIcalFeed finds an iCal feed by the SHA-256 of its token, with its Organization and its User's status.
 -- name: FindIcalFeed :one
 -- archlint:org-exempt by-hash lookup: the token in the path of the feed is all the request carries

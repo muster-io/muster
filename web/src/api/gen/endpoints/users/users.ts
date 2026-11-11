@@ -523,6 +523,80 @@ export const useDeleteUser = <TError = UnauthorizedResponse | ForbiddenResponse 
       > => {
       return useMutation(getDeleteUserMutationOptions(options), queryClient);
     }
+    export const getRevokeUserIcalFeedUrl = (userId: string,) => {
+
+
+
+
+  return `/api/v1/users/${userId}/ical-feed`
+}
+
+/**
+ * Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed. A deleted user is `404`.
+ * @summary Revoke a user's iCal feed
+ */
+export const revokeUserIcalFeed = async (userId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
+
+  return apiFetch<void>(getRevokeUserIcalFeedUrl(userId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRevokeUserIcalFeedMutationKey = () => ['revokeUserIcalFeed'] as const;
+
+export const getRevokeUserIcalFeedMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeUserIcalFeed>>, TError,RevokeUserIcalFeedMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeUserIcalFeed>>, TError,RevokeUserIcalFeedMutationVariables, TContext> => {
+
+const mutationKey = getRevokeUserIcalFeedMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeUserIcalFeed>>, RevokeUserIcalFeedMutationVariables> = (props) => {
+          const {userId} = props ?? {};
+
+          return  revokeUserIcalFeed(userId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeUserIcalFeedMutationResult = NonNullable<Awaited<ReturnType<typeof revokeUserIcalFeed>>>
+
+    export type RevokeUserIcalFeedMutationError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse
+    export type RevokeUserIcalFeedMutationVariables = {userId: string}
+
+    /**
+ * @summary Revoke a user's iCal feed
+ */
+export const useRevokeUserIcalFeed = <TError = UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | TooManyRequestsResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeUserIcalFeed>>, TError,RevokeUserIcalFeedMutationVariables, TContext>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof revokeUserIcalFeed>>,
+        TError,
+        RevokeUserIcalFeedMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRevokeUserIcalFeedMutationOptions(options), queryClient);
+    }
     export const getDisableUserUrl = (userId: string,) => {
 
 

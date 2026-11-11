@@ -13445,6 +13445,9 @@ type ServerInterface interface {
 	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
 	DeleteUserGatewayContact(w http.ResponseWriter, r *http.Request, userId UserId, gatewayContactId GatewayContactId)
+	// RevokeUserIcalFeed Revoke a user's iCal feed
+	// (DELETE /users/{user_id}/ical-feed)
+	RevokeUserIcalFeed(w http.ResponseWriter, r *http.Request, userId UserId)
 	// GetUserNotificationRules Read a user's Notification rules
 	// (GET /users/{user_id}/notification-rules)
 	GetUserNotificationRules(w http.ResponseWriter, r *http.Request, userId UserId)
@@ -20263,6 +20266,32 @@ func (siw *ServerInterfaceWrapper) DeleteUserGatewayContact(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// RevokeUserIcalFeed operation middleware
+func (siw *ServerInterfaceWrapper) RevokeUserIcalFeed(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "user_id" -------------
+	var userId UserId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user_id", r.PathValue("user_id"), &userId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeUserIcalFeed(w, r, userId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetUserNotificationRules operation middleware
 func (siw *ServerInterfaceWrapper) GetUserNotificationRules(w http.ResponseWriter, r *http.Request) {
 
@@ -20544,6 +20573,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}", wrapper.DeleteUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/users/{user_id}", wrapper.GetUser)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/users/{user_id}", wrapper.UpdateUser)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/users/{user_id}/ical-feed", wrapper.RevokeUserIcalFeed)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users/{user_id}/disable", wrapper.DisableUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users/{user_id}/enable", wrapper.EnableUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/users/{user_id}/reset-totp", wrapper.ResetUserTotp)
@@ -41204,6 +41234,89 @@ func (response DeleteUserGatewayContact429ApplicationProblemPlusJSONResponse) Vi
 	return err
 }
 
+type RevokeUserIcalFeedRequestObject struct {
+	UserId UserId `json:"user_id"`
+}
+
+type RevokeUserIcalFeedResponseObject interface {
+	VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error
+}
+
+type RevokeUserIcalFeed204Response struct {
+}
+
+func (response RevokeUserIcalFeed204Response) VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokeUserIcalFeed401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeUserIcalFeed401ApplicationProblemPlusJSONResponse) VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserIcalFeed403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeUserIcalFeed403ApplicationProblemPlusJSONResponse) VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserIcalFeed404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeUserIcalFeed404ApplicationProblemPlusJSONResponse) VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokeUserIcalFeed429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response RevokeUserIcalFeed429ApplicationProblemPlusJSONResponse) VisitRevokeUserIcalFeedResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetUserNotificationRulesRequestObject struct {
 	UserId UserId `json:"user_id"`
 }
@@ -42237,6 +42350,9 @@ type StrictServerInterface interface {
 	// DeleteUserGatewayContact Remove a user's contact at a Notification gateway
 	// (DELETE /users/{user_id}/gateway-contacts/{gateway_contact_id})
 	DeleteUserGatewayContact(ctx context.Context, request DeleteUserGatewayContactRequestObject) (DeleteUserGatewayContactResponseObject, error)
+	// RevokeUserIcalFeed Revoke a user's iCal feed
+	// (DELETE /users/{user_id}/ical-feed)
+	RevokeUserIcalFeed(ctx context.Context, request RevokeUserIcalFeedRequestObject) (RevokeUserIcalFeedResponseObject, error)
 	// GetUserNotificationRules Read a user's Notification rules
 	// (GET /users/{user_id}/notification-rules)
 	GetUserNotificationRules(ctx context.Context, request GetUserNotificationRulesRequestObject) (GetUserNotificationRulesResponseObject, error)
@@ -47698,6 +47814,32 @@ func (sh *strictHandler) DeleteUserGatewayContact(w http.ResponseWriter, r *http
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DeleteUserGatewayContactResponseObject); ok {
 		if err := validResponse.VisitDeleteUserGatewayContactResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokeUserIcalFeed operation middleware
+func (sh *strictHandler) RevokeUserIcalFeed(w http.ResponseWriter, r *http.Request, userId UserId) {
+	var request RevokeUserIcalFeedRequestObject
+
+	request.UserId = userId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokeUserIcalFeed(ctx, request.(RevokeUserIcalFeedRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokeUserIcalFeed")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokeUserIcalFeedResponseObject); ok {
+		if err := validResponse.VisitRevokeUserIcalFeedResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

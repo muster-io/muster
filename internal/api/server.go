@@ -336,7 +336,7 @@ var implemented = map[string]bool{
 	"ListSchedules": true, "CreateSchedule": true, "GetSchedule": true, "UpdateSchedule": true, "DeleteSchedule": true,
 	"GetScheduleOnCall": true, "ListScheduleOverrides": true, "CreateScheduleOverride": true,
 	"UpdateScheduleOverride": true, "DeleteScheduleOverride": true, "GetOnCallNow": true,
-	"GetMyIcalFeed": true, "IssueMyIcalFeed": true, "RevokeMyIcalFeed": true,
+	"GetMyIcalFeed": true, "IssueMyIcalFeed": true, "RevokeMyIcalFeed": true, "RevokeUserIcalFeed": true,
 	"ListMyGatewayContacts": true, "CreateMyGatewayContact": true, "SendMyGatewayContactCode": true,
 	"ConfirmMyGatewayContact": true, "DeleteMyGatewayContact": true, "ListUserGatewayContacts": true,
 	"CreateUserGatewayContact": true, "DeleteUserGatewayContact": true,

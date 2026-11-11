@@ -2,7 +2,7 @@
 // Copyright The Muster Authors
 
 // A user's page (C-03.FR-3, FR-11, FR-13, FR-29): the details, and for users:write the edit of name, email and Role,
-// disable and enable, reset TOTP, a new password setup link, convert to local and delete. The user's Account links
+// disable and enable, reset TOTP, revoke the iCal feed (C-27.FR-10), a new password setup link, convert to local and delete. The user's Account links
 // (C-18.FR-6), with "Remove" for users:write; only the user links an account, from the profile.
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -31,6 +31,7 @@ import {
   useEnableUser,
   useGetUser,
   useResetUserTotp,
+  useRevokeUserIcalFeed,
 } from "../api/gen/endpoints/users/users";
 import type { PasswordSetupLink, User } from "../api/gen/model";
 import { UpdateUserBody } from "../api/gen/zod/users/users.zod";
@@ -355,7 +356,7 @@ function ConfirmDialog({
   );
 }
 
-type Asking = "delete" | "resetTotp" | "convert" | null;
+type Asking = "delete" | "resetTotp" | "convert" | "revokeIcal" | null;
 
 function ActionsCard({ user }: { user: User }) {
   const { t } = useTranslation();
@@ -375,6 +376,14 @@ function ActionsCard({ user }: { user: User }) {
         setNotice(t("users.actions.totpReset"));
         void queryClient.invalidateQueries({ queryKey: getGetUserQueryKey(user.id) });
         void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+      },
+    },
+  });
+  const revokeIcal = useRevokeUserIcalFeed({
+    mutation: {
+      onSuccess: () => {
+        setAsking(null);
+        setNotice(t("users.actions.icalFeedRevoked"));
       },
     },
   });
@@ -403,9 +412,11 @@ function ActionsCard({ user }: { user: User }) {
     },
   });
   const failed = [disable, enable, newLink].find((m) => m.isError);
-  const busy = [disable, enable, newLink, resetTotp, convert, remove].some((m) => m.isPending);
+  const busy = [disable, enable, newLink, resetTotp, revokeIcal, convert, remove].some(
+    (m) => m.isPending,
+  );
   const ask = (what: Asking) => {
-    for (const m of [resetTotp, convert, remove]) {
+    for (const m of [resetTotp, revokeIcal, convert, remove]) {
       m.reset();
     }
     setNotice(null);
@@ -449,6 +460,9 @@ function ActionsCard({ user }: { user: User }) {
               {t("users.actions.resetTotp")}
             </Button>
           )}
+          <Button variant="outline" disabled={busy} onClick={() => ask("revokeIcal")}>
+            {t("users.actions.revokeIcalFeed")}
+          </Button>
           {user.sign_in_method === "local" ? (
             <Button
               variant="outline"
@@ -485,6 +499,16 @@ function ActionsCard({ user }: { user: User }) {
           pending={resetTotp.isPending}
           error={resetTotp.error}
           onConfirm={() => resetTotp.mutate({ userId: user.id })}
+        />
+        <ConfirmDialog
+          open={asking === "revokeIcal"}
+          onOpenChange={(open) => setAsking(open ? "revokeIcal" : null)}
+          title={t("users.actions.revokeIcalFeed")}
+          description={t("users.actions.revokeIcalFeedConfirm", { name: user.name })}
+          confirm={t("users.actions.revokeIcalFeed")}
+          pending={revokeIcal.isPending}
+          error={revokeIcal.error}
+          onConfirm={() => revokeIcal.mutate({ userId: user.id })}
         />
         <ConfirmDialog
           open={asking === "convert"}

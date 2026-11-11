@@ -511,6 +511,21 @@ var TeamInfo = newGauge(Definition{
 	Capability: "C-25",
 })
 
+// IcalFeedOutcomes are the outcome values of muster_ical_feed_requests_total.
+var IcalFeedOutcomes = []string{"served", "not_found", "failed"}
+
+// IcalFeedRequests counts the fetches of the personal iCal feeds by outcome (C-27.FR-10). It has no label for the
+// feed or its User: the token is a credential, and Users are never a label (ADR-0014).
+var IcalFeedRequests = newCounter(Definition{
+	Name: "muster_ical_feed_requests_total",
+	Help: "Fetches of the personal iCal feeds by outcome.",
+	Labels: []Label{
+		closed("outcome", "served is a feed answered 200, not_found a malformed, unknown or revoked token or one of a "+
+			"disabled or deleted User (404), failed a feed that could not be read (500)", IcalFeedOutcomes...),
+	},
+	Capability: "C-27",
+})
+
 // ScheduleInfo is 1 for every Schedule; its labels carry the Schedule's name (C-27.FR-13).
 var ScheduleInfo = newGauge(Definition{
 	Name: "muster_schedule_info",

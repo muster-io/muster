@@ -256,6 +256,30 @@ func (q *Queries) FindUser(ctx context.Context, arg FindUserParams) (int64, erro
 	return id, err
 }
 
+const getFeedUser = `-- name: GetFeedUser :one
+SELECT id, public_id
+FROM users
+WHERE org_id = $1 AND public_id = $2 AND status <> 'deleted'
+`
+
+type GetFeedUserParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+type GetFeedUserRow struct {
+	ID       int64
+	PublicID string
+}
+
+// GetFeedUser reads a User who is not deleted by public_id, for an Admin's revoke of their iCal feed.
+func (q *Queries) GetFeedUser(ctx context.Context, arg GetFeedUserParams) (GetFeedUserRow, error) {
+	row := q.db.QueryRow(ctx, getFeedUser, arg.OrgID, arg.PublicID)
+	var i GetFeedUserRow
+	err := row.Scan(&i.ID, &i.PublicID)
+	return i, err
+}
+
 const getIcalFeed = `-- name: GetIcalFeed :one
 SELECT issued_at
 FROM ical_feeds

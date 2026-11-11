@@ -18,6 +18,7 @@ import (
 
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/clock"
+	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/schedules/dbgen"
 	"github.com/muster-io/muster/internal/tokens"
 	usersdb "github.com/muster-io/muster/internal/users/dbgen"
@@ -46,12 +47,16 @@ var ErrFeedNotFound = errors.New("no such ical feed")
 // ErrFeedUserInactive is an issue of a feed for a User who is not active, disabled or deleted meanwhile.
 var ErrFeedUserInactive = errors.New("the user of the ical feed is not active")
 
+// ErrFeedUserNotFound is a revoke of the feed of a User who does not exist or is deleted.
+var ErrFeedUserNotFound = errors.New("no such user")
+
 // FeedQueries are the queries of the iCal feeds, with the insert of the Audit log.
 type FeedQueries interface {
 	ListUserSchedules(ctx context.Context, arg dbgen.ListUserSchedulesParams) ([]dbgen.ListUserSchedulesRow, error)
 	ReplaceIcalFeed(ctx context.Context, arg dbgen.ReplaceIcalFeedParams) (bool, error)
 	GetIcalFeed(ctx context.Context, arg dbgen.GetIcalFeedParams) (time.Time, error)
 	DeleteIcalFeed(ctx context.Context, arg dbgen.DeleteIcalFeedParams) (int64, error)
+	GetFeedUser(ctx context.Context, arg dbgen.GetFeedUserParams) (dbgen.GetFeedUserRow, error)
 	FindIcalFeed(ctx context.Context, tokenHash []byte) (dbgen.FindIcalFeedRow, error)
 	audit.Store
 }
@@ -178,6 +183,27 @@ func (f *Feeds) Issue(ctx context.Context, r Requester, u FeedUser) (IssuedFeed,
 func (f *Feeds) Revoke(ctx context.Context, r Requester, u FeedUser) error {
 	return f.store.InTx(ctx, func(q FeedQueries) error {
 		return f.revoke(ctx, q, r.Actor, r.Transport, r.Address, u, "revoked")
+	})
+}
+
+// RevokeOfUser deletes the iCal feed of the User userPublicID for an Admin, whose link stops working at once, and
+// records ical_feed.revoked with the reason revoked_by_admin; without a feed it does nothing. An unknown or deleted
+// User is ErrFeedUserNotFound.
+func (f *Feeds) RevokeOfUser(ctx context.Context, r Requester, userPublicID string) error {
+	norm, err := publicid.Parse(publicid.User, userPublicID)
+	if err != nil {
+		return ErrFeedUserNotFound
+	}
+	return f.store.InTx(ctx, func(q FeedQueries) error {
+		row, err := q.GetFeedUser(ctx, dbgen.GetFeedUserParams{OrgID: f.orgID, PublicID: norm})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrFeedUserNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read the user of the ical feed: %w", err)
+		}
+		return f.revoke(ctx, q, r.Actor, r.Transport, r.Address, FeedUser{ID: row.ID, PublicID: row.PublicID},
+			"revoked_by_admin")
 	})
 }
 
