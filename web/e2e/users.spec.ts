@@ -192,6 +192,7 @@ test("without users:write the user's page offers no action", async ({ page }) =>
     "Enable",
     "Delete",
     "Reset TOTP",
+    "Revoke iCal feed",
     "Convert to local",
     "New password setup link",
     "Save",
@@ -199,6 +200,16 @@ test("without users:write the user's page offers no action", async ({ page }) =>
     await expect(page.getByRole("button", { name: action })).toHaveCount(0);
   }
   await expect(page.getByLabel("Role")).toHaveCount(0);
+});
+
+test("an admin revokes a user's iCal feed", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await signInAdmin(page);
+  await page.goto("/admin/users");
+  await row(page, ADMIN_LOGIN).getByRole("link").click();
+  await page.getByRole("button", { name: "Revoke iCal feed" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Revoke iCal feed" }).click();
+  await expect(page.getByText("The iCal feed link no longer works.")).toBeVisible();
 });
 
 test("pages through the users with the cursor of the list", async ({ page }) => {

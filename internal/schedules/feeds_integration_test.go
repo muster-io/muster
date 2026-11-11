@@ -189,6 +189,27 @@ func TestIntegrationFeeds(t *testing.T) {
 		if n := e.count(t, `SELECT count(*) FROM audit_log WHERE action = 'ical_feed.revoked' AND details->>'reason' = 'revoked_by_admin'`); n != 1 {
 			t.Errorf("revoked_by_admin entries = %d", n)
 		}
+		other := schedules.NewFeeds(schedules.FeedsConfig{OrgID: e.orgID + 1, Store: schedules.NewFeedStore(e.d.Pool),
+			Audit: w, Business: e.clock, Schedules: e.svc})
+		if err := other.RevokeOfUser(ctx, by, petr.PublicID); !errors.Is(err, schedules.ErrFeedUserNotFound) {
+			t.Errorf("a User of another Organization: %v", err)
+		}
+		fourth, err := feeds.Issue(ctx, by, petr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE users SET status = 'disabled' WHERE id = $1`, petrID); err != nil {
+			t.Fatal(err)
+		}
+		if err := feeds.RevokeOfUser(ctx, by, petr.PublicID); err != nil {
+			t.Errorf("a disabled User's feed: %v", err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `UPDATE users SET status = 'active' WHERE id = $1`, petrID); err != nil {
+			t.Fatal(err)
+		}
+		if e.count(t, `SELECT count(*) FROM ical_feeds WHERE token_hash = sha256($1::bytea)`, []byte(token(fourth))) != 0 {
+			t.Error("the disabled User's feed is still there")
+		}
 		if err := feeds.RevokeOfUser(ctx, by, "SR000000000000"); !errors.Is(err, schedules.ErrFeedUserNotFound) {
 			t.Errorf("an unknown User: %v", err)
 		}

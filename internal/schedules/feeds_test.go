@@ -384,6 +384,28 @@ func TestRevokeOfUser(t *testing.T) {
 		bytes.Contains(last.Details, []byte(tokens.PrefixIcal)) {
 		t.Errorf("audit %+v", store.audit)
 	}
+	other := NewFeeds(FeedsConfig{OrgID: orgID + 1, Store: store, Audit: feeds.audit, Business: feeds.clock,
+		Schedules: feeds.schedules})
+	if err := other.RevokeOfUser(ctx, admin, petr.PublicID); !errors.Is(err, ErrFeedUserNotFound) {
+		t.Errorf("a User of another Organization: %v", err)
+	}
+	store.fail = nil
+	if _, err := feeds.Issue(ctx, asPetr, feedOfPetr); err != nil {
+		t.Fatal(err)
+	}
+	for i, u := range store.users {
+		if u.ID == petr.ID {
+			store.users[i].Status = "disabled"
+		}
+	}
+	if err := feeds.RevokeOfUser(ctx, admin, petr.PublicID); err != nil || len(store.feeds) != 0 {
+		t.Errorf("a disabled User's feed: %v, %d feeds", err, len(store.feeds))
+	}
+	for i, u := range store.users {
+		if u.ID == petr.ID {
+			store.users[i].Status = "active"
+		}
+	}
 	for _, id := range []string{"garbage", "SR000000000000"} {
 		if err := feeds.RevokeOfUser(ctx, admin, id); !errors.Is(err, ErrFeedUserNotFound) {
 			t.Errorf("%q: %v", id, err)

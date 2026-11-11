@@ -231,6 +231,10 @@ func TestIcalFeed(t *testing.T) {
 	if a := o.do(http.MethodDelete, "/api/v1/users/"+petr+"/ical-feed", ""); a.status != http.StatusForbidden {
 		t.Errorf("a Responder revokes = %d %s", a.status, a.body)
 	}
+	_, viewer := personWithToken(t, admin, r.App, "vera", "viewer")
+	if a := viewer.do(http.MethodDelete, "/api/v1/users/"+petr+"/ical-feed", ""); a.status != http.StatusForbidden {
+		t.Errorf("a Viewer revokes = %d %s", a.status, a.body)
+	}
 	if a := feed(url4); a.status != http.StatusOK {
 		t.Errorf("the feed after a refused revoke = %d", a.status)
 	}
