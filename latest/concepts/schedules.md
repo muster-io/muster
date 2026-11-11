@@ -118,6 +118,16 @@ A new link revokes the old one
     a stopped link, and the link of a disabled or deleted User, answers `404`. Deleting a User deletes their feed.
     After a link stops, calendar applications keep showing the copy they last fetched.
 
+An Admin revokes the feed of a User
+:   If a link leaked, an Admin revokes it for the User: "Revoke iCal feed" on the User's page, or `revokeUserIcalFeed`
+    (`DELETE /api/v1/users/{user_id}/ical-feed`, permission `users:write`). The link stops at once on every replica,
+    the Audit log records `ical_feed.revoked` with the reason `revoked_by_admin`, and the User can issue a new link
+    from the profile.
+
+Counting the fetches
+:   `muster_ical_feed_requests_total{outcome}` counts the fetches: `served`, `not_found` (a malformed, unknown or
+    revoked token, or a disabled or deleted User's) and `failed`. It has no label for the token or the User.
+
 Calendar applications fetch the link without signing in, so treat it as a password: anyone who has it sees the times.
 Muster never writes it to its logs, which show the path as `/ical/[redacted].ics`; a reverse proxy or ingress in
 front of Muster records the real path in its own access log, so keep that log private or mask `/ical/` there.

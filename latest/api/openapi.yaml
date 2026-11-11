@@ -1028,6 +1028,35 @@ paths:
           $ref: '#/components/responses/PreconditionFailed'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+  /users/{user_id}/ical-feed:
+    delete:
+      operationId: revokeUserIcalFeed
+      tags:
+      - Users
+      summary: Revoke a user's iCal feed
+      description: Revokes the user's personal iCal feed, for example after its link leaked. The link answers `404` at
+        once on every replica, and the user can issue a new one (`issueMyIcalFeed`). `204` also when the user has no
+        feed. Recorded in the Audit log as `ical_feed.revoked` with the reason `revoked_by_admin` when a feed existed.
+        A deleted user is `404`.
+      x-permission: users:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+        csrf: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: The user has no iCal feed now.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
   /users/{user_id}/disable:
     post:
       operationId: disableUser
