@@ -15,11 +15,11 @@ TOOLS := $(BIN)/tools
 GO_TOOLCHAIN := $(shell $(GO) env GOVERSION)
 GOLANGCI_LINT_PKG := github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 # renovate: datasource=go depName=github.com/golangci/golangci-lint/v2
-GOLANGCI_LINT_VERSION := v2.14.0
+GOLANGCI_LINT_VERSION := v2.15.0
 GOLANGCI_LINT := $(TOOLS)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GO_TEST_COVERAGE_PKG := github.com/vladopajic/go-test-coverage/v2
 # renovate: datasource=go depName=github.com/vladopajic/go-test-coverage/v2
-GO_TEST_COVERAGE_VERSION := v2.20.0
+GO_TEST_COVERAGE_VERSION := v2.23.0
 GO_TEST_COVERAGE := $(TOOLS)/go-test-coverage-$(GO_TEST_COVERAGE_VERSION)
 GO_LICENSES_PKG := github.com/google/go-licenses/v2
 # renovate: datasource=go depName=github.com/google/go-licenses/v2
@@ -27,7 +27,7 @@ GO_LICENSES_VERSION := v2.0.1
 GO_LICENSES := $(TOOLS)/go-licenses-$(GO_LICENSES_VERSION)
 GOVULNCHECK_PKG := golang.org/x/vuln/cmd/govulncheck
 # renovate: datasource=go depName=golang.org/x/vuln
-GOVULNCHECK_VERSION := v1.8.0
+GOVULNCHECK_VERSION := v1.9.0
 GOVULNCHECK := $(TOOLS)/govulncheck-$(GOVULNCHECK_VERSION)
 GREMLINS_PKG := github.com/go-gremlins/gremlins/cmd/gremlins
 # renovate: datasource=go depName=github.com/go-gremlins/gremlins
@@ -35,7 +35,7 @@ GREMLINS_VERSION := v0.6.0
 GREMLINS := $(TOOLS)/gremlins-$(GREMLINS_VERSION)
 HELM_PKG := helm.sh/helm/v4/cmd/helm
 # renovate: datasource=go depName=helm.sh/helm/v4
-HELM_VERSION := v4.3.0
+HELM_VERSION := v4.3.1
 HELM := $(TOOLS)/helm-$(HELM_VERSION)
 KUBECONFORM_PKG := github.com/yannh/kubeconform/cmd/kubeconform
 # renovate: datasource=go depName=github.com/yannh/kubeconform
@@ -47,12 +47,12 @@ SQLC_VERSION := v1.31.1
 SQLC := $(TOOLS)/sqlc-$(SQLC_VERSION)
 PROMTOOL_PKG := github.com/prometheus/prometheus/cmd/promtool
 # renovate: datasource=go depName=github.com/prometheus/prometheus
-PROMTOOL_VERSION := v0.315.0
+PROMTOOL_VERSION := v0.316.0
 PROMTOOL := $(TOOLS)/promtool-$(PROMTOOL_VERSION)
 # release.yml pushes the Artifact Hub metadata of the chart with oras, and builds it with make like helm.
 ORAS_PKG := oras.land/oras/cmd/oras
 # renovate: datasource=go depName=oras.land/oras
-ORAS_VERSION := v1.3.4
+ORAS_VERSION := v1.3.6
 ORAS := $(TOOLS)/oras-$(ORAS_VERSION)
 # The tools above, as their install rules name them; make licenses reports their licences.
 INSTALLED_TOOLS := $(GOLANGCI_LINT_PKG)@$(GOLANGCI_LINT_VERSION) $(GO_TEST_COVERAGE_PKG)@$(GO_TEST_COVERAGE_VERSION) \
