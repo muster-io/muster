@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.1.5](https://github.com/muster-io/muster/compare/v0.1.4...v0.1.5) (2026-11-14)
+
+
+### Features
+
+* **bridge:** add the gateway role with sendNotification and notification_acknowledged ([#518](https://github.com/muster-io/muster/issues/518)) ([c0f4b99](https://github.com/muster-io/muster/commit/c0f4b99df4b7ab8ad052223ff823de5df475befa))
+* **bridge:** send the structured message layout to bridges ([#512](https://github.com/muster-io/muster/issues/512)) ([95a3556](https://github.com/muster-io/muster/commit/95a3556872a4a6ddc166e28ab080e3e30d10a791))
+* **destinations:** choose the buttons of root messages per organization and destination ([#478](https://github.com/muster-io/muster/issues/478)) ([8c8d180](https://github.com/muster-io/muster/commit/8c8d1803fc7541a43d3fec4b0fb699f80ae93558))
+* **gateways:** acknowledge alert groups from a call through a notification gateway ([#521](https://github.com/muster-io/muster/issues/521)) ([d388cf2](https://github.com/muster-io/muster/commit/d388cf21a271c3d15913ae50cdfead4eec822135))
+* **gateways:** confirm contacts at notification gateways with a code ([#519](https://github.com/muster-io/muster/issues/519)) ([a05bdcc](https://github.com/muster-io/muster/commit/a05bdcc1606ae8c3a70ec2252681314b64cef464))
+* **gateways:** mark failing notification gateways broken and alert about them ([#525](https://github.com/muster-io/muster/issues/525)) ([c5326ea](https://github.com/muster-io/muster/commit/c5326ea4efc968e2eef39ec3336e01e380d541c5))
+* **gateways:** queue calls through notification gateways with combining and retries ([#520](https://github.com/muster-io/muster/issues/520)) ([f7b72d2](https://github.com/muster-io/muster/commit/f7b72d2d6639e0cdf98814c4904b2fe537442e86))
+* **helm:** set annotations per ingress and the image registry as its own key ([#481](https://github.com/muster-io/muster/issues/481)) ([4b1bc34](https://github.com/muster-io/muster/commit/4b1bc34bd976005d2bc5893fd32016ba33ce8779))
+* **messages:** lay out root messages compactly with labels chosen per route ([#497](https://github.com/muster-io/muster/issues/497)) ([cedc853](https://github.com/muster-io/muster/commit/cedc853f412218b2a441dbcdadc3a7e29f33bb11))
+* **notificationrules:** add personal notification rules with organization defaults ([#531](https://github.com/muster-io/muster/issues/531)) ([1a52d99](https://github.com/muster-io/muster/commit/1a52d990ddf585e85844f3b8256a81363b63e039))
+* **oidc:** read each mapping entry from its own claim and sync team membership from the identity provider ([#488](https://github.com/muster-io/muster/issues/488)) ([9c85c5d](https://github.com/muster-io/muster/commit/9c85c5d8a548fe14bed8eef148b85c425525684b))
+* **routing:** deliver to the teams of an alert group with severity conditions per destination ([#507](https://github.com/muster-io/muster/issues/507)) ([abc127b](https://github.com/muster-io/muster/commit/abc127b090a97ca0389622bdf1ed55234cc353fb))
+* **routing:** preview where a route's alerts go ([#509](https://github.com/muster-io/muster/issues/509)) ([3747720](https://github.com/muster-io/muster/commit/374772060b7610c05b01179396920665111a1f97))
+* **routing:** publish quietly and give final edits when route and team destinations change ([#508](https://github.com/muster-io/muster/issues/508)) ([56b2f0e](https://github.com/muster-io/muster/commit/56b2f0e3834ea8fdf68ecf7ee15dd7ed7a4b936c))
+* **routing:** rename the route profile on-call to paging ([#477](https://github.com/muster-io/muster/issues/477)) ([9ec5a31](https://github.com/muster-io/muster/commit/9ec5a31f649d39c02fca72c3b31b72b6979662c8))
+* **routing:** replace the urgent mark with a minimum severity on routes ([#474](https://github.com/muster-io/muster/issues/474)) ([1c80616](https://github.com/muster-io/muster/commit/1c8061639df5537f4c9386b397da5fe50d1e16e4))
+* **schedules:** add a personal ical feed of on-call times ([#496](https://github.com/muster-io/muster/issues/496)) ([4c1579a](https://github.com/muster-io/muster/commit/4c1579afef80d5c97103fd0d1ca5ebf437166dee))
+* **schedules:** add schedules with rotation layers, overrides and the on-call ([#489](https://github.com/muster-io/muster/issues/489)) ([74c3409](https://github.com/muster-io/muster/commit/74c3409fb401d500cb9266ec20500951977a9753))
+* **schedules:** let an admin revoke a user iCal feed and count feed fetches ([#537](https://github.com/muster-io/muster/issues/537)) ([1eef3aa](https://github.com/muster-io/muster/commit/1eef3aa5fef491822f3f71d110d7f270c4a0f233))
+* **schedules:** report gaps of schedules with an internal alert and show who is on call now ([#498](https://github.com/muster-io/muster/issues/498)) ([006654a](https://github.com/muster-io/muster/commit/006654aaea694ae0aa25ab6dc8dfb4f9f0e8b046))
+* **teams:** add teams with people, owners and working hours ([#476](https://github.com/muster-io/muster/issues/476)) ([175e700](https://github.com/muster-io/muster/commit/175e700815cf0f8e0b042d086d40117b0b5f6cf5))
+* **teams:** give alerts and alert groups their teams from the team label and team matchers ([#487](https://github.com/muster-io/muster/issues/487)) ([7e77391](https://github.com/muster-io/muster/commit/7e77391461c45f1e05d95314d81cd5ad3b19ea78))
+* **teams:** list unknown team label values and evaluate open alert groups on save ([#495](https://github.com/muster-io/muster/issues/495)) ([9eb00a3](https://github.com/muster-io/muster/commit/9eb00a3f02a78406dd521f5b90dd4d7ff89c176c))
+* **web:** add the teams pages and the owning team of routes and destinations ([#514](https://github.com/muster-io/muster/issues/514)) ([34ff9c5](https://github.com/muster-io/muster/commit/34ff9c5bd131579b194b989b84e658428e6b308e))
+* **web:** choose the buttons of root messages on the destination form and the organization page ([#485](https://github.com/muster-io/muster/issues/485)) ([e8c2510](https://github.com/muster-io/muster/commit/e8c2510c278c525a49285b630c6ddaa791f91df9))
+* **web:** choose the labels of root messages and preview the layout per messenger ([#517](https://github.com/muster-io/muster/issues/517)) ([84a6deb](https://github.com/muster-io/muster/commit/84a6deb5217895ea5a7a193124dd50746260dd49))
+* **web:** choose the minimum severity on the route form ([#482](https://github.com/muster-io/muster/issues/482)) ([65639ee](https://github.com/muster-io/muster/commit/65639ee4361c7c7328363b4f5998e77e47894730))
+* **web:** route to the teams from the label with severity conditions and a delivery preview ([#516](https://github.com/muster-io/muster/issues/516)) ([12a60a7](https://github.com/muster-io/muster/commit/12a60a72ab90b2024ad3c20d18a6461baf68d79f))
+* **web:** show the teams of alerts and alert groups and the unknown team label values ([#515](https://github.com/muster-io/muster/issues/515)) ([127c6b0](https://github.com/muster-io/muster/commit/127c6b0ab11dd61bfe82708ff24d901e7aeaff15))
+
+
+### Bug Fixes
+
+* **delivery:** bound alert edits, thread replies and webhook events to the rows due at round start and skip destinations whose limiter refused ([#544](https://github.com/muster-io/muster/issues/544)) ([4bec38e](https://github.com/muster-io/muster/commit/4bec38e4230addb3bab9efac3999286376a7bbd7))
+* **delivery:** claim configuration edits after publications and alert edits ([#533](https://github.com/muster-io/muster/issues/533)) ([6055459](https://github.com/muster-io/muster/commit/60554597eb9c469cf5bb7cbcbd02dedd774ef3e2))
+* **delivery:** claim thread replies ahead of configuration edits ([#539](https://github.com/muster-io/muster/issues/539)) ([654abbd](https://github.com/muster-io/muster/commit/654abbdd43fc4fd52d80eb832bd3e414388b43b1))
+* **doctor:** read the outbound address policy once per organization before the checks ([#505](https://github.com/muster-io/muster/issues/505)) ([6c0ec22](https://github.com/muster-io/muster/commit/6c0ec22f4e04880fb2e56860d9d80324647d21e7))
+* **ingest:** warn on the integration when its latest snapshot was rejected ([#532](https://github.com/muster-io/muster/issues/532)) ([95f6e73](https://github.com/muster-io/muster/commit/95f6e739d6d295dd2860d1153498d40add39ba6b))
+* **messages:** re-render open root messages when a route's language, snooze durations or templates, or the link rules change ([#541](https://github.com/muster-io/muster/issues/541)) ([70d6086](https://github.com/muster-io/muster/commit/70d608644bf1d1e53ed31dc143e7114a52ac7361))
+* **messages:** re-render open root messages when footer names or account links change ([#548](https://github.com/muster-io/muster/issues/548)) ([f6f271a](https://github.com/muster-io/muster/commit/f6f271a2a1b2ab2fe91f0b32471bc1ab784cd805))
+* **messages:** re-render open root messages when organization labels, time zone or a team name change ([#502](https://github.com/muster-io/muster/issues/502)) ([ad565e4](https://github.com/muster-io/muster/commit/ad565e46ed8653daec389b7d266727dd8548afeb))
+* **routing:** show every destination a group reaches as its level rises in the delivery preview ([#513](https://github.com/muster-io/muster/issues/513)) ([8eecc78](https://github.com/muster-io/muster/commit/8eecc7842a8a36e208e09b587d2f8c0f4c86fd57))
+* tighten chart image host detection and route form follow-ups ([#486](https://github.com/muster-io/muster/issues/486)) ([19f99ae](https://github.com/muster-io/muster/commit/19f99aec761172c528af564590a0f718cacb1253))
+
+
+### Performance Improvements
+
+* **links:** re-render open messages after a lookup table change only when a link rule reads it ([#545](https://github.com/muster-io/muster/issues/545)) ([16b27bc](https://github.com/muster-io/muster/commit/16b27bcf2bb4e8fcbf82716e878637587c8e28dc))
+
+
+### Dependencies
+
+* **deps:** update dependency @tanstack/react-query to v5.105.0 ([#493](https://github.com/muster-io/muster/issues/493)) ([5167960](https://github.com/muster-io/muster/commit/516796053b6b89c0b20e81d80f13908129d236ef))
+* **deps:** update go to 1.27.4 ([#538](https://github.com/muster-io/muster/issues/538)) ([3723b8a](https://github.com/muster-io/muster/commit/3723b8af38eab3326c80950763b13fbb7920086d))
+* **deps:** update go-jose to 4.1.6 ([#483](https://github.com/muster-io/muster/issues/483)) ([d103624](https://github.com/muster-io/muster/commit/d1036247ab1d56dcf1ef2d4f02190a1ffb9d8adc))
+
 ## [0.1.4](https://github.com/muster-io/muster/compare/v0.1.3...v0.1.4) (2026-10-26)
 
 
