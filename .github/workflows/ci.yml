@@ -231,7 +231,7 @@ jobs:
       pull-requests: write
     env:
       # renovate: datasource=go depName=github.com/oasdiff/oasdiff
-      OASDIFF_VERSION: v1.33.0
+      OASDIFF_VERSION: v1.37.0
     # The report on api/openapi.yaml never blocks before 1.0 (ADR-0008): its steps continue on error, so a failure
     # shows in the step and the job stays green. The Bridge protocol is published and frozen (ADR-0017): a breaking
     # change of api/bridge.yaml fails the job, with no override, because a breaking change takes a new major path.
