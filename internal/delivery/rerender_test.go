@@ -73,7 +73,7 @@ func (f *fakeDB) LockRerenderDeliveries(_ context.Context, arg dbgen.LockRerende
 			continue
 		}
 		ds := f.dests[d.dest]
-		out = append(out, dbgen.LockRerenderDeliveriesRow{ID: d.id, DesiredHash: d.hash,
+		out = append(out, dbgen.LockRerenderDeliveriesRow{ID: d.id, DesiredVersion: d.version, DesiredHash: d.hash,
 			DesiredButtonKeyID: txt(&d.buttonKeyID), DestinationID: ds.id, DestinationPublicID: ds.publicID,
 			DestinationName: ds.name, DestinationType: ds.typ, ConnectionID: nullInt(ds.connection),
 			Buttons: ds.buttons, OrganizationButtons: f.orgButtons})

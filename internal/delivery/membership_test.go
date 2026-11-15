@@ -20,6 +20,8 @@ import (
 	"github.com/muster-io/muster/internal/delivery/dbgen"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/logging"
+	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/routing"
 )
 
@@ -1459,4 +1461,53 @@ func TestDeletedDestinationFailedPublication(t *testing.T) {
 			t.Errorf("the publication that may exist: calls %+v, state %s", c, d.state)
 		}
 	})
+}
+
+// TestJoinRefreshesTheStoredMessage is C-12.FR-12 on a Destination that a Route gains again for an open Alert Group
+// whose rendering has the stored hash. While the final edit of its delivery there still waits, its Root message stays
+// published: a stored message that differs only in the footers of other identity spaces is replaced without a new
+// version, and one that reads otherwise in the Destination's space, as an unreadable one, gets a new version with
+// the repair hash, and is edited once; the first, which shows the same, is not, as its final edit is no longer due.
+// Once the delivery retired, the Root message is published afresh, so an unreadable stored message is only replaced,
+// and the Publication carries the rendering.
+func TestJoinRefreshesTheStoredMessage(t *testing.T) {
+	unreadable := func(*testing.T, []byte) []byte { return []byte(`{`) }
+	for _, c := range []struct {
+		name       string
+		stored     func(t *testing.T, payload []byte) []byte
+		retired    bool
+		newVersion bool
+		calls      int
+	}{{"other spaces", withTelegramFooter, false, false, 0}, {"unreadable", unreadable, false, true, 1},
+		{"unreadable after the final edit", unreadable, true, false, 1}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := memberEnv(t)
+			renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"}}
+			e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+				Log: logging.New(e.log, logging.LevelInfo), Renderer: renderer})
+			e.w.Renderer = renderer
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "a"), groups.System, created())
+			e.round(t)
+			d := e.only(t)
+			e.db.routeDests[routeID] = nil
+			e.changed(t, routeID, nil, []int64{destMM})
+			if c.retired {
+				e.round(t)
+			}
+			version, hash := d.version, slices.Clone(d.hash)
+			d.payload = c.stored(t, d.payload)
+			e.db.routeDests[routeID] = []int64{destMM}
+			e.changed(t, routeID, []int64{destMM}, nil)
+			if d.state != "pending" || (d.version != version) != c.newVersion ||
+				slices.Equal(d.hash, hash) == c.newVersion || strings.Contains(string(d.payload), "telegram") ||
+				string(d.payload) == "{" {
+				t.Fatalf("joined again: %s, version %d after %d, payload %s", d.state, d.version, version, d.payload)
+			}
+			e.rec.Reset()
+			e.round(t)
+			if calls := e.callsTo(destMM); len(calls) != c.calls || d.state != "delivered" {
+				t.Errorf("joined again: %s, calls %s", d.state, callMethods(calls))
+			}
+		})
+	}
 }

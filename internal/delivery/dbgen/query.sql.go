@@ -1269,6 +1269,43 @@ func (q *Queries) GetCreatedEventDeliveredAt(ctx context.Context, arg GetCreated
 	return delivered_at, err
 }
 
+const getDesiredMessage = `-- name: GetDesiredMessage :one
+SELECT d.desired_payload,
+       (d.published_at IS NOT NULL OR (d.publication_started_at IS NOT NULL AND d.state = 'pending'))::boolean AS shown,
+       ds.type AS destination_type, ds.connection_id
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE d.org_id = $1 AND d.id = $2
+`
+
+type GetDesiredMessageParams struct {
+	OrgID int64
+	ID    int64
+}
+
+type GetDesiredMessageRow struct {
+	DesiredPayload  []byte
+	Shown           bool
+	DestinationType string
+	ConnectionID    pgtype.Int8
+}
+
+// GetDesiredMessage reads, after EnsureDelivery locked the delivery, its stored message, whether its Root message may
+// have been shown — published, or its Publication started and still pending, so possibly in flight — and the type and
+// Connection of its Destination as they are now, which a change of the Connection committed since the rendering read
+// them may have changed, for a rendering whose hash is the stored one (storedNeeds in render.go, C-12.FR-12).
+func (q *Queries) GetDesiredMessage(ctx context.Context, arg GetDesiredMessageParams) (GetDesiredMessageRow, error) {
+	row := q.db.QueryRow(ctx, getDesiredMessage, arg.OrgID, arg.ID)
+	var i GetDesiredMessageRow
+	err := row.Scan(
+		&i.DesiredPayload,
+		&i.Shown,
+		&i.DestinationType,
+		&i.ConnectionID,
+	)
+	return i, err
+}
+
 const getDestinationState = `-- name: GetDestinationState :one
 SELECT public_id, health, (template_error IS NOT NULL)::boolean AS template_error_set
 FROM destinations
@@ -3500,7 +3537,8 @@ func (q *Queries) LockReplyDelivery(ctx context.Context, arg LockReplyDeliveryPa
 }
 
 const lockRerenderDeliveries = `-- name: LockRerenderDeliveries :many
-SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
+SELECT d.id, d.desired_version, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id,
+       ds.public_id AS destination_public_id,
        ds.name AS destination_name, ds.type AS destination_type, ds.connection_id, ds.buttons,
        o.buttons AS organization_buttons
 FROM deliveries d
@@ -3521,6 +3559,7 @@ type LockRerenderDeliveriesParams struct {
 
 type LockRerenderDeliveriesRow struct {
 	ID                  int64
+	DesiredVersion      int64
 	DesiredHash         []byte
 	DesiredButtonKeyID  pgtype.Text
 	DestinationID       int64
@@ -3545,6 +3584,7 @@ func (q *Queries) LockRerenderDeliveries(ctx context.Context, arg LockRerenderDe
 		var i LockRerenderDeliveriesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.DesiredVersion,
 			&i.DesiredHash,
 			&i.DesiredButtonKeyID,
 			&i.DestinationID,
@@ -4659,6 +4699,36 @@ type RecoverUnpublishedParams struct {
 // firing at that moment, Quiet otherwise (C-11.FR-19).
 func (q *Queries) RecoverUnpublished(ctx context.Context, arg RecoverUnpublishedParams) error {
 	_, err := q.db.Exec(ctx, recoverUnpublished, arg.Now, arg.OrgID, arg.DestinationID)
+	return err
+}
+
+const refreshDesiredMessage = `-- name: RefreshDesiredMessage :exec
+UPDATE deliveries
+SET desired_text = $1::text, desired_payload = $2
+WHERE org_id = $3 AND id = $4 AND desired_hash = $5
+`
+
+type RefreshDesiredMessageParams struct {
+	DesiredText    string
+	DesiredPayload []byte
+	OrgID          int64
+	ID             int64
+	DesiredHash    []byte
+}
+
+// RefreshDesiredMessage writes the text and payload of a rendering that reads as the stored Desired state, whose hash
+// @desired_hash it keeps, but whose stored message is older in what it keeps for other identity spaces than its
+// Destination's (storedNeeds in render.go, C-12.FR-12): the version, the state, the due time and the hash stay, so
+// nothing is sent, and a later send — after a change of the Destination's Connection — writes the footer of the new
+// space as it is now. A delivery whose hash changed meanwhile is left to the change that made it.
+func (q *Queries) RefreshDesiredMessage(ctx context.Context, arg RefreshDesiredMessageParams) error {
+	_, err := q.db.Exec(ctx, refreshDesiredMessage,
+		arg.DesiredText,
+		arg.DesiredPayload,
+		arg.OrgID,
+		arg.ID,
+		arg.DesiredHash,
+	)
 	return err
 }
 

@@ -4,6 +4,7 @@
 package delivery_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1545,9 +1546,10 @@ func TestFooterUserRerenderIsQuiet(t *testing.T) {
 }
 
 // TestFooterOfAnotherSpaceChangesNothing is C-12.FR-12 for a footer that names a user with Account links in several
-// identity spaces: the Desired state of a Root message keeps only the footer of its Destination's space, so a link
-// that appears, changes or goes in another space — a Telegram account, for a Mattermost Destination — changes no hash
-// and edits nothing there, while the Mattermost footer, which mentions the user's Mattermost account, is kept.
+// identity spaces: the hash of the Desired state of a Root message covers only the footer of its Destination's space,
+// so a link that appears, changes or goes in another space — a Telegram account, for a Mattermost Destination —
+// changes no hash and edits nothing there, while the Mattermost footer, which mentions the user's Mattermost account,
+// is kept; the stored message is refreshed with the new Telegram footer, without a send.
 func TestFooterOfAnotherSpaceChangesNothing(t *testing.T) {
 	space := fmt.Sprintf("mattermost:%d", connID)
 	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice", Username: "alice"},
@@ -1576,6 +1578,11 @@ func TestFooterOfAnotherSpaceChangesNothing(t *testing.T) {
 		if d := e.only(t); d.version != version || d.configOnly || len(e.rec.Calls()) != 0 {
 			t.Errorf("a telegram link %+v: version %d after %d, configuration only %v, calls %+v", link, d.version,
 				version, d.configOnly, e.rec.Calls())
+		}
+		// The stored message keeps the Telegram footer as it is now, for a send after a change of the Connection.
+		if d := e.only(t); (link.ExternalID != "") != bytes.Contains(d.payload, []byte(`"telegram"`)) ||
+			(link.ExternalID != "" && !bytes.Contains(d.payload, []byte(link.ExternalID))) {
+			t.Errorf("a telegram link %+v: the stored message %s", link, d.payload)
 		}
 	}
 }
@@ -1643,5 +1650,476 @@ func TestFooterAfterConnectionChange(t *testing.T) {
 	e.round(t)
 	if len(e.rec.Calls()) != 0 {
 		t.Errorf("a second rendering: %+v", e.rec.Calls())
+	}
+}
+
+// footerSpacesEnv is the environment of the footer tests across identity spaces: the renderer r names Alice in the
+// footer of an acknowledged Alert Group, and mention and footer are the Mention and the footer of a call as its
+// adapter writes them in the identity space of the Destination it went to.
+func footerSpacesEnv(t *testing.T, r stubRenderer) *env {
+	t.Helper()
+	e := newEnv(t)
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+		Log: logging.New(e.log, logging.LevelInfo), Renderer: r})
+	e.w.Renderer = r
+	return e
+}
+
+func footerLaidOut(c deliverytest.Call) messages.Message {
+	space := mentions.IdentitySpace(c.Destination.Type, c.Destination.Connection)
+	return c.Message.WithFooterIn(space, func(u mentions.User) string { return "@" + u.Username })
+}
+
+// reRender renders the acknowledged Alert Group "disk fuller" of the footer tests again without a lifecycle event, as
+// the run of an open_group_updates row does.
+func reRender(t *testing.T, e *env) {
+	t.Helper()
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged, "disk fuller"),
+		Actor: groups.System, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// edits are the edits of Root messages among calls.
+func edits(calls []deliverytest.Call) []deliverytest.Call {
+	var out []deliverytest.Call
+	for _, c := range calls {
+		if c.Method == deliverytest.MethodUpdate {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// TestFooterAfterUnlinkAndConnectionChange is the case of #549, C-12.FR-12, in delivery: the footer names Alice, who
+// has an Account link only in the identity space of Connection B, on a Root message of a Destination of Connection A,
+// where the footer names her by her name. She removes that link while an edit of the Root message is queued; the
+// re-render of the link change alters nothing that A shows, so the hash stays and nothing is sent, but the stored
+// message is refreshed without her footer of B. The Destination then moves to B. Whether the queued edit goes out
+// before or after the re-render of the move, it names her by her name with no Mention, and the re-render of the move,
+// whose footer of B reads as the footer of A, edits nothing more: one edit in all. A second rendering edits nothing.
+func TestFooterAfterUnlinkAndConnectionChange(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	for _, c := range []struct {
+		name      string
+		sentFirst bool
+	}{{"the queued edit sent before the re-render", true}, {"the re-render before the queued edit", false}} {
+		t.Run(c.name, func(t *testing.T) {
+			renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+				others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+			e := footerSpacesEnv(t, renderer)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+			e.round(t)
+			if p := e.publications(); len(p) != 1 || footerLaidOut(p[0]).FooterMention != "" ||
+				footerLaidOut(p[0]).Footer != "Acknowledged by Alice" {
+				t.Fatalf("the publication in A: %+v", p)
+			}
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk fuller"), groups.System,
+				groups.Recorded{Seq: 2, Event: groups.EventAcknowledged})
+			queued := e.only(t).version
+			delete(renderer.others, other)
+			reRender(t, e)
+			if d := e.only(t); d.version != queued || d.state != "pending" || d.configOnly ||
+				bytes.Contains(d.payload, []byte("alice.other")) {
+				t.Fatalf("the link change in A: version %d after %d, %s, configuration only %v, payload %s",
+					d.version, queued, d.state, d.configOnly, d.payload)
+			}
+
+			e.db.dests[destMM].connection = &moved
+			e.rec.Reset()
+			if c.sentFirst {
+				e.round(t)
+			}
+			reRender(t, e)
+			e.round(t)
+			calls := edits(e.rec.Calls())
+			if len(calls) != 1 || calls[0].Loudness != groups.Quiet || len(calls[0].Mentions) != 0 ||
+				footerLaidOut(calls[0]).FooterMention != "" || footerLaidOut(calls[0]).Footer != "Acknowledged by Alice" ||
+				!strings.Contains(textOf(calls[0]), "disk fuller") || *calls[0].Destination.Connection != moved {
+				t.Fatalf("the edits around the move: %+v", e.rec.Calls())
+			}
+			e.rec.Reset()
+			reRender(t, e)
+			e.round(t)
+			if len(e.rec.Calls()) != 0 {
+				t.Errorf("a second rendering: %+v", e.rec.Calls())
+			}
+		})
+	}
+}
+
+// TestFooterAfterStaleSendAndConnectionChange is C-12.FR-12 for the sends that come before the re-render of a change of
+// Account links: Alice, linked only in B, removes that link while an edit of a Root message of A is queued. In the
+// first case the Destination moves to B before any re-render runs, and the queued edit goes out with the footer of B
+// that the stored message still has, her old Mention; the hash covers only the footer of the Destination's space, and
+// both spaces now read the same, yet the next rendering finds that the stored message reads otherwise in B and makes
+// the delivery due, so one Quiet edit with no Mention names her by her name. In the second case the queued edit goes
+// out in A before the re-render runs and the Destination moves after it: what it showed was right, and the next
+// rendering may edit once more, with the same footer. Either way the last edit is right, and a second rendering edits
+// nothing.
+func TestFooterAfterStaleSendAndConnectionChange(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	for _, c := range []struct {
+		name       string
+		movedFirst bool
+		stale      string
+	}{{"moved before the send", true, "@alice.other"}, {"sent in A before the move", false, ""}} {
+		t.Run(c.name, func(t *testing.T) {
+			renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+				others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+			e := footerSpacesEnv(t, renderer)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+			e.round(t)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk fuller"), groups.System,
+				groups.Recorded{Seq: 2, Event: groups.EventAcknowledged})
+			delete(renderer.others, other)
+			e.rec.Reset()
+			if c.movedFirst {
+				e.db.dests[destMM].connection = &moved
+			}
+			e.round(t)
+			if calls := edits(e.rec.Calls()); len(calls) != 1 || footerLaidOut(calls[0]).FooterMention != c.stale {
+				t.Fatalf("the queued edit before the re-render: %+v", e.rec.Calls())
+			}
+			e.db.dests[destMM].connection = &moved
+			e.rec.Reset()
+			reRender(t, e)
+			if d := e.only(t); c.movedFirst && (d.state != "pending" || !d.configOnly) {
+				t.Fatalf("the re-render after the stale send: %s, configuration only %v", d.state, d.configOnly)
+			}
+			e.round(t)
+			calls := edits(e.rec.Calls())
+			if c.movedFirst && len(calls) != 1 || len(calls) > 1 {
+				t.Fatalf("the edits of the re-render: %+v", e.rec.Calls())
+			}
+			for _, call := range calls {
+				if call.Loudness != groups.Quiet || len(call.Mentions) != 0 || footerLaidOut(call).FooterMention != "" ||
+					footerLaidOut(call).Footer != "Acknowledged by Alice" {
+					t.Errorf("the edit of the re-render: %+v", call)
+				}
+			}
+			e.rec.Reset()
+			reRender(t, e)
+			e.round(t)
+			if len(e.rec.Calls()) != 0 {
+				t.Errorf("a second rendering: %+v", e.rec.Calls())
+			}
+		})
+	}
+}
+
+// TestFooterRepairDuringStaleSend is C-12.FR-12 for the race of the repair with the stale send it repairs: the queued
+// edit goes out after the move with Alice's old Mention of B, and the re-render that finds the stored message reading
+// otherwise in B commits while that call is in flight. The call then records the hash it was sent with, but the
+// re-render stored the repair hash of that hash, which no call was sent with, so the next call edits the Root message
+// once more, Quietly, with no Mention; a second rendering edits nothing.
+func TestFooterRepairDuringStaleSend(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+		others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+	e := footerSpacesEnv(t, renderer)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.round(t)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk fuller"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged})
+	delete(renderer.others, other)
+	e.db.dests[destMM].connection = &moved
+	e.rec.Reset()
+	e.rec.Script(deliverytest.MethodUpdate, deliverytest.Answer{Outcome: deliverytest.OK().Outcome,
+		Then: func() { reRender(t, e) }})
+	e.round(t)
+	e.round(t)
+	calls := edits(e.rec.Calls())
+	if len(calls) != 2 || footerLaidOut(calls[0]).FooterMention != "@alice.other" ||
+		calls[1].Loudness != groups.Quiet || len(calls[1].Mentions) != 0 ||
+		footerLaidOut(calls[1]).FooterMention != "" || footerLaidOut(calls[1]).Footer != "Acknowledged by Alice" {
+		t.Fatalf("the stale edit and its repair: %+v", e.rec.Calls())
+	}
+	if d := e.only(t); d.state != "delivered" {
+		t.Fatalf("the delivery is %s", d.state)
+	}
+	e.rec.Reset()
+	reRender(t, e)
+	e.round(t)
+	if len(e.rec.Calls()) != 0 {
+		t.Errorf("a second rendering: %+v", e.rec.Calls())
+	}
+}
+
+// TestConnectionChangeWithTheSameFooter is C-12.FR-12 for a move whose footer reads the same in the new identity
+// space: a user without an Account link in either Connection, or an Alert Group whose footer names nobody. The
+// re-render of the move edits nothing, so a Root message that the new Connection cannot edit is left as it is.
+func TestConnectionChangeWithTheSameFooter(t *testing.T) {
+	moved := int64(connID + 1)
+	for _, status := range []groups.Status{groups.StatusAcknowledged, groups.StatusFiring} {
+		e := footerSpacesEnv(t, stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+			elsewhere: &messages.FooterUser{Name: "Alice", ExternalID: "7001"}})
+		e.enqueue(t, e.group(status, "disk full"), groups.System, created())
+		e.round(t)
+		version := e.only(t).version
+		e.db.dests[destMM].connection = &moved
+		e.rec.Reset()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(status, "disk full"),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+		e.round(t)
+		if d := e.only(t); d.version != version || d.state != "delivered" || len(e.rec.Calls()) != 0 {
+			t.Errorf("%s: version %d after %d, %s, calls %+v", status, d.version, version, d.state, e.rec.Calls())
+		}
+	}
+}
+
+// TestConnectionChangeRerenderIsQuiet is ADR-0018 and C-11.FR-10 for the re-render of a change of a Destination's
+// Connection: on a Not delivered Publication that was never published, created Loud, the re-render, marked as a change
+// of configuration, publishes it once, Quietly, with no Mention, in the new Connection's footer, never Loud.
+func TestConnectionChangeRerenderIsQuiet(t *testing.T) {
+	moved := int64(connID + 1)
+	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice", Username: "alice"},
+		others: map[string]messages.FooterUser{fmt.Sprintf("mattermost:%d", moved): {Name: "Alice",
+			Username: "alice.other"}}}
+	e := newEnv(t)
+	e.svc = delivery.New(delivery.Config{OrgID: orgID, Store: e.store, Business: e.business,
+		Log: logging.New(e.log, logging.LevelInfo), Renderer: renderer})
+	e.w.Renderer = renderer
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	nd := e.only(t)
+	if !nd.loud.Bool {
+		t.Fatalf("the publication was not created loud: %+v", nd.loud)
+	}
+	nd.state, nd.publishedAt = "not_delivered", nil
+	e.db.dests[destMM].connection = &moved
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+		"disk full"), Actor: groups.System, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.only(t); d.state != "pending" || d.loud.Bool || d.configOnly {
+		t.Fatalf("not delivered revived %s, loud %+v, configuration only %v", d.state, d.loud, d.configOnly)
+	}
+	e.round(t)
+	p := e.publications()
+	if len(p) != 1 || p[0].Loudness != groups.Quiet || len(p[0].Mentions) != 0 {
+		t.Fatalf("published %+v", p)
+	}
+	space := mentions.IdentitySpace(p[0].Destination.Type, p[0].Destination.Connection)
+	if m := p[0].Message.WithFooterIn(space, func(u mentions.User) string { return "@" + u.Username }); m.FooterMention !=
+		"@alice.other" {
+		t.Errorf("the footer of the publication mentions %q", m.FooterMention)
+	}
+}
+
+// withTelegramFooter is a stored message with a footer in the identity space of Telegram besides what it has.
+func withTelegramFooter(t *testing.T, payload []byte) []byte {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(payload, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["footers"] = map[string]string{"telegram": "Acknowledged by someone"}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestStoredMessageRefreshAndRepair is C-12.FR-12 on the stored Desired state of a Root message whose rendering has
+// its hash: a stored message that differs only in the footers of other identity spaces is replaced without a new
+// version, a send or a new hash; one of a published Root message that reads otherwise in the Destination's space, as
+// an unreadable one, is due again, Quietly and marked configuration only, with the repair hash for the new
+// version, edited once, and then left alone. Two repairs before the worker sends make two repair hashes, neither of
+// them the hash the Root message was sent with, so it is still edited once; a later repair is edited again. A
+// rendering without a footer reads no stored message.
+func TestStoredMessageRefreshAndRepair(t *testing.T) {
+	e := footerSpacesEnv(t, stubRenderer{footer: &messages.FooterUser{Name: "Alice"}})
+	render := func(t *testing.T) {
+		t.Helper()
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: e.group(groups.StatusAcknowledged,
+			"disk full"), Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.round(t)
+	d := e.only(t)
+	version, hash := d.version, bytes.Clone(d.hash)
+
+	d.payload = withTelegramFooter(t, d.payload)
+	e.rec.Reset()
+	render(t)
+	e.round(t)
+	if d.version != version || !bytes.Equal(d.hash, hash) || bytes.Contains(d.payload, []byte("telegram")) ||
+		len(e.rec.Calls()) != 0 || e.db.calls["RefreshDesiredMessage"] != 1 {
+		t.Fatalf("a refresh: version %d after %d, payload %s, calls %+v", d.version, version, d.payload, e.rec.Calls())
+	}
+
+	for i, repairs := range []int{2, 1} {
+		marks := map[string]bool{string(hash): true}
+		for range repairs {
+			d.payload = []byte(`{`)
+			render(t)
+			if marks[string(d.hash)] || d.state != "pending" || !d.configOnly {
+				t.Fatalf("round %d: %s, configuration only %v, loud %v, hash new %v", i, d.state, d.configOnly,
+					d.loud.Bool, !marks[string(d.hash)])
+			}
+			marks[string(d.hash)] = true
+		}
+		version = d.version
+		e.rec.Reset()
+		e.round(t)
+		if calls := e.rec.Calls(); len(calls) != 1 || calls[0].Method != deliverytest.MethodUpdate ||
+			calls[0].Loudness != groups.Quiet || d.state != "delivered" {
+			t.Fatalf("round %d: %s, calls %+v", i, d.state, calls)
+		}
+		e.rec.Reset()
+		render(t)
+		e.round(t)
+		if d.version != version || len(e.rec.Calls()) != 0 {
+			t.Fatalf("after round %d: version %d, calls %+v", i, d.version, e.rec.Calls())
+		}
+	}
+
+	f := newEnv(t)
+	f.enqueue(t, f.group(groups.StatusFiring, "disk full"), groups.System, created())
+	f.only(t).payload = []byte(`{`)
+	if err := f.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: f.group(groups.StatusFiring, "disk full"),
+		Actor: groups.System, Configuration: true}); err != nil || f.db.calls["GetDesiredMessage"] != 0 {
+		t.Errorf("a rendering without a footer: %v, %d reads", err, f.db.calls["GetDesiredMessage"])
+	}
+}
+
+// TestRepairOfAnAlertRendering is ADR-0018 and C-11.FR-3 for a repair that a rendering of Alerts finds: alice's link
+// of B goes with no re-render, the Destination moves to B, and a rendering whose only event is alert_continued has the
+// stored hash. On a Loud Publication that was Not delivered and never published, nothing was ever shown, so the stored
+// message is only refreshed: no new version, still Not delivered and Loud. On a published Root message whose stored
+// footer of B reads otherwise, the delivery is due again, Quietly, marked configuration only, and the edit goes out
+// Quietly with no Mention.
+func TestRepairOfAnAlertRendering(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	continued := groups.Recorded{Seq: 2, Event: groups.EventAlertContinued, Loudness: groups.Quiet}
+	for _, published := range []bool{false, true} {
+		t.Run(fmt.Sprintf("published %v", published), func(t *testing.T) {
+			renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+				others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+			e := footerSpacesEnv(t, renderer)
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+			d := e.only(t)
+			if published {
+				e.round(t)
+			} else {
+				d.state, d.publishedAt = "not_delivered", nil
+			}
+			version, loud := d.version, d.loud
+			delete(renderer.others, other)
+			e.db.dests[destMM].connection = &moved
+			e.rec.Reset()
+			e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, continued)
+			if !published {
+				if d.version != version || d.state != "not_delivered" || d.loud != loud ||
+					bytes.Contains(d.payload, []byte("alice.other")) {
+					t.Fatalf("never published: %s, version %d after %d, loud %+v, payload %s", d.state, d.version,
+						version, d.loud, d.payload)
+				}
+				return
+			}
+			if d.version != version+1 || d.state != "pending" || !d.configOnly || d.loud != loud {
+				t.Fatalf("published: %s, version %d after %d, configuration only %v, loud %+v", d.state, d.version,
+					version, d.configOnly, d.loud)
+			}
+			e.round(t)
+			if calls := edits(e.rec.Calls()); len(calls) != 1 || calls[0].Loudness != groups.Quiet ||
+				len(calls[0].Mentions) != 0 || footerLaidOut(calls[0]).FooterMention != "" {
+				t.Errorf("the repair: %+v", e.rec.Calls())
+			}
+		})
+	}
+}
+
+// TestFooterRepairWhenTheMoveCommitsDuringTheRender is C-12.FR-12 for a re-render that read the Destination before a
+// change of its Connection committed: the run of Alice's unlink of B reads the Destination in A, then the move to B
+// commits and the worker sends the queued edit in B with her old Mention, and only then does the run lock the delivery.
+// It compares the stored message in the space of the Destination as it is after the lock, B, finds the stale Mention
+// and makes the delivery due again, so the Root message is edited once more, Quietly, with no Mention; the walk of
+// the move then edits nothing.
+func TestFooterRepairWhenTheMoveCommitsDuringTheRender(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+		others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+	e := footerSpacesEnv(t, renderer)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk full"), groups.System, created())
+	e.round(t)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk fuller"), groups.System,
+		groups.Recorded{Seq: 2, Event: groups.EventAcknowledged})
+	delete(renderer.others, other)
+	e.rec.Reset()
+	e.db.before["EnsureDelivery"] = func() {
+		e.db.before["EnsureDelivery"] = nil
+		e.db.mu.Lock()
+		e.db.dests[destMM].connection = &moved
+		e.db.mu.Unlock()
+		e.round(t)
+	}
+	reRender(t, e)
+	if calls := edits(e.rec.Calls()); len(calls) != 1 || footerLaidOut(calls[0]).FooterMention != "@alice.other" {
+		t.Fatalf("the edit sent during the re-render: %+v", e.rec.Calls())
+	}
+	if d := e.only(t); d.state != "pending" || !d.configOnly {
+		t.Fatalf("the re-render after the move: %s, configuration only %v", d.state, d.configOnly)
+	}
+	e.rec.Reset()
+	reRender(t, e)
+	e.round(t)
+	calls := edits(e.rec.Calls())
+	if len(calls) != 1 || calls[0].Loudness != groups.Quiet || len(calls[0].Mentions) != 0 ||
+		footerLaidOut(calls[0]).FooterMention != "" || footerLaidOut(calls[0]).Footer != "Acknowledged by Alice" {
+		t.Fatalf("the repair: %+v", e.rec.Calls())
+	}
+}
+
+// TestFooterRepairDuringStalePublication is C-12.FR-12 and ADR-0018 for a Publication in flight: the Publication of an
+// acknowledged Alert Group goes out after the move to B with Alice's old Mention of B, and the re-render that finds it
+// commits while the call is in flight, before the Publication is recorded. A Publication started and still pending
+// may be shown, so the delivery is due again, without changing the loudness of the Publication; once it is recorded,
+// the Root message is edited, Quietly, with no Mention, and a second rendering edits nothing.
+func TestFooterRepairDuringStalePublication(t *testing.T) {
+	moved := int64(connID + 1)
+	other := fmt.Sprintf("mattermost:%d", moved)
+	renderer := stubRenderer{footer: &messages.FooterUser{Name: "Alice"},
+		others: map[string]messages.FooterUser{other: {Name: "Alice", Username: "alice.other"}}}
+	e := footerSpacesEnv(t, renderer)
+	e.enqueue(t, e.group(groups.StatusAcknowledged, "disk fuller"), groups.System, created())
+	d := e.only(t)
+	loud := d.loud
+	delete(renderer.others, other)
+	e.db.dests[destMM].connection = &moved
+	e.rec.Reset()
+	var during *fakeDelivery
+	e.rec.Script(deliverytest.MethodPublish, deliverytest.Answer{Outcome: deliverytest.OK().Outcome,
+		Then: func() {
+			reRender(t, e)
+			cp := *d
+			during = &cp
+		}})
+	e.round(t)
+	if during == nil || during.state != "pending" || during.version != 2 || during.loud != loud {
+		t.Fatalf("the re-render during the publication: %+v", during)
+	}
+	e.round(t)
+	calls := e.rec.Calls()
+	if len(calls) != 2 || calls[0].Method != deliverytest.MethodPublish ||
+		footerLaidOut(calls[0]).FooterMention != "@alice.other" || calls[1].Method != deliverytest.MethodUpdate ||
+		calls[1].Loudness != groups.Quiet || len(calls[1].Mentions) != 0 || footerLaidOut(calls[1]).FooterMention != "" {
+		t.Fatalf("the publication and its repair: %+v", calls)
+	}
+	e.rec.Reset()
+	reRender(t, e)
+	e.round(t)
+	if len(e.rec.Calls()) != 0 || d.state != "delivered" {
+		t.Errorf("a second rendering: %s, %+v", d.state, e.rec.Calls())
 	}
 }

@@ -387,6 +387,8 @@ type queries interface {
 	ShareRouteMembership(ctx context.Context, arg dbgen.ShareRouteMembershipParams) error
 	EnsureDelivery(ctx context.Context, arg dbgen.EnsureDeliveryParams) (dbgen.EnsureDeliveryRow, error)
 	SetDesired(ctx context.Context, arg dbgen.SetDesiredParams) (string, error)
+	GetDesiredMessage(ctx context.Context, arg dbgen.GetDesiredMessageParams) (dbgen.GetDesiredMessageRow, error)
+	RefreshDesiredMessage(ctx context.Context, arg dbgen.RefreshDesiredMessageParams) error
 	SetDeliveryUrgent(ctx context.Context, arg dbgen.SetDeliveryUrgentParams) error
 	SetThreadBatchUntil(ctx context.Context, arg dbgen.SetThreadBatchUntilParams) error
 	InsertThreadReply(ctx context.Context, arg dbgen.InsertThreadReplyParams) error

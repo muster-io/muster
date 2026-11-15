@@ -40,8 +40,10 @@ import (
 // root_message or line template of a Route, which its Root messages show (C-12.FR-2, FR-3, C-10.FR-6), which routing
 // writes, and a created, changed or deleted Link rule or Lookup table, from which the links of every Root message are
 // computed (C-12.FR-9), which links writes; a changed display name or Account links of a User, and a renamed Service
-// account, whom the footer of a Root message names (C-12.FR-12), which users, accountlinks and tokens write; and
-// OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every replica when a row is inserted.
+// account, whom the footer of a Root message names (C-12.FR-12), which users, accountlinks and tokens write; the
+// changed Connection of a Destination, whose identity space decides the footer of its Root messages (C-12.FR-12),
+// which destinations writes; and OpenGroupUpdatesChannel, the LISTEN/NOTIFY channel that wakes the workers of every
+// replica when a row is inserted.
 const (
 	KindRouteMinimumSeverity        = "route_minimum_severity"
 	KindRouteMessageLabels          = "route_message_labels"
@@ -56,6 +58,7 @@ const (
 	KindUserName                    = "user_name"
 	KindAccountLinks                = "account_links"
 	KindServiceAccountName          = "service_account_name"
+	KindDestinationConnection       = "destination_connection"
 	OpenGroupUpdatesChannel         = "muster_open_group_updates"
 )
 
@@ -63,7 +66,8 @@ const (
 // of a kind a later version adds waits for a replica that knows it.
 var updateKinds = []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
 	KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName, KindTeamDestinations,
-	KindRouteMessageSettings, KindOrganizationLinks, KindUserName, KindAccountLinks, KindServiceAccountName}
+	KindRouteMessageSettings, KindOrganizationLinks, KindUserName, KindAccountLinks, KindServiceAccountName,
+	KindDestinationConnection}
 
 // The defaults of the worker: the lease of a claimed row, renewed with each batch, the open Alert Groups one batch
 // takes, the longest wait between rounds, which bounds what a missed notification costs, the shortest one, and the
@@ -220,14 +224,14 @@ func (s *Service) applyMinimumSeverity(ctx context.Context, q Queries, routeID i
 // rerender runs the re-render step of the dispatcher, without a lifecycle event, on the open Alert Groups ids, locked
 // in id order in the transaction of q and then walked in the order (Route, id), after a change of a button set
 // (C-28.FR-9), of a Route's "Labels in the message" (C-29.FR-2), language, Snooze durations or templates, of the Link
-// rules or Lookup tables, of the name or Account links of the user a footer names (C-12.FR-12), or of what else the
-// Root messages show (evaluateAndRerender, KindTeamName): delivery edits, Quietly, each Root message whose Desired
-// state the change changed and leaves the others, whose hashes are unchanged, so that a second run changes nothing.
-// The Alert Groups themselves do not change, so nothing is saved and no live-update hint is sent. Only when the
-// re-render changed a Desired state of an Alert Group is a Route template that failed recorded, as the dispatcher
-// records it, with the Alert Group's live-update hint, so that a second run, which changes no Desired state, records
-// nothing. It returns how many Alert Groups had a Desired state changed; after collects what runs once the transaction
-// committed.
+// rules or Lookup tables, of the name or Account links of the user a footer names or of a Destination's Connection
+// (C-12.FR-12), or of what else the Root messages show (evaluateAndRerender, KindTeamName): delivery edits, Quietly,
+// each Root message whose Desired state the change changed and leaves the others, whose hashes are unchanged, so that
+// a second run changes nothing. The Alert Groups themselves do not change, so nothing is saved and no live-update hint
+// is sent. Only when the re-render changed a Desired state of an Alert Group is a Route template that failed recorded,
+// as the dispatcher records it, with the Alert Group's live-update hint, so that a second run, which changes no
+// Desired state, records nothing. It returns how many Alert Groups had a Desired state changed; after collects what
+// runs once the transaction committed.
 func (s *Service) rerender(ctx context.Context, q Queries, ids []int64, after *committed) (int, error) {
 	changed, err := s.rerenderIDs(ctx, q, ids, rerendering{}, after)
 	return len(changed), err
@@ -474,7 +478,12 @@ func (s *Service) updateBatch(ctx context.Context, l db.Lease, u update, limit i
 			if out.changed, err = s.rerender(ctx, q, ids, &after); err != nil {
 				return err
 			}
-		case KindDestinationButtons:
+		case KindDestinationButtons, KindDestinationConnection:
+			// A Destination's Connection decides the identity space of its footers, so a new one edits each open
+			// Root message whose footer reads otherwise there once into the new space's footer. The batch needs no
+			// barrier, as for a button set: a Snapshot locks its Alert Group before it reads the Destination, so the
+			// batch waits for one that read the old Connection, and an Alert Group a Snapshot creates meanwhile is
+			// rendered whole, the footer of every space included.
 			if ids, err = q.ListOpenGroupsOfDestinationAfter(ctx, dbgen.ListOpenGroupsOfDestinationAfterParams{
 				OrgID: s.orgID, DestinationID: row.DestinationID.Int64, AfterID: row.AfterAlertGroupID,
 				Lim: lim}); err != nil {

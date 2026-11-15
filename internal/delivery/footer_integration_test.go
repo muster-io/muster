@@ -21,7 +21,10 @@ import (
 	"github.com/muster-io/muster/internal/db/dbtest"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/delivery/deliverytest"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/groups"
+	"github.com/muster-io/muster/internal/mattermost"
+	"github.com/muster-io/muster/internal/mentions"
 	"github.com/muster-io/muster/internal/messages"
 	"github.com/muster-io/muster/internal/tokens"
 	"github.com/muster-io/muster/internal/users"
@@ -414,6 +417,255 @@ func TestSnoozeAgainstRenameLockOrder(t *testing.T) {
 			}
 		}
 		f.noDeadlock(t)
+	})
+}
+
+// moveChecker passes the Destination check of any channel of the Mattermost Connections of the fixtures, as the
+// Connections do for a bot that is in the channel.
+type moveChecker struct{ l *live }
+
+func (c moveChecker) CheckChannel(ctx context.Context, in destinations.ChannelCheck) (destinations.ChannelChecked,
+	error) {
+	var id int64
+	if err := c.l.d.Pool.QueryRow(ctx, `SELECT id FROM connections WHERE org_id = $1 AND public_id = $2`, c.l.orgID,
+		in.Connection).Scan(&id); err != nil {
+		return destinations.ChannelChecked{}, destinations.ErrUnknownConnection
+	}
+	return destinations.ChannelChecked{ConnectionID: id, Check: mattermost.Check{TeamName: "team",
+		ChannelName: in.ChannelID, Outcome: delivery.Outcome{Kind: delivery.OutcomeOK},
+		Steps: []mattermost.Step{{Name: mattermost.StepToken, OK: true}}}}, nil
+}
+
+// anyMentions takes every Mention setting.
+type anyMentions struct{}
+
+func (anyMentions) Validate(context.Context, string, mentions.Settings) error { return nil }
+
+// moveLive is the footer runtime with a second Mattermost Connection B, where alice has an Account link, and the
+// destinations service that moves the Destination of the fixtures between Connections; the open Alert Group CcA,
+// acknowledged by alice, has its Root message published in that Destination of Connection A, where she has no link,
+// and an Alert queued an edit of it that was not sent yet.
+type moveLive struct {
+	*footerLive
+	connB   int64
+	saves   *destinations.Service
+	w       *delivery.Worker
+	updates *groups.UpdateWorker
+	r       accountlinks.Requester
+}
+
+func setupMoveLive(t *testing.T, s dbtest.Server) *moveLive {
+	t.Helper()
+	f := setupFooterLive(t, s)
+	ctx := t.Context()
+	m := &moveLive{footerLive: f}
+	if err := f.d.Pool.QueryRow(ctx, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url,
+		bot_token_ciphertext, bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at,
+		updated_at) VALUES ($1, 'CNAAAAAAAAAAB2', 'mattermost', 'bot b', 'https://mm-b.example.org', '\x00', 'k1', $2,
+		1000, 1, $2, $2) RETURNING id`, f.orgID, t0).Scan(&m.connB); err != nil {
+		t.Fatal(err)
+	}
+	m.saves = destinations.New(f.orgID, destinations.NewStore(f.d.Pool))
+	m.saves.SetWriter(destinations.WriterConfig{Writer: destinations.NewWriter(f.d.Pool),
+		Audit: audit.NewWriter(f.logger, f.business), Business: f.business, Mentions: anyMentions{},
+		Mattermost: moveChecker{l: f.live}, Log: f.logger})
+	m.r = accountlinks.Requester{UserID: f.aliceID, UserPublicID: f.alice.Actor.PublicID, Actor: f.alice.Actor,
+		Transport: audit.TransportUI}
+	st, err := f.links.StartMattermost(ctx, m.r, "CNAAAAAAAAAAB2", "alice_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.bot.mu.Lock()
+	code := footerCode.FindString(f.bot.sent[len(f.bot.sent)-1])
+	f.bot.mu.Unlock()
+	if _, err := f.links.ConfirmMattermost(ctx, m.r, st.RequestPublicID, code); err != nil {
+		t.Fatal(err)
+	}
+	f.fresh(t, 1000, 1)
+	f.attach(t, f.dests[0])
+	m.w, m.updates = f.worker("cc"), f.updates()
+	f.fire(t, "cc", "CcA/a")
+	if _, err := f.groups.Acknowledge(ctx, f.snooze, f.group(t, "CcA")); err != nil {
+		t.Fatal(err)
+	}
+	m.runUpdates(t)
+	f.round(t, m.w)
+	if calls := f.rec.Calls(); len(calls) == 0 || mentionIn(calls[len(calls)-1]) != "" {
+		t.Fatalf("the root message in A: %s\n%s", methods(calls), f.log)
+	}
+	f.fire(t, "cc", "CcA/a", "CcA/b")
+	return m
+}
+
+// move moves the Destination of the fixtures to Connection B through the destinations service; again, it is an update
+// that keeps the Connection.
+func (m *moveLive) move(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	d, err := m.saves.Get(ctx, "DSAAAAAAAAAAA1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.saves.Update(ctx, destinations.Requester{Actor: audit.System, Transport: audit.TransportAPI},
+		d.PublicID, nil, destinations.Input{Type: destinations.TypeMattermost, Name: d.Name,
+			Mentions: mentions.Settings{}, Limiter: destinations.Limiter{Limit: 1000, PerSeconds: 1},
+			Mattermost: &destinations.MattermostInput{Connection: "CNAAAAAAAAAAB2", TeamID: "team",
+				ChannelID: *d.MattermostChannelID}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// unlink removes alice's link of B, which writes a row account_links.
+func (m *moveLive) unlink(t *testing.T) {
+	t.Helper()
+	var link string
+	if err := m.d.Pool.QueryRow(t.Context(), `SELECT public_id FROM account_links WHERE user_id = $1`,
+		m.aliceID).Scan(&link); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.links.Unlink(t.Context(), m.r, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (m *moveLive) runUpdates(t *testing.T) {
+	t.Helper()
+	if _, err := m.updates.Round(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := m.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+		t.Fatalf("%d rows left\n%s", n, m.log)
+	}
+}
+
+// edits are the edits of Root messages the recorder made since its last reset; the rounds also send Thread replies.
+func (m *moveLive) edits() []deliverytest.Call {
+	var out []deliverytest.Call
+	for _, c := range m.rec.Calls() {
+		if c.Method == deliverytest.MethodUpdate {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// right reports whether an edit names alice by her name, Quietly, with no Mention, through Connection B.
+func (m *moveLive) right(c deliverytest.Call) bool {
+	return c.Loudness == groups.Quiet && len(c.Mentions) == 0 && mentionIn(c) == "" &&
+		*c.Destination.Connection == m.connB && c.Message.FooterUsers[accountlinks.SpaceMattermost(m.connB)].Name == "" &&
+		strings.Contains(c.Message.Footer, " by alice")
+}
+
+func mentionIn(c deliverytest.Call) string {
+	space := mentions.IdentitySpace(c.Destination.Type, c.Destination.Connection)
+	return c.Message.WithFooterIn(space, func(u mentions.User) string { return "@" + u.Username }).FooterMention
+}
+
+// TestIntegrationConnectionChangeRerender is the case of #549, C-12.FR-12, on PostgreSQL with the destinations,
+// the Account links, the renderer and delivery of the runtime (setupMoveLive): alice removes her link of B, and the run
+// of its row edits nothing in A but refreshes the stored message without her footer of B. An update of the Destination
+// that moves it to B records /connection_id in destination.updated and writes one row destination_connection in its
+// transaction; the queued edit, sent after the move, names alice by her name with no Mention, and the run of the row
+// edits nothing more, since her footer reads the same in B. A second run edits nothing, and an update that keeps the
+// Connection writes no row.
+func TestIntegrationConnectionChangeRerender(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		m := setupMoveLive(t, s)
+		m.unlink(t)
+		m.runUpdates(t)
+		if n := m.count(t, `SELECT count(*) FROM deliveries WHERE state = 'pending'
+			AND desired_payload::text NOT LIKE '%alice_b%'`); n != 1 {
+			t.Fatalf("the queued edit after the unlink: %d pending without the old mention of B", n)
+		}
+		audits := m.count(t, `SELECT count(*) FROM audit_log WHERE action = 'destination.updated'
+			AND diff::text LIKE '%/connection_id%' AND diff::text LIKE '%CNAAAAAAAAAAB2%'`)
+		m.move(t)
+		if n := m.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'destination_connection'
+			AND destination_id = $1`, m.dests[0]); n != 1 {
+			t.Fatalf("the move wrote %d rows of destination_connection", n)
+		}
+		if n := m.count(t, `SELECT count(*) FROM audit_log WHERE action = 'destination.updated'
+			AND diff::text LIKE '%/connection_id%' AND diff::text LIKE '%CNAAAAAAAAAAB2%'`); n != audits+1 {
+			t.Errorf("the move recorded %d entries with the connection", n-audits)
+		}
+		m.rec.Reset()
+		m.round(t, m.w)
+		m.runUpdates(t)
+		m.round(t, m.w)
+		if edits := m.edits(); len(edits) != 1 || !m.right(edits[0]) {
+			t.Fatalf("the edits around the move: %s %+v\n%s", methods(m.rec.Calls()), edits, m.log)
+		}
+
+		m.rec.Reset()
+		m.exec(t, `INSERT INTO open_group_updates (org_id, kind, destination_id, requested_at) VALUES ($1,
+			'destination_connection', $2, $3)`, m.orgID, m.dests[0], m.business.Now())
+		m.runUpdates(t)
+		m.round(t, m.w)
+		if calls := m.rec.Calls(); len(calls) != 0 {
+			t.Errorf("a second run made %s", methods(calls))
+		}
+		m.move(t)
+		if n := m.count(t, `SELECT count(*) FROM open_group_updates`); n != 0 {
+			t.Errorf("an update that keeps the connection wrote %d rows", n)
+		}
+		m.noDeadlock(t)
+	})
+}
+
+// TestIntegrationConnectionChangeAfterStaleSend is C-12.FR-12 on PostgreSQL for a send before the run of an unlink
+// (setupMoveLive): alice removes her link of B, and the Destination moves to B before either row runs, so the queued
+// edit goes out with her old Mention of B. Her footer reads the same in A and in B now, so the hashes are equal, but
+// the run finds the stored message reading otherwise in B and edits the Root message once more, Quietly, with no
+// Mention; a second run edits nothing.
+func TestIntegrationConnectionChangeAfterStaleSend(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		m := setupMoveLive(t, s)
+		m.unlink(t)
+		m.move(t)
+		m.rec.Reset()
+		m.round(t, m.w)
+		if edits := m.edits(); len(edits) != 1 || mentionIn(edits[0]) != "@alice_b" {
+			t.Fatalf("the queued edit before the runs: %s", methods(m.rec.Calls()))
+		}
+		m.rec.Reset()
+		m.runUpdates(t)
+		m.round(t, m.w)
+		if edits := m.edits(); len(edits) != 1 || !m.right(edits[0]) {
+			t.Fatalf("the repair: %s %+v\n%s", methods(m.rec.Calls()), edits, m.log)
+		}
+		m.rec.Reset()
+		m.exec(t, `INSERT INTO open_group_updates (org_id, kind, destination_id, requested_at) VALUES ($1,
+			'destination_connection', $2, $3)`, m.orgID, m.dests[0], m.business.Now())
+		m.runUpdates(t)
+		m.round(t, m.w)
+		if calls := m.rec.Calls(); len(calls) != 0 {
+			t.Errorf("a second run made %s", methods(calls))
+		}
+		m.noDeadlock(t)
+	})
+}
+
+// TestIntegrationConnectionChangeAlone is C-12.FR-12 on PostgreSQL for the walk of a move on its own
+// (setupMoveLive): alice keeps her link of B, and the queued edit is delivered in A, where she has none, before the
+// Destination moves to B. Nothing else renders the Alert Group, so only the run of the row destination_connection that
+// the move writes edits its Root message into her Mention of B, once, Quietly, with no Mention of the message.
+func TestIntegrationConnectionChangeAlone(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		m := setupMoveLive(t, s)
+		m.round(t, m.w)
+		m.rec.Reset()
+		m.move(t)
+		if n := m.count(t, `SELECT count(*) FROM open_group_updates WHERE kind = 'destination_connection'`); n != 1 {
+			t.Fatalf("the move wrote %d rows of destination_connection", n)
+		}
+		m.runUpdates(t)
+		m.round(t, m.w)
+		edits := m.edits()
+		if len(edits) != 1 || mentionIn(edits[0]) != "@alice_b" || edits[0].Loudness != groups.Quiet ||
+			len(edits[0].Mentions) != 0 || *edits[0].Destination.Connection != m.connB {
+			t.Fatalf("the walk: %s %+v\n%s", methods(m.rec.Calls()), edits, m.log)
+		}
+		m.noDeadlock(t)
 	})
 }
 

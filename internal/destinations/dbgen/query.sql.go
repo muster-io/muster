@@ -199,22 +199,23 @@ func (q *Queries) InsertBridgeDestination(ctx context.Context, arg InsertBridgeD
 	return id, err
 }
 
-const insertDestinationButtonsUpdate = `-- name: InsertDestinationButtonsUpdate :exec
+const insertDestinationUpdate = `-- name: InsertDestinationUpdate :exec
 INSERT INTO open_group_updates (org_id, kind, destination_id, requested_at)
 VALUES ($1, $2, $3, $4::timestamptz)
 `
 
-type InsertDestinationButtonsUpdateParams struct {
+type InsertDestinationUpdateParams struct {
 	OrgID         int64
 	Kind          string
 	DestinationID pgtype.Int8
 	RequestedAt   time.Time
 }
 
-// InsertDestinationButtonsUpdate requests that a change of a Destination's button set reach its open Root messages
-// (C-28.FR-9): the open_group_updates worker of any replica claims the row.
-func (q *Queries) InsertDestinationButtonsUpdate(ctx context.Context, arg InsertDestinationButtonsUpdateParams) error {
-	_, err := q.db.Exec(ctx, insertDestinationButtonsUpdate,
+// InsertDestinationUpdate requests that a change of a Destination's button set (C-28.FR-9, destination_buttons) or of
+// its Connection (C-12.FR-12, destination_connection) reach its open Root messages: the open_group_updates worker of
+// any replica claims the row.
+func (q *Queries) InsertDestinationUpdate(ctx context.Context, arg InsertDestinationUpdateParams) error {
+	_, err := q.db.Exec(ctx, insertDestinationUpdate,
 		arg.OrgID,
 		arg.Kind,
 		arg.DestinationID,

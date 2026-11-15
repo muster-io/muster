@@ -4,8 +4,10 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
@@ -147,12 +149,14 @@ func markupsOf(types []string) []messages.Markup {
 }
 
 // encoded is a rendered message as the Desired state stores it: its text, the payload that restores it, the hash of
-// what it shows — text, buttons and colour, never Mentions — and the key that signed its buttons.
+// what it shows — text, buttons and colour, never Mentions — and the key that signed its buttons; footer says whether
+// a Root message has a footer, without which its stored message, which has the same hash, has none either.
 type encoded struct {
 	text    string
 	payload []byte
 	hash    []byte
 	keyID   string
+	footer  bool
 }
 
 func encode(m Message) encoded {
@@ -229,7 +233,10 @@ func (s *Service) encodeRequest(ctx context.Context, db dbgen.DBTX, destinationI
 // Connection when it sends, so that an edit queued before a change of the Connection, or retried after it, names the
 // user as the new Connection's messenger mentions them; the hash covers only the footer of d's identity space as it is
 // now, so that an Account link in another space changes no hash, and the first rendering after a change of the
-// Connection edits the Root message into the new space's footer (C-12.FR-12).
+// Connection edits the Root message into the new space's footer when it reads otherwise (C-12.FR-12). A rendering whose
+// hash is the stored one may still find the stored message older in the other spaces' footers, or a send since a
+// change of the Connection that showed one of them: storedNeeds tells which, and repairHash is the hash of a state due
+// again for that reason.
 func (s *Service) desiredOf(ctx context.Context, db dbgen.DBTX, d Destination, roots Roots) (encoded, error) {
 	if !sendsRequests(d.Type) {
 		rd := roots.Messages[markupOf(d.Type)]
@@ -237,9 +244,61 @@ func (s *Service) desiredOf(ctx context.Context, db dbgen.DBTX, d Destination, r
 		own := rd
 		own.Message = rd.Message.OnlyFooterIn(mentions.IdentitySpace(d.Type, d.Connection))
 		e.hash = encodeShown(own, d.Buttons, roots.SnoozeSeconds).hash
+		e.footer = rd.Message.Footer != "" || len(rd.Message.Footers) > 0
 		return e, nil
 	}
 	return s.encodeRequest(ctx, db, d.ID, RequestState{Language: roots.Language, Group: roots.Data})
+}
+
+// storedNeeds is what the stored Desired state of a Root message, stored, needs from a rendering msg whose hash is the
+// stored one or its repair hash (sameHash, C-12.FR-12). The hash covers the footer of the identity space the
+// Destination had when the state was stored, while the adapter writes the footer of its space at the time of the send,
+// so after a change of the Connection a send may have shown the stored footer of the new space, which a link changed or
+// removed since may have made wrong. Both messages are compared in the identity space of the Destination as stored read
+// it, after the delivery's lock, since a change of the Connection may have committed after the rendering read the
+// Destination. When the stored message of a Root message that may have been shown reads otherwise there than msg, the
+// delivery is due again (due), with the repair hash of msg's hash for its next version, so that the Root message is
+// edited into msg; when only what it keeps for other spaces differs, or the Root message was never shown, msg replaces
+// it without a send (refresh), so that a later send writes the footer of its space as it is now; when they are the
+// same, nothing. A stored message that may have been shown and cannot be read is due again.
+func storedNeeds(stored dbgen.GetDesiredMessageRow, msg encoded) (due, refresh bool) {
+	m, err := decode(stored.DesiredPayload)
+	switch {
+	case err != nil:
+		return stored.Shown, !stored.Shown
+	case bytes.Equal(encode(m).payload, msg.payload):
+		return false, false
+	case !stored.Shown:
+		return false, true
+	}
+	fresh, err := decode(msg.payload)
+	if err != nil {
+		return true, false
+	}
+	space := mentions.IdentitySpace(stored.DestinationType, int8Of(stored.ConnectionID))
+	differs := !bytes.Equal(encode(m.OnlyFooterIn(space)).payload, encode(fresh.OnlyFooterIn(space)).payload)
+	return differs, !differs
+}
+
+// repairHash is the repair hash of h for the version version: the hash a Desired state stores when it is due again,
+// at that version, although its rendering's hash h is the stored one (storedNeeds). It is a hash of h salted with the
+// version, which no rendering yields and which differs from every hash the Root message was sent with — h and the
+// repair hashes of earlier versions — so that the worker, which takes a delivery whose actual hash is the desired one
+// as delivered, edits it, even when a call in flight records the hash it was sent with after the change or two repairs
+// come before the send.
+func repairHash(h []byte, version int64) []byte {
+	b := append([]byte("redone\x00"), h...)
+	b = binary.BigEndian.AppendUint64(b, uint64(version)) //nolint:gosec // G115: a version is never negative
+	sum := sha256.Sum256(b)
+	return sum[:]
+}
+
+// sameHash reports whether the stored hash of the Desired state of a Root message of an Alert Group, of version
+// version, is the hash h of a rendering or its repair hash for that version: either way the rendering reads as the
+// stored state, whose Root message is due or was sent with it. Every comparison of the stored hash of such a Root
+// message with a rendering's goes through it; Storm summaries and outgoing webhooks are never repaired.
+func sameHash(stored, h []byte, version int64) bool {
+	return bytes.Equal(stored, h) || bytes.Equal(stored, repairHash(h, version))
 }
 
 // encodeShown is the Root message rd with only the buttons that set shows on a Route with the Snooze durations given

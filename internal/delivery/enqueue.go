@@ -4,7 +4,6 @@
 package delivery
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -753,7 +752,20 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 	if err != nil {
 		return fmt.Errorf("render the request of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 	}
-	if !bytes.Equal(row.DesiredHash, msg.hash) {
+	same := sameHash(row.DesiredHash, msg.hash, row.DesiredVersion)
+	due, refresh := false, false
+	if same {
+		if due, refresh, err = s.storedNeeds(ctx, q, row.ID, d, msg); err != nil {
+			return fmt.Errorf("read the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
+	}
+	if !same || due {
+		// The repair of a stored message that a send may have shown wrong is a change of configuration whatever
+		// rendering found it: Quiet, and claimed after the edits of Alerts and Commands (C-11.FR-3, ADR-0018).
+		quiet := configurationOnly(r) || due
+		if due {
+			msg.hash = repairHash(msg.hash, row.DesiredVersion+1)
+		}
 		var received pgtype.Timestamptz
 		if r.ReceivedAt != nil {
 			received = pgtype.Timestamptz{Time: r.ReceivedAt.UTC(), Valid: true}
@@ -762,15 +774,22 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 			DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), ReceivedAt: received,
 			Open:   g.Status != groups.StatusResolved,
 			Firing: deliveryEvent(DeliveryAfterRecovery).loud(g.Status == groups.StatusFiring), Urgent: g.Urgent,
-			Quiet: configurationOnly(r), ConfigurationOnly: configurationOnly(r), Now: now}); err != nil {
+			Quiet: quiet, ConfigurationOnly: quiet, Now: now}); err != nil {
 			return fmt.Errorf("set the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 		}
 		if r.Changed != nil {
 			r.Changed()
 		}
-	} else if err := q.SetDeliveryUrgent(ctx, dbgen.SetDeliveryUrgentParams{OrgID: s.orgID, ID: row.ID,
-		Urgent: g.Urgent, Now: now}); err != nil {
-		return fmt.Errorf("set the urgency of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+	} else {
+		if refresh {
+			if err := s.refreshDesired(ctx, q, row.ID, row.DesiredHash, msg); err != nil {
+				return fmt.Errorf("refresh the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+			}
+		}
+		if err := q.SetDeliveryUrgent(ctx, dbgen.SetDeliveryUrgentParams{OrgID: s.orgID, ID: row.ID,
+			Urgent: g.Urgent, Now: now}); err != nil {
+			return fmt.Errorf("set the urgency of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
 	}
 	if g.Status == groups.StatusResolved {
 		if err := s.settleResolved(ctx, q, row.ID, now); err != nil {
@@ -795,6 +814,29 @@ func (s *Service) enqueue(ctx context.Context, q queries, r groups.Rendering, d 
 		}
 	}
 	return nil
+}
+
+// storedNeeds reads the stored message of the delivery id, locked, and tells what it needs from msg, whose hash is its
+// own (storedNeeds). An outgoing webhook keeps no footers, and a rendering without a footer has a stored message
+// without one either, since the hash covers the footer, so neither is read.
+func (s *Service) storedNeeds(ctx context.Context, q queries, id int64, d Destination, msg encoded) (due, refresh bool,
+	err error) {
+	if sendsRequests(d.Type) || !msg.footer {
+		return false, false, nil
+	}
+	stored, err := q.GetDesiredMessage(ctx, dbgen.GetDesiredMessageParams{OrgID: s.orgID, ID: id})
+	if err != nil {
+		return false, false, err
+	}
+	due, refresh = storedNeeds(stored, msg)
+	return due, refresh, nil
+}
+
+// refreshDesired writes msg over the stored message of the delivery id, whose stored hash stored it keeps, without
+// making it due (storedNeeds, RefreshDesiredMessage).
+func (s *Service) refreshDesired(ctx context.Context, q queries, id int64, stored []byte, msg encoded) error {
+	return q.RefreshDesiredMessage(ctx, dbgen.RefreshDesiredMessageParams{OrgID: s.orgID, ID: id,
+		DesiredText: msg.text, DesiredPayload: msg.payload, DesiredHash: stored})
 }
 
 // configurationOnly reports whether a rendering comes from a change of configuration, not from an Alert or a Command:

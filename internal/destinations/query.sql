@@ -291,9 +291,10 @@ UPDATE destinations
 SET owning_team_id = sqlc.narg('owning_team_id')::bigint
 WHERE org_id = @org_id AND id = @id;
 
--- InsertDestinationButtonsUpdate requests that a change of a Destination's button set reach its open Root messages
--- (C-28.FR-9): the open_group_updates worker of any replica claims the row.
--- name: InsertDestinationButtonsUpdate :exec
+-- InsertDestinationUpdate requests that a change of a Destination's button set (C-28.FR-9, destination_buttons) or of
+-- its Connection (C-12.FR-12, destination_connection) reach its open Root messages: the open_group_updates worker of
+-- any replica claims the row.
+-- name: InsertDestinationUpdate :exec
 INSERT INTO open_group_updates (org_id, kind, destination_id, requested_at)
 VALUES (@org_id, @kind, @destination_id, @requested_at::timestamptz);
 
