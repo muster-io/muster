@@ -53,7 +53,7 @@
 ### Connect Slack
 
 1. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http): choose the event mode first, because the app's manifest differs. In Socket Mode the Leader holds a WebSocket connection to Slack, so Slack needs no address of Muster; over HTTP Slack must reach this address over HTTPS. If Slack is the only client outside your network that reaches the ingest listener, expose only `/api/v1/callbacks/`; Alertmanagers and Heartbeats use the same listener, so publish their paths too when they come from outside. Use one Slack app for each Connection ([One Slack app per Connection](https://muster-io.github.io/muster/latest/messengers/slack.md#one-slack-app-per-connection)).
-2. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest): create the app from the manifest for Socket Mode or for HTTP. Muster needs these six bot scopes and no other. Keep the tab on: the Messages tab carries the codes of Account links ([What the manifest sets](https://muster-io.github.io/muster/latest/messengers/slack.md#what-the-manifest-sets)).
+2. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest): create the app from the manifest for Socket Mode or for HTTP. Muster needs the first six of these bot scopes and no other, and takes `usergroups:read` when you want to mention Teams by Slack user groups. Keep the tab on: the Messages tab carries the codes of Account links ([What the manifest sets](https://muster-io.github.io/muster/latest/messengers/slack.md#what-the-manifest-sets)).
 3. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#install-the-app-and-create-the-tokens): install the app, copy the bot token and, in Socket Mode, generate a token with the scope `connections:write`, or over HTTP copy the Signing Secret.
 4. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-connection): create the Connection of type Slack and run **Check connection**. A bot posts only to channels it is a member of. Invite it with `/invite @Muster` and create a Destination for each channel ([Invite the bot and create Destinations](https://muster-io.github.io/muster/latest/messengers/slack.md#invite-the-bot-and-create-destinations)).
 5. [Link Slack](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack): people link their accounts with a code that the bot sends by direct message.
@@ -185,4 +185,4 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 941075 bytes, about 235268 tokens.
+- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): every page in one file, 947561 bytes, about 236890 tokens.

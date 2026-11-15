@@ -89,6 +89,7 @@ oauth_config:
       - im:write
       - users:read
       - users:read.email
+      - usergroups:read
 settings:
   interactivity:
     is_enabled: true
@@ -122,6 +123,7 @@ oauth_config:
       - im:write
       - users:read
       - users:read.email
+      - usergroups:read
 settings:
   interactivity:
     is_enabled: true
@@ -173,8 +175,9 @@ There is no event subscription
 
 ### The scopes
 
-Muster needs these six bot scopes and no other. **Check connection** reads the scopes Slack grants the token and fails
-with `missing_scope`, naming the missing ones.
+Muster needs the first six of these bot scopes and no other, and takes `usergroups:read` when you want to mention Teams
+by Slack user groups. **Check connection** reads the scopes Slack grants the token, fails with `missing_scope`, naming
+the missing ones of the six, and reports whether `usergroups:read` is granted, which never fails it.
 
 `chat:write`
 :   Posts, edits and deletes the bot's own messages, and answers the people who press its buttons.
@@ -197,7 +200,20 @@ with `missing_scope`, naming the missing ones.
 `users:read.email`
 :   Finds a person by email for an Account link.
 
+`usergroups:read`, optional
+:   Lists the user groups of the workspace, so that a Team can be mentioned by its user group
+    ([Team mentions](../concepts/teams.md#team-mentions)). Without it a Slack Connection works as before, but takes no
+    Team mention, whose reason a Team reads as `usergroups_read_missing`. The Connection records whether its last
+    successful check found the scope (`usergroups_read`).
+
 Muster never joins a channel on its own, so it asks for no `channels:join`: you invite the bot.
+
+### Add usergroups:read to an installed app
+
+An app installed from an earlier manifest lacks `usergroups:read`. Add it under **OAuth & Permissions → Scopes → Bot
+Token Scopes**, or add the line to the app's manifest, and reinstall the app when Slack asks for it: a scope added to an
+installed app reaches its bot token only after the reinstall. The reinstall keeps the bot token, so the Connection needs
+no change: select **Check connection** on it again, and the check records the new scope.
 
 ## Install the app and create the tokens
 
@@ -225,7 +241,7 @@ Muster stores all three secrets encrypted, never shows them again and writes the
 
     1. **Token**: `auth.test` with the bot token, which names the bot and the workspace and fails if the token is not
        a bot's;
-    2. **Scopes**: every scope of the manifest is granted;
+    2. **Scopes**: every scope the bot needs is granted, and whether the optional `usergroups:read` is;
     3. **App-level token**, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
        connection for it. The check opens no WebSocket.
 

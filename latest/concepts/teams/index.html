@@ -1757,6 +1757,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#team-mentions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Team mentions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#working-hours" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3136,6 +3147,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#team-mentions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Team mentions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#working-hours" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -3196,6 +3218,7 @@ to the Teams, and nothing else: owning a Destination is another thing.</p>
 <li>a <strong>description</strong>;</li>
 <li>its <strong>Team matchers</strong>, which pick the Alerts that belong to it beside its slug;</li>
 <li>the <strong>people</strong> in it, which may be nobody, added by hand or through the groups of the identity provider;</li>
+<li>its <strong>Team mentions</strong>, the group that mentions it in each messenger (<a href="#team-mentions">Team mentions</a>);</li>
 <li>its <strong>Working hours</strong>: its own, else the Organization's.</li>
 </ul>
 <dl>
@@ -3209,10 +3232,10 @@ deliver to the Team, and a Route's owning Team adds no delivery.</dd>
 cannot change the Team, and a Viewer in a Team is refused Acknowledge as any Viewer is. Only an Admin creates,
 edits and deletes Teams and adds people to them; every Role reads them.</dd>
 <dt>Deleting a Team</dt>
-<dd>The people leave it, its Working hours and Team matchers are removed, and the Routes and Destinations it owned
-have no owner from then on, each with a new version. Its slug and name are free at once for a new Team, and its
-slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still names it: the Alert
-Groups that had it among their Teams list it by its name, with <code>deleted</code> true.</dd>
+<dd>The people leave it, its Working hours, Team matchers and Team mentions are removed, and the Routes and
+Destinations it owned have no owner from then on, each with a new version. Its slug and name are free at once for a
+new Team, and its slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still
+names it: the Alert Groups that had it among their Teams list it by its name, with <code>deleted</code> true.</dd>
 </dl>
 <p>Every change of a Team and of the people in it is recorded in the Audit log, and the metric <code>muster_team_info</code> has
 one series per Team that is not deleted, with its name (<a href="../../reference/metrics/">Metrics</a>). The operations are listed
@@ -3351,6 +3374,45 @@ sign-in or re-check. Every change the identity provider makes is recorded in the
 <p>With the groups claim <code>groups</code>, which GitLab fills with a person's groups and the groups below them, this takes in a
 person of <code>corp/payments/oncall</code> and nobody of <code>corp/paymentsx</code>. Subtree entries are safe here, also with a role claim:
 a Team grants no Permission and no Role.</p>
+<h2 id="team-mentions">Team mentions<a class="headerlink" href="#team-mentions" title="Permanent link">&para;</a></h2>
+<p>A <strong>Team mention</strong> is the group that mentions a Team through one Connection: when a message mentions the Team in a
+channel of that Connection, it mentions that group, whose members the messenger notifies. A Team has at most one Team
+mention per Connection, in <code>team_mentions</code>, each with its Connection and its group:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">"team_mentions"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"connection_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CNAGK7M3QX9P2R"</span><span class="p">,</span><span class="w"> </span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments_team"</span><span class="p">},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">"connection_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CNB4R8J2M6Q1TX"</span><span class="p">,</span><span class="w"> </span><span class="nt">"group"</span><span class="p">:</span><span class="w"> </span><span class="s2">"payments-team"</span><span class="p">,</span><span class="w"> </span><span class="nt">"group_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"S0FAKEPAYTEAM"</span><span class="p">}</span>
+<span class="p">]</span>
+</code></pre></div>
+<p>What each messenger takes:</p>
+<dl>
+<dt>Mattermost</dt>
+<dd>The name of a Mattermost group, as <code>@payments_team</code> mentions it. A bot with the role Member reads the groups of the
+server, so <strong>Check connection</strong> reads them in its step <strong>Groups</strong>, and the API lists them for the Team mention
+(<code>listConnectionGroups</code>). A server that does not list them to the bot fails nothing: the step says so, and a Team
+mention is still saved by the name you type.</dd>
+<dt>Slack</dt>
+<dd>A Slack user group, chosen from those the Connection lists, by its handle and its id. The bot needs the optional
+scope <code>usergroups:read</code>; until the Connection's check has found it, a Team mention for a Slack Connection is
+refused. See <a href="../../messengers/slack/#the-scopes">The scopes</a>.</dd>
+<dt>Bridge</dt>
+<dd>A group name of the bridge's messenger, when the bridge declares group mentions in its <code>info</code>
+(<code>group_mentions</code>). Muster does not list the groups of a bridge: you type the name.</dd>
+<dt>Telegram</dt>
+<dd>Telegram has no group mentions, so a Telegram Connection takes no Team mention.</dd>
+</dl>
+<p>Saving a Team mention for a Connection that cannot carry one — Telegram, a Slack Connection without <code>usergroups:read</code>,
+a bridge that declares no group mentions, or a Notification gateway — is refused with <code>422</code> and the code
+<code>group_mentions_unsupported</code> at the entry's <code>connection_id</code>. A read of a Team lists under <code>mention_connections</code> every
+Connection that may have a Destination, with the Team's Team mention for it or none, and for those that cannot mention
+a group the reason: <code>telegram_no_groups</code>, <code>usergroups_read_missing</code> or <code>bridge_no_group_mentions</code>. A Notification
+gateway is not listed.</p>
+<p>A Team without a Team mention for a Connection is mentioned as nobody through it: Muster never mentions the Team's
+On-call instead. A Team mention whose Connection later loses the ability — a Slack app reinstalled without
+<code>usergroups:read</code>, a bridge that stops declaring group mentions — stays, reads <code>available</code> false with the reason, and
+mentions nobody until the ability is back. A save that sends it again unchanged, with the same Connection, group and
+user group id, keeps it and is not refused; only a new or changed Team mention is checked against what its Connection
+can mention. Deleting a Connection deletes its Team mentions, each recorded in the Audit
+log of its Team; a change of a Team's Team mentions is recorded in its Audit log as every other change of the Team.</p>
 <h2 id="working-hours">Working hours<a class="headerlink" href="#working-hours" title="Permanent link">&para;</a></h2>
 <p>Working hours are days of the week, a start and an end on the 24-hour clock, and a time zone. The end is later than
 the start on the same day: Working hours never span midnight. Holidays are not part of them.</p>

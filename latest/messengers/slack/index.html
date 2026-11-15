@@ -1029,6 +1029,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#add-usergroupsread-to-an-installed-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add usergroups:read to an installed app
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3308,6 +3319,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#add-usergroupsread-to-an-installed-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Add usergroups:read to an installed app
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3554,6 +3576,7 @@ again. How long Slack counts the connection of a Leader that crashed has not bee
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">im:write</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read.email</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">usergroups:read</span>
 <span class="nt">settings</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">interactivity</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">is_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -3583,6 +3606,7 @@ which is off:</p>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">im:write</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read</span>
 <span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">users:read.email</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">usergroups:read</span>
 <span class="nt">settings</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">interactivity</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">is_enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
@@ -3624,8 +3648,9 @@ renew it, so a rotating token ends as <code>token_expired</code> and every Desti
 <dd>Muster does not use the Events API: it hears only the presses of buttons and menus.</dd>
 </dl>
 <h3 id="the-scopes">The scopes<a class="headerlink" href="#the-scopes" title="Permanent link">&para;</a></h3>
-<p>Muster needs these six bot scopes and no other. <strong>Check connection</strong> reads the scopes Slack grants the token and fails
-with <code>missing_scope</code>, naming the missing ones.</p>
+<p>Muster needs the first six of these bot scopes and no other, and takes <code>usergroups:read</code> when you want to mention Teams
+by Slack user groups. <strong>Check connection</strong> reads the scopes Slack grants the token, fails with <code>missing_scope</code>, naming
+the missing ones of the six, and reports whether <code>usergroups:read</code> is granted, which never fails it.</p>
 <dl>
 <dt><code>chat:write</code></dt>
 <dd>Posts, edits and deletes the bot's own messages, and answers the people who press its buttons.</dd>
@@ -3642,8 +3667,18 @@ is sent with <code>chat.postMessage</code> to the person's user id, which needs 
 tokens belong to one app.</dd>
 <dt><code>users:read.email</code></dt>
 <dd>Finds a person by email for an Account link.</dd>
+<dt><code>usergroups:read</code>, optional</dt>
+<dd>Lists the user groups of the workspace, so that a Team can be mentioned by its user group
+(<a href="../../concepts/teams/#team-mentions">Team mentions</a>). Without it a Slack Connection works as before, but takes no
+Team mention, whose reason a Team reads as <code>usergroups_read_missing</code>. The Connection records whether its last
+successful check found the scope (<code>usergroups_read</code>).</dd>
 </dl>
 <p>Muster never joins a channel on its own, so it asks for no <code>channels:join</code>: you invite the bot.</p>
+<h3 id="add-usergroupsread-to-an-installed-app">Add usergroups:read to an installed app<a class="headerlink" href="#add-usergroupsread-to-an-installed-app" title="Permanent link">&para;</a></h3>
+<p>An app installed from an earlier manifest lacks <code>usergroups:read</code>. Add it under <strong>OAuth &amp; Permissions → Scopes → Bot
+Token Scopes</strong>, or add the line to the app's manifest, and reinstall the app when Slack asks for it: a scope added to an
+installed app reaches its bot token only after the reinstall. The reinstall keeps the bot token, so the Connection needs
+no change: select <strong>Check connection</strong> on it again, and the check records the new scope.</p>
 <h2 id="install-the-app-and-create-the-tokens">Install the app and create the tokens<a class="headerlink" href="#install-the-app-and-create-the-tokens" title="Permanent link">&para;</a></h2>
 <ol>
 <li>In the app's settings, open <strong>Install App</strong> and install it in the workspace. Slack then shows the <strong>Bot User OAuth
@@ -3670,7 +3705,7 @@ tokens belong to one app.</dd>
 <ol>
 <li><strong>Token</strong>: <code>auth.test</code> with the bot token, which names the bot and the workspace and fails if the token is not
    a bot's;</li>
-<li><strong>Scopes</strong>: every scope of the manifest is granted;</li>
+<li><strong>Scopes</strong>: every scope the bot needs is granted, and whether the optional <code>usergroups:read</code> is;</li>
 <li><strong>App-level token</strong>, in Socket Mode: the token belongs to the same app as the bot token, and Slack opens a
    connection for it. The check opens no WebSocket.</li>
 </ol>
