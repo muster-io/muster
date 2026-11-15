@@ -142,6 +142,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   messages whose footer names them as the Owner or as who snoozed; a Root message whose footer the change does not
   alter, among them those of another identity space, is not edited. The name an OIDC sign-in brings is used only when
   the account is created, so a sign-in changes no footer.
+  _Revised for L2 (2026-11-15, #549):_ a change of a Destination's Connection to one of another identity space
+  re-renders its open Root messages Quietly, as edits, into the footer of the new Connection's identity space; a Root
+  message is edited only when its footer reads otherwise there.
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 
