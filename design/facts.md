@@ -972,8 +972,10 @@ adding it and after the reinstall · Slack Pro (trial)_ · Used in C-24.FR-1, C-
 bot's `chat.postMessage` in the other channel, with `text` "Muster spike test" and one `section` block whose mrkdwn
 starts with `<!subteam^S…>`, was drawn as `@payments-team`, highlighted for the member as a mention of them, with the
 red badge 1 on the channel and a badge on the app's icon in the macOS Dock. A Thread reply with the same block under a
-bot message without a mention was drawn and highlighted alike and counted too: the Dock badge went to 2. — _2026-11-15 ·
-a Root message and a Thread reply, repeated four and three times · Slack Pro (trial), desktop client_ · Used in
+bot message without a mention was drawn and highlighted alike and counted too: the Dock badge went to 2. The person's
+Activity listed each of the last three Root messages as "Mention in #<channel>" and each of the three Thread replies as
+"Mention in #<channel> thread", by the times written into the posts. — _2026-11-15 · a Root message and a Thread reply,
+repeated four and three times; the Activity seen in a screenshot · Slack Pro (trial), desktop client_ · Used in
 C-24.FR-6, C-25.FR-8, C-28.FR-2.
 
 **F-127. `<!everyone>` from a bot mentions only in the general channel.** The bot's `chat.postMessage` with a `section`
