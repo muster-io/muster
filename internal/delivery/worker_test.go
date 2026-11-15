@@ -602,6 +602,12 @@ func (f *fakeDB) work(d *fakeDelivery) bool {
 	return d.heldBy == 0 && (!f.dests[d.dest].deleted || d.desiredRetire || d.publishedAt == nil)
 }
 
+// skipped reports whether the Destination dest is one of dests or of a Connection of conns.
+func (f *fakeDB) skipped(dest int64, dests, conns []int64) bool {
+	c := f.dests[dest].connection
+	return slices.Contains(dests, dest) || c != nil && slices.Contains(conns, *c)
+}
+
 func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliveriesParams) (
 	[]dbgen.ClaimDueDeliveriesRow, error) {
 	f.mu.Lock()
@@ -613,7 +619,7 @@ func (f *fakeDB) ClaimDueDeliveries(_ context.Context, arg dbgen.ClaimDueDeliver
 	for _, d := range f.deliveries {
 		if d.state == "pending" && !d.next.After(arg.Due) && (d.owner == "" || !d.until.After(arg.Now)) &&
 			f.healthy(d.dest) && f.work(d) && d.urgent == arg.Urgent && d.configOnly == arg.ConfigurationOnly &&
-			!slices.Contains(arg.SkipDestinations, d.dest) {
+			!f.skipped(d.dest, arg.SkipDestinations, arg.SkipConnections) {
 			due = append(due, d)
 		}
 	}
@@ -672,7 +678,8 @@ func (f *fakeDB) GetLeasedDelivery(_ context.Context, arg dbgen.GetLeasedDeliver
 		TelegramChannelChatID: nullInt(ds.tgChannel), TelegramDiscussionChatID: nullInt(ds.tgGroup),
 		DestinationDeleted: ds.deleted,
 		ActualButtonKeyID:  txt(d.actualKey), ThreadAnchorID: txt(d.anchorID), ActualStatus: txt(d.actualStatus),
-		PastEditWindow: d.pastEditWindow, RepublicationStartedAt: tz(d.restarted)}
+		PastEditWindow: d.pastEditWindow, RepublicationStartedAt: tz(d.restarted), Urgent: d.urgent,
+		ConfigurationOnly: d.configOnly}
 	if d.storm != 0 {
 		out.StormID = pgtype.Int8{Int64: d.storm, Valid: true}
 		return out, nil
@@ -995,6 +1002,7 @@ func (f *fakeDB) TakeTokens(_ context.Context, arg dbgen.TakeTokensParams) (dbge
 	avail := map[bucketKey]float64{}
 	ok := len(keys) > 0
 	var due time.Time
+	dues := map[string]time.Time{}
 	for _, k := range keys {
 		c, rate := f.limiterOf(k)
 		b := f.buckets[k]
@@ -1002,18 +1010,49 @@ func (f *fakeDB) TakeTokens(_ context.Context, arg dbgen.TakeTokensParams) (dbge
 		avail[k] = a
 		if a < 1 {
 			ok = false
-			if d := arg.Now.Add(time.Duration((1 - a) / rate * float64(time.Second))); d.After(due) {
+			d := arg.Now.Add(time.Duration((1 - a) / rate * float64(time.Second)))
+			dues[k.kind] = d
+			if d.After(due) {
 				due = d
 			}
 		}
 	}
 	if !ok {
-		return dbgen.TakeTokensRow{Due: cmp.Or(due, time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC))}, nil
+		zero := time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)
+		return dbgen.TakeTokensRow{Due: cmp.Or(due, zero), DestinationDue: cmp.Or(dues["destination"], zero),
+			ConnectionDue: cmp.Or(dues["connection"], zero)}, nil
 	}
 	for _, k := range keys {
 		f.buckets[k].tokens, f.buckets[k].refilled = avail[k]-1, arg.Now
 	}
 	return dbgen.TakeTokensRow{Taken: true, Due: time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC)}, nil
+}
+
+func (f *fakeDB) LimiterDues(_ context.Context, arg dbgen.LimiterDuesParams) ([]dbgen.LimiterDuesRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("LimiterDues"); err != nil {
+		return nil, err
+	}
+	var keys []bucketKey
+	for _, id := range arg.DestinationIds {
+		keys = append(keys, bucketKey{"destination", id})
+	}
+	for _, id := range arg.ConnectionIds {
+		keys = append(keys, bucketKey{"connection", id})
+	}
+	var out []dbgen.LimiterDuesRow
+	for _, k := range keys {
+		b := f.buckets[k]
+		if b == nil {
+			continue
+		}
+		c, rate := f.limiterOf(k)
+		a := math.Min(c, b.tokens+arg.Now.Sub(b.refilled).Seconds()*rate)
+		out = append(out, dbgen.LimiterDuesRow{Kind: k.kind, ID: k.id,
+			Due: arg.Now.Add(time.Duration(math.Max(0, 1-a) / rate * float64(time.Second)))})
+	}
+	return out, nil
 }
 
 func (f *fakeDB) HoldBucket(_ context.Context, arg dbgen.HoldBucketParams) error {
@@ -1040,7 +1079,7 @@ func (f *fakeDB) ClaimDueReplies(_ context.Context, arg dbgen.ClaimDueRepliesPar
 		d := f.delivery(r.delivery)
 		if (r.state != "collecting" && r.state != "pending") || r.next.After(arg.Due) ||
 			(r.owner != "" && r.until.After(arg.Now)) || d.publishedAt == nil || !f.healthy(r.dest) ||
-			slices.Contains(arg.SkipDestinations, r.dest) {
+			f.skipped(r.dest, arg.SkipDestinations, arg.SkipConnections) {
 			continue
 		}
 		if slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
@@ -1238,8 +1277,10 @@ func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkP
 			out.LeaseEnd = until
 		}
 	}
+	skipped := func(dest int64) bool { return f.skipped(dest, arg.SkipDestinations, arg.SkipConnections) }
 	for _, d := range f.deliveries {
-		if d.state == "pending" && (f.healthy(d.dest) || f.dests[d.dest].probeOnNext) && f.work(d) {
+		if d.state == "pending" && (f.healthy(d.dest) || f.dests[d.dest].probeOnNext) && f.work(d) &&
+			!skipped(d.dest) {
 			add(d.next, d.owner, d.until)
 		}
 	}
@@ -1250,13 +1291,13 @@ func (f *fakeDB) NextDeliveryWork(_ context.Context, arg dbgen.NextDeliveryWorkP
 	}
 	for _, r := range f.replies {
 		if (r.state == "collecting" || r.state == "pending") && f.delivery(r.delivery).publishedAt != nil &&
-			f.healthy(r.dest) && !slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
+			f.healthy(r.dest) && !skipped(r.dest) && !slices.ContainsFunc(f.replies, func(p *fakeReply) bool {
 			return p.delivery == r.delivery && p.state == "pending" && p.id < r.id
 		}) {
 			add(r.next, r.owner, r.until)
 		}
 	}
-	f.eventWork(add)
+	f.eventWork(add, skipped)
 	return out, nil
 }
 

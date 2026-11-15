@@ -369,8 +369,10 @@ WITH due AS MATERIALIZED (
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
       AND x.urgent = $6::boolean AND x.configuration_only = $7::boolean
       AND x.destination_id <> ALL (coalesce($8::bigint[], '{}'))
+      AND (ds.connection_id IS NULL
+           OR ds.connection_id <> ALL (coalesce($9::bigint[], '{}')))
     ORDER BY x.next_attempt_at, x.last_delivered_at NULLS FIRST, x.id
-    LIMIT $9
+    LIMIT $10
     FOR UPDATE OF x SKIP LOCKED
 )
 UPDATE deliveries d
@@ -389,6 +391,7 @@ type ClaimDueDeliveriesParams struct {
 	Urgent            bool
 	ConfigurationOnly bool
 	SkipDestinations  []int64
+	SkipConnections   []int64
 	Lim               int32
 }
 
@@ -411,23 +414,26 @@ type ClaimDueDeliveriesRow struct {
 // that claimed a row or a full batch due now (Round). So a re-render of every open Root message never delays a
 // Publication, an edit of a Root message that an Alert or a Command made, or a Thread reply of its urgency or below,
 // and the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one claimed batch of it;
-// Thread replies and webhook events, Urgent or not, come after the Root-message work of both. @skip_destinations are
-// the Destinations whose limiter refused a take earlier in the round (Round) — for the Urgent claims, those whose
-// refused token is not due yet and, for those bounded by the start of a drain or a visit, those refused during the
-// current visit of the Urgent ranks: their rows are left untouched for the next round, so a spent limiter costs a round
-// at most one claimed batch of refused takes of the work that is not Urgent, and of the Urgent work one per visit of
-// the Urgent ranks and one per batch due now that finds its token due; NULL skips none. It is a filter, not part of the
-// index range: the claim reads past the skipped rows due before the others. The order is order only. It is not strict
-// between the Urgent ranks, and across rounds: a refused row waits until its token's time plus TokenMargin, and work
-// due before then can take that token. Configuration edits wait as long as the work before them uses up the limiter —
-// Alert Groups that keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of
-// its Alert Group, which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at
-// once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work
-// before it. A delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its
-// final edit or, never published there, to end it (prepare): an Enqueue that read the Destination's entries before its
-// deletion committed can create one after the deletion ended the others, and a Publication claimed before it committed
-// can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may
-// plan it as the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
+// Thread replies and webhook events, Urgent or not, come after the Root-message work of both. @skip_destinations and
+// the Destinations of @skip_connections are those behind a limiter that refused a take (Round): for the claims of the
+// work that is not Urgent, every limiter that refused in the round or whose refused token's time plus TokenMargin is
+// still to come when the round starts; for the Urgent claims, those whose refused token is not due yet, and, for those
+// bounded by the start of a drain or a visit, also those refused during the current visit of the Urgent ranks and, for
+// the Urgent configuration edits, those that refused an Urgent delivery that is not configuration only, until its
+// token's time plus TokenMargin. Their rows are left untouched, so a spent limiter costs a round at most one claimed
+// batch of refused takes of the work that is not Urgent, and of the Urgent work one per visit of the Urgent ranks and
+// one per batch due now that finds its token due; NULL skips none. It is a filter, not part of the index range: the
+// claim reads past the skipped rows due before the others. Within one replica no row takes a token that a refused row
+// of an earlier rank waits for; within a rank the order is by due time, and a refused row is due at its token's time
+// plus TokenMargin. Configuration edits wait as long as the work before them uses up the limiter — Alert Groups that
+// keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of its Alert Group,
+// which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due when
+// the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work before it. A
+// delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its final edit or,
+// never published there, to end it (prepare): an Enqueue that read the Destination's entries before its deletion
+// committed can create one after the deletion ended the others, and a Publication claimed before it committed can fail
+// meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
+// the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
 // deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
 // The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
 // without the ranks, which only Root messages have; a fix of it applies to them too.
@@ -441,6 +447,7 @@ func (q *Queries) ClaimDueDeliveries(ctx context.Context, arg ClaimDueDeliveries
 		arg.Urgent,
 		arg.ConfigurationOnly,
 		arg.SkipDestinations,
+		arg.SkipConnections,
 		arg.Lim,
 	)
 	if err != nil {
@@ -471,12 +478,14 @@ WITH due AS MATERIALIZED (
       AND (x.lease_until IS NULL OR x.lease_until <= $5::timestamptz) AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
       AND x.destination_id <> ALL (coalesce($6::bigint[], '{}'))
+      AND (ds.connection_id IS NULL
+           OR ds.connection_id <> ALL (coalesce($7::bigint[], '{}')))
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
                       WHERE p.org_id = x.org_id AND p.delivery_id = x.delivery_id AND p.state = 'pending'
                         AND p.id < x.id)
     ORDER BY x.next_attempt_at, x.id
-    LIMIT $7
+    LIMIT $8
     FOR UPDATE OF x SKIP LOCKED
 )
 UPDATE thread_replies r
@@ -493,6 +502,7 @@ type ClaimDueRepliesParams struct {
 	Due              time.Time
 	Now              time.Time
 	SkipDestinations []int64
+	SkipConnections  []int64
 	Lim              int32
 }
 
@@ -506,9 +516,9 @@ type ClaimDueRepliesRow struct {
 // that comes due closes: it becomes pending, and new Alerts start the next batch. The worker's round claims them, due
 // by its start, after the Urgent deliveries, after the other deliveries that are not configuration only and before the
 // webhook events and the other configuration edits, with one batch due now between two batches of those, and skips the
-// Destinations of @skip_destinations as ClaimDueDeliveries does (ClaimDueDeliveries, Round). The choice is a
-// materialized CTE, run once, as in ClaimDueDeliveries: planned as the inner side of a nested loop over every reply, it
-// ran once per row and took seconds once replies had piled up.
+// Destinations of @skip_destinations and of the Connections of @skip_connections as ClaimDueDeliveries does
+// (ClaimDueDeliveries, Round). The choice is a materialized CTE, run once, as in ClaimDueDeliveries: planned as the
+// inner side of a nested loop over every reply, it ran once per row and took seconds once replies had piled up.
 func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams) ([]ClaimDueRepliesRow, error) {
 	rows, err := q.db.Query(ctx, claimDueReplies,
 		arg.Owner,
@@ -517,6 +527,7 @@ func (q *Queries) ClaimDueReplies(ctx context.Context, arg ClaimDueRepliesParams
 		arg.Due,
 		arg.Now,
 		arg.SkipDestinations,
+		arg.SkipConnections,
 		arg.Lim,
 	)
 	if err != nil {
@@ -1377,7 +1388,8 @@ SELECT d.id, coalesce(d.alert_group_id, 0)::bigint AS alert_group_id, d.storm_id
        d.desired_payload, d.desired_hash, d.desired_received_at, d.desired_retire, d.publication_loud, d.late_note,
        d.republished_after_delete, d.actual_hash, d.message_id, d.message_url, d.publication_started_at, d.attempts,
        d.published_at, d.publications, d.response_values, d.thread_opened, d.actual_button_key_id, d.thread_anchor_id,
-       d.actual_status, d.past_edit_window, d.republication_started_at, ds.id AS destination_id,
+       d.actual_status, d.past_edit_window, d.republication_started_at, d.urgent, d.configuration_only,
+       ds.id AS destination_id,
        ds.public_id AS destination_public_id, ds.name AS destination_name,
        ds.type AS destination_type, ds.connection_id, ds.health AS destination_health, ds.telegram_channel_chat_id,
        ds.telegram_discussion_chat_id, (ds.deleted_at IS NOT NULL)::boolean AS destination_deleted,
@@ -1424,6 +1436,8 @@ type GetLeasedDeliveryRow struct {
 	ActualStatus             pgtype.Text
 	PastEditWindow           bool
 	RepublicationStartedAt   pgtype.Timestamptz
+	Urgent                   bool
+	ConfigurationOnly        bool
 	DestinationID            int64
 	DestinationPublicID      string
 	DestinationName          string
@@ -1447,8 +1461,9 @@ type GetLeasedDeliveryRow struct {
 // and, for Telegram, its channel and discussion group, and its Alert Group, or its Storm for a Storm summary, whose
 // Alert Group fields are empty, with whether the Alert Group still waits for its first Publication to be marked
 // (C-17.FR-1). A bridge's Root message also brings its Thread anchor, the status it shows, whether it is past its
-// edit window and the start of a republication past it (C-22.FR-9). No row when the lease ran out or went to another
-// replica.
+// edit window and the start of a republication past it (C-22.FR-9), and every delivery its rank (urgent,
+// configuration_only), which the memo of refused limiters records (Round). No row when the lease ran out or went to
+// another replica.
 func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryParams) (GetLeasedDeliveryRow, error) {
 	row := q.db.QueryRow(ctx, getLeasedDelivery,
 		arg.OrgID,
@@ -1483,6 +1498,8 @@ func (q *Queries) GetLeasedDelivery(ctx context.Context, arg GetLeasedDeliveryPa
 		&i.ActualStatus,
 		&i.PastEditWindow,
 		&i.RepublicationStartedAt,
+		&i.Urgent,
+		&i.ConfigurationOnly,
 		&i.DestinationID,
 		&i.DestinationPublicID,
 		&i.DestinationName,
@@ -2562,6 +2579,69 @@ func (q *Queries) LeaseOldestWaitingEvent(ctx context.Context, arg LeaseOldestWa
 	var i LeaseOldestWaitingEventRow
 	err := row.Scan(&i.ID, &i.Free)
 	return i, err
+}
+
+const limiterDues = `-- name: LimiterDues :many
+WITH clock AS (
+    SELECT $2::timestamptz AS now
+), want AS (
+    SELECT 'destination'::text AS kind, d.id, d.limiter_limit::float8 AS cap,
+           d.limiter_limit::float8 / d.limiter_per_seconds::float8 AS rate
+    FROM destinations d
+    WHERE d.org_id = $1 AND d.id = ANY ($3::bigint[])
+    UNION ALL
+    SELECT 'connection'::text, c.id, c.limiter_limit::float8, c.limiter_limit::float8 / c.limiter_per_seconds::float8
+    FROM connections c
+    WHERE c.org_id = $1 AND c.id = ANY ($4::bigint[])
+)
+SELECT w.kind, w.id,
+       (k.now + greatest(0, 1 - least(w.cap, b.tokens + extract(epoch FROM (k.now - b.refilled_at))::float8 * w.rate))
+                / w.rate * interval '1 second')::timestamptz AS due
+FROM want w
+JOIN rate_limit_buckets b ON b.org_id = $1 AND b.subject_kind = w.kind AND b.subject_id = w.id
+CROSS JOIN clock k
+`
+
+type LimiterDuesParams struct {
+	OrgID          int64
+	Now            time.Time
+	DestinationIds []int64
+	ConnectionIds  []int64
+}
+
+type LimiterDuesRow struct {
+	Kind string
+	ID   int64
+	Due  time.Time
+}
+
+// LimiterDues reads, without locking, when the bucket of each Destination of @destination_ids and each Connection of
+// @connection_ids holds a token at @now, by the current limits and with the refill of TakeTokens: @now itself when it
+// holds one already. A subject without a bucket has no row. The worker reads the limiters its memo carries into a
+// round, so that a limit raised since the refusal shortens the wait of the Urgent claims (Round).
+func (q *Queries) LimiterDues(ctx context.Context, arg LimiterDuesParams) ([]LimiterDuesRow, error) {
+	rows, err := q.db.Query(ctx, limiterDues,
+		arg.OrgID,
+		arg.Now,
+		arg.DestinationIds,
+		arg.ConnectionIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LimiterDuesRow{}
+	for rows.Next() {
+		var i LimiterDuesRow
+		if err := rows.Scan(&i.Kind, &i.ID, &i.Due); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDeletedDestinationsOfConnection = `-- name: ListDeletedDestinationsOfConnection :many
@@ -3833,6 +3913,9 @@ WITH due AS (
     WHERE x.org_id = $2 AND x.state = 'pending' AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
       AND x.held_by_storm_id IS NULL
       AND (ds.deleted_at IS NULL OR x.desired_retire OR x.published_at IS NULL)
+      AND x.destination_id <> ALL (coalesce($3::bigint[], '{}'))
+      AND (ds.connection_id IS NULL
+           OR ds.connection_id <> ALL (coalesce($4::bigint[], '{}')))
     UNION ALL
     SELECT b.next_probe_at, NULL::timestamptz
     FROM destinations b
@@ -3848,6 +3931,9 @@ WITH due AS (
     JOIN destinations ds ON ds.org_id = y.org_id AND ds.id = y.destination_id
     WHERE y.org_id = $2 AND y.state IN ('collecting', 'pending') AND d.published_at IS NOT NULL
       AND ds.health = 'healthy'
+      AND y.destination_id <> ALL (coalesce($3::bigint[], '{}'))
+      AND (ds.connection_id IS NULL
+           OR ds.connection_id <> ALL (coalesce($4::bigint[], '{}')))
       AND NOT EXISTS (SELECT 1
                       FROM thread_replies p
                       WHERE p.org_id = y.org_id AND p.delivery_id = y.delivery_id AND p.state = 'pending'
@@ -3858,6 +3944,7 @@ WITH due AS (
     JOIN destinations ds ON ds.org_id = e.org_id AND ds.id = e.destination_id
     WHERE e.org_id = $2 AND e.state = 'pending' AND ds.deleted_at IS NULL
       AND (ds.health = 'healthy' OR ds.next_probe_at = 'infinity')
+      AND e.destination_id <> ALL (coalesce($3::bigint[], '{}'))
       AND NOT EXISTS (SELECT 1
                       FROM webhook_events p
                       WHERE p.org_id = e.org_id AND p.destination_id = e.destination_id
@@ -3871,8 +3958,10 @@ FROM due
 `
 
 type NextDeliveryWorkParams struct {
-	Now   time.Time
-	OrgID int64
+	Now              time.Time
+	OrgID            int64
+	SkipDestinations []int64
+	SkipConnections  []int64
 }
 
 type NextDeliveryWorkRow struct {
@@ -3883,9 +3972,16 @@ type NextDeliveryWorkRow struct {
 // NextDeliveryWork is when the next delivery, Thread reply, outgoing webhook event or Broken probe can be claimed: the earliest due time of
 // free work on the business clock, and the earliest end of a lease still held on the real clock; each the zero time
 // when there is none. A Broken Destination marked for its next due delivery wakes the worker when that one is due;
-// deliveries a Storm holds, and those of a deleted Destination other than its final edits, are not work.
+// deliveries a Storm holds, and those of a deleted Destination other than its final edits, are not work, nor is the
+// work of @skip_destinations and of the Destinations of @skip_connections, whose limiters refused a take and which
+// the worker leaves alone until it wakes for their tokens (Round); NULL skips none.
 func (q *Queries) NextDeliveryWork(ctx context.Context, arg NextDeliveryWorkParams) (NextDeliveryWorkRow, error) {
-	row := q.db.QueryRow(ctx, nextDeliveryWork, arg.Now, arg.OrgID)
+	row := q.db.QueryRow(ctx, nextDeliveryWork,
+		arg.Now,
+		arg.OrgID,
+		arg.SkipDestinations,
+		arg.SkipConnections,
+	)
 	var i NextDeliveryWorkRow
 	err := row.Scan(&i.FreeAt, &i.LeaseEnd)
 	return i, err
@@ -5820,7 +5916,17 @@ SELECT v.ok::boolean AS taken,
                  FROM cur c
                  CROSS JOIN clock k
                  WHERE NOT v.ok AND c.avail < 1),
-                '0001-01-01 00:00:00+00')::timestamptz AS due
+                '0001-01-01 00:00:00+00')::timestamptz AS due,
+       coalesce((SELECT k.now + ((1 - c.avail) / c.rate) * interval '1 second'
+                 FROM cur c
+                 CROSS JOIN clock k
+                 WHERE NOT v.ok AND c.avail < 1 AND c.subject_kind = 'destination'),
+                '0001-01-01 00:00:00+00')::timestamptz AS destination_due,
+       coalesce((SELECT k.now + ((1 - c.avail) / c.rate) * interval '1 second'
+                 FROM cur c
+                 CROSS JOIN clock k
+                 WHERE NOT v.ok AND c.avail < 1 AND c.subject_kind = 'connection'),
+                '0001-01-01 00:00:00+00')::timestamptz AS connection_due
 FROM verdict v
 `
 
@@ -5832,14 +5938,17 @@ type TakeTokensParams struct {
 }
 
 type TakeTokensRow struct {
-	Taken bool
-	Due   time.Time
+	Taken          bool
+	Due            time.Time
+	DestinationDue time.Time
+	ConnectionDue  time.Time
 }
 
 // TakeTokens takes one token from each bucket of a Destination and its Connection, or from none: each bucket refills
 // at limit / per_seconds up to limit since refilled_at, which may lie in the future after a RetryAfter. It locks the
 // buckets in one order, so that two takers never wait for each other. taken says whether the tokens were taken; due is
-// when every bucket that has none will hold one, or the zero time.
+// when every bucket that has none will hold one, destination_due and connection_due when the Destination's and the
+// Connection's will, each the zero time when that bucket has a token or there is none.
 func (q *Queries) TakeTokens(ctx context.Context, arg TakeTokensParams) (TakeTokensRow, error) {
 	row := q.db.QueryRow(ctx, takeTokens,
 		arg.Now,
@@ -5848,7 +5957,12 @@ func (q *Queries) TakeTokens(ctx context.Context, arg TakeTokensParams) (TakeTok
 		arg.ConnectionID,
 	)
 	var i TakeTokensRow
-	err := row.Scan(&i.Taken, &i.Due)
+	err := row.Scan(
+		&i.Taken,
+		&i.Due,
+		&i.DestinationDue,
+		&i.ConnectionDue,
+	)
 	return i, err
 }
 

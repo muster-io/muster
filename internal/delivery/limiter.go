@@ -17,10 +17,13 @@ import (
 // from neither, and an outgoing webhook has only its Destination's bucket. A RetryAfter holds the bucket of its scope
 // until its end.
 
-// taken is the result of taking tokens: whether they were taken, and otherwise when every empty bucket holds one.
+// taken is the result of taking tokens: whether they were taken, and otherwise when every empty bucket holds one, and
+// when the Destination's and the Connection's bucket will, zero for one that has a token.
 type taken struct {
-	ok  bool
-	due time.Time
+	ok          bool
+	due         time.Time
+	destination time.Time
+	connection  time.Time
 }
 
 // subject names the buckets of a call: a Destination with its Connection, or a Connection alone.
@@ -47,7 +50,16 @@ func takeTokens(ctx context.Context, q queries, orgID int64, s subject, now time
 	if err != nil {
 		return taken{}, fmt.Errorf("take the limiter tokens: %w", err)
 	}
-	return taken{ok: r.Taken, due: r.Due.UTC()}, nil
+	return taken{ok: r.Taken, due: r.Due.UTC(), destination: zeroOf(r.DestinationDue),
+		connection: zeroOf(r.ConnectionDue)}, nil
+}
+
+// zeroOf is t in UTC, or the zero time for the zero time of the database.
+func zeroOf(t time.Time) time.Time {
+	if t.Year() <= 1 {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // holdBucket holds the bucket that a RetryAfter of d names — d's own or its Connection's — until until: no token

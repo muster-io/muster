@@ -414,6 +414,7 @@ type queries interface {
 	RecordReplySent(ctx context.Context, arg dbgen.RecordReplySentParams) error
 	RecordReplyRetry(ctx context.Context, arg dbgen.RecordReplyRetryParams) (dbgen.RecordReplyRetryRow, error)
 	NextDeliveryWork(ctx context.Context, arg dbgen.NextDeliveryWorkParams) (dbgen.NextDeliveryWorkRow, error)
+	LimiterDues(ctx context.Context, arg dbgen.LimiterDuesParams) ([]dbgen.LimiterDuesRow, error)
 	InsertDeliveryEvent(ctx context.Context, arg dbgen.InsertDeliveryEventParams) error
 	GetGroupForDeliveries(ctx context.Context, arg dbgen.GetGroupForDeliveriesParams) (int64, error)
 	ListGroupDeliveries(ctx context.Context, arg dbgen.ListGroupDeliveriesParams) ([]dbgen.ListGroupDeliveriesRow, error)

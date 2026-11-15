@@ -493,6 +493,7 @@ S-065, S-095
 | C-11.AC-15 | S-034 | complete | added by pull request #533 (issue #504), which also revised C-11.FR-3; checked by the e2e test of that pull request, not by a step of S-034 |
 | C-11.AC-16 | S-034 | complete | added by pull request #539 (issue #534), which also revised C-11.FR-3; checked by the integration and unit tests of that pull request, not by a step of S-034 |
 | C-11.AC-17 | S-034 | complete | added by pull request #544 (issue #540), which implements C-11.FR-3 as revised; checked by the unit and integration tests of that pull request, not by a step of S-034 |
+| C-11.AC-18 | S-034 | complete | proposed and implemented by pull request #553 (issue #546), added with the fix of issues #554 and #547; checked by the unit and integration tests of #553, not by a step of S-034 |
 
 ## C-12
 

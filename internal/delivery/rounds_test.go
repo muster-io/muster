@@ -5,6 +5,7 @@ package delivery_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -852,5 +853,832 @@ func TestUrgentPublicationDuringAShortConfigurationBatch(t *testing.T) {
 	if at != n {
 		t.Fatalf("the Urgent Publication at call %d of %d, want %d, right after the configuration edits", at,
 			len(calls), n)
+	}
+}
+
+// runRounds runs rounds as Run does, the business clock moving 2 ms a token and, after each round, by the wait it
+// returns, at least MinWait, until done says so or after most rounds; it returns the rounds it ran. With woken, each
+// round comes MinWait after the last, as when the NOTIFY of other work wakes the worker.
+func runRounds(t *testing.T, e *eventsEnv, woken bool, most int, done func() bool) int {
+	t.Helper()
+	var tick func()
+	tick = func() {
+		e.business.Advance(2 * time.Millisecond)
+		e.db.before["TakeTokens"] = tick
+	}
+	defer delete(e.db.before, "TakeTokens")
+	for r := range most {
+		if done() {
+			return r
+		}
+		e.db.before["TakeTokens"] = tick
+		next := e.round(t)
+		if woken {
+			next = 0
+		}
+		e.business.Advance(max(next, delivery.MinWait))
+	}
+	return most
+}
+
+// callsOn is the sequence of the calls to Destination dest whose text has one of the marks, each written as its
+// letter.
+func callsOn(e *eventsEnv, dest int64, marks map[string]string) string {
+	var b strings.Builder
+	for _, c := range e.rec.Calls() {
+		if c.Destination.ID != dest {
+			continue
+		}
+		for mark, letter := range marks {
+			if strings.Contains(textOf(c), mark) {
+				b.WriteString(letter)
+			}
+		}
+	}
+	return b.String()
+}
+
+// TestUrgentEditsBeforeConfigurationEditsAcrossRounds is C-11.FR-3 for #554: 8 Urgent edits that Alerts made and,
+// due after them, 500 configuration edits that are not Urgent wait in Destination 11 at 1 call a second, and the
+// worker waits between rounds as Run does. Every Urgent edit goes out before any configuration edit: a refused
+// Destination is left out of every claim until its token's time plus TokenMargin, when the refused Urgent edits are
+// due again, also in the rounds that follow the refusal, whether the worker sleeps until then or the NOTIFY of other
+// work wakes it every MinWait.
+func TestUrgentEditsBeforeConfigurationEditsAcrossRounds(t *testing.T) {
+	for _, woken := range []bool{false, true} {
+		t.Run(fmt.Sprintf("woken %v", woken), func(t *testing.T) {
+			e := roundEnv(t, 0)
+			const u, m = 8, 500
+			for i := range u {
+				e.enqueue(t, newGroupOf(e.env, i, "u", true), groups.System, created())
+			}
+			for i := range m {
+				e.enqueue(t, newGroupOf(e.env, 100+i, "n", false), groups.System, created())
+			}
+			for range 3 {
+				e.round(t)
+			}
+			e.rec.Reset()
+			for i := range u {
+				e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+			}
+			e.business.Advance(time.Millisecond)
+			for i := range m {
+				if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e.env, 100+i, "cfg",
+					false), Actor: groups.System, Configuration: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+			e.db.buckets = map[bucketKey]*fakeBucket{}
+			marks := map[string]string{"uedit": "U", "cfg": "c"}
+			rounds := runRounds(t, e, woken, 6000, func() bool {
+				return strings.Count(callsOn(e, destMM, marks), "U") == u
+			})
+			if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", u)) {
+				t.Fatalf("after %d rounds, the first configuration edit at call %d and the last Urgent edit at call "+
+					"%d of %d in Destination 11, want the %d Urgent edits first", rounds, strings.Index(s, "c"),
+					strings.LastIndex(s, "U"), len(s), u)
+			}
+		})
+	}
+}
+
+// TestUrgentEditsBeforeUrgentConfigurationEditsInARound is C-11.FR-3 for #554 within one round: 8 Urgent edits that
+// Alerts made and 50 Urgent configuration edits wait in Destination 11 at 5 calls a second, and 300 edits that are not
+// Urgent in Destination 13, whose limiter has room, make the round visit the Urgent ranks many times. A configuration
+// edit never takes a token that Destination 11 gets back ahead of the Urgent edits refused earlier in the round, and
+// across the rounds every Urgent edit goes first.
+func TestUrgentEditsBeforeUrgentConfigurationEditsInARound(t *testing.T) {
+	e := roundEnv(t, 0)
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	const u, c, m = 8, 50, 300
+	for i := range u + c {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	for i := range m {
+		e.enqueue(t, groupOn(e.env, routeOther, i, "g"), groups.System, created())
+	}
+	for range 3 {
+		e.round(t)
+	}
+	e.rec.Reset()
+	for i := range c {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e.env, u+i, "cfg", true),
+			Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.business.Advance(time.Millisecond)
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	for i := range m {
+		e.enqueue(t, groupOn(e.env, routeOther, i, "nedit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 5, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	marks := map[string]string{"uedit": "U", "cfg": "c"}
+	runRounds(t, e, false, 1, func() bool { return false })
+	first := callsOn(e, destMM, marks)
+	if n := e.rec.Count(deliverytest.MethodUpdate) - len(first); n != m {
+		t.Fatalf("%d edits in Destination 13 in the round, want %d", n, m)
+	}
+	if i := strings.Index(first, "c"); i >= 0 && strings.Count(first, "U") < u {
+		t.Fatalf("calls in Destination 11 in the round %q: a configuration edit at call %d, ahead of a refused "+
+			"Urgent edit", first, i)
+	}
+	runRounds(t, e, true, 200, func() bool { return strings.Count(callsOn(e, destMM, marks), "U") == u })
+	if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", u)) {
+		t.Fatalf("calls in Destination 11 %q, want the %d Urgent edits first", s, u)
+	}
+}
+
+// TestConnectionRefusalSkipsItsDestinations is C-11.FR-3 for #547: Destinations 11 and 14 share Connection 5, whose
+// limiter allows 5 calls a second while theirs have room; 8 Urgent edits wait in Destination 11, 50 edits that are
+// not Urgent and 25 Thread replies in Destination 14, due after 100 edits in Destination 13, which keep the round going
+// until the Connection has a token again. Once the Connection refused an Urgent edit, the round leaves every
+// Destination of the Connection out of the claims of the work that is not Urgent, so Destination 14 takes no token in
+// the round, and across the rounds the Urgent edits go first.
+func TestConnectionRefusalSkipsItsDestinations(t *testing.T) {
+	e := roundEnv(t, 0)
+	const dest14, route14 = 14, 4
+	conn := int64(connID)
+	e.db.dests[dest14] = &fakeDest{id: dest14, publicID: "DSAAAAAAAAAA14", name: "ops-2", typ: delivery.TypeMattermost,
+		connection: &conn, health: "healthy", limit: 100_000, per: 1}
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	r := e.db.routes[routeID]
+	r.publicID = "RTAAAAAAAAAAA4"
+	e.db.routes[route14] = r
+	e.db.routeDests[route14] = []int64{dest14}
+	const u, m, n = 8, 50, 100
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	for i := range n {
+		e.enqueue(t, groupOn(e.env, routeOther, i, "g"), groups.System, created())
+	}
+	for i := range m {
+		e.enqueue(t, groupOn(e.env, route14, 500+i, "g"), groups.System, created())
+	}
+	for range 3 {
+		e.round(t)
+	}
+	if p := e.rec.Count(deliverytest.MethodPublish); p != u+m+n {
+		t.Fatalf("%d of %d published", p, u+m+n)
+	}
+	e.rec.Reset()
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	for i := range n {
+		e.enqueue(t, groupOn(e.env, routeOther, i, "nedit"), groups.System, annotatedEvent())
+	}
+	e.business.Advance(time.Millisecond)
+	for i := range m {
+		ev := annotatedEvent()
+		if i%2 == 1 {
+			ev = alertsAdded(2, groups.StatusFiring, fmt.Sprintf("fp-%d", i))
+		}
+		e.enqueue(t, groupOn(e.env, route14, 500+i, "cedit"), groups.System, ev)
+	}
+	if r := e.repliesTo(dest14); len(r) != m/2 {
+		t.Fatalf("%d Thread replies in Destination 14, want %d", len(r), m/2)
+	}
+	e.db.connLimits[connID] = [2]int64{5, 1}
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes := 0
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(2 * time.Millisecond)
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	on11, on14 := callsOn(e, destMM, map[string]string{"uedit": "U"}), 0
+	for _, c := range e.rec.Calls() {
+		if c.Destination.ID == dest14 {
+			on14++
+		}
+	}
+	if sent := len(e.rec.Calls()); on14 != 0 || takes-sent > 2*int(delivery.Batch) {
+		t.Fatalf("%d edits in Destination 11 and %d calls in Destination 14 in the round, %d refused takes; want none "+
+			"in Destination 14 and at most two claimed batches refused", len(on11), on14, takes-sent)
+	}
+	runRounds(t, e, true, 200, func() bool {
+		return strings.Count(callsOn(e, destMM, map[string]string{"uedit": "U"}), "U") == u
+	})
+	var order strings.Builder
+	for _, c := range e.rec.Calls() {
+		switch {
+		case c.Destination.ID == destMM && strings.Contains(textOf(c), "uedit"):
+			order.WriteString("U")
+		case c.Destination.ID == dest14:
+			order.WriteString("c")
+		}
+	}
+	if s := order.String(); !strings.HasPrefix(s, strings.Repeat("U", u)) {
+		t.Fatalf("the calls through Connection 5 %q, want the %d Urgent edits first", s, u)
+	}
+}
+
+// TestMemoKeepsTheLatestDueTime is C-11.FR-3 for #554: the memo keeps the latest due time of the tokens a limiter
+// refused, not the first. Destination 11 allows 1 call a second; of 4 Urgent edits, the first takes the token, the
+// second is refused, the clock then moves 1.5 s, the third takes the token that came back and the fourth is refused
+// again, its token due 1 s later. The batch of rank 1 due now leaves Destination 11 alone until then, though the second
+// edit is due again already, and the worker waits for that token, though 3 edits that are not Urgent wait there
+// untouched.
+func TestMemoKeepsTheLatestDueTime(t *testing.T) {
+	e := roundEnv(t, 0)
+	const u, m = 4, 3
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	for i := range m {
+		e.enqueue(t, newGroupOf(e.env, 100+i, "g", false), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	for i := range m {
+		e.enqueue(t, newGroupOf(e.env, 100+i, "nedit", false), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes := 0
+	var tick func()
+	tick = func() {
+		takes++
+		if takes == 2 {
+			e.business.Advance(1500 * time.Millisecond)
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	next := e.round(t)
+	delete(e.db.before, "TakeTokens")
+	if sent := len(e.rec.Calls()); takes != u || sent != 2 {
+		t.Errorf("%d takes and %d calls in the round, want %d and 2: a refused edit was claimed again before the "+
+			"latest refused token was due", takes, sent, u)
+	}
+	if want := time.Second; next != want {
+		t.Errorf("the worker waits %v, want %v, until the latest due time of the refused tokens", next, want)
+	}
+}
+
+// TestWaitForARefusedToken is C-11.FR-3 for #547: when every due row waits for a limiter that refused a take, the
+// worker sleeps until that token's time instead of repeating rounds every MinWait, and a wake — the NOTIFY of new work —
+// still runs a round at once, which delivers the new work on another Destination and leaves the refused one alone. The
+// round at the token, where the batches of rank 1 due now could take it, leaves the edits that are not Urgent alone
+// until the token's time plus TokenMargin, when they are due again; one more round then sends one. Destination 11
+// allows 10 calls a minute, as a Telegram chat does, and 30 edits wait there.
+func TestWaitForARefusedToken(t *testing.T) {
+	e := roundEnv(t, 0)
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	const n = 30
+	for i := range n {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range n {
+		e.enqueue(t, newGroup(e.env, i, "edit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 10, 60
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	interval := 6 * time.Second
+	var waits []time.Duration
+	var takes []int
+	ctx, cancel := context.WithCancel(t.Context())
+	e.w.Wait = func(_ context.Context, d time.Duration, wake <-chan struct{}) {
+		waits = append(waits, d)
+		takes = append(takes, e.db.calls["TakeTokens"])
+		switch len(waits) {
+		case 1:
+			e.enqueue(t, groupOn(e.env, routeOther, 1, "woken"), groups.System, created())
+			e.w.Wake()
+			<-wake
+		case 2, 3:
+			e.business.Advance(d)
+		case 4:
+			cancel()
+		}
+	}
+	e.w.Run(ctx)
+	if len(waits) != 4 {
+		t.Fatalf("waits %v", waits)
+	}
+	if waits[0] != interval || waits[1] != interval || waits[2] != delivery.TokenMargin {
+		t.Errorf("waits %v, want %v twice, until the refused token's time, also after a wake, then %v", waits,
+			interval, delivery.TokenMargin)
+	}
+	if woken := callsOn(e, destOther, map[string]string{"woken": "w"}); woken != "w" {
+		t.Errorf("the Publication in Destination 13 that woke the worker: %q", woken)
+	}
+	// The wake and the round at the token took no token in Destination 11; the round after the margin makes one call
+	// there and one claimed batch of refused takes, and the worker sleeps until the next token.
+	if takes[1]-takes[0] != 1 || takes[2] != takes[1] || takes[3]-takes[2] != int(delivery.Batch) {
+		t.Errorf("takes %v: want 1 in the woken round, none at the token and %d after the margin", takes,
+			delivery.Batch)
+	}
+	if edits := e.rec.Count(deliverytest.MethodUpdate); edits != 11 {
+		t.Errorf("%d edits in Destination 11, want the 10 of its bucket and 1 after the token", edits)
+	}
+	if waits[3] <= interval-2*delivery.TokenMargin || waits[3] > interval {
+		t.Errorf("the wait after the token %v, want about %v", waits[3], interval)
+	}
+}
+
+// TestWaitForTheEarliestRefusedToken is C-11.FR-3 for #547: with the limiters of Destinations 11 and 13 refusing, at
+// 1 call a second and 1 call in 3 seconds, the worker sleeps until the earlier token's time.
+func TestWaitForTheEarliestRefusedToken(t *testing.T) {
+	e := roundEnv(t, 0)
+	for i := range 2 {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+		e.enqueue(t, groupOn(e.env, routeOther, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	for i := range 2 {
+		e.enqueue(t, newGroup(e.env, i, "edit"), groups.System, annotatedEvent())
+		e.enqueue(t, groupOn(e.env, routeOther, i, "edit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 1, 3
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	if next, want := e.round(t), time.Second; next != want {
+		t.Errorf("the worker waits %v, want %v", next, want)
+	}
+}
+
+// TestUrgentPublicationOnARefusedDestinationAtItsToken is C-11.FR-3 for #554: Destination 11 refused an Urgent edit
+// that Alerts made, which is due again at the token's time plus TokenMargin; an Urgent Publication there that comes
+// due before the token goes out once the token is due, ahead of the refused edit, which is due later, while 200 Urgent
+// configuration edits in Destination 13 keep the round going.
+func TestUrgentPublicationOnARefusedDestinationAtItsToken(t *testing.T) {
+	e := roundEnv(t, 0)
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	const n, m = 6, 200
+	for i := range n {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	others := make([]*groups.Group, m)
+	for i := range m {
+		others[i] = groupOn(e.env, routeOther, i, "g")
+		others[i].Urgent, e.db.groups[others[i].ID].urgent = true, true
+		e.enqueue(t, others[i], groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range n {
+		e.enqueue(t, newGroupOf(e.env, i, "annotated", true), groups.System, annotatedEvent())
+	}
+	e.business.Advance(time.Millisecond)
+	for _, g := range others {
+		g.Title = "renamed"
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: g, Actor: groups.System,
+			Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 5, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes := 0
+	var injected time.Time
+	var tick func()
+	tick = func() {
+		takes++
+		e.business.Advance(10 * time.Millisecond)
+		if takes == 15 {
+			injected = e.business.Now()
+			e.enqueue(t, newGroupOf(e.env, n, "urgent", true), groups.System, created())
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	calls := e.rec.Calls()
+	at := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Method == deliverytest.MethodPublish && strings.Contains(textOf(c), "urgent")
+	})
+	last := slices.IndexFunc(calls, func(c deliverytest.Call) bool {
+		return c.Destination.ID == destMM && c.Method == deliverytest.MethodUpdate && !c.At.Before(injected)
+	})
+	if injected.IsZero() || at < 0 {
+		t.Fatalf("the Urgent Publication did not go out in the round (%d calls)", len(calls))
+	}
+	// The bucket runs dry at the 5th take and refuses the 6th; its token is due after the injection, and the refused
+	// edit TokenMargin later.
+	t.Logf("the Urgent Publication at call %d of %d, %v after it came due; the refused edit at call %d", at, len(calls),
+		calls[at].At.Sub(injected), last)
+	if !calls[at].At.Before(injected.Add(delivery.TokenMargin)) {
+		t.Errorf("the Urgent Publication went %v after it came due, want it at the token, before %v",
+			calls[at].At.Sub(injected), delivery.TokenMargin)
+	}
+	if last >= 0 && last < at {
+		t.Errorf("the refused edit at call %d went before the Urgent Publication at call %d", last, at)
+	}
+}
+
+// TestRefusalOfBothLimiters is C-11.FR-3 for #547: when both Destination 11's limiter and its Connection's refuse a
+// take, the round leaves Destination 11, with an edit that is not Urgent, and every other Destination of the
+// Connection alone; the worker wakes for the Connection's token, which Destination 14 takes TokenMargin later, while
+// Destination 11 waits for its own.
+func TestRefusalOfBothLimiters(t *testing.T) {
+	e := roundEnv(t, 0)
+	const dest14, route14 = 14, 4
+	conn := int64(connID)
+	e.db.dests[dest14] = &fakeDest{id: dest14, publicID: "DSAAAAAAAAAA14", name: "ops-2", typ: delivery.TypeMattermost,
+		connection: &conn, health: "healthy", limit: 100_000, per: 1}
+	r := e.db.routes[routeID]
+	r.publicID = "RTAAAAAAAAAAA4"
+	e.db.routes[route14] = r
+	e.db.routeDests[route14] = []int64{dest14}
+	for i := range 2 {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	e.enqueue(t, newGroupOf(e.env, 2, "g", false), groups.System, created())
+	e.enqueue(t, groupOn(e.env, route14, 500, "g"), groups.System, created())
+	e.round(t)
+	e.rec.Reset()
+	for i := range 2 {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	e.enqueue(t, newGroupOf(e.env, 2, "nedit", false), groups.System, annotatedEvent())
+	e.enqueue(t, groupOn(e.env, route14, 500, "cedit"), groups.System, annotatedEvent())
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 2
+	e.db.connLimits[connID] = [2]int64{1, 1}
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	takes := e.db.calls["TakeTokens"]
+	next := e.round(t)
+	if takes, sent := e.db.calls["TakeTokens"]-takes, len(e.rec.Calls()); takes != 2 || sent != 1 {
+		t.Errorf("%d takes and %d calls in the round, want 2 and 1: Destination 14 left alone", takes, sent)
+	}
+	// The Connection's token comes first: at its time the work that is not Urgent still leaves the Connection alone,
+	// TokenMargin later Destination 14 takes it, and Destination 11 waits for its own token as well.
+	steps := []struct {
+		wait  time.Duration
+		takes int
+		calls string
+	}{{time.Second, 0, ""}, {delivery.TokenMargin, 1, "c"}, {800 * time.Millisecond, 0, "c"}}
+	for i, step := range steps {
+		if next != step.wait {
+			t.Fatalf("step %d: the worker waits %v, want %v", i, next, step.wait)
+		}
+		e.business.Advance(next)
+		takes = e.db.calls["TakeTokens"]
+		next = e.round(t)
+		if s := callsOn(e, dest14, map[string]string{"cedit": "c"}); s != step.calls ||
+			e.db.calls["TakeTokens"]-takes != step.takes {
+			t.Errorf("step %d: calls in Destination 14 %q after %d takes, want %q after %d", i, s,
+				e.db.calls["TakeTokens"]-takes, step.calls, step.takes)
+		}
+	}
+}
+
+// TestLimitRaisedAfterARefusal is C-11.FR-3 for #554: a limit raised after a refusal ends the wait of the Urgent
+// claims. Destination 11 at 1 call a minute refuses the second of three edits that are not Urgent; its limit is then
+// raised to 100 a second, which keeps the state of its bucket, and 1 s later a Publication comes due there. The round
+// reads the bucket again by the current limit, and an Urgent Publication goes out in it. One that is not Urgent waits
+// for the refused edits, which are due again at the refused token's time plus TokenMargin, and goes then, ahead of
+// them, as it is due earlier.
+func TestLimitRaisedAfterARefusal(t *testing.T) {
+	for _, urgent := range []bool{true, false} {
+		t.Run(fmt.Sprintf("urgent %v", urgent), func(t *testing.T) {
+			e := roundEnv(t, 0)
+			for i := range 3 {
+				e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+			}
+			e.round(t)
+			e.rec.Reset()
+			for i := range 3 {
+				e.enqueue(t, newGroup(e.env, i, "edit"), groups.System, annotatedEvent())
+			}
+			e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 60
+			e.db.buckets = map[bucketKey]*fakeBucket{}
+			refused := e.business.Now()
+			if next := e.round(t); len(e.rec.Calls()) != 1 || next != delivery.MaxWait {
+				t.Fatalf("%d calls in the first round and a wait of %v, want 1 and %v", len(e.rec.Calls()), next,
+					delivery.MaxWait)
+			}
+			e.db.dests[destMM].limit, e.db.dests[destMM].per = 100, 1
+			e.business.Advance(time.Second)
+			e.enqueue(t, newGroupOf(e.env, 50, "fresh", urgent), groups.System, created())
+			next := e.round(t)
+			marks := map[string]string{"fresh": "F", "edit": "e"}
+			if s, want := callsOn(e, destMM, marks), map[bool]string{true: "eF", false: "e"}[urgent]; s != want {
+				t.Fatalf("calls in Destination 11 1 s after the limit was raised %q, want %q; the worker waits %v", s,
+					want, next)
+			}
+			if urgent {
+				return
+			}
+			runRounds(t, e, false, 20, func() bool { return strings.Contains(callsOn(e, destMM, marks), "F") })
+			calls := e.rec.Calls()
+			at := slices.IndexFunc(calls, func(c deliverytest.Call) bool { return strings.Contains(textOf(c), "fresh") })
+			if s := callsOn(e, destMM, marks); s != "eFee" || at < 0 ||
+				calls[at].At.Before(refused.Add(time.Minute+delivery.TokenMargin)) {
+				t.Errorf("calls in Destination 11 %q, the Publication at %v after the refusal, want %q at %v", s,
+					calls[max(at, 0)].At.Sub(refused), "eFee", time.Minute+delivery.TokenMargin)
+			}
+		})
+	}
+}
+
+// TestUrgentDueInsideTheMargin is C-11.FR-3 for #554: the worker wakes at a refused token's time, when the batches of
+// rank 1 due now may take it, not only TokenMargin later. Destination 11 at 1 call a second refuses an edit, and an
+// Urgent Publication there comes due 1.05 s later without a NOTIFY, as after a Transient backoff: the round at the
+// token finds it not due yet, and the worker wakes again at the end of the margin, when it goes.
+func TestUrgentDueInsideTheMargin(t *testing.T) {
+	e := roundEnv(t, 0)
+	for i := range 3 {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range 3 {
+		e.enqueue(t, newGroup(e.env, i, "edit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.enqueue(t, newGroupOf(e.env, 50, "late", true), groups.System, created())
+	late := e.db.deliveries[len(e.db.deliveries)-1]
+	if !late.urgent || late.state != "pending" {
+		t.Fatalf("the last delivery %+v, want the pending Urgent Publication", late)
+	}
+	late.next = e.business.Now().Add(time.Second + 50*time.Millisecond)
+	if next := e.round(t); next != time.Second {
+		t.Fatalf("the worker waits %v, want %v, until the refused token's time", next, time.Second)
+	}
+	e.business.Advance(time.Second)
+	if next := e.round(t); next != delivery.TokenMargin {
+		t.Fatalf("at the token the worker waits %v, want %v, until the end of the margin", next, delivery.TokenMargin)
+	}
+	e.business.Advance(delivery.TokenMargin)
+	e.round(t)
+	if s := callsOn(e, destMM, map[string]string{"late": "L", "edit": "e"}); s != "eL" {
+		t.Errorf("calls in Destination 11 %q, want the edit of the bucket, then the Urgent Publication", s)
+	}
+}
+
+// TestDestinationRefusalLeavesItsConnection is C-11.FR-3 for #547: a refusal of Destination 11's own limiter leaves
+// the other Destinations of its Connection alone: Destination 14 sends its edits in the round.
+func TestDestinationRefusalLeavesItsConnection(t *testing.T) {
+	e := roundEnv(t, 0)
+	const dest14, route14 = 14, 4
+	conn := int64(connID)
+	e.db.dests[dest14] = &fakeDest{id: dest14, publicID: "DSAAAAAAAAAA14", name: "ops-2", typ: delivery.TypeMattermost,
+		connection: &conn, health: "healthy", limit: 100_000, per: 1}
+	r := e.db.routes[routeID]
+	r.publicID = "RTAAAAAAAAAAA4"
+	e.db.routes[route14] = r
+	e.db.routeDests[route14] = []int64{dest14}
+	for i := range 2 {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	for i := range 3 {
+		e.enqueue(t, groupOn(e.env, route14, 500+i, "g"), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range 2 {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	for i := range 3 {
+		e.enqueue(t, groupOn(e.env, route14, 500+i, "cedit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 60
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	u, c := callsOn(e, destMM, map[string]string{"uedit": "U"}), callsOn(e, dest14, map[string]string{"cedit": "c"})
+	if u != "U" || c != "ccc" {
+		t.Errorf("calls in Destination 11 %q and in Destination 14 %q, want %q and %q", u, c, "U", "ccc")
+	}
+}
+
+// urgentAndConfiguration is a roundEnv with 8 Urgent edits that Alerts made and, due after them, 50 configuration
+// edits, Urgent or not, waiting in Destination 11 at limit calls per per seconds, its bucket full.
+func urgentAndConfiguration(t *testing.T, limit, per int64, urgentConfiguration bool) *eventsEnv {
+	t.Helper()
+	e := roundEnv(t, 0)
+	const u, m = 8, 50
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "u", true), groups.System, created())
+	}
+	for i := range m {
+		e.enqueue(t, newGroupOf(e.env, 100+i, "n", urgentConfiguration), groups.System, created())
+	}
+	for range 3 {
+		e.round(t)
+	}
+	e.rec.Reset()
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	e.business.Advance(time.Millisecond)
+	for i := range m {
+		if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e.env, 100+i, "cfg",
+			urgentConfiguration), Actor: groups.System, Configuration: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = limit, per
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	return e
+}
+
+// TestUrgentEditsFirstAfterARaise is C-11.FR-3 for #554 with a limit raised while the bucket is still empty: 8 Urgent
+// edits and 50 configuration edits, Urgent or not, wait in Destination 11 at 1 call in 10 s, which then goes to 1 call
+// in 2 s. The later ranks still wait until the refused edits are due again, so every Urgent edit goes first, whether
+// the worker sleeps or is woken every MinWait.
+func TestUrgentEditsFirstAfterARaise(t *testing.T) {
+	for _, c := range []struct{ woken, urgent bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		woken := c.woken
+		t.Run(fmt.Sprintf("woken %v, Urgent configuration edits %v", c.woken, c.urgent), func(t *testing.T) {
+			e := urgentAndConfiguration(t, 1, 10, c.urgent)
+			e.round(t)
+			e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 2
+			marks := map[string]string{"uedit": "U", "cfg": "c"}
+			runRounds(t, e, woken, 6000, func() bool { return strings.Count(callsOn(e, destMM, marks), "U") == 8 })
+			if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", 8)) {
+				t.Errorf("calls in Destination 11 %q, want the 8 Urgent edits first", s)
+			}
+		})
+	}
+}
+
+// TestMemoCarriedWhenItsReadFails is C-11.FR-3 for #554: when the round cannot read the limiters of the memo again, it
+// carries them as they were and says so. Destination 11 at 1 call a second refuses an Urgent edit; a round woken before
+// the token fails to read them and still waits for that token, another one woken after the token but before its time
+// plus TokenMargin fails too, and every Urgent edit still goes first.
+func TestMemoCarriedWhenItsReadFails(t *testing.T) {
+	e := urgentAndConfiguration(t, 1, 1, false)
+	e.round(t)
+	// Before the token, the Urgent claims still wait for it.
+	e.business.Advance(500 * time.Millisecond)
+	e.db.fail["LimiterDues"] = errBoom
+	if next, err := e.w.Round(t.Context()); !errors.Is(err, errBoom) || next != 500*time.Millisecond {
+		t.Errorf("the round before the token after a failed read = %v, %v; want %v, %v", next, err,
+			500*time.Millisecond, errBoom)
+	}
+	e.business.Advance(550 * time.Millisecond)
+	if _, err := e.w.Round(t.Context()); !errors.Is(err, errBoom) {
+		t.Errorf("the round after a failed read of the memo = %v, want %v", err, errBoom)
+	}
+	delete(e.db.fail, "LimiterDues")
+	marks := map[string]string{"uedit": "U", "cfg": "c"}
+	runRounds(t, e, true, 3000, func() bool { return strings.Count(callsOn(e, destMM, marks), "U") == 8 })
+	if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", 8)) {
+		t.Errorf("calls in Destination 11 %q, want the 8 Urgent edits first", s)
+	}
+}
+
+// TestUrgentAtTheTokenAfterARaise is C-11.FR-3 for #554: after a raise that leaves the bucket empty, the Urgent claims
+// wait for the new token's time itself. Destination 11 at 1 call in 10 s refuses an edit and goes to 1 call in 2 s; an
+// Urgent Publication that comes due 0.5 s later goes out at the new token, 2 s after the refusal, with no refused take.
+func TestUrgentAtTheTokenAfterARaise(t *testing.T) {
+	e := roundEnv(t, 0)
+	for i := range 3 {
+		e.enqueue(t, newGroup(e.env, i, "g"), groups.System, created())
+	}
+	e.round(t)
+	e.rec.Reset()
+	for i := range 3 {
+		e.enqueue(t, newGroup(e.env, i, "edit"), groups.System, annotatedEvent())
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 10
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	t0 := e.business.Now()
+	e.round(t)
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 2
+	e.business.Advance(500 * time.Millisecond)
+	e.enqueue(t, newGroupOf(e.env, 50, "fresh", true), groups.System, created())
+	takes := e.db.calls["TakeTokens"]
+	runRounds(t, e, false, 50, func() bool {
+		return strings.Contains(callsOn(e, destMM, map[string]string{"fresh": "F"}), "F")
+	})
+	calls := e.rec.Calls()
+	at := slices.IndexFunc(calls, func(c deliverytest.Call) bool { return strings.Contains(textOf(c), "fresh") })
+	// The round's clock moves 2 ms a take.
+	if at < 0 || calls[at].At.Sub(t0) != 2*time.Second+2*time.Millisecond || e.db.calls["TakeTokens"]-takes != 1 {
+		t.Errorf("the Urgent Publication at %v after the refusal with %d takes, want at 2.002s with 1",
+			calls[max(at, 0)].At.Sub(t0), e.db.calls["TakeTokens"]-takes)
+	}
+}
+
+// TestUrgentConfigurationEditJudgedAtTheStartOfTheStep is C-11.FR-3 for #554 within one step of a visit: Destination
+// 11 allows 1 call a second and holds 2 Urgent edits that Alerts made and an Urgent configuration edit; the second edit
+// is refused in a round. The next round starts after that token is due but before its time plus TokenMargin: its drain
+// sends an Urgent edit in Destination 13, during which an Urgent Publication there comes due, and the clock passes that
+// time while the batch of rank 1 due now sends the Publication. The claim of rank 2 that follows still leaves
+// Destination 11 alone, as the drain before it did, so the configuration edit never takes the token ahead of the
+// refused edit, which goes first.
+func TestUrgentConfigurationEditJudgedAtTheStartOfTheStep(t *testing.T) {
+	e := roundEnv(t, 0)
+	e.db.dests[destOther].limit, e.db.dests[destOther].per = 100_000, 1
+	const u = 2
+	for i := range u + 1 {
+		e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+	}
+	q := groupOn(e.env, routeOther, 1, "g")
+	q.Urgent, e.db.groups[q.ID].urgent = true, true
+	e.enqueue(t, q, groups.System, created())
+	e.round(t)
+	e.rec.Reset()
+	for i := range u {
+		e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+	}
+	if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e.env, u, "cfg", true),
+		Actor: groups.System, Configuration: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+	e.db.buckets = map[bucketKey]*fakeBucket{}
+	e.round(t)
+	marks := map[string]string{"uedit": "U", "cfg": "c"}
+	if s := callsOn(e, destMM, marks); s != "U" {
+		t.Fatalf("calls in Destination 11 in the first round %q, want %q", s, "U")
+	}
+	e.business.Advance(time.Second + delivery.TokenMargin/2)
+	q.Title = "qedit"
+	e.enqueue(t, q, groups.System, annotatedEvent())
+	takes := 0
+	var tick func()
+	tick = func() {
+		takes++
+		switch takes {
+		case 1:
+			p := groupOn(e.env, routeOther, 2, "urgent")
+			p.Urgent, e.db.groups[p.ID].urgent = true, true
+			e.enqueue(t, p, groups.System, created())
+		case 2:
+			e.business.Advance(time.Second)
+		}
+		e.db.before["TakeTokens"] = tick
+	}
+	e.db.before["TakeTokens"] = tick
+	e.round(t)
+	delete(e.db.before, "TakeTokens")
+	p := callsOn(e, destOther, map[string]string{"qedit": "q", "urgent": "p"})
+	if s := callsOn(e, destMM, marks); s != "U" || p != "qp" {
+		t.Fatalf("calls in Destination 11 after the second round %q and in Destination 13 %q, want %q and %q", s, p,
+			"U", "qp")
+	}
+	runRounds(t, e, true, 50, func() bool { return strings.Contains(callsOn(e, destMM, marks), "c") })
+	if s := callsOn(e, destMM, marks); s != "UUc" {
+		t.Fatalf("calls in Destination 11 %q, want %q", s, "UUc")
+	}
+}
+
+// TestConnectionRefusalThenMove is C-11.FR-3: Connection 5 refuses an Urgent edit of Destination 11 — alone, or with
+// Destination 11's own limiter, whose token comes sooner — and Destination 11 then moves to Connection 7, with room,
+// with or without a re-render of its Urgent Root messages. The edits that are not Urgent of Destination 11 still wait
+// for the refused Urgent edits, which go first.
+func TestConnectionRefusalThenMove(t *testing.T) {
+	for _, c := range []struct{ rerender, both bool }{{false, false}, {true, false}, {false, true}} {
+		t.Run(fmt.Sprintf("re-render %v, both empty %v", c.rerender, c.both), func(t *testing.T) {
+			e := roundEnv(t, 0)
+			const u, m = 4, 4
+			for i := range u {
+				e.enqueue(t, newGroupOf(e.env, i, "g", true), groups.System, created())
+			}
+			for i := range m {
+				e.enqueue(t, newGroupOf(e.env, 100+i, "g", false), groups.System, created())
+			}
+			e.round(t)
+			e.rec.Reset()
+			for i := range u {
+				e.enqueue(t, newGroupOf(e.env, i, "uedit", true), groups.System, annotatedEvent())
+			}
+			e.business.Advance(time.Millisecond)
+			for i := range m {
+				e.enqueue(t, newGroupOf(e.env, 100+i, "nedit", false), groups.System, annotatedEvent())
+			}
+			if c.both {
+				e.db.dests[destMM].limit, e.db.dests[destMM].per = 1, 1
+			}
+			e.db.connLimits[connID] = [2]int64{1, 10}
+			e.db.buckets = map[bucketKey]*fakeBucket{}
+			e.round(t)
+			c7 := int64(7)
+			e.db.dests[destMM].connection = &c7
+			if c.rerender {
+				for i := range u {
+					if err := e.svc.Enqueue(t.Context(), nil, groups.Rendering{Group: newGroupOf(e.env, i, "uedit",
+						true), Actor: groups.System, Configuration: true}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			marks := map[string]string{"uedit": "U", "nedit": "n"}
+			runRounds(t, e, true, 300, func() bool { return strings.Count(callsOn(e, destMM, marks), "U") == u })
+			if s := callsOn(e, destMM, marks); !strings.HasPrefix(s, strings.Repeat("U", u)) {
+				t.Errorf("calls in Destination 11 %q, want the %d Urgent edits first", s, u)
+			}
+		})
 	}
 }
