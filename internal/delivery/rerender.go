@@ -4,7 +4,6 @@
 package delivery
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -141,7 +140,7 @@ func (s *Service) rerenderGroup(ctx context.Context, id int64, activeKeyID strin
 				return fmt.Errorf("render alert group #%d in %s: %w: signed with key %s, the active key is %s",
 					g.Number, d.PublicID, ErrButtonKeyNotActive, msg.keyID, activeKeyID)
 			}
-			if bytes.Equal(r.DesiredHash, msg.hash) && r.DesiredButtonKeyID.String == msg.keyID {
+			if sameHash(r.DesiredHash, msg.hash, r.DesiredVersion) && r.DesiredButtonKeyID.String == msg.keyID {
 				continue
 			}
 			if _, err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: r.ID, DesiredText: msg.text,

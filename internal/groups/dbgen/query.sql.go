@@ -3203,7 +3203,8 @@ type ListOpenGroupsOfDestinationAfterParams struct {
 }
 
 // ListOpenGroupsOfDestinationAfter lists, by id after a cursor, a batch of the open Alert Groups with a delivery in a
-// Destination that is not being retired, whose Root messages its button set re-renders (C-28.FR-9).
+// Destination that is not being retired, whose Root messages its button set (C-28.FR-9) and its Connection
+// (C-12.FR-12) re-render.
 func (q *Queries) ListOpenGroupsOfDestinationAfter(ctx context.Context, arg ListOpenGroupsOfDestinationAfterParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listOpenGroupsOfDestinationAfter,
 		arg.OrgID,

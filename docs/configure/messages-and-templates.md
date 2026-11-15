@@ -111,14 +111,21 @@ example value (`listRouteLabelSuggestions`). A change of the list, or of the Gro
 edits the open Root messages of the Route, Quietly, to show the new labels.
 
 The open Root messages also follow the other settings that they show: a change of the Route's language, its Snooze
-durations, or its Root message or line template edits the open Root messages of the Route once, Quietly; a change of
-the [severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day
-of the week](organization.md), or of a [Link rule or a Lookup table](#links), edits every open Root message once,
-Quietly; a rename of a Team edits those of the open Alert Groups that have the Team; and a new display name of a User
-or of a Service account, or a new, changed or removed [Account link](../messengers/account-links.md) of a User, edits
-those whose footer names them, as the Owner or as who snoozed the Alert Group, so that the footer shows the new name or
-mentions them by the new link. A message the change does not alter is not edited, and no change sends a new message or
-a Mention.
+durations, or its Root message or line template edits the open Root messages of the Route once, Quietly; a change of the
+[severity label, the Team label, the Instance labels, the time zone, the start of the working day or the first day of
+the week](organization.md), or of a [Link rule or a Lookup table](#links), edits every open Root message once, Quietly;
+a rename of a Team edits those of the open Alert Groups that have the Team; and a new display name of a User or of a
+Service account, or a new, changed or removed [Account link](../messengers/account-links.md) of a User, edits those
+whose footer names them, as the Owner or as who snoozed the Alert Group, so that the footer shows the new name or
+mentions them by the new link. Moving a Mattermost, Slack or Bridge Destination to another Connection edits, once and
+Quietly, those of its open Root messages whose footer names a user with an Account link in either Connection, so that
+the footer names them as the new Connection's messenger knows them; a move between Telegram Connections edits none. A
+message a change does not alter is not edited, and none of these changes sends a new message or a Mention, with one
+exception after a move: an edit goes through the new Connection to a message the old one published, so one the new
+Connection cannot find is published again, Quietly, where a Mention in its footer may notify, and one it may not edit,
+such as a message another Connection published, makes the Destination [Broken](../concepts/broken-destinations.md). Both
+happen at an edit after any move; a move only brings them forward to its own edit, and only for the Root messages whose
+footer reads otherwise.
 
 ## What you can change, and what you cannot
 

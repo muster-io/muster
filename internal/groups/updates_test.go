@@ -719,7 +719,8 @@ func TestButtonsUpdate(t *testing.T) {
 	}
 
 	for kind, q := range map[string]string{KindDestinationButtons: "ListOpenGroupsOfDestinationAfter",
-		KindOrganizationButtons: "ListOpenGroupsFollowingOrganizationAfter"} {
+		KindDestinationConnection: "ListOpenGroupsOfDestinationAfter",
+		KindOrganizationButtons:   "ListOpenGroupsFollowingOrganizationAfter"} {
 		for _, failing := range []string{q, "LockGroups", "rerender", "InsertTimelineEntry", "Notify"} {
 			u := newUpdates(t)
 			u.db.delivered, u.db.following = map[int64][]int64{u.acked.ID: {21}}, []int64{21}
@@ -733,7 +734,7 @@ func TestButtonsUpdate(t *testing.T) {
 			})
 			// A row of the Organization's set names no Destination.
 			row, scope := &fakeUpdate{id: u.db.id(), kind: kind, requested: u.clock.Now()}, ""
-			if kind == KindDestinationButtons {
+			if kind != KindOrganizationButtons {
 				row.destinationID, scope = 21, `"destination":"DS000000000021",`
 			}
 			u.db.updates = append(u.db.updates, row)
@@ -752,6 +753,55 @@ func TestButtonsUpdate(t *testing.T) {
 		requested: u.clock.Now()})
 	if u.round(t, u.worker); len(u.db.updates) != 0 {
 		t.Errorf("without a re-render step: %d rows", len(u.db.updates))
+	}
+}
+
+// TestDestinationConnectionUpdate is C-12.FR-12 on the worker: a row destination_connection, which a change of a
+// Destination's Connection writes, runs the dispatcher's re-render step, without a lifecycle event and as the System,
+// on each open Alert Group with a delivery in its Destination that is not being retired, by Route and id, without the
+// barrier of the evaluation; it saves no Alert Group, records no Timeline entry and sends no live-update hint, is
+// deleted with its last batch and logged as open_group_update_done with its Destination and the number of Alert Groups
+// whose Desired state changed, so a second run, which changes no Desired state, counts none.
+func TestDestinationConnectionUpdate(t *testing.T) {
+	u := newUpdates(t)
+	var rendered []int64
+	changes := map[int64]bool{}
+	u.svc.SetRerender(func(_ context.Context, _ DBTX, r Rendering) error {
+		if len(r.Events) != 0 || r.Actor != System || r.Changed == nil {
+			t.Errorf("a re-render with events %+v as %+v", r.Events, r.Actor)
+		}
+		rendered = append(rendered, r.Group.ID)
+		if changes[r.Group.ID] {
+			r.Changed()
+		}
+		return nil
+	})
+	u.db.delivered = map[int64][]int64{u.acked.ID: {21}, u.firing.ID: {21, 22}, u.snoozed.ID: {22},
+		u.elsewhere.ID: {21, 23}}
+	u.db.retired = map[[2]int64]bool{{u.elsewhere.ID, 21}: true}
+	changes[u.acked.ID], changes[u.firing.ID] = true, true
+	entries, saves, hints := len(u.db.entries), u.db.calls["SaveGroup"], len(u.db.hints)
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationConnection,
+		destinationID: 21, requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if want := []int64{u.acked.ID, u.firing.ID}; !slices.Equal(rendered, want) {
+		t.Errorf("rendered %v, want %v", rendered, want)
+	}
+	if len(u.db.updates) != 0 || len(u.db.entries) != entries || u.db.calls["SaveGroup"] != saves ||
+		len(u.db.hints) != hints || u.db.calls["LockTeamEvaluation"] != 0 || !strings.Contains(u.log.String(),
+		`"event":"open_group_update_done","kind":"destination_connection","destination":"DS000000000021",`+
+			`"alert_groups":2`) {
+		t.Errorf("rows %d, entries %d, saves %d, hints %d, calls %v, log %s", len(u.db.updates),
+			len(u.db.entries)-entries, u.db.calls["SaveGroup"]-saves, len(u.db.hints)-hints, u.db.calls, u.log)
+	}
+
+	rendered, changes = nil, map[int64]bool{}
+	u.db.updates = append(u.db.updates, &fakeUpdate{id: u.db.id(), kind: KindDestinationConnection,
+		destinationID: 21, requested: u.clock.Now()})
+	u.round(t, u.worker)
+	if len(rendered) != 2 || !strings.Contains(u.log.String(),
+		`"kind":"destination_connection","destination":"DS000000000021","alert_groups":0`) {
+		t.Errorf("a second run: rendered %v, log %s", rendered, u.log)
 	}
 }
 
@@ -1565,10 +1615,11 @@ func TestTeamNameUpdate(t *testing.T) {
 	}
 }
 
-// TestUpdateKindsOfOlderVersions is the rolling update for the kinds of 0031 and 0039: a replica of a version that
-// does not know organization_message_settings and team_name — whose kinds end with team_evaluation — or one of 0032
-// that does not know route_message_settings and organization_links — whose kinds end with team_destinations — never
-// claims a row of them nor waits for one, and a replica of this version claims every one.
+// TestUpdateKindsOfOlderVersions is the rolling update for the kinds of 0031, 0039, 0040 and 0041: a replica of a
+// version that does not know organization_message_settings and team_name — whose kinds end with team_evaluation — one
+// of 0032 that does not know route_message_settings and organization_links — whose kinds end with team_destinations —
+// one of 0039 that does not know the kinds of the footer's user, or one of 0040 that does not know
+// destination_connection never claims a row of them nor waits for one, and a replica of this version claims every one.
 func TestUpdateKindsOfOlderVersions(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -1587,6 +1638,10 @@ func TestUpdateKindsOfOlderVersions(t *testing.T) {
 			KindTeamDestinations, KindRouteMessageSettings, KindOrganizationLinks}, []*fakeUpdate{
 			{kind: KindUserName, userID: owner}, {kind: KindAccountLinks, userID: owner},
 			{kind: KindServiceAccountName, accountID: robotID}}},
+		{"0041", []string{KindRouteMinimumSeverity, KindRouteMessageLabels, KindDestinationButtons,
+			KindOrganizationButtons, KindTeamEvaluation, KindOrganizationMessageSettings, KindTeamName,
+			KindTeamDestinations, KindRouteMessageSettings, KindOrganizationLinks, KindUserName, KindAccountLinks,
+			KindServiceAccountName}, []*fakeUpdate{{kind: KindDestinationConnection, destinationID: 21}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEvaluation(t)

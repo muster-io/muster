@@ -98,7 +98,10 @@
   (the kinds `user_name`, `account_links` and `service_account_name` of `open_group_updates`, with
   `open_group_updates.user_id` and `service_account_id`, and the indexes `alert_groups_snoozed_by_user_idx` and
   `alert_groups_snoozed_by_service_account_idx`, partial on the open Alert Groups, the re-render of the open Root messages whose footer names a User or
-  a Service account after a change of their name or of the User's Account links, C-12.FR-12), in
+  a Service account after a change of their name or of the User's Account links, C-12.FR-12) and
+  [`0041_destination_connection_updates`](../../internal/db/migrations/0041_destination_connection_updates.up.sql)
+  (the kind `destination_connection` of `open_group_updates`, the re-render of the open Root messages of a Destination
+  after a change of its Connection, C-12.FR-12), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -955,7 +958,8 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   items of `organizations.buttons`, or null — the default, which a replica of 0.1 writes — for "As in the
   Organization"; a `CHECK` keeps it an array. Only messenger Destinations set it: an outgoing webhook sends no buttons.
   A change of it inserts a row `destination_buttons` of `open_group_updates`, with the Destination in
-  `destination_id`, in the same transaction ([section 5](#5-queues-and-claims)). The
+  `destination_id`, in the same transaction ([section 5](#5-queues-and-claims)), and so does a change of
+  `connection_id` with a row `destination_connection` (migration 0041). The
   template error state of an outgoing webhook request is kept here (`MusterTemplateError`). **Deletion** is soft:
   `deleted_at` is set and the Destination leaves its Routes; its open Root messages get their final edit
   (`deliveries.desired_retire`), and then its secrets — the Signing secrets, the proxy password and its
@@ -1350,10 +1354,15 @@ Serves C-11 – C-16, C-17.FR-4, C-20.FR-6–7, C-23; [ADR-0005](../adr/0005-del
   `alert_group_id`, `storm_id`), the main delivery table:
   - *desired state*: `desired_version` (incremented by every re-render), `desired_text`, `desired_payload` (buttons,
     colour, or for an outgoing webhook in template mode the data its request templates read), `desired_hash` (for that
-    webhook, the hash of the rendered "update" request with its Secrets and extracted values left out), `desired_button_key_id`, `desired_retire` (the next call
-    is the final "no longer updated here" edit), `desired_received_at` (the receipt time of the oldest Snapshot whose
-    change the actual message does not show yet — null when only Commands or timers changed it; the adapter call
-    observes `muster_delivery_latency_seconds` from it and a delivered version clears it), `publication_loud`,
+    webhook, the hash of the rendered "update" request with its Secrets and extracted values left out; for a Root
+    message of an Alert Group, the hash of its rendering or, after the repair of a stored message a send may have shown
+    wrong, its repair hash, salted with `desired_version` — see [section 5](#5-queues-and-claims) — so code that
+    compares the stored hash of such a Root message with a rendering's goes through `sameHash` in
+    `internal/delivery/render.go`; Storm summaries and outgoing webhooks are never repaired),
+    `desired_button_key_id`, `desired_retire` (the next call is the final "no longer updated here" edit),
+    `desired_received_at` (the receipt time of the oldest Snapshot whose change the actual message does not show yet —
+    null when only Commands or timers changed it; the adapter call observes `muster_delivery_latency_seconds` from it
+    and a delivered version clears it), `publication_loud`,
     `late_note`; `entries` (migration 0032, `jsonb`, an array, `deliveries_entries_check`) — the entries that reached the
     Destination of an Alert Group's delivery, appended and never removed, one per Route (`{"kind": "route"}`) or Team
     (`{"kind": "team", "team_id": N}`) with the `severity_condition` it had when it first reached it, so that the
@@ -1913,8 +1922,11 @@ links of a User (`account_links`), both with the User in `user_id`, which `open_
 requires, and the name of a Service account (`service_account_name`, with it in `service_account_id`, which
 `open_group_updates_service_account_scope_check` requires) from migration 0040, whom the footer of a Root message
 names (C-12.FR-12); both foreign keys are `ON DELETE CASCADE`, as Users and Service accounts are deleted softly and a
-row without its person has nothing to render — more kinds as later stories add them to the kind `CHECK`, versioned
-`open_group_updates_kind_v8_check` since migration 0040 — is one row of
+row without its person has nothing to render; and the Connection of a Destination (`destination_connection`, with the
+Destination in `destination_id`, which `open_group_updates_destination_connection_scope_check` requires) from
+migration 0041, which decides the identity space of the footers of its Root messages (C-12.FR-12) — more kinds as
+later stories add them to the kind `CHECK`, versioned `open_group_updates_kind_v9_check` since migration 0041 — is one
+row of
 `open_group_updates`, inserted in the transaction of the change with a `NOTIFY` on `muster_open_group_updates`. The
 worker of every replica — not a Leader task — is woken at start, by that notification and by the development clock, and
 claims one row at a time:
@@ -1978,7 +1990,30 @@ whose footer names its User — `owner_user_id` while acknowledged, `snoozed_by_
 re-render step on them, so delivery edits only the Root messages whose footer changed: the Desired state of a Root
 message stores the footer of every identity space, and the adapter writes the one of the Destination's Connection when
 it sends, so that an edit queued before a change of the Connection and sent after it is right, but its hash covers only
-the footer of the Destination's identity space, so a link in another space edits nothing there. A change of a User's
+the footer of the Destination's identity space, so a link in another space edits nothing there. A rendering whose hash
+is the stored one but whose message differs in the footers of other spaces writes `desired_text` and
+`desired_payload` without a new version, state or due time (`RefreshDesiredMessage`), so a later send after a change
+of the Connection writes the new space's footer as it is now; a rendering without a footer has a stored message
+without one, so it reads nothing. When the stored message, read after the delivery's lock in the identity space of the
+Destination as it is then — a change of the Connection may have committed after the rendering read the Destination —
+differs from the rendering there, and its Root message was published or its Publication started and is still
+pending, the delivery is due again: a send after a change of the Connection, before the re-render of a link change
+ran, may have shown a footer of the new space that is no longer right. Enqueue makes it due Quietly and asks
+`SetDesired` for `configuration_only`, whatever rendering found it, and `SetDesired` sets the mark as for any edit of
+configuration, only on a delivered row or a pending row that had it; the gain of a Destination by a Route (`join`)
+makes it due as it makes its own changes, Quietly and without the mark. `desired_hash` is then the repair hash of the
+rendering's hash for the new `desired_version`, which no rendering yields and no earlier send carried, so that the
+worker, which takes a delivery whose `actual_hash` is `desired_hash` as delivered, edits it even when a call in
+flight records the hash it was sent with, or two repairs come before the send; a rendering takes the repair hash of
+the stored version as its own hash, so it edits nothing more. A Root message that was never shown is only
+refreshed. A row `destination_connection` walks the open
+Alert Groups that a row `destination_buttons` walks and only runs the re-render step on them, so delivery edits, once
+and Quietly, each Root message whose footer reads otherwise in the new space and leaves the others. It needs no
+barrier, as for a button set: a Snapshot locks its Alert Group before it reads the Destination, so the batch waits for
+one that read the old Connection, and an Alert Group a Snapshot creates meanwhile is rendered with the footer of every
+space. A save inserts the row only when the Connection changes and with it the identity space — every Telegram
+Connection shares one — and not when the button set changes in the same save, whose row `destination_buttons` walks
+the same Alert Groups; it inserts one each time. A change of a User's
 display name — a profile update, an update by an Admin, the pseudonym of a deletion — inserts `user_name`, a new,
 replaced, changed or removed Account link `account_links`, and a rename of a Service account `service_account_name`,
 each in the transaction of the change and none while a row of the same person is still unclaimed (`user_name` and `account_links`

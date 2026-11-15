@@ -487,6 +487,32 @@ func (f *fakeDB) SetDesired(_ context.Context, arg dbgen.SetDesiredParams) (stri
 	return d.state, nil
 }
 
+func (f *fakeDB) GetDesiredMessage(_ context.Context, arg dbgen.GetDesiredMessageParams) (
+	dbgen.GetDesiredMessageRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("GetDesiredMessage"); err != nil {
+		return dbgen.GetDesiredMessageRow{}, err
+	}
+	d := f.delivery(arg.ID)
+	ds := f.dests[d.dest]
+	return dbgen.GetDesiredMessageRow{DesiredPayload: d.payload,
+		Shown:           d.publishedAt != nil || (d.started != nil && d.state == "pending"),
+		DestinationType: ds.typ, ConnectionID: nullInt(ds.connection)}, nil
+}
+
+func (f *fakeDB) RefreshDesiredMessage(_ context.Context, arg dbgen.RefreshDesiredMessageParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("RefreshDesiredMessage"); err != nil {
+		return err
+	}
+	if d := f.delivery(arg.ID); bytes.Equal(d.hash, arg.DesiredHash) {
+		d.text, d.payload = arg.DesiredText, arg.DesiredPayload
+	}
+	return nil
+}
+
 func (f *fakeDB) SetDeliveryUrgent(_ context.Context, arg dbgen.SetDeliveryUrgentParams) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

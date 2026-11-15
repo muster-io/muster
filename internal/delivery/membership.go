@@ -4,7 +4,6 @@
 package delivery
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -548,8 +547,20 @@ func (s *Service) join(ctx context.Context, tx dbgen.DBTX, q queries, g GroupVie
 	if err != nil {
 		return fmt.Errorf("render the request of alert group #%d in %s: %w", g.Number, d.PublicID, err)
 	}
-	if bytes.Equal(row.DesiredHash, msg.hash) {
-		return nil
+	if sameHash(row.DesiredHash, msg.hash, row.DesiredVersion) {
+		due, refresh, err := s.storedNeeds(ctx, q, row.ID, d, msg)
+		if err != nil {
+			return fmt.Errorf("read the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+		}
+		if refresh {
+			if err := s.refreshDesired(ctx, q, row.ID, row.DesiredHash, msg); err != nil {
+				return fmt.Errorf("refresh the desired state of alert group #%d in %s: %w", g.Number, d.PublicID, err)
+			}
+		}
+		if !due {
+			return nil
+		}
+		msg.hash = repairHash(msg.hash, row.DesiredVersion+1)
 	}
 	if _, err := q.SetDesired(ctx, dbgen.SetDesiredParams{OrgID: s.orgID, ID: row.ID, DesiredText: msg.text,
 		DesiredPayload: msg.payload, DesiredHash: msg.hash, ButtonKeyID: nonEmpty(msg.keyID), Open: true,
