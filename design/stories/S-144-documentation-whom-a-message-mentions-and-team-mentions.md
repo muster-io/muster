@@ -69,9 +69,8 @@ issue: 433
   (F-123), `<!subteam^ID>` mentions a Slack user group's members (F-126), and in Slack a workspace may let only its
   Admins and Owners create user groups (F-125); Connect Slack — kept from S-139, which writes it: `usergroups:read`
   reaches the bot only after the app is reinstalled, which keeps the bot token, so the Connection is checked again, not
-  edited (F-125); Whom a message mentions and Connect Slack — `@everyone` (`<!everyone>`) mentions only in the
-  workspace's general channel and elsewhere looks the same but mentions no one, as far as was checked, so a Destination
-  in another channel uses `@channel` (F-127).
+  edited (F-125); Whom a message mentions and Connect Slack — Slack offers no `@everyone`: `<!everyone>` from a bot
+  mentions only in the workspace's general channel, where `@channel` reaches the same people (F-127, C-28.FR-2).
 - **llms.txt** (`docs/llms.txt.tmpl`): a scenario "Mention the right people" with Concepts → Whom a message mentions and
   Concepts → Teams.
 

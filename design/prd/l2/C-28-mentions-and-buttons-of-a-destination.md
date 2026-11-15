@@ -46,14 +46,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   | Destination type | Everyone in the chat | Messenger groups and Teams | People and On-call |
   |---|---|---|---|
   | Mattermost | `@channel`, `@here`, `@all` | Mattermost groups by name | linked people |
-  | Slack | `<!channel>`, `<!here>`, `<!everyone>` | Slack user groups, when the Connection's check found the scope `usergroups:read` (C-24.FR-1) | linked people |
+  | Slack | `<!channel>`, `<!here>` | Slack user groups, when the Connection's check found the scope `usergroups:read` (C-24.FR-1) | linked people |
   | Telegram | none | none | linked people |
   | Bridge | those of `channel`, `here`, `all` and `everyone` that the bridge declares in `info` (C-22.FR-2) | group names, when the bridge declares group mentions in `info` | linked people; a bridge without `native_mentions` shows their plain name, which notifies nobody (C-22.FR-16) |
   | Outgoing webhook | every target, as data (C-15.FR-11) | every target, as data | every target, as data |
 
-  Saving an entry that the Connection cannot mention is refused with `422` and the code `mention_unsupported`. When a
-  Connection later loses an ability, such as a Slack app reinstalled without the scope, its entries stay, mention
-  nobody, and the Destination page warns about each.
+  Slack offers no `everyone`: `<!everyone>` from a bot mentions only in the workspace's general channel (F-127), where
+  `<!channel>` reaches the same people. Saving an entry that the Connection cannot mention is refused with `422` and the
+  code `mention_unsupported`. When a Connection later loses an ability, such as a Slack app reinstalled without the
+  scope, its entries stay, mention nobody, and the Destination page warns about each.
 - **C-28.FR-3** For each Loud event, delivery turns the entries that apply to it into the Mentions of the message for
   that Destination: a person, by the Account link in the Identity space of the Destination's Connection (C-12.FR-12); a
   Team, by its Team mention for that Connection, and nobody when it has none — never its On-call instead; "Team from the
@@ -149,7 +150,7 @@ Checked through the recording test adapter of C-11 and the fake messenger server
 - **C-28.AC-2** "Team payments" in a Mattermost Destination mentions `@payments_team` when the Team has that Team
   mention for the Connection, and nobody — and not the On-call — when it has none.
 - **C-28.AC-3** A Telegram Destination refuses `@channel`, a group and a Team with `422` `mention_unsupported`, and
-  takes a person and "On-call of a Team"; a Slack Destination takes `everyone`, and takes a user group only after its
+  takes a person and "On-call of a Team"; a Slack Destination refuses `everyone`, and takes a user group only after its
   Connection's check found `usergroups:read`; a Bridge Destination takes `channel` only when its bridge declares it in
   `info`, and takes a person on any bridge, where one without `native_mentions` gets the plain name and the Timeline
   records "Mention not delivered" with the reason that the bridge cannot mention people.

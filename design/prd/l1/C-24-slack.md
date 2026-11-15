@@ -126,8 +126,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   Destination's Mention settings ask. A Slack Destination takes nobody, `channel`, `here` and chosen users, and refuses
   `all` and messenger groups. The footer names a User linked for the Connection by `<@U…>`, in edits and new messages
   alike (C-12.FR-12).
-  _Revised for L2 (2026-10-26):_ a Slack Destination also takes `everyone` (`<!everyone>`) and, with `usergroups:read`,
-  user groups and Team mentions as `<!subteam^ID>` (C-28.FR-2).
+  _Revised for L2 (2026-10-26, 2026-11-15):_ a Slack Destination also takes, with `usergroups:read`, user groups and
+  Team mentions as `<!subteam^ID>` (C-28.FR-2). It does not take `everyone`: `<!everyone>` from a bot mentions only in
+  the workspace's general channel (F-127), where `<!channel>` reaches the same people.
 - **C-24.FR-7** The adapter escapes alert data for Slack's mrkdwn (C-12.FR-7): `&`, `<` and `>` become `&amp;`,
   `&lt;` and `&gt;`, so that nothing in alert data becomes a link, a Mention, `<!channel>` or `<!here>` (F-097); `@`
   gets the zero-width space of C-12.FR-7; and since mrkdwn has no escape for `*`, `_`, `~` and `` ` `` (F-097), each of

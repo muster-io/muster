@@ -13,6 +13,11 @@ files_touched:
   - design/stories/S-171-group-and-everyone-mentions-in-slack-and-through-bridges.md
   - design/stories/S-143-mentions-grid-of-the-destination-form-and-how-to-mention-the-team.md
   - design/stories/S-144-documentation-whom-a-message-mentions-and-team-mentions.md
+  - design/stories/coverage.md
+  - design/stories/README.md
+  - design/prd/l2/C-28-mentions-and-buttons-of-a-destination.md
+  - design/prd/l1/C-24-slack.md
+  - design/prd/L2.md
 acceptance:
   - "[C-25.FR-8, C-28.FR-2] `design/facts.md` has a new entry F-NNN that says whether `@<group>` in a bot's post notifies the members of a Mattermost custom group, and of an LDAP-synced group, in a Thread reply's `message` and inside the attachment of a Root message, as `@channel` does (F-113), and whether the group's `allow_reference` matters, with the Mattermost version and edition."
   - "[C-25.FR-8] `design/facts.md` has a new entry F-NNN that says which Mattermost editions and licences have custom groups and LDAP-synced groups, and how a bot reads them — `GET /api/v4/groups` with which parameters and which permission or role of the bot — and what the call answers to a bot without it."

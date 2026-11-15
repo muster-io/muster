@@ -114,7 +114,7 @@ issue: 428
     mentions of everyone), `usergroups_read_missing` (a Slack Connection whose last check found no
     `usergroups:read`), `bridge_no_group_mentions` (a bridge that declares no group mentions), `bridge_not_declared`
     (a mention of everyone that the bridge does not declare in `everyone_mentions`), `messenger_has_no_token` (a mention
-    of everyone that the messenger lacks: `@everyone` in Mattermost, `@all` in Slack).
+    of everyone that the messenger lacks: `@everyone` in Mattermost, `@all` and `@everyone` in Slack, F-127).
   - `listConnectionGroups` (`GET /connections/{connection_id}/groups`, `connections:write` because it calls out with
     the bot token, as `listConnectionChannels`; `q`): `ConnectionGroupList` {`items` ({`id`, `name`,
     `display_name`, `member_count` or null})[], `truncated`}; `409` `groups_not_listed` (`conflict`, a new code) for

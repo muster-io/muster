@@ -45,12 +45,12 @@ files_touched:
   - docs/install/versions.md
 acceptance:
   - "[C-28.FR-1, C-28.FR-10, C-12.FR-8] Every Destination type takes `mention_entries` — each a target (`everyone` with `channel`, `here`, `all` or `everyone`; `user`; `group`; `team`; `teams_from_label`; `on_call_of_team`; `on_call_of_teams_from_label`) and the Loud events it applies to (`new_alert_group`, `new_alerts`, `reopen`, `ack_timeout`, `snooze_ended`, `rise_to_urgent`, `storm_started`), all seven when omitted — saved in order with `If-Match` and in the diff of `destination.updated`; a Destination without entries mentions nobody (`entries_test.go`, `write_test.go`)."
-  - "[C-28.FR-2, C-28.AC-3, C-22.FR-3] A Telegram Destination refuses `channel`, a group, a Team and \"Team from the label\" with `422` `mention_unsupported` at `/mention_entries/{i}/target` and takes a person and \"On-call of a Team\"; a Slack Destination takes `everyone` and refuses `all`, and takes a user group or a Team only while its Connection's last check found `usergroups:read`; a Bridge Destination takes `channel` only when its bridge declares it in `everyone_mentions`, a group only with `group_mentions`, and a person on any bridge; an outgoing webhook takes every target; an entry whose Connection later lost the ability stays, reads `available` false with its `MentionUnavailableReason` and mentions nobody (`entries_test.go`)."
+  - "[C-28.FR-2, C-28.AC-3, C-22.FR-3] A Telegram Destination refuses `channel`, a group, a Team and \"Team from the label\" with `422` `mention_unsupported` at `/mention_entries/{i}/target` and takes a person and \"On-call of a Team\"; a Slack Destination refuses `everyone` and `all`, and takes a user group or a Team only while its Connection's last check found `usergroups:read`; a Bridge Destination takes `channel` only when its bridge declares it in `everyone_mentions`, a group only with `group_mentions`, and a person on any bridge; an outgoing webhook takes every target; an entry whose Connection later lost the ability stays, reads `available` false with its `MentionUnavailableReason` and mentions nobody (`entries_test.go`)."
   - "[C-28.FR-3, C-28.AC-1, C-28.AC-2, C-25.FR-8, C-13.FR-8] A Mattermost Destination with \"On-call of the Team from the label\" for every event and `here` for `new_alert_group` only mentions, on a new Alert Group of \"payments\", the On-call of payments' main Schedule at that moment and `@here`, and on its Reopen only the On-call; \"Team payments\" mentions `@payments_team` when the Team has that Team mention for the Connection, and nobody — not the On-call — when it has none; each person and group is mentioned once per message (`mentions_test.go`, `mention_entries_test.go`)."
   - "[C-28.FR-3, C-12.FR-12] A person whom an entry names without an Account link in the Destination's Identity space is left out of the message's Mentions and nothing is written in the Thread for them (`mentions_test.go`)."
   - "[C-28.FR-4] Reminders and auto-unacknowledge still mention the Owner and a Takeover the previous Owner whatever the entries, a Reopen into acknowledged only the Owner, an edit never adds Mentions, and a Quiet new message carries none (`worker_test.go`)."
   - "[C-28.FR-5, C-28.AC-5] The migration turns the L1 settings \"`@channel` for `new_alert_group`, Alice for `ack_timeout`\" into two entries — `channel` for `new_alert_group` and `storm_started`, Alice for `ack_timeout` — and a Destination that mentioned nobody into none; until 0.3.0 `mentions` is deprecated, computed in the reads from the entries L1 can express and reads the same as before; the column keeps what the migration found and is not written afterwards (`entries_integration_test.go`, `db_test.go`)."
-  - "[C-28.FR-5] Until 0.3.0 a create or update with `mentions` and without `mention_entries` sets the entries by the conversion the migration uses: on create they are the conversion; on update it replaces exactly the entries that L1 can express for the Destination's type — the targets L1 took there (Mattermost: `channel`, `all`, `here`, Users, groups by name; Slack: `channel`, `here`, Users; Telegram and Bridge: Users; outgoing webhook: `channel`, `all`, `here`, Users, groups) with at least one of the six L1 events — and keeps every other entry after them, a Slack `everyone` and a Slack user group among them; a target present before and after keeps its stored `storm_started`; an update whose `mentions` equals the L1 form of the stored entries changes nothing; every L1 value reads back unchanged — `channel` for `new_alerts`, `here`, `all`, `channel` for `ack_timeout`, chosen Users and Mattermost groups; a request with both fields takes `mention_entries` and ignores `mentions`; a value L1 refused is refused at the same pointer under `/mentions` (`entries_test.go`, `write_test.go`)."
+  - "[C-28.FR-5] Until 0.3.0 a create or update with `mentions` and without `mention_entries` sets the entries by the conversion the migration uses: on create they are the conversion; on update it replaces exactly the entries that L1 can express for the Destination's type — the targets L1 took there (Mattermost: `channel`, `all`, `here`, Users, groups by name; Slack: `channel`, `here`, Users; Telegram and Bridge: Users; outgoing webhook: `channel`, `all`, `here`, Users, groups) with at least one of the six L1 events — and keeps every other entry after them, a Slack user group among them; a target present before and after keeps its stored `storm_started`; an update whose `mentions` equals the L1 form of the stored entries changes nothing; every L1 value reads back unchanged — `channel` for `new_alerts`, `here`, `all`, `channel` for `ack_timeout`, chosen Users and Mattermost groups; a request with both fields takes `mention_entries` and ignores `mentions`; a value L1 refused is refused at the same pointer under `/mentions` (`entries_test.go`, `write_test.go`)."
   - "[C-28.FR-6, C-28.AC-8, C-26.FR-1] Naming a Destination of the Team \"payments\" that has no entry naming that Team adds the entry \"Team payments\" for every Loud event, recorded in the Audit log, on every Destination type but Telegram, which gets none; an Admin may remove it, and naming it again later adds it again only when it has none (`teams_test.go`)."
   - "[C-28.FR-7, C-28.AC-6, C-11.FR-6] The first publication of a Storm summary carries the Mentions of the Destination's entries for `storm_started`, with \"Team from the label\" and \"On-call of the Team from the label\" taken from the Teams of the Alert Groups it counts; its later edits carry none, and it starts nothing else (`storm_test.go`)."
   - "[C-26.FR-5, C-11.FR-20, C-17.FR-2] `destination_joined` mentions the Destination's entries for `new_alert_group`, and an ack timeout notice those for `ack_timeout` (`worker_test.go`)."
@@ -82,7 +82,7 @@ issue: 429
 
 **OUT**
 
-- Writing group mentions and mentions of everyone in Slack (`<!subteam^ID>`, `<!everyone>`) and through bridges (the
+- Writing group mentions in Slack (`<!subteam^ID>`) and group mentions and mentions of everyone through bridges (the
   `kind` of a Mention in `api/bridge.yaml`): S-171, which follows this story.
 - "Mention not delivered" in the Timeline and the Destination's warnings about it: S-165.
 - The Mentions grid of the Destination form, "What each messenger supports" and "How to mention the Team": S-143. The
@@ -130,7 +130,7 @@ issue: 429
     one dropped in a third, as `0010` does for the kind CHECK.
   - The down migration drops the table and restores the old CHECK.
 - **Mentions** (`internal/mentions`): `entries.go` — the entries, their validation against the Connection's abilities
-  (Mattermost: `channel`, `here`, `all`, groups, Teams; Slack: `channel`, `here`, `everyone`, and groups and Teams with
+  (Mattermost: `channel`, `here`, `all`, groups, Teams; Slack: `channel`, `here`, and groups and Teams with
   `slack_usergroups_read`; Telegram: people and the On-call only; Bridge: the declared `everyone_mentions`, and groups
   and Teams with `group_mentions`; outgoing webhook: all), `available` and `resolves_to`, the L1 form computed from
   them, `FromSettings` (the L1 settings to entries, C-28.FR-5) and `AddTeamEntry` for C-28.FR-6; `mentions.go` —
@@ -150,18 +150,17 @@ issue: 429
 - **Destinations** (`internal/destinations`): the entries in the inputs, reads, diffs and validation of every type.
   **The entries that L1 can express** are those whose target L1 took on the Destination's type — by the L1 rules of
   `mentions.Validate` (C-12.FR-8, C-22.FR-3, C-24.FR-6): Mattermost `channel`, `all` and `here`, Users and groups by
-  name; Slack `channel`, `here` and Users (no `everyone`, no user groups); Telegram and Bridge Users only; outgoing
-  webhook `channel`, `all`, `here`, Users and groups — and whose events include at least one of the six L1 kinds. The
-  L1 `mentions` of the read is computed from exactly those entries. A request with `mentions` and without
-  `mention_entries` is converted into entries by `mentions.FromSettings`, the function the migration's conversion
-  follows (C-28.FR-5): on create the entries are its result; on update its result replaces exactly the stored entries
-  that L1 can express, every other entry staying after them in its order — a Slack `everyone` or user group, a Bridge
-  mention of everyone or group, an entry for `storm_started` alone, Teams and On-calls — and a target present before
-  and after keeps its stored `storm_started` membership rather than the migration's rule; a `mentions` equal to the L1
-  form of the stored entries changes nothing, so a client that sends back what it read loses nothing. The L1 validation
-  and its pointers under `/mentions` stay for such a request, and the read never shows what that validation would
-  refuse, so a read sent back changed is never refused for a part it did not change. The column
-  `destinations.mentions` is not written, as above.
+  name; Slack `channel`, `here` and Users (no user groups); Telegram and Bridge Users only; outgoing webhook `channel`,
+  `all`, `here`, Users and groups — and whose events include at least one of the six L1 kinds. The L1 `mentions` of the
+  read is computed from exactly those entries. A request with `mentions` and without `mention_entries` is converted into
+  entries by `mentions.FromSettings`, the function the migration's conversion follows (C-28.FR-5): on create the entries
+  are its result; on update its result replaces exactly the stored entries that L1 can express, every other entry
+  staying after them in its order — a Slack user group, a Bridge mention of everyone or group, an entry for
+  `storm_started` alone, Teams and On-calls — and a target present before and after keeps its stored `storm_started`
+  membership rather than the migration's rule; a `mentions` equal to the L1 form of the stored entries changes nothing,
+  so a client that sends back what it read loses nothing. The L1 validation and its pointers under `/mentions` stay for
+  such a request, and the read never shows what that validation would refuse, so a read sent back changed is never
+  refused for a part it did not change. The column `destinations.mentions` is not written, as above.
 - **Problems** (`internal/api/problem.go`): `mention_unsupported` maps to its error item at
   `/mention_entries/{i}/target`.
 - **Gateway-only Connections** (maintainer's decision Q2 of the plan review): a Connection whose only role is
@@ -178,9 +177,9 @@ issue: 429
   Mattermost writes group targets as L1 does (`@{name}`, which mentions a custom group's members inside a Root message's
   attachment and in a Thread reply's `message`, F-123; `@channel`, `@here` and `@all` in both, F-113 and F-124); Slack
   keeps writing `<!channel>` and `<!here>` as in L1 (`test/e2e/slack_test.go`); until S-171 merges, the Slack adapter
-  leaves out `<!everyone>` and user groups (`<!subteam^ID>`), and the Bridge adapter the group and everyone targets,
-  which they cannot write yet. The in-process live test of delivery (`live_test.go`) sets Mentions through
-  `mention_entries` rows instead of the column, and expects `storm_started` on the first publication of a Storm summary.
+  leaves out user groups (`<!subteam^ID>`), and the Bridge adapter the group and everyone targets, which they cannot
+  write yet. The in-process live test of delivery (`live_test.go`) sets Mentions through `mention_entries` rows instead
+  of the column, and expects `storm_started` on the first publication of a Storm summary.
 - **Outgoing webhooks** (`internal/webhooks/mentions.go`): the data of C-15.FR-11 revised.
 - **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): `mention_entries` empty in the builders of
   Destination reads. The new enums meet no exhaustive switch of the SPA, and `MentionName` none either.
@@ -206,8 +205,8 @@ issue: 429
    the spec. Check: `make generate-check`; `entries_test.go` covers the table of C-28.FR-2 cell by cell and the round
    trip of every L1 value (`channel`, `here`, `all` per kind, Users, groups) through `FromSettings` and the computed
    form; `write_test.go` covers `mentions` alone on create and update, both fields, an update that sends back the read,
-   one that keeps a Team entry, a Slack Destination with an `everyone` entry and a user group entry that an update of
-   its L1 form keeps, and a target whose stored `storm_started` an update keeps.
+   one that keeps a Team entry, a Slack Destination with a user group entry that an update of its L1 form keeps, and a
+   target whose stored `storm_started` an update keeps.
 3. Write the resolution with its interfaces, wire them, and use it in delivery, Storm summaries and outgoing webhooks.
    Check: `mentions_test.go`, `worker_test.go`, `storm_test.go`, `body_test.go`; `go vet ./...` finds no import cycle.
 4. Add the entry of a Team's Destination. Check: `teams_test.go`.
@@ -268,7 +267,7 @@ curl -s "${A[@]}" -X PUT -H "If-Match: $E" $API/destinations/$IN -d "$(curl -s "
 curl -s "${A[@]}" $API/destinations/$IN | jq -c '[.mentions.new_alert_group.everyone, .mentions.new_alerts.everyone]'   # ["here","channel"]
 ```
 
-`test/e2e/mention_entries_test.go` repeats these checks and adds a Slack Destination that takes `everyone` and takes a
+`test/e2e/mention_entries_test.go` repeats these checks and adds a Slack Destination that refuses `everyone` and takes a
 user group only after its Connection's check found the scope, a bridge that takes `channel` only when it declares it
 (C-28.AC-3; their messages are S-171's), a Storm on the Route whose summary's first publication mentions the entries
 for `storm_started` (C-28.AC-6), an outgoing webhook with a Team target, and the Owner rules of C-28.FR-4. The migration
@@ -303,10 +302,9 @@ None open. Settled:
 - The conversion of `mentions` in requests is the maintainer's decision on the plan review (Q1): ignoring it, as the
   first contract said, would have left every Destination that the end-to-end suites, the L1 editor and 0.1 clients
   write without Mentions.
-- `<!everyone>` mentions only in the Slack workspace's general channel; elsewhere Slack draws it the same and it did not
-  mention the channel member who watched (F-127). A Slack Destination still takes the entry `everyone` on any channel,
-  as C-28.FR-2 says; the pull request of the spike S-138 proposes a change of C-28.FR-2 for the maintainer to decide,
-  and until it is decided this contract does not change.
+- A Slack Destination refuses the entry `everyone` (C-28.FR-2, the maintainer's decision on the spike S-138):
+  `<!everyone>` from a bot mentions only in the workspace's general channel (F-127), where `<!channel>` reaches the same
+  people; the form shows it unavailable with `messenger_has_no_token`, as `all`.
 - Migration `0034` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
 
