@@ -5,11 +5,17 @@
 import type { DestinationRef } from './destinationRef';
 import type { PublicId } from './publicId';
 import type { TeamInput } from './teamInput';
+import type { TeamMention } from './teamMention';
+import type { TeamMentionConnection } from './teamMentionConnection';
 
 export type Team = TeamInput & {
   id: PublicId;
   /** The Destinations of the Team's `destination_entries`, by name, with their health. */
   destinations: DestinationRef[];
+  /** The Team mentions of Connections that are not deleted, by Connection name. */
+  team_mentions: TeamMention[];
+  /** Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or null, and whether it can mention a group. */
+  mention_connections: TeamMentionConnection[];
   /** How many people are in the Team, disabled Users included. */
   user_count: number;
   created_at: string;
@@ -19,6 +25,10 @@ export type Team = TeamInput & {
   id: PublicId;
   /** The Destinations of the Team's `destination_entries`, by name, with their health. */
   destinations: DestinationRef[];
+  /** The Team mentions of Connections that are not deleted, by Connection name. */
+  team_mentions: TeamMention[];
+  /** Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or null, and whether it can mention a group. */
+  mention_connections: TeamMentionConnection[];
   /** How many people are in the Team, disabled Users included. */
   user_count: number;
   created_at: string;

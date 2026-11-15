@@ -98,12 +98,17 @@ const (
 	codeNotInTeam             = "not_in_team"
 	codeScheduleInUse         = "schedule_in_use"
 	codeOverrideEnded         = "override_ended"
+	codeGroupsNotListed       = "groups_not_listed"
+	codeTeamMentionsChanged   = "team_mentions_changed"
 
 	fieldRequired      = "required"
 	fieldInvalidFormat = "invalid_format"
 	fieldTooShort      = "too_short"
 	fieldTooLong       = "too_long"
 	fieldUnsupported   = "unsupported"
+	// fieldGroupMentionsUnsupported is a Team mention for a Connection that cannot mention a group (C-25.FR-8), which
+	// internal/teams refuses with teams.CodeGroupMentionsUnsupported.
+	fieldGroupMentionsUnsupported = teams.CodeGroupMentionsUnsupported
 )
 
 const (
@@ -507,6 +512,13 @@ func (s *Server) problemFor(ctx context.Context, operation string, err error) *P
 			"Destinations use this Connection; delete them or move them to another Connection first.")
 	case errors.Is(err, connections.ErrNotMattermost):
 		return problem(http.StatusConflict, typeConflict, "", "This is not a Mattermost Connection.")
+	case errors.Is(err, connections.ErrTeamMentionsChanged):
+		return problem(http.StatusConflict, typeConflict, codeTeamMentionsChanged,
+			"Teams kept adding Team mentions for this Connection while it was being deleted; delete it again.")
+	case errors.Is(err, connections.ErrGroupsNotListed):
+		return problem(http.StatusConflict, typeConflict, codeGroupsNotListed,
+			"This Connection lists no groups: Telegram has no group mentions, a bridge's groups are entered by name, "+
+				"and a Slack Connection needs the scope usergroups:read, found by its check.")
 	case errors.Is(err, routing.ErrNotFound):
 		return problem(http.StatusNotFound, typeNotFound, "", "No such Route.")
 	case errors.Is(err, routing.ErrNameTaken):

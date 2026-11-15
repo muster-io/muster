@@ -50,6 +50,8 @@ type fakeConnections struct {
 	chanArgs  [][2]string
 	slack     slack.ChannelList
 	slackArgs [][2]string
+	groups    connections.GroupList
+	groupArgs [][2]string
 	chanErr   error
 	baseURLs  []*string
 	drafts    []connections.Draft
@@ -186,6 +188,14 @@ func (f *fakeConnections) SlackChannels(_ context.Context, id, q string) (slack.
 		return slack.ChannelList{}, connections.ErrNotFound
 	}
 	return f.slack, cmp.Or(f.chanErr, f.err)
+}
+
+func (f *fakeConnections) Groups(_ context.Context, id, q string) (connections.GroupList, error) {
+	f.groupArgs = append(f.groupArgs, [2]string{id, q})
+	if f.find(id) < 0 {
+		return connections.GroupList{}, connections.ErrNotFound
+	}
+	return f.groups, cmp.Or(f.chanErr, f.err)
 }
 
 func (f *fakeConnections) CallbackURL(id string) string {
@@ -1176,5 +1186,73 @@ func TestListSlackChannelsAPI(t *testing.T) {
 	fc.chanErr = nil
 	if a := x.as(t, connectionsReader, http.MethodGet, path, ""); a.status != http.StatusForbidden {
 		t.Errorf("by a reader = %d", a.status)
+	}
+}
+
+// TestListConnectionGroupsAPI covers C-25.FR-8 on the API: listConnectionGroups answers the groups with their id, name,
+// display name and member count, null when the messenger did not say, and truncated; q reaches the service; a
+// Connection that lists no groups answers 409 groups_not_listed, a refused read 409, no limiter token 503 with
+// Retry-After, an unknown Connection 404 and a reader 403.
+func TestListConnectionGroupsAPI(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	two := int64(2)
+	fc.groups = connections.GroupList{Groups: []connections.Group{{ID: "g1", Name: "devops_team",
+		DisplayName: "DevOps team", MemberCount: &two}, {ID: "S0FAKEPAYTEAM", Name: "payments-team",
+		DisplayName: "Payments team"}}, Truncated: true}
+	path := "/api/v1/connections/" + connectionID + "/groups"
+	a := x.as(t, connectionsWriter, http.MethodGet, path+"?q=team", "")
+	var list gen.ConnectionGroupList
+	decodeInto(t, a, &list)
+	if a.status != http.StatusOK || !list.Truncated || len(list.Items) != 2 || list.Items[0].Id != "g1" ||
+		list.Items[0].Name != "devops_team" || list.Items[0].DisplayName != "DevOps team" ||
+		list.Items[0].MemberCount.MustGet() != 2 || !list.Items[1].MemberCount.IsNull() ||
+		fc.groupArgs[0] != [2]string{connectionID, "team"} {
+		t.Fatalf("groups = %d %s", a.status, a.body)
+	}
+	if !strings.Contains(string(a.body), `"member_count":null`) {
+		t.Errorf("a count the messenger did not say is not null: %s", a.body)
+	}
+	fc.groups = connections.GroupList{Groups: []connections.Group{}}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusOK ||
+		strings.TrimSpace(string(a.body)) != `{"items":[],"truncated":false}` || fc.groupArgs[1][1] != "" {
+		t.Errorf("empty = %d %s", a.status, a.body)
+	}
+	fc.chanErr = connections.ErrGroupsNotListed
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusConflict ||
+		a.json(t)["code"] != "groups_not_listed" || a.json(t)["type"] != problemBase+"conflict" {
+		t.Errorf("not listed = %d %s", a.status, a.body)
+	}
+	fc.chanErr = &connections.MessengerError{Text: "Mattermost answered 403: denied (api.context.permissions.app_error)"}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusConflict ||
+		!strings.Contains(a.json(t)["detail"].(string), "api.context.permissions.app_error") {
+		t.Errorf("refused = %d %s", a.status, a.body)
+	}
+	fc.chanErr = &delivery.LimitedError{RetryAfter: 2 * time.Second}
+	if a := x.as(t, connectionsWriter, http.MethodGet, path, ""); a.status != http.StatusServiceUnavailable ||
+		a.header.Get("Retry-After") != "2" {
+		t.Errorf("limited = %d %v", a.status, a.header)
+	}
+	fc.chanErr = nil
+	if a := x.as(t, connectionsWriter, http.MethodGet, "/api/v1/connections/CNAAAAAAAAAAZZ/groups", ""); a.status !=
+		http.StatusNotFound {
+		t.Errorf("unknown = %d %s", a.status, a.body)
+	}
+	if a := x.as(t, connectionsReader, http.MethodGet, path, ""); a.status != http.StatusForbidden {
+		t.Errorf("by a reader = %d", a.status)
+	}
+}
+
+// TestDeleteConnectionTeamMentionsChanged is C-25.FR-11 on the API: a deletion that Teams kept giving a first Team
+// mention while it ran answers 409 team_mentions_changed, saying to delete again, and deletes nothing.
+func TestDeleteConnectionTeamMentionsChanged(t *testing.T) {
+	x, fc := newConnectionsAPI(t)
+	fc.list = append(fc.list, connections.Connection{ID: 9, PublicID: "CNAAAAAAAAAAD9",
+		Type: connections.TypeMattermost, Name: "free", Version: 1})
+	fc.err = connections.ErrTeamMentionsChanged
+	a := x.as(t, connectionsWriter, http.MethodDelete, "/api/v1/connections/CNAAAAAAAAAAD9", "")
+	if a.status != http.StatusConflict || a.json(t)["type"] != problemBase+"conflict" ||
+		a.json(t)["code"] != "team_mentions_changed" || !strings.Contains(a.json(t)["detail"].(string),
+		"delete it again") || len(fc.deleted) != 0 {
+		t.Fatalf("delete = %d %s", a.status, a.body)
 	}
 }

@@ -128,6 +128,16 @@ func TestParseValidInfo(t *testing.T) {
 		{"every feature", nil, []string{"buttons", "delete", "deletion_events", "direct_messages", "native_mentions",
 			"private_answers", "quiet_messages", "status_color", "thread_messages"}},
 		{"minimal", minimal, []string{}},
+		{"group and everyone mentions", func(m map[string]any) {
+			c := at(m, "capabilities")
+			c["group_mentions"], c["everyone_mentions"] = true, []any{"channel", "here", "all", "everyone"}
+		}, []string{"buttons", "delete", "deletion_events", "direct_messages", "everyone_mentions", "group_mentions",
+			"native_mentions", "private_answers", "quiet_messages", "status_color", "thread_messages"}},
+		{"no group and no everyone mentions", func(m map[string]any) {
+			minimal(m)
+			c := at(m, "capabilities")
+			c["group_mentions"], c["everyone_mentions"] = false, []any{}
+		}, []string{}},
 		{"switched off", func(m map[string]any) {
 			c := at(m, "capabilities")
 			c["native_mentions"], c["quiet_messages"], c["status_color"], c["deletion_events"] = false, false, false, false
@@ -324,6 +334,13 @@ func TestInvalidInfo(t *testing.T) {
 		{set("capabilities.delete", "max_age_seconds", 0), "capabilities.delete.max_age_seconds is below 1"},
 		{set("capabilities", "native_mentions", nil), "capabilities.native_mentions is null"},
 		{set("capabilities", "native_mentions", "yes"), "capabilities.native_mentions has the wrong type"},
+		{set("capabilities", "group_mentions", nil), "capabilities.group_mentions is null"},
+		{set("capabilities", "group_mentions", "yes"), "capabilities.group_mentions has the wrong type"},
+		{set("capabilities", "everyone_mentions", nil), "capabilities.everyone_mentions is null"},
+		{set("capabilities", "everyone_mentions", []any{"room"}),
+			"capabilities.everyone_mentions has an unknown value"},
+		{set("capabilities", "everyone_mentions", []any{"here", "here"}),
+			"capabilities.everyone_mentions has a repeated value"},
 		{set("", "roles", nil), "roles is null"},
 		{set("", "roles", []any{}), "roles is empty"},
 		{set("", "roles", []any{"pager"}), "roles has an unknown value"},
@@ -695,5 +712,34 @@ func TestInfoRoles(t *testing.T) {
 		if got := StoredRoles([]byte(raw)); !slices.Equal(got, []string{RoleMessenger}) {
 			t.Errorf("StoredRoles(%q) = %v", raw, got)
 		}
+	}
+}
+
+// TestGroupAndEveryoneMentions covers C-22.FR-2 revised and C-28.FR-2: Muster reads group_mentions and
+// everyone_mentions from the info and from its stored copy, as none when the bridge declares none.
+func TestGroupAndEveryoneMentions(t *testing.T) {
+	declared, err := ParseInfo(validInfo(t, func(m map[string]any) {
+		c := at(m, "capabilities")
+		c["group_mentions"], c["everyone_mentions"] = true, []any{"here", "channel"}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := DecodeInfo(declared.Raw)
+	if err != nil || !declared.GroupMentions() || !stored.GroupMentions() ||
+		!slices.Equal(declared.EveryoneMentions(), []string{"here", "channel"}) ||
+		!slices.Equal(stored.EveryoneMentions(), []string{"here", "channel"}) {
+		t.Fatalf("declared: %v, %v, stored %+v, %v", declared.GroupMentions(), declared.EveryoneMentions(), stored, err)
+	}
+	none, err := ParseInfo(validInfo(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.GroupMentions() || none.EveryoneMentions() == nil || len(none.EveryoneMentions()) != 0 {
+		t.Fatalf("none declared: %v, %#v", none.GroupMentions(), none.EveryoneMentions())
+	}
+	off, err := ParseInfo(validInfo(t, set("capabilities", "group_mentions", false)))
+	if err != nil || off.GroupMentions() {
+		t.Fatalf("group_mentions false: %v, %v", off.GroupMentions(), err)
 	}
 }

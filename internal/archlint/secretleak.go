@@ -1460,6 +1460,11 @@ func probeMattermost(ctx context.Context, secrets []string, log io.Writer) error
 	errs = append(errs, err, texts(res))
 	_, err = svc.Channels(ctx, c.PublicID, "", "")
 	errs = append(errs, err)
+	groups, err := svc.Groups(ctx, c.PublicID, "")
+	errs = append(errs, err)
+	for _, g := range groups.Groups {
+		errs = append(errs, errors.New(g.ID+" "+g.Name+" "+g.DisplayName))
+	}
 	errs = append(errs, probePresses(ctx, svc, k, clocks, logger, c.PublicID), probeAdapter(ctx, svc, store, clocks))
 	checked, err := svc.CheckChannel(ctx, destinations.ChannelCheck{Connection: c.PublicID, TeamID: "t",
 		ChannelID: "c"})
@@ -3204,6 +3209,17 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 		}
 		return list
 	}
+	// groups is the list of the user groups of Team mentions (C-25.FR-8), read as if the last check had found
+	// usergroups:read.
+	groups := func(ctx context.Context) connections.GroupList {
+		store.row.SlackUsergroupsRead = pgtype.Bool{Bool: true, Valid: true}
+		list, err := svc.Groups(ctx, store.row.PublicID, "")
+		errs = append(errs, err)
+		for _, g := range list.Groups {
+			errs = append(errs, errors.New(g.ID+" "+g.Name+" "+g.DisplayName))
+		}
+		return list
+	}
 	c, err := svc.Create(ctx, by, in)
 	if err != nil {
 		return err
@@ -3223,6 +3239,9 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 			errs = append(errs, &probeIncomplete{what: "the check against the stand-in Slack did not pass"})
 		}
 		dc, list := dcheck(ctx), chans(ctx)
+		if g := groups(ctx); a == slackOK && len(g.Groups) != 1 {
+			errs = append(errs, &probeIncomplete{what: "the user group list against the stand-in Slack failed"})
+		}
 		switch {
 		case a == slackOK && (!dc.OK() || len(list.Channels) != 1):
 			errs = append(errs, &probeIncomplete{what: "the channel check or list against the stand-in Slack failed"})
@@ -3268,6 +3287,7 @@ func probeSlack(ctx context.Context, secrets []string, log io.Writer) error {
 	check(ctx)
 	dcheck(ctx)
 	chans(ctx)
+	groups(ctx)
 	base.Store(&standIn)
 	errs = append(errs, probeSlackDrafts(ctx, svc, c.PublicID, botToken, appToken, proxied(accepting), &answer,
 		&draftEcho, &base, cutBase)...)
@@ -3437,6 +3457,9 @@ func slackAnswer(w http.ResponseWriter, r *http.Request, a int32, echo string) {
 		body = map[string]any{"ok": true, "channels": []map[string]any{{"id": "C0PROBE01", "name": name,
 			"is_member": true, "is_archived": false, "is_private": false}},
 			"response_metadata": map[string]any{"next_cursor": cursor}}
+	case method == "usergroups.list":
+		body = map[string]any{"ok": true, "usergroups": []map[string]any{{"id": "S0PROBE01", "handle": name,
+			"name": name, "user_count": 1, "date_delete": 0}}, "warning": echo}
 	case method == "chat.update" && a == slackGone:
 		body = map[string]any{"ok": false, "error": "message_not_found", "warning": echo}
 	case method == "chat.delete" && a == slackMisplaced:
@@ -3640,6 +3663,32 @@ func (s *probeConnections) ListSlackDestinations(context.Context, int64) ([]cdb.
 }
 
 func (s *probeConnections) SetBotIdentity(context.Context, cdb.SetBotIdentityParams) error {
+	return nil
+}
+
+func (s *probeConnections) SetGroupsRead(context.Context, cdb.SetGroupsReadParams) (int64, error) {
+	return 1, nil
+}
+
+// The probed Connections have no Team mentions.
+func (s *probeConnections) LockConnectionTeams(context.Context, cdb.LockConnectionTeamsParams) ([]int64, error) {
+	return nil, nil
+}
+
+func (s *probeConnections) ListConnectionTeams(context.Context, cdb.ListConnectionTeamsParams) ([]int64, error) {
+	return nil, nil
+}
+
+func (s *probeConnections) ListConnectionTeamMentions(context.Context, cdb.ListConnectionTeamMentionsParams) (
+	[]cdb.ListConnectionTeamMentionsRow, error) {
+	return nil, nil
+}
+
+func (s *probeConnections) DeleteConnectionTeamMentions(context.Context, cdb.DeleteConnectionTeamMentionsParams) error {
+	return nil
+}
+
+func (s *probeConnections) BumpTeamVersions(context.Context, cdb.BumpTeamVersionsParams) error {
 	return nil
 }
 

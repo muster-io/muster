@@ -222,6 +222,33 @@ type Channel struct {
 	DeleteAt    int64  `json:"delete_at"`
 }
 
+// GroupsPageSize is how many groups Groups reads, in one page: a list of this many may have left some out.
+const GroupsPageSize = 200
+
+// groupsPath is the read of the groups a Team mention or a group entry may name (F-122, F-123): those that may be
+// mentioned, with their member counts, which come only with include_member_count; no source filter, which did not
+// filter with LDAP off (F-122).
+const groupsPath = "/api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200"
+
+// Group is a Mattermost group as GET /api/v4/groups answers it (F-122): Name is what `@<name>` mentions, MemberCount
+// is nil when the answer has none, and a DeleteAt other than 0 is a deleted group.
+type Group struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	DisplayName    string `json:"display_name"`
+	Source         string `json:"source"`
+	AllowReference bool   `json:"allow_reference"`
+	MemberCount    *int64 `json:"member_count"`
+	DeleteAt       int64  `json:"delete_at"`
+}
+
+// Groups reads the first GroupsPageSize groups that may be mentioned, whatever their source, with their member
+// counts, as a bot with the role Member may (F-122). A server that refuses the read answers it with its status.
+func (c *Client) Groups(ctx context.Context, class outbound.Class) ([]Group, Result) {
+	var gs []Group
+	return gs, c.get(ctx, class, "getGroups", groupsPath, &gs)
+}
+
 // Me reads the bot's own user: the check of its token.
 func (c *Client) Me(ctx context.Context, class outbound.Class) (User, Result) {
 	var u User

@@ -387,12 +387,14 @@ func TestProblemCodes(t *testing.T) {
 		{typeForbidden, codeCSRFInvalid}, {typeForbidden, codeSessionRequired}, {typeForbidden, codeTOTPRequired},
 		{typeForbidden, codeTOTPEnrolmentRequired}, {typeConflict, codeLocalUserOnly},
 		{typeConflict, codeAccountLinkedElsewhere}, {typeRateLimited, codeLinkCodeRequestsExceeded},
+		{typeConflict, codeGroupsNotListed}, {typeConflict, codeTeamMentionsChanged},
 	} {
 		if !has(c.typ, "code", c.code) {
 			t.Errorf("%s %s is not catalogued", c.typ, c.code)
 		}
 	}
-	for _, code := range []string{fieldRequired, fieldInvalidFormat, fieldTooShort, fieldTooLong} {
+	for _, code := range []string{fieldRequired, fieldInvalidFormat, fieldTooShort, fieldTooLong,
+		fieldGroupMentionsUnsupported} {
 		if !has(typeValidationFailed, "errors[].code", code) {
 			t.Errorf("errors[].code %s is not catalogued", code)
 		}

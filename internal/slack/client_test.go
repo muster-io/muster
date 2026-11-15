@@ -6,12 +6,14 @@ package slack
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,8 @@ import (
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
 	"github.com/muster-io/muster/internal/fakes/fakeproxy"
+	"github.com/muster-io/muster/internal/fakes/fakeserver"
+	"github.com/muster-io/muster/internal/fakes/fakeslack"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/outbound"
 )
@@ -688,5 +692,79 @@ func TestCut(t *testing.T) {
 	}
 	if got := cut("a\xffb"); got != "a�b" {
 		t.Fatalf("cut = %q", got)
+	}
+}
+
+// TestUsergroupsList covers C-25.FR-8 and F-125: usergroups.list is a read method, so its arguments go form-encoded,
+// with include_count; the answer keeps the user groups that are not disabled, masked, with their user_count, and an
+// answer without the list names the method.
+func TestUsergroupsList(t *testing.T) {
+	s := startStandIn(t, answerJSON(http.StatusOK, `{"ok":true,"usergroups":[`+
+		`{"id":"S0B","handle":"payments-team","name":"Payments `+testBot+`","user_count":3,"date_delete":0},`+
+		`{"id":"S0A","handle":"old","name":"Old","user_count":1,"date_delete":1763210000}]}`))
+	c := newClient(t, network(t, nil), settings(s.base()))
+	groups, r := c.UsergroupsList(t.Context(), outbound.ClassInteractive)
+	if !r.OK() || len(groups) != 1 || groups[0] != (UserGroup{ID: "S0B", Handle: "payments-team",
+		Name: "Payments [redacted]", UserCount: 3}) {
+		t.Fatalf("groups %+v, %+v", groups, r)
+	}
+	got := s.seen()
+	if len(got) != 1 || got[0].Path != "/api/usergroups.list" || got[0].Body != "include_count=true" ||
+		got[0].Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+		t.Fatalf("requests %+v", got)
+	}
+	s2 := startStandIn(t, answerJSON(http.StatusOK, `{"ok":true}`))
+	c2 := newClient(t, network(t, nil), settings(s2.base()))
+	if _, r := c2.UsergroupsList(t.Context(), outbound.ClassInteractive); r.OK() ||
+		string(r.Error) != "usergroups.list: the answer is not the expected JSON" {
+		t.Fatalf("an answer without the list = %+v", r)
+	}
+}
+
+// TestUserGroups covers C-25.FR-8: the user groups of a Connection against the fake, those that are not disabled;
+// missing_scope and other refusals are a *ListFailedError, a 429 a *RateLimitedError whose
+// outcome holds the Connection, and the runner's own error ends the list.
+func TestUserGroups(t *testing.T) {
+	f := startFake(t)
+	c := fakeClient(t, f, false)
+	_, err := UserGroups(t.Context(), c, direct)
+	if lf, ok := errors.AsType[*ListFailedError](err); !ok || !strings.Contains(string(lf.Text), "missing_scope") {
+		t.Fatalf("without usergroups:read = %v", err)
+	}
+	cfg := fakeslack.DefaultConfig()
+	cfg.Scopes[fakeslack.AppA] = fakeslack.DefaultScopes + ",usergroups:read"
+	cfg.Usergroups[fakeslack.AppA]["S0FAKEDEVOPS"] = fakeslack.UserGroup{Handle: "devops", Name: "Platform",
+		Users: []string{fakeslack.UserBob}}
+	cfg.Usergroups[fakeslack.AppA]["S0FAKEOLD"] = fakeslack.UserGroup{Handle: "old", Name: "Old", Disabled: true}
+	if err := f.SetConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	devops := UserGroup{ID: "S0FAKEDEVOPS", Handle: "devops", Name: "Platform", UserCount: 1}
+	payments := UserGroup{ID: fakeslack.UserGroupPayments, Handle: "payments-team", Name: "Payments team",
+		UserCount: 1}
+	if got, err := UserGroups(t.Context(), c, direct); err != nil || !slices.Equal(got, []UserGroup{devops, payments}) {
+		t.Errorf("the user groups that are not disabled = %+v, %v", got, err)
+	}
+	if err := f.SetFault(fakeserver.Fault{Path: "/api/usergroups.list", Status: http.StatusTooManyRequests,
+		RetryAfterSeconds: 20, Body: `{"ok":false,"error":"ratelimited"}`, Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var outcome delivery.Outcome
+	run := func(ctx context.Context, op func(ctx context.Context, c delivery.Call) delivery.Outcome) (delivery.Outcome,
+		error) {
+		outcome = op(ctx, delivery.Call{Class: outbound.ClassInteractive})
+		return outcome, nil
+	}
+	_, err = UserGroups(t.Context(), c, run)
+	if rl, ok := errors.AsType[*RateLimitedError](err); !ok || rl.RetryAfter != 20*time.Second ||
+		outcome.Kind != delivery.OutcomeRetryAfter || outcome.Scope != delivery.ScopeConnection {
+		t.Fatalf("429 = %v, outcome %+v", err, outcome)
+	}
+	limited := &delivery.LimitedError{RetryAfter: time.Second}
+	if _, err := UserGroups(t.Context(), c, func(context.Context, func(ctx context.Context,
+		c delivery.Call) delivery.Outcome) (delivery.Outcome, error) {
+		return delivery.Outcome{}, limited
+	}); !errors.Is(err, limited) {
+		t.Fatalf("the runner's error = %v", err)
 	}
 }

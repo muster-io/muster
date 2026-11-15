@@ -86,6 +86,7 @@ export const ListConnectionsResponse = zod.object({
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
   "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
+  "groups_read": zod.boolean().nullable().describe('Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -176,6 +177,8 @@ export const ListConnectionsResponse = zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -251,6 +254,7 @@ export const ListConnectionsResponse = zod.object({
   "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
   "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "usergroups_read": zod.boolean().nullable().describe('Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
   "other_connections": zod.int().min(listConnectionsResponseItemsItemFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
@@ -437,6 +441,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
   "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
+  "groups_read": zod.boolean().nullable().describe('Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -527,6 +532,8 @@ export const CreateConnectionResponse = zod.union([zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -602,6 +609,7 @@ export const CreateConnectionResponse = zod.union([zod.object({
   "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
   "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "usergroups_read": zod.boolean().nullable().describe('Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
   "other_connections": zod.int().min(createConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
@@ -718,14 +726,18 @@ export const checkConnectionDraftResponseRequestLogRunRegExp = new RegExp('^[A-H
 export const CheckConnectionDraftResponse = zod.object({
   "ok": zod.boolean(),
   "steps": zod.array(zod.object({
-  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token']).describe('The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.'),
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token', 'groups']).describe('The step: Mattermost `token` and `groups`, which reads the groups and passes whatever the server answers, its `message` saying when the server did not list them, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.'),
   "ok": zod.boolean(),
   "skipped": zod.boolean().optional(),
   "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.'),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code\'s text.'),
   "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal('wrong_token_type'),zod.literal('missing_scope'),zod.literal('app_mismatch'),zod.literal('not_slack'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot\'s: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack\'s JSON `{"ok":false, "error":"not_authed"}`; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`, Slack `POST https://slack.com/api/auth.test`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost or Slack) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.'),
-  "missing_scopes": zod.array(zod.string()).optional().describe('Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.')
+  "missing_scopes": zod.array(zod.string()).optional().describe('Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.'),
+  "optional_scopes": zod.array(zod.object({
+  "scope": zod.string(),
+  "present": zod.boolean()
+}).describe('An optional scope of a Slack bot token and whether the token has it.')).optional().describe('Set on the Slack step `scopes` once `token` passed, omitted otherwise — each scope the bot token may have and whether it has it; a missing one never fails the step (C-24.FR-2). `usergroups:read` is the one Team mentions and user group entries need.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread', 'another_client_connected'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): none of the bot\'s roles, which `bot_roles` lists, grants `create_post_ephemeral`, so the bot `bot_name` may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting the bot account itself that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader\'s; presses are shared between them at random — use one Slack app for each Connection and share it with no other Connection or installation.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
@@ -754,6 +766,8 @@ export const CheckConnectionDraftResponse = zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -856,6 +870,7 @@ export const GetConnectionResponse = zod.union([zod.object({
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
   "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
+  "groups_read": zod.boolean().nullable().describe('Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -946,6 +961,8 @@ export const GetConnectionResponse = zod.union([zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -1021,6 +1038,7 @@ export const GetConnectionResponse = zod.union([zod.object({
   "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
   "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "usergroups_read": zod.boolean().nullable().describe('Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
   "other_connections": zod.int().min(getConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
@@ -1216,6 +1234,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "updated_at": zod.iso.datetime({"offset":true}).nullish()
 }).describe('What a read shows instead of a Secret. The value itself is never returned.'),
   "bot_username": zod.string().nullish().describe('The bot\'s username, as the last successful Connection check found it; null before one and after the server URL or the bot token changed.'),
+  "groups_read": zod.boolean().nullable().describe('Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.'),
   "proxy": zod.object({
   "enabled": zod.boolean(),
   "type": zod.enum(['http', 'https', 'socks5']).optional(),
@@ -1306,6 +1325,8 @@ export const UpdateConnectionResponse = zod.union([zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -1381,6 +1402,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
   "team_id": zod.string().nullable().describe('The workspace\'s id (`T…`); null as `bot_name`.'),
   "team_name": zod.string().nullable().describe('The workspace\'s name; null as `bot_name`.'),
   "app_id": zod.string().nullable().describe('The Slack app\'s id (`A…`), found by the step `app_token` of a check in `socket` mode; null before one and after the bot token changed.'),
+  "usergroups_read": zod.boolean().nullable().describe('Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.'),
   "socket": zod.union([zod.object({
   "hello_at": zod.iso.datetime({"offset":true}).describe('When the Leader\'s Socket Mode connection last received `hello`, on the business clock.'),
   "other_connections": zod.int().min(updateConnectionResponseFourTwoSocketOneOtherConnectionsMin).describe('The connections of the Slack app that `hello` counted beyond those the Leader holds; more than 0 means another program, usually another Connection or installation using the same Slack app, takes some of the presses.')
@@ -1403,7 +1425,7 @@ export const UpdateConnectionResponse = zod.union([zod.object({
 }))]).describe('A Connection; `type` selects the variant.')
 
 /**
- * A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
+ * A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered. The deletion also deletes the Team mentions of the Connection, each recorded in the Audit log of its Team; when Teams keep giving the Connection a first Team mention while it runs, it is run again, and after three attempts it answers `409` (`team_mentions_changed`) and deletes nothing: delete it again.
  * @summary Delete Connection
  */
 export const deleteConnectionPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
@@ -1466,14 +1488,18 @@ export const checkConnectionResponseRequestLogRunRegExp = new RegExp('^[A-HJKMNP
 export const CheckConnectionResponse = zod.object({
   "ok": zod.boolean(),
   "steps": zod.array(zod.object({
-  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token']).describe('The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.'),
+  "name": zod.enum(['token', 'dry_probe', 'get_me', 'get_webhook_info', 'info', 'event_delivery', 'scopes', 'app_token', 'groups']).describe('The step: Mattermost `token` and `groups`, which reads the groups and passes whatever the server answers, its `message` saying when the server did not list them, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.'),
   "ok": zod.boolean(),
   "skipped": zod.boolean().optional(),
   "latency_ms": zod.int().nullish().describe('How long the step\'s request took; null for a step that made no request: one that was skipped, `event_delivery`, which only reads the info that the step `info` read, and `scopes`, which reads the header of the answer of `token`. The latency of `app_token` is that of its two requests together.'),
   "via": zod.enum(['direct', 'proxy']).optional().describe('How the request travelled.'),
   "message": zod.string().nullish().describe('What answered when the step failed, or what a step that passed found, in English; untrusted text where it comes from the remote side. Secrets, the Signing secret and tokens are masked. Clients translate `code` and show this text as its detail where it says more than the code\'s text.'),
   "code": zod.union([zod.literal('token_invalid'),zod.literal('not_bot_api'),zod.literal('wrong_path_prefix'),zod.literal('unexpected_status'),zod.literal('dns_failed'),zod.literal('connect_failed'),zod.literal('tls_failed'),zod.literal('timeout'),zod.literal('proxy_refused'),zod.literal('blocked'),zod.literal('request_failed'),zod.literal('webhook_set'),zod.literal('protocol_version_unknown'),zod.literal('protocol_mismatch'),zod.literal('event_delivery_not_offered'),zod.literal('not_mattermost'),zod.literal('not_bridge'),zod.literal('wrong_token_type'),zod.literal('missing_scope'),zod.literal('app_mismatch'),zod.literal('not_slack'),zod.literal(null)]).nullish().describe('What a step of the Connection check found, as a stable code that clients translate, with `message` as its detail in English; null when the step passed with nothing to say or was skipped. A step that failed: `token_invalid` — the messenger refused the bot token (`token`, `get_me`) or the bridge refused the token (`info`); for Slack, `token_invalid` — Slack refused the bot token or the app-level token (`token`, `app_token`), `wrong_token_type` — the bot token is not a bot\'s: Slack answered `not_allowed_token_type`, or `auth.test` named no `bot_id` (`token`), `missing_scope` — the bot token lacks scopes Muster needs, which `missing_scopes` lists and `message` names (`scopes`), `app_mismatch` — the app-level token belongs to another Slack app than the bot token (`app_token`), and `not_slack` — the address answered the dry probe, but not with Slack\'s JSON `{"ok":false, "error":"not_authed"}`; for the dry probe (`dry_probe`, without any token: Telegram `GET <base>/bot0:x/getMe`, Mattermost `GET <server>/api/v4/system/ping`, a Bridge `GET <base>/v1/info`, Slack `POST https://slack.com/api/auth.test`), `not_bot_api` — the address answered, but not as a Bot API (not JSON), `not_mattermost` — the address answered, but not as a Mattermost server (not JSON, or `200` JSON whose `status` is not `OK`), `not_bridge` — the address answered, but not with a problem of the Bridge protocol (`application/problem+json`), `wrong_path_prefix` — it answered 404, so the path prefix of the address is wrong, `unexpected_status` — it answered another status than the probe expects (`401` from a Bot API or a bridge, `200` from Mattermost or Slack) in the expected format; for `info`, `protocol_version_unknown` — the bridge speaks a protocol version this Muster does not, which `message` names, and `protocol_mismatch` — the answer does not match the protocol or is larger than 64 KiB, which `message` names; for `event_delivery`, `event_delivery_not_offered` — the bridge does not offer the Connection\'s event delivery mode; for any step, `dns_failed` — the host name does not resolve, `connect_failed` — no connection, or the answer could not be read, `tls_failed` — the TLS handshake failed, `timeout` — no answer in time, `proxy_refused` — the proxy refused its credentials, `blocked` — the outbound address policy refused the address, and `request_failed` — any other failure, such as an error answer, which `message` names (from a bridge, the problem\'s masked `detail`). A step that passed: `webhook_set` (`get_webhook_info`) — a webhook is set, and `message` names its host.'),
-  "missing_scopes": zod.array(zod.string()).optional().describe('Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.')
+  "missing_scopes": zod.array(zod.string()).optional().describe('Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.'),
+  "optional_scopes": zod.array(zod.object({
+  "scope": zod.string(),
+  "present": zod.boolean()
+}).describe('An optional scope of a Slack bot token and whether the token has it.')).optional().describe('Set on the Slack step `scopes` once `token` passed, omitted otherwise — each scope the bot token may have and whether it has it; a missing one never fails the step (C-24.FR-2). `usergroups:read` is the one Team mentions and user group entries need.')
 })),
   "warnings": zod.array(zod.enum(['press_answers_in_thread', 'another_client_connected'])).describe('Hints that do not fail the check. `press_answers_in_thread` (Mattermost): none of the bot\'s roles, which `bot_roles` lists, grants `create_post_ephemeral`, so the bot `bot_name` may not make ephemeral messages and the answers to button presses show in the Thread of the Root message instead of the channel view; granting the bot account itself that permission, for example with the system admin role, shows them in the channel. `another_client_connected` (Slack, `socket` mode): the last `hello` counted another connection of the Slack app than the Leader\'s; presses are shared between them at random — use one Slack app for each Connection and share it with no other Connection or installation.'),
   "bot_name": zod.string().nullish().describe('The bot\'s name or username.'),
@@ -1502,6 +1528,8 @@ export const CheckConnectionResponse = zod.object({
 }).optional().describe('The bot can send direct messages, which Account links by code need.'),
   "private_answers": zod.array(zod.enum(['ephemeral', 'popup'])).optional().describe('How the bridge can show an answer to one person only: an ephemeral message, a pop-up (short plain text), or both.'),
   "native_mentions": zod.boolean().optional().describe('Mention markers become the messenger\'s own mentions, which notify the person.'),
+  "group_mentions": zod.boolean().optional().describe('The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.'),
+  "everyone_mentions": zod.array(zod.enum(['channel', 'here', 'all', 'everyone'])).optional().describe('The mentions of everyone in the chat that the bridge\'s messenger has, by their symbolic names.'),
   "quiet_messages": zod.boolean().optional().describe('The messenger can post a new message without notifying anyone (`notify` false).'),
   "status_color": zod.boolean().optional().describe('The messenger can colour a message by `color`; otherwise the bridge shows `emoji`.'),
   "delete": zod.object({
@@ -1566,4 +1594,29 @@ export const ListConnectionChannelsResponse = zod.union([zod.object({
 }).describe('A channel of a Slack Connection\'s workspace that the bot is a member of.')).describe('By name.'),
   "truncated": zod.boolean().describe('More channels were left after the fifth page of `conversations.list`; a channel that is not listed is still saved by its id.')
 })]).describe('The channels of a Connection\'s bot, by the Connection\'s type; only `SlackChannelList` has `truncated`.')
+
+/**
+ * The groups of a Connection for its Team mentions and the group entries of its Destinations (C-25.FR-8), by name. A Mattermost Connection answers the groups that may be mentioned, read with `GET /api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200` (F-122), `truncated` when that page was full. A Slack Connection whose last check found `usergroups:read` answers the user groups that are not disabled, read with `usergroups.list` (F-125); `name` is the handle. A Telegram or Bridge Connection, and a Slack Connection without the scope, answer `409` `groups_not_listed`; a server that refuses the read answers `409`. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one.
+ * @summary List the groups a Connection can mention
+ */
+export const listConnectionGroupsPathConnectionIdRegExp = new RegExp('^[A-HJKMNP-TV-Za-hjkmnp-tv-z]{1,2}[0-9A-TV-Za-tv-z]{12}$');
+
+
+export const ListConnectionGroupsParams = zod.object({
+  "connection_id": zod.string().regex(listConnectionGroupsPathConnectionIdRegExp).describe('Connection `public_id`.')
+})
+
+export const ListConnectionGroupsQueryParams = zod.object({
+  "q": zod.string().optional().describe('Only groups whose name or display name contains this text, regardless of case.')
+})
+
+export const ListConnectionGroupsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('The messenger\'s id of the group; a Slack user group\'s is the `group_id` of a Team mention.'),
+  "name": zod.string().describe('What a mention names, without `@`; the `group` of a Team mention.'),
+  "display_name": zod.string(),
+  "member_count": zod.int().nullable().describe('How many people are in the group; null when the messenger did not say.')
+}).describe('A group a Connection can mention.')),
+  "truncated": zod.boolean().describe('More groups may exist than were read.')
+})
 

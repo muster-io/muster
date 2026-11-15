@@ -3,8 +3,10 @@
 
 // Package teams holds the Teams of C-25: a name and a slug, each unique among the Teams that are not deleted, a
 // description, the people added by hand, the groups of the identity provider whose people are in the Team and the
-// Working hours, the Team's own or the Organization's. A Team grants no Permission and limits none (ADR-0018). Every
-// change is recorded in the Audit log and announced with the live hint team, and the package exports muster_team_info.
+// Working hours, the Team's own or the Organization's, and its Team mentions, the group that mentions it through each
+// Connection whose messenger can mention a group (mentions.go). A Team grants no Permission and limits none
+// (ADR-0018). Every change is recorded in the Audit log and announced with the live hint team, and the package exports
+// muster_team_info.
 // Deleting a Team keeps its row, marked deleted, removes its people, entries and Working hours and leaves the Routes
 // and Destinations it owned without an owner, through its own queries, so that the package imports no other domain
 // than internal/oidc, whose rule of matching groups it shares.
@@ -170,6 +172,11 @@ type Team struct {
 
 	DestinationEntries []DestinationEntry
 	Destinations       []DestinationRef
+
+	// Mentions are the Team mentions of Connections that are not deleted, by Connection name, and MentionConnections
+	// the Connections that may have a Destination with the Team's Team mention for each (C-25.FR-8).
+	Mentions           []Mention
+	MentionConnections []MentionConnection
 }
 
 // Matcher is a Team matcher (C-25.FR-5): a condition on one label in the syntax of Route Matchers.
@@ -193,6 +200,9 @@ type Input struct {
 	IdpEntries      *[]IdpEntry
 	// DestinationEntries replace the Destinations of the Team as a whole (C-26.FR-1).
 	DestinationEntries *[]DestinationEntry
+	// Mentions replace the Team mentions of the Team as a whole (C-25.FR-8); nil keeps them on an update and is none
+	// on a creation.
+	Mentions *[]MentionInput
 }
 
 // Person is someone in a Team with their Role, how they are in it, the identity provider entries that matched them and
@@ -299,6 +309,13 @@ type Queries interface {
 	DeleteAllTeamDestinations(ctx context.Context, arg dbgen.DeleteAllTeamDestinationsParams) error
 	InsertTeamDestinationsUpdate(ctx context.Context, arg dbgen.InsertTeamDestinationsUpdateParams) error
 	LockTeamMembership(ctx context.Context, arg dbgen.LockTeamMembershipParams) error
+	ListTeamMentions(ctx context.Context, arg dbgen.ListTeamMentionsParams) ([]dbgen.ListTeamMentionsRow, error)
+	ListMentionConnections(ctx context.Context, orgID int64) ([]dbgen.ListMentionConnectionsRow, error)
+	ResolveMentionConnections(ctx context.Context, arg dbgen.ResolveMentionConnectionsParams) (
+		[]dbgen.ResolveMentionConnectionsRow, error)
+	DeleteTeamMentions(ctx context.Context, arg dbgen.DeleteTeamMentionsParams) error
+	InsertTeamMentions(ctx context.Context, arg dbgen.InsertTeamMentionsParams) error
+	GetTeamMention(ctx context.Context, arg dbgen.GetTeamMentionParams) (dbgen.GetTeamMentionRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }
@@ -460,6 +477,9 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	if err := s.withDestinations(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
 	}
+	if err := s.withMentions(ctx, s.store, page.Teams); err != nil {
+		return Page{}, err
+	}
 	return page, nil
 }
 
@@ -516,6 +536,9 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Team, er
 		return Team{}, err
 	}
 	if err := s.withDestinations(ctx, q, out); err != nil {
+		return Team{}, err
+	}
+	if err := s.withMentions(ctx, q, out); err != nil {
 		return Team{}, err
 	}
 	return out[0], nil
@@ -750,6 +773,13 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
+		var mentions []teamMention
+		if in.Mentions != nil {
+			var err error
+			if mentions, _, err = s.resolveMentions(ctx, q, *in.Mentions, nil); err != nil {
+				return err
+			}
+		}
 		now := s.clock.Now().UTC()
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
 			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: now}
@@ -770,6 +800,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 		}
 		if _, err := s.writeDestinations(ctx, q, id, nil, dests, now); err != nil {
 			return err
+		}
+		if len(mentions) > 0 {
+			if err := s.writeMentions(ctx, q, id, mentions, now); err != nil {
+				return err
+			}
 		}
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
@@ -810,7 +845,8 @@ func setHours(days *[]string, start, end, zone *pgtype.Text, w *WorkingHours) {
 // the evaluation of the open Alert Groups (C-25.FR-13); a change of the name, the description or the Working hours
 // does not. A changed name requests the re-render of the Root messages of the open Alert Groups that have the Team
 // (C-29.FR-1), and changed Destination entries the row team_destinations, under the Team's membership lock
-// (C-26.FR-6).
+// (C-26.FR-6). Team mentions are checked against what each Connection can mention now, an unchanged stored one kept
+// whatever its Connection can mention, and replaced as a whole when they changed (C-25.FR-8); they request neither.
 func (s *Service) Update(ctx context.Context, r Requester, publicID string, version *int64, in Input) (Team, error) {
 	in, err := check(in)
 	if err != nil {
@@ -846,6 +882,18 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 			next.DestinationEntries = entriesOf(dests)
 		}
+		var mentions []teamMention
+		if in.Mentions != nil {
+			var inputs []MentionInput
+			stored := mentionInputs(before.Mentions)
+			if mentions, inputs, err = s.resolveMentions(ctx, q, *in.Mentions, stored); err != nil {
+				return err
+			}
+			next.Mentions = make([]Mention, len(inputs))
+			for i, m := range inputs {
+				next.Mentions[i] = Mention{MentionInput: m}
+			}
+		}
 		if in.OwnWorkingHours && next.Own == nil {
 			if before.Own == nil {
 				return missingHours()
@@ -873,6 +921,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 		// A change of the entries changes nobody's membership until their next sign-in or re-check (C-25.FR-4).
 		if !slices.Equal(before.IdpEntries, next.IdpEntries) {
 			if err := s.replaceIdpEntries(ctx, q, before.ID, next.IdpEntries); err != nil {
+				return err
+			}
+		}
+		if in.Mentions != nil && !slices.Equal(mentionInputs(before.Mentions), mentionInputs(next.Mentions)) {
+			if err := s.writeMentions(ctx, q, before.ID, mentions, now); err != nil {
 				return err
 			}
 		}
@@ -916,8 +969,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 
 // Delete deletes the Team publicID (C-25.FR-10); a non-nil version must be its current one. A Team that has Schedules
 // is refused with InUseError, read under the lock that every change of its Schedules takes (P-64). The row stays,
-// marked deleted, for the names that point at it, and its name and slug are free at once; its people and Working hours
-// are removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and
+// marked deleted, for the names that point at it, and its name and slug are free at once; its people, Working hours and
+// Team mentions are removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and
 // its own Audit log entry by the system, in the same transaction. Its Destination entries are removed last, under its
 // membership lock, with the row team_destinations that gives their final edits to the open Alert Groups that had the
 // Team wherever no other entry names them (C-25.FR-10, C-26.FR-6).
@@ -995,6 +1048,10 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if err := q.DeleteTeamIdpEntries(ctx, dbgen.DeleteTeamIdpEntriesParams{OrgID: s.orgID,
 			TeamID: before.ID}); err != nil {
 			return fmt.Errorf("remove the identity provider entries of the team %s: %w", before.PublicID, err)
+		}
+		if err := q.DeleteTeamMentions(ctx, dbgen.DeleteTeamMentionsParams{OrgID: s.orgID,
+			TeamID: before.ID}); err != nil {
+			return fmt.Errorf("remove the team mentions of the team %s: %w", before.PublicID, err)
 		}
 		if err := q.DeleteTeam(ctx, dbgen.DeleteTeamParams{OrgID: s.orgID, ID: before.ID,
 			Now: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
@@ -1249,7 +1306,7 @@ func resourceOf(t Team) audit.Resource {
 }
 
 // view is a Team as its Audit log diff shows it: its own Working hours, null when it follows the Organization's, its
-// identity provider entries and the Destinations of the Team with their Severity conditions.
+// identity provider entries, the Destinations of the Team with their Severity conditions and its Team mentions.
 type view struct {
 	Name            string        `json:"name"`
 	Slug            string        `json:"slug"`
@@ -1260,6 +1317,8 @@ type view struct {
 	IdpEntries      []IdpEntry    `json:"idp_entries"`
 	// DestinationEntries are the Destinations of the Team (C-26.FR-1).
 	DestinationEntries []DestinationEntry `json:"destination_entries"`
+	// TeamMentions are the Team mentions of the Team (C-25.FR-8, FR-11).
+	TeamMentions []MentionInput `json:"team_mentions"`
 }
 
 func viewOf(t Team) view {
@@ -1272,7 +1331,8 @@ func viewOf(t Team) view {
 		dests = []DestinationEntry{}
 	}
 	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
-		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries), DestinationEntries: dests}
+		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries), DestinationEntries: dests,
+		TeamMentions: mentionInputs(t.Mentions)}
 }
 
 // exportInfo sets the muster_team_info series of a Team.

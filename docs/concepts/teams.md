@@ -39,6 +39,7 @@ A Team has:
 - a **description**;
 - its **Team matchers**, which pick the Alerts that belong to it beside its slug;
 - the **people** in it, which may be nobody, added by hand or through the groups of the identity provider;
+- its **Team mentions**, the group that mentions it in each messenger ([Team mentions](#team-mentions));
 - its **Working hours**: its own, else the Organization's.
 
 What a Team owns
@@ -53,10 +54,10 @@ What a Team does not grant
     edits and deletes Teams and adds people to them; every Role reads them.
 
 Deleting a Team
-:   The people leave it, its Working hours and Team matchers are removed, and the Routes and Destinations it owned
-    have no owner from then on, each with a new version. Its slug and name are free at once for a new Team, and its
-    slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still names it: the Alert
-    Groups that had it among their Teams list it by its name, with `deleted` true.
+:   The people leave it, its Working hours, Team matchers and Team mentions are removed, and the Routes and
+    Destinations it owned have no owner from then on, each with a new version. Its slug and name are free at once for a
+    new Team, and its slug no longer gives Alerts the Team. The Team itself is kept, marked deleted, for what still
+    names it: the Alert Groups that had it among their Teams list it by its name, with `deleted` true.
 
 Every change of a Team and of the people in it is recorded in the Audit log, and the metric `muster_team_info` has
 one series per Team that is not deleted, with its name ([Metrics](../reference/metrics.md)). The operations are listed
@@ -217,6 +218,54 @@ For example, a Team whose people are the members of the GitLab group `corp/payme
 With the groups claim `groups`, which GitLab fills with a person's groups and the groups below them, this takes in a
 person of `corp/payments/oncall` and nobody of `corp/paymentsx`. Subtree entries are safe here, also with a role claim:
 a Team grants no Permission and no Role.
+
+## Team mentions
+
+A **Team mention** is the group that mentions a Team through one Connection: when a message mentions the Team in a
+channel of that Connection, it mentions that group, whose members the messenger notifies. A Team has at most one Team
+mention per Connection, in `team_mentions`, each with its Connection and its group:
+
+```json
+"team_mentions": [
+  {"connection_id": "CNAGK7M3QX9P2R", "group": "payments_team"},
+  {"connection_id": "CNB4R8J2M6Q1TX", "group": "payments-team", "group_id": "S0FAKEPAYTEAM"}
+]
+```
+
+What each messenger takes:
+
+Mattermost
+:   The name of a Mattermost group, as `@payments_team` mentions it. A bot with the role Member reads the groups of the
+    server, so **Check connection** reads them in its step **Groups**, and the API lists them for the Team mention
+    (`listConnectionGroups`). A server that does not list them to the bot fails nothing: the step says so, and a Team
+    mention is still saved by the name you type.
+
+Slack
+:   A Slack user group, chosen from those the Connection lists, by its handle and its id. The bot needs the optional
+    scope `usergroups:read`; until the Connection's check has found it, a Team mention for a Slack Connection is
+    refused. See [The scopes](../messengers/slack.md#the-scopes).
+
+Bridge
+:   A group name of the bridge's messenger, when the bridge declares group mentions in its `info`
+    (`group_mentions`). Muster does not list the groups of a bridge: you type the name.
+
+Telegram
+:   Telegram has no group mentions, so a Telegram Connection takes no Team mention.
+
+Saving a Team mention for a Connection that cannot carry one — Telegram, a Slack Connection without `usergroups:read`,
+a bridge that declares no group mentions, or a Notification gateway — is refused with `422` and the code
+`group_mentions_unsupported` at the entry's `connection_id`. A read of a Team lists under `mention_connections` every
+Connection that may have a Destination, with the Team's Team mention for it or none, and for those that cannot mention
+a group the reason: `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`. A Notification
+gateway is not listed.
+
+A Team without a Team mention for a Connection is mentioned as nobody through it: Muster never mentions the Team's
+On-call instead. A Team mention whose Connection later loses the ability — a Slack app reinstalled without
+`usergroups:read`, a bridge that stops declaring group mentions — stays, reads `available` false with the reason, and
+mentions nobody until the ability is back. A save that sends it again unchanged, with the same Connection, group and
+user group id, keeps it and is not refused; only a new or changed Team mention is checked against what its Connection
+can mention. Deleting a Connection deletes its Team mentions, each recorded in the Audit
+log of its Team; a change of a Team's Team mentions is recorded in its Audit log as every other change of the Team.
 
 ## Working hours
 

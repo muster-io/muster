@@ -782,7 +782,7 @@ func TestCheckRuns(t *testing.T) {
 		ops: []string{"getInfo"}})
 	res, err = svc.Check(t.Context(), e.savedMM.PublicID, nil)
 	check("the check of a saved Mattermost Connection", res, err, want{conn: e.savedMM.ID, kind: "connection_check",
-		ops: []string{"getMe", "getRolesByNames"}})
+		ops: []string{"getMe", "getGroups", "getRolesByNames"}})
 	res, err = svc.CheckDraft(t.Context(), of(brDraft(e.br2.URL()), "", fakebridge.SecondToken))
 	check("a new Bridge", res, err, want{draft: true, kind: "draft_check", ops: []string{"getInfo"}})
 	res, err = svc.CheckDraft(t.Context(), of(brDraft(e.br2.URL()), e.savedBR.PublicID, fakebridge.SecondToken))

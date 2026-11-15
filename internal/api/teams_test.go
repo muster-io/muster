@@ -15,6 +15,7 @@ import (
 
 	"github.com/oapi-codegen/nullable"
 
+	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/auth"
 	"github.com/muster-io/muster/internal/destinations"
@@ -555,5 +556,85 @@ func TestListTeamLabelValues(t *testing.T) {
 	if a := x.as(t, teamsReader, http.MethodGet, "/api/v1/team-label-values", ""); a.status !=
 		http.StatusInternalServerError {
 		t.Errorf("a failure = %d %s", a.status, a.body)
+	}
+}
+
+// TestTeamMentionsAPI is C-25.FR-8 and FR-11 on the API: a Team takes team_mentions, given to the Teams as written and
+// saved with If-Match, an update without them keeps them; a read carries team_mentions with their Connection, whether
+// it can carry them and why not, and mention_connections with the Team mention of each Connection or null; the Teams'
+// refusal group_mentions_unsupported answers 422 at its pointer, and a group or a user group id of another form is
+// 422 invalid_format before the Teams.
+func TestTeamMentionsAPI(t *testing.T) {
+	x, ft, _ := newTeamsAPI(t)
+	a := x.as(t, teamsAdmin, http.MethodGet, "/api/v1/teams/"+teamID, "")
+	if !strings.Contains(string(a.body), `"team_mentions":[]`) || !strings.Contains(string(a.body),
+		`"mention_connections":[]`) {
+		t.Errorf("a Team without team mentions = %s", a.body)
+	}
+	mm := teams.Mention{MentionInput: teams.MentionInput{ConnectionID: "CNAAAAAAAAAAA1", Group: "payments_team"},
+		Connection: teams.MentionConnectionRef{PublicID: "CNAAAAAAAAAAA1", Name: "chat", Type: "mattermost"},
+		Available:  true}
+	sl := teams.Mention{MentionInput: teams.MentionInput{ConnectionID: "CNAAAAAAAAAAS1", Group: "payments-team",
+		GroupID: "S0FAKEPAYTEAM"}, Connection: teams.MentionConnectionRef{PublicID: "CNAAAAAAAAAAS1", Name: "slack",
+		Type: "slack"}, UnavailableReason: teams.ReasonUsergroupsReadMissing}
+	ft.team.Mentions = []teams.Mention{mm, sl}
+	ft.team.MentionConnections = []teams.MentionConnection{
+		{Connection: mm.Connection, Available: true, Mention: &mm},
+		{Connection: sl.Connection, UnavailableReason: teams.ReasonUsergroupsReadMissing, Mention: &sl},
+		{Connection: teams.MentionConnectionRef{PublicID: "CNAAAAAAAAAAT1", Name: "tg", Type: "telegram"},
+			UnavailableReason: teams.ReasonTelegramNoGroups},
+	}
+	body := `{"name":"Payments","slug":"payments","own_working_hours":false,"team_mentions":[` +
+		`{"connection_id":"CNAAAAAAAAAAA1","group":"payments_team"},` +
+		`{"connection_id":"CNAAAAAAAAAAS1","group":"payments-team","group_id":"S0FAKEPAYTEAM"}]}`
+	a = x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID, body, "If-Match", `"2"`)
+	var team gen.Team
+	decodeInto(t, a, &team)
+	if a.status != http.StatusOK || len(team.TeamMentions) != 2 || len(team.MentionConnections) != 3 {
+		t.Fatalf("update = %d %s", a.status, a.body)
+	}
+	if in := ft.inputs[0].Mentions; in == nil || len(*in) != 2 || (*in)[0] != (teams.MentionInput{
+		ConnectionID: "CNAAAAAAAAAAA1", Group: "payments_team"}) || (*in)[1].GroupID != "S0FAKEPAYTEAM" ||
+		*ft.versions[0] != 2 {
+		t.Errorf("input team mentions = %+v", in)
+	}
+	got := team.TeamMentions[1]
+	if got.Connection != (gen.ConnectionRef{Id: "CNAAAAAAAAAAS1", Name: "slack", Type: gen.ConnectionType("slack")}) ||
+		got.Available || got.UnavailableReason.MustGet() != gen.UsergroupsReadMissing || *got.GroupId !=
+		"S0FAKEPAYTEAM" || !team.TeamMentions[0].UnavailableReason.IsNull() || team.TeamMentions[0].GroupId != nil {
+		t.Errorf("team mentions = %s", a.body)
+	}
+	tg := team.MentionConnections[2]
+	if !tg.TeamMention.IsNull() || tg.Available || tg.UnavailableReason.MustGet() != gen.TelegramNoGroups ||
+		tg.Type != "telegram" || tg.Connection.Name != "tg" ||
+		team.MentionConnections[0].TeamMention.MustGet().Group != "payments_team" ||
+		!team.MentionConnections[0].UnavailableReason.IsNull() {
+		t.Errorf("mention connections = %s", a.body)
+	}
+	if a = x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID, `{"name":"P","slug":"p",`+
+		`"own_working_hours":false}`, "If-Match", `"2"`); a.status != http.StatusOK || ft.inputs[1].Mentions != nil {
+		t.Errorf("an update without team mentions = %d, %+v", a.status, ft.inputs[1].Mentions)
+	}
+	ft.err = &teams.FieldError{Pointer: "/team_mentions/0/connection_id", Code: teams.CodeGroupMentionsUnsupported,
+		Detail: "Telegram has no group mentions."}
+	status, _, ptr, code := firstProblemError(t, x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID,
+		`{"name":"P","slug":"p","own_working_hours":false,"team_mentions":[{"connection_id":"CNAAAAAAAAAAT1",`+
+			`"group":"x"}]}`, "If-Match", `"2"`))
+	if status != http.StatusUnprocessableEntity || ptr != "/team_mentions/0/connection_id" ||
+		code != "group_mentions_unsupported" {
+		t.Errorf("telegram = %d %s %s", status, ptr, code)
+	}
+	ft.err = nil
+	calls := len(ft.inputs)
+	for _, mention := range []string{`{"group":"x"}`, `{"connection_id":"CNAAAAAAAAAAA1"}`,
+		`{"connection_id":"CNAAAAAAAAAAA1","group":5}`} {
+		if a := x.as(t, teamsAdmin, http.MethodPut, "/api/v1/teams/"+teamID, `{"name":"P","slug":"p",`+
+			`"own_working_hours":false,"team_mentions":[`+mention+`]}`, "If-Match", `"2"`); a.status !=
+			http.StatusBadRequest {
+			t.Errorf("%s = %d %s", mention, a.status, a.body)
+		}
+	}
+	if len(ft.inputs) != calls {
+		t.Error("a request that does not match the schema reached the Teams")
 	}
 }

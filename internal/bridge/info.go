@@ -93,19 +93,40 @@ func StoredRoles(raw []byte) []string {
 	return i.Roles()
 }
 
+// GroupMentions reports whether the info declares group mentions, which the Team mentions and the group entries of a
+// Destination need (C-22.FR-2 revised, C-25.FR-8).
+func (i Info) GroupMentions() bool {
+	return i.Capabilities.GroupMentions != nil && *i.Capabilities.GroupMentions
+}
+
+// EveryoneMentions are the mentions of everyone in the chat that the info declares — channel, here, all and everyone —
+// in its order, none when it declares none (C-22.FR-2 revised, C-28.FR-2).
+func (i Info) EveryoneMentions() []string {
+	out := []string{}
+	if i.Capabilities.EveryoneMentions == nil {
+		return out
+	}
+	for _, m := range *i.Capabilities.EveryoneMentions {
+		out = append(out, string(m))
+	}
+	return out
+}
+
 // Features are the names of the optional features the info declares, sorted.
 func (i Info) Features() []string {
 	c := i.Capabilities
 	present := map[string]bool{
-		"buttons":         c.Buttons != nil,
-		"thread_messages": c.ThreadMessages != nil,
-		"direct_messages": c.DirectMessages != nil,
-		"private_answers": c.PrivateAnswers != nil && len(*c.PrivateAnswers) > 0,
-		"native_mentions": c.NativeMentions != nil && *c.NativeMentions,
-		"quiet_messages":  c.QuietMessages != nil && *c.QuietMessages,
-		"status_color":    c.StatusColor != nil && *c.StatusColor,
-		"delete":          c.Delete != nil,
-		"deletion_events": c.DeletionEvents != nil && *c.DeletionEvents,
+		"buttons":           c.Buttons != nil,
+		"thread_messages":   c.ThreadMessages != nil,
+		"direct_messages":   c.DirectMessages != nil,
+		"private_answers":   c.PrivateAnswers != nil && len(*c.PrivateAnswers) > 0,
+		"native_mentions":   c.NativeMentions != nil && *c.NativeMentions,
+		"group_mentions":    i.GroupMentions(),
+		"everyone_mentions": len(i.EveryoneMentions()) > 0,
+		"quiet_messages":    c.QuietMessages != nil && *c.QuietMessages,
+		"status_color":      c.StatusColor != nil && *c.StatusColor,
+		"delete":            c.Delete != nil,
+		"deletion_events":   c.DeletionEvents != nil && *c.DeletionEvents,
 	}
 	out := []string{}
 	for _, name := range slices.Sorted(maps.Keys(present)) {
@@ -270,7 +291,7 @@ var infoShape = shape{
 		"messenger": {required: []string{"name"}},
 		"capabilities": {
 			optional: []string{"buttons", "thread_messages", "direct_messages", "private_answers", "native_mentions",
-				"quiet_messages", "status_color", "delete", "deletion_events"},
+				"group_mentions", "everyone_mentions", "quiet_messages", "status_color", "delete", "deletion_events"},
 			nested: map[string]shape{
 				"buttons":         {required: []string{"max_per_message", "max_per_row", "data_max_bytes", "styles"}},
 				"direct_messages": {required: []string{"bot_can_start"}},
@@ -397,6 +418,11 @@ func validateCapabilities(c gen.Capabilities) string {
 	}
 	if c.PrivateAnswers != nil {
 		if problem := uniqueValid("capabilities.private_answers", *c.PrivateAnswers); problem != "" {
+			return problem
+		}
+	}
+	if c.EveryoneMentions != nil {
+		if problem := uniqueValid("capabilities.everyone_mentions", *c.EveryoneMentions); problem != "" {
 			return problem
 		}
 	}

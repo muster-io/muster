@@ -443,3 +443,69 @@ INSERT INTO team_destinations (org_id, team_id, destination_id, severity_conditi
 SELECT @org_id, @team_id, d.id, d.condition, @now
 FROM (SELECT unnest(@destination_ids::bigint[]) AS id, unnest(@conditions::text[]) AS condition) AS d
 ON CONFLICT (team_id, destination_id) DO UPDATE SET severity_condition = excluded.severity_condition;
+
+-- The Team mentions of the Teams (C-25.FR-8): the group that mentions a Team through each Connection whose messenger
+-- can mention a group. What a Connection can mention is read from the Connection: its type, whether the last check of a
+-- Slack Connection found usergroups:read, and whether the stored info of a Bridge declares group_mentions and the role
+-- messenger — the role every bridge has that declares no roles (C-30.FR-1).
+
+-- ListTeamMentions lists the Team mentions of the Teams for Connections that are not deleted, each with its Connection
+-- and what the Connection can mention, by Team, then by the Connection's name and public_id.
+-- name: ListTeamMentions :many
+SELECT m.team_id, m.connection_id, m.group_name, m.slack_usergroup_id, c.public_id, c.name, c.type,
+       c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM team_mentions m
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+WHERE m.org_id = @org_id AND m.team_id = ANY(@team_ids::bigint[]) AND c.deleted_at IS NULL
+ORDER BY m.team_id, c.name, c.public_id;
+
+-- ListMentionConnections lists the Connections that are not deleted and may have a Destination — every Connection but
+-- a Bridge whose stored info lists roles without messenger, a Notification gateway only (S-145) — with what each can
+-- mention, by name and public_id.
+-- name: ListMentionConnections :many
+SELECT c.id, c.public_id, c.name, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions
+FROM connections c
+WHERE c.org_id = @org_id AND c.deleted_at IS NULL
+  AND (c.type <> 'bridge' OR c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)
+ORDER BY c.name, c.public_id;
+
+-- ResolveMentionConnections reads the Connections that are not deleted among the public_ids, with what each can
+-- mention, for the Team mentions of a save, FOR SHARE in id order after the Team's own row: the deletion of a
+-- Connection, which locks the Teams of its Team mentions and then the Connection, either waits for the save and deletes
+-- what it wrote, or commits first and the save finds the Connection deleted.
+-- name: ResolveMentionConnections :many
+SELECT c.id, c.public_id, c.name, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM connections c
+WHERE c.org_id = @org_id AND c.public_id = ANY(@public_ids::text[]) AND c.deleted_at IS NULL
+ORDER BY c.id
+FOR SHARE OF c;
+
+-- DeleteTeamMentions removes the Team mentions of a Team: before a save writes them again, and at its deletion.
+-- name: DeleteTeamMentions :exec
+DELETE FROM team_mentions
+WHERE org_id = @org_id AND team_id = @team_id;
+
+-- InsertTeamMentions adds the Team mentions of a Team, each a Connection with its group and, for a Slack Connection,
+-- the user group's id, empty for the others.
+-- name: InsertTeamMentions :exec
+INSERT INTO team_mentions (org_id, team_id, connection_id, group_name, slack_usergroup_id, created_at)
+SELECT @org_id, @team_id, m.connection_id, m.group_name, nullif(m.usergroup_id, ''), @now
+FROM (SELECT unnest(@connection_ids::bigint[]) AS connection_id, unnest(@group_names::text[]) AS group_name,
+             unnest(@usergroup_ids::text[]) AS usergroup_id) AS m;
+
+-- GetTeamMention reads the Team mention of a Team that is not deleted for a Connection that is not deleted, with what
+-- the Connection can mention, for delivery (S-140).
+-- name: GetTeamMention :one
+SELECT m.group_name, m.slack_usergroup_id, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM team_mentions m
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = @org_id AND m.team_id = @team_id AND m.connection_id = @connection_id AND c.deleted_at IS NULL
+  AND t.deleted_at IS NULL;

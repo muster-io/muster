@@ -16,6 +16,7 @@ package slack
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -358,6 +359,63 @@ func (c *Client) BotsInfo(ctx context.Context, class outbound.Class, botID strin
 	b := *out.Bot
 	return Bot{ID: c.mask(b.ID), Name: c.mask(b.Name), AppID: c.mask(b.AppID), UserID: c.mask(b.UserID),
 		Deleted: b.Deleted}, r
+}
+
+// UserGroup is a user group of the workspace as usergroups.list answers it (F-125): its id (S…), its handle, which
+// <!subteam^ID> is drawn as, its name, how many people it has, and DateDelete, other than 0 for a disabled one.
+type UserGroup struct {
+	ID         string `json:"id"`
+	Handle     string `json:"handle"`
+	Name       string `json:"name"`
+	UserCount  int64  `json:"user_count"`
+	DateDelete int64  `json:"date_delete"`
+}
+
+// UsergroupsList calls usergroups.list with the bot token (scope usergroups:read) and include_count, form-encoded as
+// every read method, since some of them refuse a JSON body (F-125): the user groups that are not disabled, masked, in
+// the order Slack answered. Without the scope Slack answers missing_scope, with the scope it needs in Needed.
+func (c *Client) UsergroupsList(ctx context.Context, class outbound.Class) ([]UserGroup, Result) {
+	var out struct {
+		Usergroups *[]UserGroup `json:"usergroups"`
+	}
+	r := c.Call(ctx, class, "usergroups.list", Args{"include_count": true})
+	if !r.OK() {
+		return nil, r
+	}
+	if r.Decode(&out) != nil || out.Usergroups == nil {
+		return nil, notExpected(r, "usergroups.list")
+	}
+	groups := make([]UserGroup, 0, len(*out.Usergroups))
+	for _, g := range *out.Usergroups {
+		if g.DateDelete != 0 {
+			continue
+		}
+		groups = append(groups, UserGroup{ID: c.mask(g.ID), Handle: c.mask(g.Handle), Name: c.mask(g.Name),
+			UserCount: g.UserCount})
+	}
+	return groups, r
+}
+
+// UserGroups lists the user groups of the workspace that are not disabled through run (C-25.FR-8), in the order Slack
+// answered: one call of usergroups.list, which Slack does not page. An answer 429 is a *RateLimitedError and waits for
+// nothing: the interactive path holds the Connection's limiter for its Retry-After. A call that failed otherwise is a
+// *ListFailedError. Its other errors are the runner's own.
+func UserGroups(ctx context.Context, c *Client, run Runner) ([]UserGroup, error) {
+	var groups []UserGroup
+	var r Result
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		groups, r = c.UsergroupsList(ctx, call.Class)
+		return r.Outcome()
+	}); err != nil {
+		return nil, err
+	}
+	switch {
+	case r.Status == http.StatusTooManyRequests:
+		return nil, &RateLimitedError{RetryAfter: r.Classification.RetryAfter}
+	case !r.OK():
+		return nil, &ListFailedError{Text: outbound.Untrusted(cmp.Or(string(r.Error), checkFailed))}
+	}
+	return groups, nil
 }
 
 // Call calls method in class with the bot token.

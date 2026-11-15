@@ -9,24 +9,33 @@ covers: [C-25.FR-1, C-25.FR-8, C-25.FR-11, C-25.FR-12, C-25.AC-7, C-28.FR-2, C-2
 files_touched:
   - api/openapi.yaml
   - api/bridge.yaml
-  - internal/db/migrations/0033_team_mentions.up.sql
-  - internal/db/migrations/0033_team_mentions.down.sql
+  - internal/db/migrations/0042_team_mentions.up.sql
+  - internal/db/migrations/0042_team_mentions.down.sql
   - design/db/schema.md
   - internal/db/db_test.go
   - internal/db/migrate_test.go
   - internal/teams/mentions.go
   - internal/teams/mentions_test.go
+  - internal/teams/mentions_integration_test.go
   - internal/teams/teams.go
+  - internal/teams/teams_test.go
   - internal/teams/query.sql
   - internal/api/teams.go
   - internal/api/teams_test.go
   - internal/api/problem.go
+  - internal/api/server.go
+  - internal/api/server_test.go
   - internal/connections/groups.go
   - internal/connections/groups_test.go
   - internal/connections/connections.go
+  - internal/connections/connections_test.go
+  - internal/connections/draft_test.go
+  - internal/connections/team_mentions_integration_test.go
   - internal/connections/slack.go
   - internal/connections/query.sql
   - internal/api/connections.go
+  - internal/api/connections_test.go
+  - internal/archlint/secretleak.go
   - internal/slack/check.go
   - internal/slack/check_test.go
   - internal/slack/client.go
@@ -36,6 +45,7 @@ files_touched:
   - internal/mattermost/client.go
   - internal/bridge/info.go
   - internal/bridge/info_test.go
+  - internal/fakes/fakebridge/fakebridge_test.go
   - internal/fakes/fakemattermost/fakemattermost.go
   - internal/fakes/fakemattermost/fakemattermost_test.go
   - internal/fakes/fakeslack/fakeslack.go
@@ -45,10 +55,14 @@ files_touched:
   - web/src/test/fixtures/connections.ts
   - web/src/test/fixtures/teams.ts
   - web/src/components/connection-check.tsx
+  - web/e2e/connection-checks.spec.ts
+  - web/e2e/mattermost-connection.spec.ts
+  - web/e2e/slack-connection.spec.ts
   - web/src/locales/en.json
   - web/src/locales/ru.json
   - docs/concepts/teams.md
   - docs/messengers/slack.md
+  - docs/llms.txt.tmpl
   - docs/install/versions.md
   - AGENTS.md
 acceptance:
@@ -102,9 +116,11 @@ issue: 428
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
   - `TeamInput` gains `team_mentions` (`TeamMentionInput`[] {`connection_id`, `group` (the Mattermost group's name, the
     Slack user group's handle, or the bridge's group name; 1 to 64 characters of the form of `mentions` group names),
-    `group_id` (the Slack user group's id, `^S[0-9A-Z]+$`, required for Slack and refused for the others)}).
-  - `Team` gains `team_mentions` (`TeamMention`[] = the input with `connection` (`EntityRef` and `type`), `available`,
-    `unavailable_reason`) and `mention_connections` (`TeamMentionConnection`[] {`connection` (`EntityRef`), `type`,
+    `group_id` (the Slack user group's id, `^S[0-9A-Z]+$`, required for Slack and refused for the others)}). Both
+    forms are checked by `internal/teams` (`422` `invalid_format`), not by a `pattern` of the spec: the request
+    validation answers a nested field's `pattern` with `400`, as `x-unprocessable` covers top-level fields only.
+  - `Team` gains `team_mentions` (`TeamMention`[] = the input with `connection` (`ConnectionRef`: `EntityRef` and
+    `type`), `available`, `unavailable_reason`) and `mention_connections` (`TeamMentionConnection`[] {`connection` (`EntityRef`), `type`,
     `available`, `unavailable_reason` (`MentionUnavailableReason` or null), `team_mention` (the Team's for it, or
     null)}), for every Connection that is not deleted and may have a Destination: a Bridge Connection whose stored
     `info` lists `roles` without `messenger` — a Notification gateway only, S-145 — is left out (maintainer's decision
@@ -121,14 +137,18 @@ issue: 428
     Telegram, Bridge and a Slack Connection without the scope.
   - The Slack Connection read gains `usergroups_read` (boolean or null until checked); the Mattermost Connection read
     gains `groups_read` (boolean or null); `ConnectionCheckStep.name` gains `groups` (the Mattermost check's new step),
-    and `ConnectionCheckStep` gains `optional_scopes` ({`scope`, `present`}[]), set on the Slack step `scopes`.
+    and `ConnectionCheckStep` gains `optional_scopes` (`ConnectionCheckOptionalScope` {`scope`, `present`}[]), set on
+    the Slack step `scopes`. `listConnectionGroups` joins the operations `internal/api/server.go` implements.
   - Problem code `group_mentions_unsupported` (`validation-failed`, in `errors[].code`). Both new codes map in
     `internal/api/problem.go`: `group_mentions_unsupported` to its error item, `groups_not_listed` to a `409`.
 - **Protocol** (`api/bridge.yaml`, MIT): `Capabilities` gains `group_mentions` ("The bridge renders a group mention
   that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need
   it") and `everyone_mentions` (the mentions of everyone in the chat its messenger has, by their symbolic names); both
-  optional, additive in version 1 (ADR-0017). The `kind` of a `mentions` entry is S-171's.
-- **Schema** (migration `0033_team_mentions`, expand only; `schema.md` §4.5, §4.15):
+  optional, additive in version 1 (ADR-0017). The `kind` of a `mentions` entry is S-171's. The values of
+  `everyone_mentions` name their Go constants with `x-enum-varnames` (`EveryoneMention…`): without them, `all` and
+  `channel` would make oapi-codegen rename the generated constants of `thread_messages` and of a problem's `scope`.
+  The copy of `Capabilities` in `api/openapi.yaml` (`BridgeCapabilities`, `x-bridge-schema`) gains both fields.
+- **Schema** (migration `0042_team_mentions`, expand only; `schema.md` §4.5, §4.15):
   - `team_mentions`: `org_id`, `team_id` (FK), `connection_id` (FK),
     `group_name`, `slack_usergroup_id` (set for a Slack Connection only, which `internal/teams` checks), `created_at`;
     primary key `(team_id, connection_id)`; index `(org_id, connection_id)`.
@@ -137,19 +157,32 @@ issue: 428
 - **Teams** (`internal/teams/mentions.go`): validates each Team mention against the Connection's current abilities —
   Mattermost always, Slack with `slack_usergroups_read`, a Bridge with `group_mentions` in its stored `info`, Telegram
   never — writes them replaced as a whole, in the Team's diff; computes `available` and `mention_connections`;
-  `ForConnection(team, connection)` answers the Team mention that delivery uses from S-140; it satisfies the interface
+  `ForConnection(ctx, team, connection)` (by their ids) answers the Team mention that delivery uses from S-140, none
+  when there is none or the Connection cannot carry it now; it satisfies the interface
   `TeamMentions` that `mentions` declares in S-140 and that `internal/runtime` wires, so `mentions` never imports
   `teams` (the direction of S-140's Contracts). The query of `mention_connections` leaves out a Bridge Connection whose
   stored `info` has `roles` without `messenger`, a condition on `connections.bridge_info` that holds whether or not
   S-145 has merged; a Team mention for one is refused with `group_mentions_unsupported`, since a gateway-only bridge
-  declares no group mentions. A Slack Team mention is
+  declares no group mentions. A Team mention identical to a stored one (same `connection_id`, `group` and `group_id`) is
+  kept on a save whatever its Connection can mention now, so that one whose Connection lost the ability never blocks a
+  save of its Team; only a new or changed one is checked. A Slack Team mention is
   saved with the id and handle the picker took from `listConnectionGroups`; saving does not call Slack. Teams and
   Connections are deleted softly, so no foreign key cascades: `teams.Delete` deletes the Team's `team_mentions` in its
   transaction, and the Connection delete in `internal/connections/connections.go` deletes those of the Connection in
-  its own, each recorded in the Audit log diff of the Team it changes.
+  its own, each recorded in the Audit log diff of the Team it changes (`team.updated` by the person who deleted the
+  Connection, with the reason `connection_deleted`), and gives each such Team a new version, so that its ETag
+  changes. Every path that locks both takes a Team before a Connection: the Connection delete locks the Teams of its
+  Team mentions in id order before its own row, and a Team save takes the Connections of its Team mentions `FOR SHARE`
+  after the Team's row, as a Destination save takes its owning Team and then its Connection. A Team that gives the
+  Connection its first Team mention after the delete read the Teams to lock, and before it locked the Connection, makes
+  the delete run again with that Team, up to three times, and then answer `409` `team_mentions_changed` (a new
+  `conflict` code); the delete works only on the Teams that still have a Team mention for the Connection once it is
+  locked.
 - **Connections** (`internal/connections/groups.go`, `slack.go`, `connections.go`): `listConnectionGroups` on the
   interactive path; the Slack check stores `slack_usergroups_read` from `x-oauth-scopes`; the Mattermost check stores
-  `mattermost_groups_read`.
+  `mattermost_groups_read`, each only for the version of the Connection the check read, as what a check learns is;
+  a new bot token or server URL forgets both with the bot. The check of a draft is unchanged. The lint-5 harness
+  (`internal/archlint/secretleak.go`) lists the groups through its hostile Mattermost and Slack servers.
 - **Slack** (`internal/slack/check.go`, `client.go`): `usergroups:read` is an optional scope — present or missing, never
   `missing_scope` — and `usergroups.list` (`include_count=true`), with the user groups whose `date_delete` is 0,
   `member_count` from `user_count`; it is a read method, so `client.go` sends its arguments form-encoded, as it does for
@@ -248,7 +281,8 @@ CHECK $CS; curl -s "${A[@]}" $API/teams/$TP | jq -c '[.team_mentions[] | select(
 ```
 
 `test/e2e/team_mentions_test.go` repeats these checks and adds a Mattermost bot that may not read groups (the step
-`groups` warns, `groups_read` false, a typed Team mention is still saved), a deleted Connection whose Team mentions go,
+`groups` passes and its message says that the server refused the read, `groups_read` false, a typed Team mention is
+still saved), a deleted Connection whose Team mentions go,
 and `listConnectionGroups` of a Telegram Connection answering `409`. The PUTs of `/_fake/config` merge into the fake's
 configuration as in S-097; "a" is the key of the demo Slack app.
 
@@ -264,7 +298,7 @@ None. Settled:
 ## Notes
 
 - Suggested commit: `feat(teams): add team mentions per connection with the groups each connection can read`.
-- Migration `0033` follows the story map; a story merged out of that order renumbers its migration to the next free
+- Migration `0042`: the story map gave `0033`, but `0033` to `0041` merged before this story, so it took the next free
   number in its own pull request (S-131's Notes).
 - S-115 creates the builder of Team reads (`web/src/test/fixtures/teams.ts`) that this story extends; the plan review
   moved it there from S-119 so that this backend story no longer waits for the Teams pages (and, through S-117, for the

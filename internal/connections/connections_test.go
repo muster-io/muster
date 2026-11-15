@@ -89,6 +89,13 @@ type memStore struct {
 	// claim locks taken.
 	seen  map[memEvent]time.Time
 	locks []dbgen.LockBridgeEventParams
+	// mentions are the Team mentions, as ListConnectionTeamMentions reads them, bumps the Teams that got a new version
+	// and groupsRead what SetGroupsRead recorded (groups_test.go).
+	mentions    []dbgen.ListConnectionTeamMentionsRow
+	bumps       []dbgen.BumpTeamVersionsParams
+	groupsRead  []dbgen.SetGroupsReadParams
+	lockedTeams [][]int64
+	newTeams    []int64
 }
 
 // memEvent is an event id of a Bridge Connection.
@@ -146,10 +153,12 @@ func (s *memStore) InTx(_ context.Context, f func(connections.Queries) error) er
 		len(s.infos), s.next
 	nSlack := len(s.slackIDs)
 	seen := maps.Clone(s.seen)
+	mentions, nBumps, nGroups := slices.Clone(s.mentions), len(s.bumps), len(s.groupsRead)
 	if err := f(s); err != nil {
 		s.rows, s.audit, s.hints, s.updates, s.bots, s.infos, s.next = rows, s.audit[:nAudit], s.hints[:nHints],
 			s.updates[:nUpdates], s.bots[:nBots], s.infos[:nInfos], next
 		s.seen, s.slackIDs = seen, s.slackIDs[:nSlack]
+		s.mentions, s.bumps, s.groupsRead = mentions, s.bumps[:nBumps], s.groupsRead[:nGroups]
 		return err
 	}
 	s.committed++
@@ -324,6 +333,7 @@ func (s *memStore) UpdateConnection(_ context.Context, a dbgen.UpdateConnectionP
 		r.BridgeInfo, r.BridgeInfoReadAt = nil, pgtype.Timestamptz{}
 		r.SlackTeamID, r.SlackTeamName, r.SlackTeamUrl, r.SlackAppID, r.SlackBotID = pgtype.Text{}, pgtype.Text{},
 			pgtype.Text{}, pgtype.Text{}, pgtype.Text{}
+		r.SlackUsergroupsRead, r.MattermostGroupsRead = pgtype.Bool{}, pgtype.Bool{}
 		s.rows[a.ID].cursor = nil
 	}
 	if a.ForgetUpdates {
@@ -369,6 +379,7 @@ func (s *memStore) SetSlackIdentity(_ context.Context, a dbgen.SetSlackIdentityP
 	r.row.SlackTeamID, r.row.SlackTeamName, r.row.SlackTeamUrl, r.row.SlackBotID = a.TeamID, a.TeamName, a.TeamUrl,
 		a.BotID
 	r.row.BotUserID, r.row.BotUsername = a.BotUserID, a.BotUsername
+	r.row.SlackUsergroupsRead = pgtype.Bool{Bool: a.UsergroupsRead, Valid: true}
 	if a.AppID.Valid {
 		r.row.SlackAppID = a.AppID
 	}
@@ -1235,14 +1246,15 @@ func TestStepCalled(t *testing.T) {
 // TestCheck is C-13.FR-2: the Connection check on the interactive path, limited by the Connection, returns the bot's
 // name and records the bot, with the warning press_answers_in_thread and the roles it read while the bot's roles do
 // not grant create_post_ephemeral (D284) and without either once they do; a revoked token fails with "The bot token is not
-// valid."; no limiter token in time is a *delivery.LimitedError.
+// valid."; no limiter token in time is a *delivery.LimitedError. The step groups follows token (C-25.FR-8,
+// TestMattermostCheckGroups).
 func TestCheck(t *testing.T) {
 	e := newEnv(t)
 	c := e.create(t, "mm")
 	ctx := t.Context()
 	res, err := e.svc.Check(ctx, c.PublicID, nil)
-	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 1 ||
-		res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
+	if err != nil || !res.OK || res.BotName != fakemattermost.BotUsername || len(res.Steps) != 2 ||
+		res.Steps[1].Name != mattermost.StepGroups || res.Steps[0].Name != connections.StepToken || !res.Steps[0].OK || res.Steps[0].Via != mattermost.ViaDirect ||
 		res.Steps[0].Latency != 7*time.Millisecond || res.Steps[0].Message != "" || res.Steps[0].Code != "" ||
 		!slices.Equal(res.Warnings, []string{connections.WarningPressAnswersInThread}) ||
 		!slices.Equal(res.BotRoles, []string{"system_user"}) {
@@ -1253,13 +1265,13 @@ func TestCheck(t *testing.T) {
 		*got.BotUserID != fakemattermost.BotUserID || got.Version != 1 {
 		t.Errorf("bot = %+v", got)
 	}
-	if len(e.path.subjects) != 2 || e.path.subjects[1].Connection == nil || *e.path.subjects[1].Connection != c.ID ||
+	if len(e.path.subjects) != 3 || e.path.subjects[1].Connection == nil || *e.path.subjects[1].Connection != c.ID ||
 		e.path.subjects[1].Destination != nil {
 		t.Errorf("subjects %+v", e.path.subjects)
 	}
 	reqs := e.fake.Requests()
-	if len(reqs) != 2 || reqs[0].Path != "/api/v4/users/me" || reqs[0].Headers["Authorization"][0] != "Bearer "+botToken ||
-		reqs[1].Path != "/api/v4/roles/names" || reqs[1].Body != `["system_user"]` {
+	if len(reqs) != 3 || reqs[0].Path != "/api/v4/users/me" || reqs[0].Headers["Authorization"][0] != "Bearer "+botToken ||
+		reqs[1].Path != "/api/v4/groups" || reqs[2].Path != "/api/v4/roles/names" || reqs[2].Body != `["system_user"]` {
 		t.Errorf("requests %+v", reqs)
 	}
 	e.configure(t, `{"bot_system_admin":true}`)
@@ -1361,7 +1373,7 @@ func TestCheckThroughProxy(t *testing.T) {
 		t.Fatalf("destination check = %+v, %v", checked, err)
 	}
 	reqs, targets := e.fake.Requests(), p.Targets()
-	if len(reqs) != 8 || len(targets) != len(reqs) || p.Refused() != 0 {
+	if len(reqs) != 9 || len(targets) != len(reqs) || p.Refused() != 0 {
 		t.Errorf("%d requests reached the fake, %d through the proxy, %d refused", len(reqs), len(targets),
 			p.Refused())
 	}

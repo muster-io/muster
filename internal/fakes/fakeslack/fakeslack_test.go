@@ -293,8 +293,11 @@ func TestConfig(t *testing.T) {
 	}
 	channels := `{"C0FAKEALERTS":{"name":"alerts","member":true,"archived":false,"private":false},` +
 		`"C0FAKEOTHER":{"name":"other","member":false,"archived":false,"private":false}}`
+	usergroups := `{"S0FAKEPAYTEAM":{"handle":"payments-team","name":"Payments team","users":["U0FAKEALICE"],` +
+		`"disabled":false}}`
 	if got := do(t, req); got.raw != `{"scopes":{"a":"`+fakeslack.DefaultScopes+`","b":"`+fakeslack.DefaultScopes+
 		`"},"revoked":[],"user_tokens":[],"app_of":{},"channels":{"a":`+channels+`,"b":`+channels+
+		`},"usergroups":{"a":`+usergroups+`,"b":`+usergroups+
 		`},"page_size":0,"request_url":{},"extra_connections":{},"messages_tab_off":[]}`+"\n" {
 		t.Fatalf("default config %s", got.raw)
 	}
@@ -2277,4 +2280,77 @@ func TestMessagesTabOff(t *testing.T) {
 	}
 	putConfig(t, f, `{"messages_tab_off":[]}`)
 	ok(t, post(t, f, map[string]any{"channel": fakeslack.UserAlice, "text": "code 2"}))
+}
+
+// TestUsergroups covers usergroups.list of S-139 (F-125): without usergroups:read it is missing_scope with the scope
+// needed and those the token has; with it, the user groups of the token's app that are not disabled, form-encoded or
+// in JSON, with user_count only with include_count; /_fake/config merges the user groups of each app by id, null
+// deleting one and an app given as null getting the default again, and refuses an unknown app or an empty id.
+func TestUsergroups(t *testing.T) {
+	f := start(t)
+	got := call(t, f, "usergroups.list", fakeslack.BotToken, map[string]string{"include_count": "true"}, false)
+	if got.body["ok"] != false || got.body["error"] != "missing_scope" || got.body["needed"] != "usergroups:read" ||
+		got.body["provided"] != fakeslack.DefaultScopes ||
+		got.header.Get("X-Accepted-OAuth-Scopes") != "usergroups:read" {
+		t.Fatalf("without the scope: %s %v", got.raw, got.header)
+	}
+	slackError(t, call(t, f, "usergroups.list", fakeslack.AppToken, nil, false), "not_allowed_token_type")
+	withScope := fakeslack.DefaultScopes + ",usergroups:read"
+	putConfig(t, f, `{"scopes":{"a":"`+withScope+`"}}`)
+	for _, asJSON := range []bool{false, true} {
+		got = call(t, f, "usergroups.list", fakeslack.BotToken, map[string]string{"include_count": "true"}, asJSON)
+		groups, _ := got.body["usergroups"].([]any)
+		if got.body["ok"] != true || len(groups) != 1 {
+			t.Fatalf("with the scope (JSON %v): %s", asJSON, got.raw)
+		}
+		g := groups[0].(map[string]any)
+		if g["id"] != fakeslack.UserGroupPayments || g["handle"] != "payments-team" || g["name"] != "Payments team" ||
+			g["date_delete"] != float64(0) || g["user_count"] != float64(1) || g["team_id"] != "T0MUSTERDEVA" {
+			t.Fatalf("the user group: %v", g)
+		}
+	}
+	got = call(t, f, "usergroups.list", fakeslack.BotToken, nil, false)
+	if g := got.body["usergroups"].([]any)[0].(map[string]any); g["user_count"] != nil {
+		t.Fatalf("user_count without include_count: %v", g)
+	}
+	slackMissing := call(t, f, "usergroups.list", fakeslack.SecondBotToken, nil, false)
+	if slackMissing.body["error"] != "missing_scope" {
+		t.Fatalf("app b keeps its scopes: %s", slackMissing.raw)
+	}
+
+	putConfig(t, f, `{"usergroups":{"a":{"S0FAKEDEVOPS":{"handle":"devops","name":"DevOps","users":["U0FAKEBOB"]},`+
+		`"S0FAKEOLD":{"handle":"old","name":"Old","users":[],"disabled":true}}}}`)
+	if c := f.Config(); len(c.Usergroups[fakeslack.AppA]) != 3 || len(c.Usergroups[fakeslack.AppB]) != 1 {
+		t.Fatalf("merged user groups %+v", c.Usergroups)
+	}
+	got = call(t, f, "usergroups.list", fakeslack.BotToken, nil, false)
+	if groups := got.body["usergroups"].([]any); len(groups) != 2 ||
+		groups[0].(map[string]any)["id"] != "S0FAKEDEVOPS" || groups[1].(map[string]any)["id"] != "S0FAKEPAYTEAM" {
+		t.Fatalf("the user groups that are not disabled, by id: %s", got.raw)
+	}
+	got = call(t, f, "usergroups.list", fakeslack.BotToken, map[string]string{"include_disabled": "1"}, false)
+	if groups := got.body["usergroups"].([]any); len(groups) != 3 ||
+		groups[1].(map[string]any)["date_delete"] == float64(0) {
+		t.Fatalf("with include_disabled: %s", got.raw)
+	}
+	putConfig(t, f, `{"usergroups":{"a":{"S0FAKEOLD":null}}}`)
+	if c := f.Config(); len(c.Usergroups[fakeslack.AppA]) != 2 {
+		t.Fatalf("after a deletion %+v", c.Usergroups)
+	}
+	putConfig(t, f, `{"usergroups":{"a":null},"scopes":{"a":null}}`)
+	if !reflect.DeepEqual(f.Config(), fakeslack.DefaultConfig()) {
+		t.Fatalf("an app given as null: %+v", f.Config())
+	}
+	for _, body := range []string{`{"usergroups":{"c":{}}}`, `{"usergroups":{"a":{"":{"handle":"x"}}}}`} {
+		if got := putConfig(t, f, body); got.status != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", body, got.status, got.raw)
+		}
+	}
+	if err := f.SetConfig(fakeslack.Config{Usergroups: map[string]map[string]fakeslack.UserGroup{"z": {}}}); err == nil {
+		t.Fatal("SetConfig took the user groups of an unknown app")
+	}
+	if err := f.SetConfig(fakeslack.Config{}); err != nil ||
+		!reflect.DeepEqual(f.Config().Usergroups, fakeslack.DefaultConfig().Usergroups) {
+		t.Fatalf("SetConfig without user groups: %v, %+v", err, f.Config().Usergroups)
+	}
 }

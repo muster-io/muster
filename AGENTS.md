@@ -219,13 +219,16 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   scripted person from its `role_claims`, the direct groups of each role they hold. The fake Mattermost server has,
   beside `ch-alerts` and `ch-alerts-prod`, the channels `ch-infra-critical`, `ch-infra-notice`, `ch-payments-critical`,
   `ch-payments-notice` and `ch-search-notice` for routing to Teams by Severity, with the bot a member of each. Both
-  Mattermost servers and the Telegram server also serve a second bot, with the published tokens
+  Mattermost servers serve the custom groups `payments_team` (alice) and `devops_team` (bob) at `GET /api/v4/groups`,
+  with `member_count` only when asked for, and `/_fake/config` `{"groups_forbidden":true}` makes them refuse that read
+  with `403`. Both Mattermost servers and the Telegram server also serve a second bot, with the published tokens
   `muster-dev-mattermost-token-b` and `234567:dev-telegram-token-b`, for which `muster dev` creates no Connection. The
   fake bridge serves three bots: `muster-dev-bridge-token`, which the demo Connection "Example Bridge" uses in poll
   mode, `muster-dev-bridge-token-b`, for which `muster dev` creates no Connection, and the Notification gateway
   `muster-dev-gateway-token`, whose `info` declares only the role `gateway`, which the demo Connection "Example Gateway"
   uses in poll mode under the path prefix `/gateway`, checked at start; `/_fake/config` changes what its `info` says,
-  the roles of each bot included, `/_fake/messages` lists every message and edit with the `layout` Muster sent, from
+  the roles of each bot included, and its `capabilities` `group_mentions` and `everyone_mentions`, which it declares
+  neither of by default, `/_fake/messages` lists every message and edit with the `layout` Muster sent, from
   which the fake renders nothing, `/_fake/notifications` lists the notifications the bots sent, and
   `POST /_fake/acknowledge` acknowledges one. The fake Slack server serves two Slack apps, each a
   workspace with a bot: the bot token `xoxb-muster-dev-slack-token` with the app-level token
@@ -234,9 +237,11 @@ Go version (go.mod), Node version (`.node-version`) and pnpm version (`packageMa
   their Slack signing secrets are `muster-dev-slack-signing-secret` and `muster-dev-slack-signing-secret-b`. Under
   `muster dev` a Slack Connection whose bot token is one of these calls the fake server instead of `slack.com`;
   `/_fake/config` sets the scopes of each app, the revoked tokens, the tokens answered as a person's, the app of each
-  token, the channels of each app, merged by id, a page size for `conversations.list` and the `request_url` of each
-  app; both apps have the channel `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other", without it, and
-  the people `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in every channel with the bot.
+  token, the channels and the user groups of each app, each merged by id, a page size for `conversations.list` and the
+  `request_url` of each app; both apps have the user group `S0FAKEPAYTEAM` "payments-team" with `U0FAKEALICE`, which
+  `usergroups.list` answers to a bot token whose scopes include `usergroups:read`, which the default scopes lack; both
+  apps have the channel `C0FAKEALERTS` "alerts", with the bot, and `C0FAKEOTHER` "other", without it, and the people
+  `U0FAKEALICE`, `U0FAKEBOB`, `U0FAKECAROL` and `U0FAKEDORA` are in every channel with the bot.
   `POST /_fake/press` presses a button of a message as one of them and sends the app's `request_url` the press signed
   with its Slack signing secret; `/_fake/ephemeral` and `/_fake/responses` list what Muster answered.
 - Development defaults: the bootstrap Admin `admin@example.org` with the password `muster-dev-password`, and a fixed,

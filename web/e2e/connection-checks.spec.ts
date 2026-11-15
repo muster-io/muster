@@ -126,6 +126,13 @@ function carries(r: Recorded, token: string): boolean {
   return [r.path, r.query, r.body, ...Object.values(r.headers).flat()].some((s) => whole.test(s));
 }
 
+/**
+ * The optional scope usergroups:read under the step Scopes, missing for the fake's bot tokens by default: the step
+ * passes and says that Team mentions and Slack user groups need it (C-24.FR-2).
+ */
+const USERGROUPS_MISSING =
+  "usergroups:read: missing, optional; Team mentions and Slack user groups need it";
+
 function steps(page: Page) {
   return page.getByTestId("connection-check-step");
 }
@@ -413,7 +420,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
     await expect(steps(page)).toHaveText([
       /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
-      "Scopes: ok · direct",
+      `Scopes: ok · direct${USERGROUPS_MISSING}`,
       /^App-level token: ok · \d+ ms · direct · App: A0MUSTERDEVB$/,
     ]);
     await shot(page, "connection-checks-new-slack");
@@ -451,7 +458,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     await expect(summary(page)).toHaveText("Connected as muster-dev-bot-b");
     await expect(steps(page)).toHaveText([
       /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
-      "Scopes: ok · through the proxy",
+      `Scopes: ok · through the proxy${USERGROUPS_MISSING}`,
       `App-level token: ${APP_TOKEN_RETYPE}`,
     ]);
     // Both tokens typed: every step through the proxy.
@@ -464,7 +471,7 @@ test("checks Slack drafts: the typed tokens, and only the dry probe for a new pr
     await checkButton(page).click();
     await expect(steps(page)).toHaveText([
       /^Token: ok · \d+ ms · through the proxy · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
-      "Scopes: ok · through the proxy",
+      `Scopes: ok · through the proxy${USERGROUPS_MISSING}`,
       /^App-level token: ok · \d+ ms · through the proxy · App: A0MUSTERDEVB$/,
     ]);
     // A draft never warns about another program on the app.

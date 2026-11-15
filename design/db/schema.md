@@ -101,7 +101,10 @@
   a Service account after a change of their name or of the User's Account links, C-12.FR-12) and
   [`0041_destination_connection_updates`](../../internal/db/migrations/0041_destination_connection_updates.up.sql)
   (the kind `destination_connection` of `open_group_updates`, the re-render of the open Root messages of a Destination
-  after a change of its Connection, C-12.FR-12), in
+  after a change of its Connection, C-12.FR-12) and
+  [`0042_team_mentions`](../../internal/db/migrations/0042_team_mentions.up.sql)
+  (the Team mentions, `team_mentions`, and what a check of a Connection found of its groups,
+  `connections.slack_usergroups_read` and `connections.mattermost_groups_read`, C-25.FR-8, C-24.FR-1, FR-2, S-139), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -203,8 +206,8 @@ changes of configuration that reach the open Alert Groups, `open_group_updates` 
 `schedule_overrides` (0025), the personal iCal feeds, `ical_feeds` (0026), the identity provider entries
 of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_destinations` (0032), and the contacts at
 Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), and the calls through
-them, `gateway_calls` and `gateway_call_items` (0034), and the Notification rules of the Users, `notification_rules`
-(0037), which makes 77 tables.
+them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of the Users, `notification_rules`
+(0037), and the Team mentions, `team_mentions` (0042), which makes 78 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -218,7 +221,7 @@ them, `gateway_calls` and `gateway_call_items` (0034), and the Notification rule
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
 | Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams, links, users, account links and tokens insert, `groups` claims and deletes | deleted with the last batch of its run |
-| Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams | deleted Teams kept, marked deleted |
+| Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries`, `team_mentions` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams; connections deletes the `team_mentions` of a Connection it deletes and gives each Team they belonged to a new `version` | deleted Teams kept, marked deleted; `team_mentions` with their Team or Connection |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
 | Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
@@ -904,6 +907,14 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   those the Leader holds — written by the Leader from S-101 for the version its socket read, not a change of the
   configuration; a save that changes the Connection forgets both, since its socket starts again and counts at its next
   `hello`; a save without changes writes nothing and keeps them.
+  **Groups a Connection reads** (migration 0042, C-25.FR-8): `slack_usergroups_read` is whether the `x-oauth-scopes`
+  of the last passing check of a Slack Connection named the optional scope `usergroups:read` (C-24.FR-1, FR-2), which
+  its Team mentions and user group entries need; `mattermost_groups_read` is whether the last passing check of a
+  Mattermost Connection could read the groups (`GET /api/v4/groups`, its step `groups`). Both are null until a check
+  sets them, are written like what the check learned — only for the version of the Connection the check read, not a
+  change of the configuration — and a new bot token or server URL forgets them with the bot; one saved on a replica
+  without 0042 keeps them until the Connection's next check on a replica with it. A Slack Connection whose last check
+  found no `usergroups:read` keeps its Team mentions, which then mention nobody.
   **Broken Notification gateway** (migration 0036, C-30.FR-8): a Bridge Connection that is a Notification gateway
   ([4.17](#417-notification-gateways)) is Broken while `gateway_broken_since` is set, with `gateway_broken_reason`
   (the masked error of the call that made it Broken or of its last probe) and `gateway_next_probe_at`, when any
@@ -934,7 +945,8 @@ Serves C-11.FR-18, C-12.FR-8, C-13, C-14, C-15, C-18, C-22, C-24;
   `gateways`.
   `UNIQUE (id, type)` is the target of type-checked foreign keys. A Connection cannot be deleted while a Destination
   that is not deleted uses it; deleting it abandons the final edits still pending for its deleted Destinations, whose
-  deliveries end as `not_delivered`.
+  deliveries end as `not_delivered`, and deletes its Team mentions ([4.15](#415-teams)) in its transaction, each in the
+  Audit log diff of its Team.
 - **`destinations`** — one table for the five types, with type-specific nullable columns and a `CHECK` per type. The
   composite foreign key `(connection_id, type) REFERENCES connections (id, type)` guarantees that a Mattermost
   Destination posts through a Mattermost Connection, a Telegram one through a Telegram Connection, a Bridge one
@@ -1635,6 +1647,30 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   it only removed entries ([section 5](#5-queues-and-claims)); the deletion of a Team deletes its rows under the lock,
   which it takes last in its transaction, after releasing the Destinations and Routes it owned, and inserts the row of
   the Team alone; the deletion of a Destination deletes the rows that name it.
+- **`team_mentions`** (migration 0042, C-25.FR-8) — the Team mention of each Team for a Connection whose messenger can
+  mention a group, primary key `(team_id, connection_id)`: `group_name`, the name of a Mattermost group, the handle of
+  a Slack user group or a group name of a bridge, 1 to 64 characters, and for a Slack Connection only
+  `slack_usergroup_id`, the user group's id (`S…`), which `internal/teams` requires there and refuses elsewhere, and
+  `created_at`. A save of the Team's `team_mentions` replaces them as a whole, after checking each against what its
+  Connection can mention now — a Mattermost Connection always, a Slack one whose `slack_usergroups_read` is true, a
+  Bridge whose stored `bridge_info` declares `group_mentions`, a Telegram one never — and it is in the Team's Audit log
+  diff. A Connection that later loses the ability keeps the row, which reads unavailable and mentions nobody. Teams
+  and Connections are deleted softly, so no foreign key cascades: the deletion of a Team deletes its rows, and the
+  deletion of a Connection deletes those of the Connection through the index `team_mentions_connection_idx` on
+  `(org_id, connection_id)`, recording each in the Audit log of its Team and giving each such Team a new `version`.
+  Every path that locks both takes a Team before a Connection: the deletion of a Connection locks the Teams of its
+  Team mentions `FOR NO KEY UPDATE`, in id order, before the Connection's row, and reads, deletes and records their
+  Team mentions under those locks; a save of a Team locks the Team's row and then takes the Connections of its Team
+  mentions `FOR SHARE`; a save of a Destination takes its owning Team and then its Connection `FOR SHARE`. The set of
+  Teams the deletion locks is read before it holds the Connection, so a save of another Team may still give the
+  Connection that Team's first Team mention meanwhile; once it holds the Connection no save can, and it reads the
+  Teams with a Team mention for it again, and works on those alone: one it did not lock rolls the deletion back, and the
+  deletion runs again with it, up to three times, after which it is refused with `409` `team_mentions_changed`
+  (locking that Team after the Connection would invert the order); one it locked whose save removed its Team mention
+  for the Connection meanwhile gets no Audit log entry and no new version. A save of a Team that reaches the Connection after the deletion locked it waits for it and then finds
+  the Connection deleted. A replica without 0042 that deletes a Team
+  or a Connection leaves its rows, which no read returns — every read of the Team mentions, `ForConnection` included,
+  joins a Team and a Connection that are not deleted — and the Team's next save of its Team mentions replaces them.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both

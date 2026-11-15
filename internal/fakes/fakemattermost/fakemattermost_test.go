@@ -1357,3 +1357,41 @@ func TestSecondBot(t *testing.T) {
 		}
 	})
 }
+
+// TestGroups covers the groups of S-139 (F-121 to F-123): GET /api/v4/groups lists payments_team and devops_team,
+// custom groups that may be mentioned, with member_count only with include_member_count=true and at most per_page of
+// them; groups_forbidden makes it answer 403 api.context.permissions.app_error until it is turned off, and a reset
+// turns it off.
+func TestGroups(t *testing.T) {
+	fx := start(t)
+	path := "/api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200"
+	gs := decode[[]fakemattermost.Group](t, fx.api(http.MethodGet, path, ""))
+	if len(gs) != 2 || gs[0].Name != fakemattermost.GroupPayments || gs[1].Name != fakemattermost.GroupDevops {
+		t.Fatalf("groups %+v", gs)
+	}
+	for _, g := range gs {
+		if g.Source != "custom" || !g.AllowReference || g.DeleteAt != 0 || g.MemberCount == nil || *g.MemberCount != 1 ||
+			len(g.ID) != 26 || g.DisplayName == "" {
+			t.Errorf("group %+v", g)
+		}
+	}
+	r := fx.api(http.MethodGet, "/api/v4/groups?per_page=1", "")
+	if one := decode[[]map[string]any](t, r); len(one) != 1 || one[0]["member_count"] != nil ||
+		one[0]["name"] != fakemattermost.GroupPayments {
+		t.Fatalf("one group without its count: %s", r)
+	}
+	fx.setConfig(`{"groups_forbidden":true}`)
+	if !fx.fake.Config().GroupsForbidden {
+		t.Fatal("groups_forbidden is not set")
+	}
+	wantAppError(t, fx.api(http.MethodGet, path, ""), http.StatusForbidden, "api.context.permissions.app_error")
+	fx.setConfig(`{"groups_forbidden":false}`)
+	if r := fx.api(http.MethodGet, path, ""); r.status != http.StatusOK {
+		t.Fatalf("after groups_forbidden off: %s", r)
+	}
+	fx.setConfig(`{"groups_forbidden":true}`)
+	fx.control(http.MethodPost, "/_fake/reset", "")
+	if fx.fake.Config().GroupsForbidden {
+		t.Fatal("a reset keeps groups_forbidden")
+	}
+}

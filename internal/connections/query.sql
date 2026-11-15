@@ -22,7 +22,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -52,7 +52,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -139,6 +139,8 @@ SET name = @name, mattermost_server_url = sqlc.narg('server_url'),
     slack_team_url = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_team_url END,
     slack_app_id = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_app_id END,
     slack_bot_id = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_bot_id END,
+    slack_usergroups_read = CASE WHEN @forget_bot::boolean THEN NULL ELSE slack_usergroups_read END,
+    mattermost_groups_read = CASE WHEN @forget_bot::boolean THEN NULL ELSE mattermost_groups_read END,
     telegram_update_offset = CASE WHEN @forget_updates::boolean THEN NULL ELSE telegram_update_offset END,
     slack_socket_hello_at = NULL, slack_socket_other_connections = NULL,
     proxy = @proxy, proxy_password_ciphertext = sqlc.narg('proxy_password_ciphertext'),
@@ -160,6 +162,13 @@ UPDATE connections
 SET bot_user_id = @bot_user_id, bot_username = @bot_username
 WHERE org_id = @org_id AND id = @id AND deleted_at IS NULL;
 
+-- SetGroupsRead records whether a passing check of a Mattermost Connection could read its groups (C-25.FR-8), unless
+-- the Connection changed since the check read it; it is not a change of the configuration.
+-- name: SetGroupsRead :execrows
+UPDATE connections
+SET mattermost_groups_read = @groups_read::boolean
+WHERE org_id = @org_id AND id = @id AND type = 'mattermost' AND version = @version AND deleted_at IS NULL;
+
 -- SetBridgeInfo records the info that a check of a Bridge Connection read, as the bridge sent it, at read_at on the
 -- business clock, unless the Connection changed since the check read it; it is not a change of the configuration.
 -- name: SetBridgeInfo :execrows
@@ -168,12 +177,13 @@ SET bridge_info = @info::jsonb, bridge_info_read_at = @read_at::timestamptz
 WHERE org_id = @org_id AND id = @id AND type = 'bridge' AND version = @version AND deleted_at IS NULL;
 
 -- SetSlackIdentity records what a passing check of a Slack Connection learned — the workspace, its address and the
--- bot, and the app when the check had the step app_token, keeping the stored app otherwise — unless the Connection
--- changed since the check read it; it is not a change of the configuration.
+-- bot, whether the bot token has usergroups:read (C-24.FR-1 revised), and the app when the check had the step
+-- app_token, keeping the stored app otherwise — unless the Connection changed since the check read it; it is not a
+-- change of the configuration.
 -- name: SetSlackIdentity :execrows
 UPDATE connections
 SET slack_team_id = @team_id, slack_team_name = @team_name, slack_team_url = @team_url, slack_bot_id = @bot_id,
-    bot_user_id = @bot_user_id, bot_username = @bot_username,
+    bot_user_id = @bot_user_id, bot_username = @bot_username, slack_usergroups_read = @usergroups_read::boolean,
     slack_app_id = coalesce(sqlc.narg('app_id')::text, slack_app_id)
 WHERE org_id = @org_id AND id = @id AND type = 'slack' AND version = @version AND deleted_at IS NULL;
 
@@ -215,6 +225,58 @@ SET deleted_at = @now::timestamptz, updated_at = @now::timestamptz, version = ve
     bridge_push_secret_ciphertext = NULL, bridge_push_secret_key_id = NULL, slack_app_token_ciphertext = NULL,
     slack_app_token_key_id = NULL, slack_signing_secret_ciphertext = NULL, slack_signing_secret_key_id = NULL
 WHERE org_id = @org_id AND id = @id;
+
+-- LockConnectionTeams locks, FOR NO KEY UPDATE and in id order, the Teams that are not deleted and have a Team mention
+-- for the Connection that is not deleted with the public_id, as the first step of its deletion, before the Connection's
+-- own row: a save of a Team locks the Team's row and then takes the Connections of its Team mentions FOR SHARE, and a
+-- save of a Destination takes its owning Team FOR SHARE and then its Connection FOR SHARE, so every path takes a Team
+-- before a Connection.
+-- name: LockConnectionTeams :many
+SELECT t.id
+FROM teams t
+WHERE t.org_id = @org_id AND t.deleted_at IS NULL
+  AND t.id IN (SELECT m.team_id
+               FROM team_mentions m
+               JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+               WHERE m.org_id = @org_id AND c.public_id = @public_id AND c.deleted_at IS NULL)
+ORDER BY t.id
+FOR NO KEY UPDATE OF t;
+
+-- ListConnectionTeams lists the Teams that are not deleted and have a Team mention for a Connection, read in its
+-- deletion once the Connection is locked, when no save can give it another: one that LockConnectionTeams did not lock
+-- gave its first Team mention after that lock's read, and the deletion runs again.
+-- name: ListConnectionTeams :many
+SELECT DISTINCT m.team_id
+FROM team_mentions m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = @org_id AND m.connection_id = @connection_id AND t.deleted_at IS NULL
+ORDER BY m.team_id;
+
+-- ListConnectionTeamMentions lists, in the deletion of a Connection, every Team mention of the Teams it locked, of the
+-- Connections that are not deleted and of the one being deleted, by Team and Connection: the Team mentions before and
+-- after the deletion, for the Audit log diff of each Team.
+-- name: ListConnectionTeamMentions :many
+SELECT t.id AS team_id, t.public_id AS team_public_id, t.name AS team_name, m.connection_id,
+       c.public_id AS connection_public_id, m.group_name, m.slack_usergroup_id
+FROM team_mentions m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+WHERE m.org_id = @org_id AND m.team_id = ANY(@team_ids::bigint[]) AND t.deleted_at IS NULL
+  AND (c.deleted_at IS NULL OR c.id = @connection_id)
+ORDER BY t.id, c.public_id;
+
+-- DeleteConnectionTeamMentions deletes the Team mentions of a Connection of the Teams its deletion locked, in the
+-- transaction of the deletion: Teams and Connections are deleted softly, so no foreign key cascades.
+-- name: DeleteConnectionTeamMentions :exec
+DELETE FROM team_mentions
+WHERE org_id = @org_id AND connection_id = @connection_id AND team_id = ANY(@team_ids::bigint[]);
+
+-- BumpTeamVersions gives each Team whose Team mentions the deletion of a Connection changed a new version, as a save
+-- of the Team does, so that its ETag changes.
+-- name: BumpTeamVersions :exec
+UPDATE teams
+SET version = version + 1, updated_at = @now::timestamptz
+WHERE org_id = @org_id AND id = ANY(@team_ids::bigint[]) AND deleted_at IS NULL;
 
 -- LockDemo serializes the demo start-up step of replicas that start together, until the transaction ends.
 -- name: LockDemo :exec

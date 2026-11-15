@@ -239,7 +239,49 @@ func teamInputOf(b gen.TeamInput) teams.Input {
 		}
 		in.DestinationEntries = &entries
 	}
+	if b.TeamMentions != nil {
+		ms := make([]teams.MentionInput, len(*b.TeamMentions))
+		for i, m := range *b.TeamMentions {
+			ms[i] = teams.MentionInput{ConnectionID: m.ConnectionId, Group: m.Group, GroupID: deref(m.GroupId)}
+		}
+		in.Mentions = &ms
+	}
 	return in
+}
+
+// teamMentionOf is the API form of a Team mention.
+func teamMentionOf(m teams.Mention) gen.TeamMention {
+	return gen.TeamMention{ConnectionId: m.ConnectionID, Group: m.Group, GroupId: optional(m.GroupID),
+		Connection: gen.ConnectionRef{Id: m.Connection.PublicID, Name: m.Connection.Name,
+			Type: gen.ConnectionType(m.Connection.Type)},
+		Available: m.Available, UnavailableReason: unavailableReasonOf(m.UnavailableReason)}
+}
+
+// unavailableReasonOf is why a Connection cannot mention a group, null when it can.
+func unavailableReasonOf(reason string) nullable.Nullable[gen.MentionUnavailableReason] {
+	if reason == "" {
+		return nullable.NewNullNullable[gen.MentionUnavailableReason]()
+	}
+	return nullable.NewNullableWithValue(gen.MentionUnavailableReason(reason))
+}
+
+// teamMentionsOf are the Team mentions of t and the Connections that may have a Destination, in the API form.
+func teamMentionsOf(t teams.Team) ([]gen.TeamMention, []gen.TeamMentionConnection) {
+	ms := make([]gen.TeamMention, len(t.Mentions))
+	for i, m := range t.Mentions {
+		ms[i] = teamMentionOf(m)
+	}
+	conns := make([]gen.TeamMentionConnection, len(t.MentionConnections))
+	for i, c := range t.MentionConnections {
+		conns[i] = gen.TeamMentionConnection{Connection: gen.EntityRef{Id: c.Connection.PublicID,
+			Name: c.Connection.Name}, Type: gen.ConnectionType(c.Connection.Type), Available: c.Available,
+			UnavailableReason: unavailableReasonOf(c.UnavailableReason),
+			TeamMention:       nullable.NewNullNullable[gen.TeamMention]()}
+		if c.Mention != nil {
+			conns[i].TeamMention = nullable.NewNullableWithValue(teamMentionOf(*c.Mention))
+		}
+	}
+	return ms, conns
 }
 
 // idpEntriesOf is the API form of identity provider entries.
@@ -286,10 +328,12 @@ func teamOf(t teams.Team) gen.Team {
 		dests[i] = gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
 			Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
 	}
+	mentions, conns := teamMentionsOf(t)
 	return gen.Team{Id: t.PublicID, Name: t.Name, Slug: t.Slug, Description: t.Description,
 		OwnWorkingHours: t.Own != nil, WorkingHours: workingHoursOf(t.WorkingHours),
 		IdpEntries: idpEntriesOf(t.IdpEntries), UserCount: int(t.UserCount), CreatedAt: t.CreatedAt.UTC(), Etag: &tag,
-		Matchers: ms, DestinationEntries: entries, Destinations: dests}
+		Matchers: ms, DestinationEntries: entries, Destinations: dests, TeamMentions: mentions,
+		MentionConnections: conns}
 }
 
 // teamUserOf is the API form of a person in a Team.

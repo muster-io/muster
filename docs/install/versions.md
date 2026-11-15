@@ -197,6 +197,20 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       shown wrong stores a repair hash in `deliveries.desired_hash`; a replica without 0041, during a rolling update
       or after a downgrade, takes it as a changed Desired state and edits each such Root message once more, Quietly,
       with no visible change.
+    - Migration 0042 adds the [Team mentions](../concepts/teams.md#team-mentions), none after the upgrade, and what the
+      check of a Connection finds of its groups: whether a Slack bot token has `usergroups:read` and whether a
+      Mattermost bot may read the groups, unknown until the Connection's next check. It is expand only: a 0.1 replica,
+      or one of a development image without it, reads and writes neither; a Team or a Connection it deletes keeps its
+      Team mentions, which no read shows and the Team's next save of its Team mentions replaces, and a new bot token or
+      server URL it saves keeps what the last check found of the old bot's groups until the Connection is checked again
+      on 0.2.0.
+
+    **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
+    [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
+    working without it, without Team mentions. To add it, add the scope to the app and reinstall the app in the
+    workspace, as Slack asks: the reinstall keeps the bot token, so the Connection needs no change; check it again and
+    it records the scope
+    ([Add usergroups:read to an installed app](../messengers/slack.md#add-usergroupsread-to-an-installed-app)).
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -680,6 +694,12 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     Going back below 0041 deletes the re-renders of this kind still to do, whose Root messages then catch up at each
     Alert Group's next change; a replica of a version without 0041 neither writes nor claims them.
+
+    Migration 0042 adds the Team mentions and the groups a check of a Connection finds in one transaction: a failure
+    leaves nothing of it, but the schema recorded as dirty at version 42. To recover, with the same database role as
+    Muster, run `UPDATE schema_migrations SET version = 41, dirty = false;` and start the 0.2.0 replica again, or run
+    `muster migrate`. Going back below 0042 loses every Team mention and what the checks found of the groups; once 0042
+    is back, each Connection's next check finds the groups again, and the Team mentions are entered again.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

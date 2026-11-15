@@ -826,6 +826,28 @@ components:
         native_mentions:
           type: boolean
           description: Mention markers become the messenger's own mentions, which notify the person.
+        group_mentions:
+          type: boolean
+          description: The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`;
+            the Team mentions and group entries of a Destination need it. Missing or false, Muster offers no group
+            mention for the bridge's Connections.
+        everyone_mentions:
+          type: array
+          description: The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names.
+            Muster sends only those listed here; missing or empty, none.
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - channel
+            - here
+            - all
+            - everyone
+            x-enum-varnames:
+            - EveryoneMentionChannel
+            - EveryoneMentionHere
+            - EveryoneMentionAll
+            - EveryoneMentionEveryone
         quiet_messages:
           type: boolean
           description: The messenger can post a new message without notifying anyone (`notify` false).

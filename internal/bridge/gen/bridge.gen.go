@@ -63,6 +63,30 @@ func (e ButtonStyle) Valid() bool {
 	}
 }
 
+// Defines values for CapabilitiesEveryoneMentions.
+const (
+	EveryoneMentionAll      CapabilitiesEveryoneMentions = "all"
+	EveryoneMentionChannel  CapabilitiesEveryoneMentions = "channel"
+	EveryoneMentionEveryone CapabilitiesEveryoneMentions = "everyone"
+	EveryoneMentionHere     CapabilitiesEveryoneMentions = "here"
+)
+
+// Valid indicates whether the value is a known member of the CapabilitiesEveryoneMentions enum.
+func (e CapabilitiesEveryoneMentions) Valid() bool {
+	switch e {
+	case EveryoneMentionAll:
+		return true
+	case EveryoneMentionChannel:
+		return true
+	case EveryoneMentionEveryone:
+		return true
+	case EveryoneMentionHere:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CapabilitiesPrivateAnswers.
 const (
 	CapabilitiesPrivateAnswersEphemeral CapabilitiesPrivateAnswers = "ephemeral"
@@ -399,6 +423,12 @@ type Capabilities struct {
 		BotCanStart bool `json:"bot_can_start"`
 	} `json:"direct_messages,omitempty"`
 
+	// EveryoneMentions The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names. Muster sends only those listed here; missing or empty, none.
+	EveryoneMentions *[]CapabilitiesEveryoneMentions `json:"everyone_mentions,omitempty"`
+
+	// GroupMentions The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it. Missing or false, Muster offers no group mention for the bridge's Connections.
+	GroupMentions *bool `json:"group_mentions,omitempty"`
+
 	// NativeMentions Mention markers become the messenger's own mentions, which notify the person.
 	NativeMentions *bool `json:"native_mentions,omitempty"`
 
@@ -414,6 +444,9 @@ type Capabilities struct {
 	// ThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
 	ThreadMessages *CapabilitiesThreadMessages `json:"thread_messages,omitempty"`
 }
+
+// CapabilitiesEveryoneMentions defines model for Capabilities.EveryoneMentions.
+type CapabilitiesEveryoneMentions string
 
 // CapabilitiesPrivateAnswers defines model for Capabilities.PrivateAnswers.
 type CapabilitiesPrivateAnswers string

@@ -32,6 +32,25 @@ func (q *Queries) BridgeEventSeen(ctx context.Context, arg BridgeEventSeenParams
 	return seen, err
 }
 
+const bumpTeamVersions = `-- name: BumpTeamVersions :exec
+UPDATE teams
+SET version = version + 1, updated_at = $1::timestamptz
+WHERE org_id = $2 AND id = ANY($3::bigint[]) AND deleted_at IS NULL
+`
+
+type BumpTeamVersionsParams struct {
+	Now     time.Time
+	OrgID   int64
+	TeamIds []int64
+}
+
+// BumpTeamVersions gives each Team whose Team mentions the deletion of a Connection changed a new version, as a save
+// of the Team does, so that its ETag changes.
+func (q *Queries) BumpTeamVersions(ctx context.Context, arg BumpTeamVersionsParams) error {
+	_, err := q.db.Exec(ctx, bumpTeamVersions, arg.Now, arg.OrgID, arg.TeamIds)
+	return err
+}
+
 const countConnectionDestinations = `-- name: CountConnectionDestinations :one
 SELECT count(*)
 FROM destinations
@@ -50,6 +69,24 @@ func (q *Queries) CountConnectionDestinations(ctx context.Context, arg CountConn
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteConnectionTeamMentions = `-- name: DeleteConnectionTeamMentions :exec
+DELETE FROM team_mentions
+WHERE org_id = $1 AND connection_id = $2 AND team_id = ANY($3::bigint[])
+`
+
+type DeleteConnectionTeamMentionsParams struct {
+	OrgID        int64
+	ConnectionID int64
+	TeamIds      []int64
+}
+
+// DeleteConnectionTeamMentions deletes the Team mentions of a Connection of the Teams its deletion locked, in the
+// transaction of the deletion: Teams and Connections are deleted softly, so no foreign key cascades.
+func (q *Queries) DeleteConnectionTeamMentions(ctx context.Context, arg DeleteConnectionTeamMentionsParams) error {
+	_, err := q.db.Exec(ctx, deleteConnectionTeamMentions, arg.OrgID, arg.ConnectionID, arg.TeamIds)
+	return err
 }
 
 const findConnectionByName = `-- name: FindConnectionByName :one
@@ -146,7 +183,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -211,6 +248,8 @@ type GetConnectionRow struct {
 	GatewayBrokenSince              pgtype.Timestamptz
 	GatewayBrokenReason             pgtype.Text
 	GatewayNextProbeAt              pgtype.Timestamptz
+	SlackUsergroupsRead             pgtype.Bool
+	MattermostGroupsRead            pgtype.Bool
 	DestinationCount                int64
 }
 
@@ -267,6 +306,8 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (G
 		&i.GatewayBrokenSince,
 		&i.GatewayBrokenReason,
 		&i.GatewayNextProbeAt,
+		&i.SlackUsergroupsRead,
+		&i.MattermostGroupsRead,
 		&i.DestinationCount,
 	)
 	return i, err
@@ -727,6 +768,100 @@ func (q *Queries) ListBridgePollingConnections(ctx context.Context, orgID int64)
 	return items, nil
 }
 
+const listConnectionTeamMentions = `-- name: ListConnectionTeamMentions :many
+SELECT t.id AS team_id, t.public_id AS team_public_id, t.name AS team_name, m.connection_id,
+       c.public_id AS connection_public_id, m.group_name, m.slack_usergroup_id
+FROM team_mentions m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+WHERE m.org_id = $1 AND m.team_id = ANY($2::bigint[]) AND t.deleted_at IS NULL
+  AND (c.deleted_at IS NULL OR c.id = $3)
+ORDER BY t.id, c.public_id
+`
+
+type ListConnectionTeamMentionsParams struct {
+	OrgID        int64
+	TeamIds      []int64
+	ConnectionID int64
+}
+
+type ListConnectionTeamMentionsRow struct {
+	TeamID             int64
+	TeamPublicID       string
+	TeamName           string
+	ConnectionID       int64
+	ConnectionPublicID string
+	GroupName          string
+	SlackUsergroupID   pgtype.Text
+}
+
+// ListConnectionTeamMentions lists, in the deletion of a Connection, every Team mention of the Teams it locked, of the
+// Connections that are not deleted and of the one being deleted, by Team and Connection: the Team mentions before and
+// after the deletion, for the Audit log diff of each Team.
+func (q *Queries) ListConnectionTeamMentions(ctx context.Context, arg ListConnectionTeamMentionsParams) ([]ListConnectionTeamMentionsRow, error) {
+	rows, err := q.db.Query(ctx, listConnectionTeamMentions, arg.OrgID, arg.TeamIds, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListConnectionTeamMentionsRow{}
+	for rows.Next() {
+		var i ListConnectionTeamMentionsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.TeamPublicID,
+			&i.TeamName,
+			&i.ConnectionID,
+			&i.ConnectionPublicID,
+			&i.GroupName,
+			&i.SlackUsergroupID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConnectionTeams = `-- name: ListConnectionTeams :many
+SELECT DISTINCT m.team_id
+FROM team_mentions m
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = $1 AND m.connection_id = $2 AND t.deleted_at IS NULL
+ORDER BY m.team_id
+`
+
+type ListConnectionTeamsParams struct {
+	OrgID        int64
+	ConnectionID int64
+}
+
+// ListConnectionTeams lists the Teams that are not deleted and have a Team mention for a Connection, read in its
+// deletion once the Connection is locked, when no save can give it another: one that LockConnectionTeams did not lock
+// gave its first Team mention after that lock's read, and the deletion runs again.
+func (q *Queries) ListConnectionTeams(ctx context.Context, arg ListConnectionTeamsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listConnectionTeams, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var team_id int64
+		if err := rows.Scan(&team_id); err != nil {
+			return nil, err
+		}
+		items = append(items, team_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConnections = `-- name: ListConnections :many
 
 
@@ -741,7 +876,7 @@ SELECT c.id, c.public_id, c.type, c.name, c.mattermost_server_url, c.telegram_bo
        c.slack_signing_secret_ciphertext, c.slack_signing_secret_key_id, c.slack_signing_secret_updated_at,
        c.slack_team_id, c.slack_team_name, c.slack_team_url, c.slack_app_id, c.slack_bot_id,
        c.slack_socket_hello_at, c.slack_socket_other_connections, c.gateway_broken_since, c.gateway_broken_reason,
-       c.gateway_next_probe_at,
+       c.gateway_next_probe_at, c.slack_usergroups_read, c.mattermost_groups_read,
        (SELECT count(*)
         FROM destinations d
         WHERE d.org_id = c.org_id AND d.connection_id = c.id AND d.deleted_at IS NULL)::bigint AS destination_count
@@ -816,6 +951,8 @@ type ListConnectionsRow struct {
 	GatewayBrokenSince              pgtype.Timestamptz
 	GatewayBrokenReason             pgtype.Text
 	GatewayNextProbeAt              pgtype.Timestamptz
+	SlackUsergroupsRead             pgtype.Bool
+	MattermostGroupsRead            pgtype.Bool
 	DestinationCount                int64
 }
 
@@ -893,6 +1030,8 @@ func (q *Queries) ListConnections(ctx context.Context, arg ListConnectionsParams
 			&i.GatewayBrokenSince,
 			&i.GatewayBrokenReason,
 			&i.GatewayNextProbeAt,
+			&i.SlackUsergroupsRead,
+			&i.MattermostGroupsRead,
 			&i.DestinationCount,
 		); err != nil {
 			return nil, err
@@ -1214,6 +1353,48 @@ func (q *Queries) LockConnection(ctx context.Context, arg LockConnectionParams) 
 	return i, err
 }
 
+const lockConnectionTeams = `-- name: LockConnectionTeams :many
+SELECT t.id
+FROM teams t
+WHERE t.org_id = $1 AND t.deleted_at IS NULL
+  AND t.id IN (SELECT m.team_id
+               FROM team_mentions m
+               JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+               WHERE m.org_id = $1 AND c.public_id = $2 AND c.deleted_at IS NULL)
+ORDER BY t.id
+FOR NO KEY UPDATE OF t
+`
+
+type LockConnectionTeamsParams struct {
+	OrgID    int64
+	PublicID string
+}
+
+// LockConnectionTeams locks, FOR NO KEY UPDATE and in id order, the Teams that are not deleted and have a Team mention
+// for the Connection that is not deleted with the public_id, as the first step of its deletion, before the Connection's
+// own row: a save of a Team locks the Team's row and then takes the Connections of its Team mentions FOR SHARE, and a
+// save of a Destination takes its owning Team FOR SHARE and then its Connection FOR SHARE, so every path takes a Team
+// before a Connection.
+func (q *Queries) LockConnectionTeams(ctx context.Context, arg LockConnectionTeamsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockConnectionTeams, arg.OrgID, arg.PublicID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockDemo = `-- name: LockDemo :exec
 SELECT pg_advisory_xact_lock($1::bigint)
 `
@@ -1431,30 +1612,60 @@ func (q *Queries) SetBridgeInfo(ctx context.Context, arg SetBridgeInfoParams) (i
 	return result.RowsAffected(), nil
 }
 
+const setGroupsRead = `-- name: SetGroupsRead :execrows
+UPDATE connections
+SET mattermost_groups_read = $1::boolean
+WHERE org_id = $2 AND id = $3 AND type = 'mattermost' AND version = $4 AND deleted_at IS NULL
+`
+
+type SetGroupsReadParams struct {
+	GroupsRead bool
+	OrgID      int64
+	ID         int64
+	Version    int64
+}
+
+// SetGroupsRead records whether a passing check of a Mattermost Connection could read its groups (C-25.FR-8), unless
+// the Connection changed since the check read it; it is not a change of the configuration.
+func (q *Queries) SetGroupsRead(ctx context.Context, arg SetGroupsReadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setGroupsRead,
+		arg.GroupsRead,
+		arg.OrgID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setSlackIdentity = `-- name: SetSlackIdentity :execrows
 UPDATE connections
 SET slack_team_id = $1, slack_team_name = $2, slack_team_url = $3, slack_bot_id = $4,
-    bot_user_id = $5, bot_username = $6,
-    slack_app_id = coalesce($7::text, slack_app_id)
-WHERE org_id = $8 AND id = $9 AND type = 'slack' AND version = $10 AND deleted_at IS NULL
+    bot_user_id = $5, bot_username = $6, slack_usergroups_read = $7::boolean,
+    slack_app_id = coalesce($8::text, slack_app_id)
+WHERE org_id = $9 AND id = $10 AND type = 'slack' AND version = $11 AND deleted_at IS NULL
 `
 
 type SetSlackIdentityParams struct {
-	TeamID      pgtype.Text
-	TeamName    pgtype.Text
-	TeamUrl     pgtype.Text
-	BotID       pgtype.Text
-	BotUserID   pgtype.Text
-	BotUsername pgtype.Text
-	AppID       pgtype.Text
-	OrgID       int64
-	ID          int64
-	Version     int64
+	TeamID         pgtype.Text
+	TeamName       pgtype.Text
+	TeamUrl        pgtype.Text
+	BotID          pgtype.Text
+	BotUserID      pgtype.Text
+	BotUsername    pgtype.Text
+	UsergroupsRead bool
+	AppID          pgtype.Text
+	OrgID          int64
+	ID             int64
+	Version        int64
 }
 
 // SetSlackIdentity records what a passing check of a Slack Connection learned — the workspace, its address and the
-// bot, and the app when the check had the step app_token, keeping the stored app otherwise — unless the Connection
-// changed since the check read it; it is not a change of the configuration.
+// bot, whether the bot token has usergroups:read (C-24.FR-1 revised), and the app when the check had the step
+// app_token, keeping the stored app otherwise — unless the Connection changed since the check read it; it is not a
+// change of the configuration.
 func (q *Queries) SetSlackIdentity(ctx context.Context, arg SetSlackIdentityParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setSlackIdentity,
 		arg.TeamID,
@@ -1463,6 +1674,7 @@ func (q *Queries) SetSlackIdentity(ctx context.Context, arg SetSlackIdentityPara
 		arg.BotID,
 		arg.BotUserID,
 		arg.BotUsername,
+		arg.UsergroupsRead,
 		arg.AppID,
 		arg.OrgID,
 		arg.ID,
@@ -1560,6 +1772,8 @@ SET name = $1, mattermost_server_url = $2,
     slack_team_url = CASE WHEN $23::boolean THEN NULL ELSE slack_team_url END,
     slack_app_id = CASE WHEN $23::boolean THEN NULL ELSE slack_app_id END,
     slack_bot_id = CASE WHEN $23::boolean THEN NULL ELSE slack_bot_id END,
+    slack_usergroups_read = CASE WHEN $23::boolean THEN NULL ELSE slack_usergroups_read END,
+    mattermost_groups_read = CASE WHEN $23::boolean THEN NULL ELSE mattermost_groups_read END,
     telegram_update_offset = CASE WHEN $24::boolean THEN NULL ELSE telegram_update_offset END,
     slack_socket_hello_at = NULL, slack_socket_other_connections = NULL,
     proxy = $25, proxy_password_ciphertext = $26,

@@ -29,11 +29,13 @@ import type {
   ConnectionCheckRequest,
   ConnectionCheckResult,
   ConnectionDraft,
+  ConnectionGroupList,
   ConnectionInput,
   ConnectionList,
   ForbiddenResponse,
   LimitedResponse,
   ListConnectionChannelsParams,
+  ListConnectionGroupsParams,
   ListConnectionsParams,
   NotFoundResponse,
   PreconditionFailedResponse,
@@ -546,7 +548,7 @@ export const useUpdateConnection = <TError = BadRequestResponse | UnauthorizedRe
 }
 
 /**
- * A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered.
+ * A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count; deleting the Connection abandons the final edits still pending for them, which end as Not delivered. The deletion also deletes the Team mentions of the Connection, each recorded in the Audit log of its Team; when Teams keep giving the Connection a first Team mention while it runs, it is run again, and after three attempts it answers `409` (`team_mentions_changed`) and deletes nothing: delete it again.
  * @summary Delete Connection
  */
 export const deleteConnection = async (connectionId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {
@@ -805,6 +807,122 @@ export function useListConnectionChannels<TData = Awaited<ReturnType<typeof list
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListConnectionChannelsQueryOptions(connectionId,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getListConnectionGroupsUrl = (connectionId: string,
+    params?: ListConnectionGroupsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/connections/${connectionId}/groups?${stringifiedParams}` : `/api/v1/connections/${connectionId}/groups`
+}
+
+/**
+ * The groups of a Connection for its Team mentions and the group entries of its Destinations (C-25.FR-8), by name. A Mattermost Connection answers the groups that may be mentioned, read with `GET /api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200` (F-122), `truncated` when that page was full. A Slack Connection whose last check found `usergroups:read` answers the user groups that are not disabled, read with `usergroups.list` (F-125); `name` is the handle. A Telegram or Bridge Connection, and a Slack Connection without the scope, answer `409` `groups_not_listed`; a server that refuses the read answers `409`. Requires `connections:write` because it calls out with the bot token. Runs on the interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`, the answer is `503` with `Retry-After`, Slack's own when it sent one.
+ * @summary List the groups a Connection can mention
+ */
+export const listConnectionGroups = async (connectionId: string,
+    params?: ListConnectionGroupsParams, options?: Parameters<typeof apiFetch>[1]): Promise<ConnectionGroupList> => {
+
+  return apiFetch<ConnectionGroupList>(getListConnectionGroupsUrl(connectionId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListConnectionGroupsQueryKey = (connectionId: string,
+    params?: ListConnectionGroupsParams,) => {
+    return [
+    `/api/v1/connections/${connectionId}/groups`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListConnectionGroupsQueryOptions = <TData = Awaited<ReturnType<typeof listConnectionGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(connectionId: string,
+    params?: ListConnectionGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListConnectionGroupsQueryKey(connectionId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listConnectionGroups>>> = ({ signal }) => listConnectionGroups(connectionId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: connectionId !== null && connectionId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListConnectionGroupsQueryResult = NonNullable<Awaited<ReturnType<typeof listConnectionGroups>>>
+export type ListConnectionGroupsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse
+
+
+export function useListConnectionGroups<TData = Awaited<ReturnType<typeof listConnectionGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
+ connectionId: string,
+    params: undefined |  ListConnectionGroupsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listConnectionGroups>>,
+          TError,
+          Awaited<ReturnType<typeof listConnectionGroups>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListConnectionGroups<TData = Awaited<ReturnType<typeof listConnectionGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
+ connectionId: string,
+    params?: ListConnectionGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listConnectionGroups>>,
+          TError,
+          Awaited<ReturnType<typeof listConnectionGroups>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListConnectionGroups<TData = Awaited<ReturnType<typeof listConnectionGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
+ connectionId: string,
+    params?: ListConnectionGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List the groups a Connection can mention
+ */
+
+export function useListConnectionGroups<TData = Awaited<ReturnType<typeof listConnectionGroups>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | NotFoundResponse | ConflictResponse | TooManyRequestsResponse | LimitedResponse>(
+ connectionId: string,
+    params?: ListConnectionGroupsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listConnectionGroups>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListConnectionGroupsQueryOptions(connectionId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

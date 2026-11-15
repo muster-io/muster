@@ -321,7 +321,7 @@ var implemented = map[string]bool{
 	"GetLinkRule": true, "UpdateLinkRule": true, "DeleteLinkRule": true,
 	"ListConnections": true, "CreateConnection": true, "GetConnection": true, "UpdateConnection": true,
 	"DeleteConnection": true, "CheckConnection": true, "CheckConnectionDraft": true, "ListConnectionChannels": true,
-	"CreateDestination": true,
+	"ListConnectionGroups": true, "CreateDestination": true,
 	"UpdateDestination": true, "CheckDestination": true, "ListDestinationSecrets": true, "SetDestinationSecret": true,
 	"DeleteDestinationSecret": true, "GetSigningSecret": true, "GenerateSigningSecret": true,
 	"RetirePreviousSigningSecret": true, "TestDestination": true, "PreviewDestination": true,
