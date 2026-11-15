@@ -162,15 +162,17 @@ test("creates, checks and replaces the bot token of a Connection that a Destinat
     `Mattermost calls ${callback} when someone presses a button. If that address is internal, add its host to AllowedUntrustedInternalConnections in the Mattermost server settings; otherwise presses fail with 'Action integration error'. A test message to a Destination checks it. Learn more`,
   );
 
-  // 2. "Check connection" → "Connected as muster-dev-bot", "direct", a latency in ms, and — the fake's bot is not a
-  // system admin — the hint that answers to presses show in the Thread.
+  // 2. "Check connection" → "Connected as muster-dev-bot", "direct", a latency in ms, the step Groups, which reads the
+  // groups of the server (C-25.FR-8), and — the fake's bot is not a system admin — the hint that answers to presses
+  // show in the Thread.
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(page.getByTestId("connection-check-summary")).toHaveText(
     "Connected as muster-dev-bot",
   );
-  await expect(page.getByTestId("connection-check-step")).toHaveText(
+  await expect(page.getByTestId("connection-check-step")).toHaveText([
     /^Token: ok · \d+ ms · direct$/,
-  );
+    /^Groups: ok · \d+ ms · direct$/,
+  ]);
   await expect(page.getByTestId("connection-check-warning")).toContainText(WARNING);
   await expect(
     page.getByTestId("connection-check-warning").getByRole("link", { name: /^How to fix: / }),
@@ -317,9 +319,10 @@ async function russianAdmin(browser: Browser): Promise<void> {
   await expect(page.getByTestId("connection-check-summary")).toHaveText(
     "Подключено как muster-dev-bot",
   );
-  await expect(page.getByTestId("connection-check-step")).toHaveText(
+  await expect(page.getByTestId("connection-check-step")).toHaveText([
     /^Токен: успешно · \d+ мс · напрямую$/,
-  );
+    /^Группы: успешно · \d+ мс · напрямую$/,
+  ]);
   await expect(page.getByTestId("connection-check-warning")).toContainText(WARNING_RU);
   await expect(
     page.getByTestId("connection-check-warning").getByRole("link", { name: /^Как исправить: / }),

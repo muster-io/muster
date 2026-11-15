@@ -93,6 +93,9 @@ type fakeStore struct {
 	// team_destinations inserted.
 	seq             []string
 	destinationRows []dbgen.InsertTeamDestinationsUpdateParams
+	// connections are the Connections by public_id, and mentions the Team mentions of each Team (mentions_test.go).
+	connections map[string]*fakeConnection
+	mentions    map[int64][]fakeMention
 }
 
 // fakeDestination is a row of destinations as the Destinations of a Team read it.
@@ -923,7 +926,7 @@ func TestCreate(t *testing.T) {
 	var diff []audit.Change
 	_ = json.Unmarshal(e.Diff, &diff)
 	if e.Action != ActionCreated || e.ResourceType.String != ResourceTeam || e.ResourcePublicID.String !=
-		team.PublicID || len(diff) != 11 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
+		team.PublicID || len(diff) != 12 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
 		t.Errorf("audit %+v %s", e, e.Diff)
 	}
 	if len(store.hints) != 1 || store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {

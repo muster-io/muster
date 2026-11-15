@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (41)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (42)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":41`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":42`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":41`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":42`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (41)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (42)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":41`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":42`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4121,6 +4121,101 @@ func TestIntegrationDestinationConnectionUpdates(t *testing.T) {
 		}
 		if err := insert(t, "destination_connection", true); err != nil {
 			t.Errorf("up again: a row of destination_connection: %v", err)
+		}
+	})
+}
+
+// TestIntegrationTeamMentions runs 0042 over a database at 41 with a Team and a Mattermost and a Slack Connection: up
+// adds connections.slack_usergroups_read and mattermost_groups_read, null for the existing Connections, and
+// team_mentions, which takes one Team mention per Team and Connection, a Slack user group's id of the form S… only and
+// a group name of 1 to 64 characters. Down drops the table and the columns; up again works.
+func TestIntegrationTeamMentions(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 41)
+		e.exec(t, `INSERT INTO teams (org_id, public_id, name, slug, own_working_hours, created_at, updated_at)
+			SELECT id, 'TM0000000000M1', 'payments', 'payments', false, '2026-11-15', '2026-11-15' FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, mattermost_server_url, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, 'CN0000000000M1', 'mattermost', 'mm', 'http://mm', '\x02', 'k1', '2026-11-15', 1, 1,
+				'2026-11-15', '2026-11-15'
+			FROM organizations`)
+		e.exec(t, `INSERT INTO connections (org_id, public_id, type, name, slack_event_mode,
+			slack_app_token_ciphertext, slack_app_token_key_id, slack_app_token_updated_at, bot_token_ciphertext,
+			bot_token_key_id, bot_token_updated_at, limiter_limit, limiter_per_seconds, created_at, updated_at)
+			SELECT id, 'CN0000000000S1', 'slack', 'sl', 'socket', '\x01', 'k1', '2026-11-15', '\x02', 'k1',
+				'2026-11-15', 1, 1, '2026-11-15', '2026-11-15'
+			FROM organizations`)
+		insert := func(t *testing.T, conn, group string, usergroup *string) error {
+			t.Helper()
+			_, err := e.d.Pool.Exec(t.Context(), `INSERT INTO team_mentions (org_id, team_id, connection_id, group_name,
+				slack_usergroup_id, created_at)
+				SELECT o.id, (SELECT id FROM teams), (SELECT id FROM connections WHERE public_id = $1), $2, $3,
+					'2026-11-15'
+				FROM organizations o`, conn, group, usergroup)
+			return err
+		}
+		columns := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'connections'
+					AND column_name IN ('slack_usergroups_read', 'mattermost_groups_read')`)
+		}
+
+		if err := e.mm.Migrate(42); err != nil {
+			t.Fatalf("up to 42: %v", err)
+		}
+		if n := columns(t); n != 2 {
+			t.Errorf("after up: %d of the two columns", n)
+		}
+		if n := e.count(t, `SELECT count(*) FROM connections
+			WHERE slack_usergroups_read IS NULL AND mattermost_groups_read IS NULL`); n != 2 {
+			t.Errorf("after up: %d Connections without a check of their groups, want 2", n)
+		}
+		usergroup := "S0FAKEPAYTEAM"
+		if err := insert(t, "CN0000000000M1", "payments_team", nil); err != nil {
+			t.Errorf("a Mattermost Team mention: %v", err)
+		}
+		if err := insert(t, "CN0000000000S1", "payments-team", &usergroup); err != nil {
+			t.Errorf("a Slack Team mention: %v", err)
+		}
+		if pe, ok := errors.AsType[*pgconn.PgError](insert(t, "CN0000000000M1", "devops_team", nil)); !ok ||
+			pe.Code != "23505" {
+			t.Errorf("a second Team mention for the Connection: %v", pe)
+		}
+		e.exec(t, `DELETE FROM team_mentions`)
+		bad := "U0FAKEALICE"
+		for name, err := range map[string]error{
+			"a user id as the user group":   insert(t, "CN0000000000S1", "payments-team", &bad),
+			"an empty group name":           insert(t, "CN0000000000M1", "", nil),
+			"a group name of 65 characters": insert(t, "CN0000000000M1", strings.Repeat("g", 65), nil),
+		} {
+			if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" {
+				t.Errorf("%s: %v", name, err)
+			}
+		}
+		if err := insert(t, "CN0000000000M1", strings.Repeat("g", 64), nil); err != nil {
+			t.Errorf("a group name of 64 characters: %v", err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_indexes WHERE indexname = 'team_mentions_connection_idx'`); n != 1 {
+			t.Errorf("after up: %d indexes of the Team mentions of a Connection", n)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 41 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := e.count(t, `SELECT count(*) FROM pg_class WHERE relname = 'team_mentions'`); n != 0 {
+			t.Error("after down: team_mentions is still there")
+		}
+		if n := columns(t); n != 0 {
+			t.Errorf("after down: %d of the two columns", n)
+		}
+
+		if err := e.mm.Migrate(42); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if err := insert(t, "CN0000000000S1", "payments-team", &usergroup); err != nil {
+			t.Errorf("up again: a Slack Team mention: %v", err)
 		}
 	})
 }

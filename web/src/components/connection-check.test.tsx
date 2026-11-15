@@ -11,7 +11,8 @@
 // this check", which lists the requests of that run alone, the check before saving included. A Slack check names its
 // steps and translates its four codes; the scopes a bot token lacks are named from missing_scopes, never read from the
 // English message, and without them the text names none (D396). "Slack refused the token." stays the detail of the
-// generic text of token_invalid. A Slack check that passes with another_client_connected warns that another program
+// generic text of token_invalid. The step scopes names the optional scope usergroups:read as granted or missing, and
+// passes either way. A Slack check that passes with another_client_connected warns that another program
 // shares the app (C-24.FR-2). A failed step and a warning end with "How to fix" to the guide of their code and type, and
 // a step that passed or failed with request_failed has none (C-21.FR-11). English and Russian.
 
@@ -627,6 +628,45 @@ describe("the check of a Slack Connection", () => {
       .element(page.getByTestId("connection-check-step-detail"))
       .toHaveTextContent("Details: Slack refused the token.");
   });
+
+  test.each([
+    ["en", "Check connection", true, "Scopes: ok · directusergroups:read: granted"],
+    [
+      "en",
+      "Check connection",
+      false,
+      "Scopes: ok · directusergroups:read: missing, optional; Team mentions and Slack user groups need it",
+    ],
+    ["ru", "Проверить подключение", true, "Права: успешно · напрямуюusergroups:read: выдано"],
+    [
+      "ru",
+      "Проверить подключение",
+      false,
+      "Права: успешно · напрямуюusergroups:read: нет, необязательно; без него нельзя упоминать команды и группы пользователей Slack",
+    ],
+  ] as const)(
+    "names the optional scope usergroups:read as granted or missing on the step scopes, which passes (%s, %s)",
+    async (language, button, present, text) => {
+      await i18n.changeLanguage(language);
+      answer(() =>
+        json(200, {
+          ok: true,
+          steps: [
+            step("token", { latency_ms: 12 }),
+            step("scopes", { optional_scopes: [{ scope: "usergroups:read", present }] }),
+          ],
+          warnings: [],
+          bot_name: "muster-dev-slack-bot",
+          request_log_run: RUN,
+        } satisfies ConnectionCheckResult),
+      );
+      await renderCheck({ connectionId: SAVED_ID, type: "slack" });
+      await page.getByRole("button", { name: button }).click();
+      await expect.poll(stepTexts).toContain(text);
+      expect(page.getByTestId("connection-check-optional-scope").elements()).toHaveLength(1);
+      expect(page.getByTestId("connection-check-step-reason").elements()).toHaveLength(0);
+    },
+  );
 
   test("reads in Russian, the scopes the bot token lacks included", async () => {
     await i18n.changeLanguage("ru");

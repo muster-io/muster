@@ -42,6 +42,11 @@ export type SlackConnection = SlackConnectionBase & ({
      * @nullable
      */
   readonly app_id: string | null;
+  /**
+     * Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.
+     * @nullable
+     */
+  readonly usergroups_read: boolean | null;
   /** Socket Mode only. What the last `hello` of the Leader's Socket Mode connection counted (C-24.FR-2, FR-9); null in `http` mode and before the first `hello` after the Connection was saved. */
   readonly socket?: SlackSocketStatus | null;
   proxy: ProxyConfig;

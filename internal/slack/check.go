@@ -53,9 +53,23 @@ const HintAnotherClientConnected = "another program is connected to this Slack a
 	"shared between them at random; use one Slack app for each Connection and share it with no other Connection or " +
 	"installation"
 
-// RequiredScopes are the scopes the bot token needs, and no other (C-24.FR-1).
+// RequiredScopes are the scopes the bot token needs (C-24.FR-1).
 var RequiredScopes = []string{"chat:write", "channels:read", "groups:read", "im:write", "users:read",
 	"users:read.email"}
+
+// ScopeUsergroupsRead is the optional scope of the bot token that the Team mentions and the user group entries of a
+// Destination need (C-24.FR-1 revised, C-25.FR-8): usergroups.list reads the user groups with it.
+const ScopeUsergroupsRead = "usergroups:read"
+
+// OptionalScopes are the scopes the bot token may have, which the step scopes reports as present or missing without
+// failing (C-24.FR-2 revised).
+var OptionalScopes = []string{ScopeUsergroupsRead}
+
+// OptionalScope is an optional scope of the bot token and whether the token has it.
+type OptionalScope struct {
+	Scope   string
+	Present bool
+}
 
 // MissingScopesMessage is the message of the step scopes for the scopes the bot token lacks.
 func MissingScopesMessage(missing []string) string {
@@ -90,16 +104,18 @@ func Interactive(in Path, s delivery.Subject) Runner {
 
 // Step is one step of a check: whether it passed or was skipped, its latency on the real clock and path, and when it
 // failed what answered, in English, with its code, which clients translate, and with CodeMissingScope the scopes the
-// bot token lacks, which clients name in their own words (D396). The step scopes makes no request and has no latency.
+// bot token lacks, which clients name in their own words (D396). The step scopes makes no request and has no latency;
+// it also reports each of OptionalScopes as present or missing, which never fails it.
 type Step struct {
-	Name          string
-	OK            bool
-	Skipped       bool
-	Latency       time.Duration
-	Via           string
-	Message       string
-	Code          string
-	MissingScopes []string
+	Name           string
+	OK             bool
+	Skipped        bool
+	Latency        time.Duration
+	Via            string
+	Message        string
+	Code           string
+	MissingScopes  []string
+	OptionalScopes []OptionalScope
 }
 
 // Identity is what a check found: the workspace's id, name and address, the bot's id, user id and name from the step
@@ -114,10 +130,12 @@ type Identity struct {
 	AppID     string
 }
 
-// Check is the result of a connection check: its steps, and what it found once the step token passed.
+// Check is the result of a connection check: its steps, and what it found once the step token passed, with whether
+// the bot token has usergroups:read, nil before the step scopes ran.
 type Check struct {
-	Steps    []Step
-	Identity *Identity
+	Steps          []Step
+	Identity       *Identity
+	UsergroupsRead *bool
 }
 
 // OK reports whether no step failed; skipped steps do not fail a check.
@@ -142,7 +160,8 @@ func (c Check) Failed() (Step, bool) {
 //  1. token — auth.test with the bot token: the bot and its workspace; a token Slack refuses is token_invalid, and one
 //     that is not a bot's — not_allowed_token_type, or an answer without bot_id — wrong_token_type;
 //  2. scopes — no request: the x-oauth-scopes of that answer must name every scope of RequiredScopes, else
-//     missing_scope names the missing ones in their order, in the message and in MissingScopes;
+//     missing_scope names the missing ones in their order, in the message and in MissingScopes; each of
+//     OptionalScopes is reported as present or missing, which never fails the step;
 //  3. app_token, in socket mode only — apps.connections.open with the app-level token first, so that a token that is
 //     not an app-level one, not_allowed_token_type, is wrong_token_type; the check opens no WebSocket and drops the
 //     answer's url unread. Then auth.test with the app-level token answers the app's id, which must equal the bot's
@@ -200,6 +219,12 @@ func RunCheck(ctx context.Context, c *Client, run Runner, realClock clock.Clock,
 			missing = append(missing, s)
 		}
 	}
+	for _, s := range OptionalScopes {
+		scopes.OptionalScopes = append(scopes.OptionalScopes, OptionalScope{Scope: s,
+			Present: slices.Contains(r.Scopes, s)})
+	}
+	usergroups := slices.Contains(r.Scopes, ScopeUsergroupsRead)
+	out.UsergroupsRead = &usergroups
 	if len(missing) > 0 {
 		scopes.OK, scopes.Code, scopes.Message = false, CodeMissingScope, MissingScopesMessage(missing)
 		scopes.MissingScopes = missing

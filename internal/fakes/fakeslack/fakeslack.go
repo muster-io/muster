@@ -12,6 +12,8 @@
 // app's id alone for an app-level token; bots.info answers the bot of the token's app; apps.connections.open answers a
 // Socket Mode address on the fake with a new single-use ticket for an app-level token (socket.go); conversations.info
 // answers a channel of the token's app and conversations.list its channels page by page (F-098, channels.go);
+// usergroups.list answers the user groups of the token's app to a token with usergroups:read and missing_scope
+// otherwise (F-125, usergroups.go);
 // chat.postMessage, chat.update, chat.delete, chat.postEphemeral and chat.getPermalink keep each channel's messages
 // and Threads by the rules of F-074 to F-092 that Muster relies on (messages.go); chat.postEphemeral shows a message
 // only to one of the fake's people — UserAlice, UserBob, UserCarol, UserDora and the person UserID, members of every
@@ -28,7 +30,8 @@
 // The control endpoints under /_fake/ come from the fake-server harness (requests; faults, such as an error answer, a
 // 429 with Retry-After or a delay) and add GET and PUT /_fake/config: the scopes of each app's bot token, the revoked
 // tokens, the tokens answered as a person's and the app of each token, over the published pairing; the channels of
-// each app, by id, with their name, the bot's membership and whether they are archived or private; a page size that
+// each app, by id, with their name, the bot's membership and whether they are archived or private; the user groups of
+// each app, by id, with their handle, name, people and whether they are disabled; a page size that
 // makes conversations.list answer smaller pages; the request_url of each app, the Interactivity Request URL its
 // presses go to; the extra_connections of each app, the connections of other programs that the hello of its
 // sockets counts; and messages_tab_off, the apps whose Messages tab is off, whose bot's direct messages to a person
@@ -145,42 +148,46 @@ func PublishedBotToken(token string) bool {
 // connections of other programs to each app, by app key, which the hello of its sockets counts beside the fake's own
 // (F-102). MessagesTabOff are the keys of the apps whose Messages tab is off: chat.postMessage to a person's user id
 // answers messages_tab_disabled, as Slack's reference lists it for chat.postMessage (not seen on the stand).
+// Usergroups are the user groups of each app's workspace, by app key and user group id, which usergroups.list answers.
 type Config struct {
-	Scopes           map[string]string             `json:"scopes"`
-	Revoked          []string                      `json:"revoked"`
-	UserTokens       []string                      `json:"user_tokens"`
-	AppOf            map[string]string             `json:"app_of"`
-	Channels         map[string]map[string]Channel `json:"channels"`
-	PageSize         int                           `json:"page_size"`
-	RequestURL       map[string]string             `json:"request_url"`
-	ExtraConnections map[string]int                `json:"extra_connections"`
-	MessagesTabOff   []string                      `json:"messages_tab_off"`
+	Scopes           map[string]string               `json:"scopes"`
+	Revoked          []string                        `json:"revoked"`
+	UserTokens       []string                        `json:"user_tokens"`
+	AppOf            map[string]string               `json:"app_of"`
+	Channels         map[string]map[string]Channel   `json:"channels"`
+	Usergroups       map[string]map[string]UserGroup `json:"usergroups"`
+	PageSize         int                             `json:"page_size"`
+	RequestURL       map[string]string               `json:"request_url"`
+	ExtraConnections map[string]int                  `json:"extra_connections"`
+	MessagesTabOff   []string                        `json:"messages_tab_off"`
 }
 
 // configPatch is a PUT of /_fake/config: each field given replaces the whole value, the others are kept, except
 // scopes, whose entries are set one by one: a text sets an app's scopes and null restores DefaultScopes; and channels,
 // merged by id within each app: a channel replaces the one of its id, null deletes it, and an app given as null gets
-// its default channels again; and request_url and extra_connections, set app by app: a value sets an app's, null
-// removes it, as does an extra_connections of 0.
+// its default channels again; usergroups, merged the same way; and request_url and extra_connections, set app by app:
+// a value sets an app's, null removes it, as does an extra_connections of 0.
 type configPatch struct {
-	Scopes           map[string]*string             `json:"scopes"`
-	Revoked          *[]string                      `json:"revoked"`
-	UserTokens       *[]string                      `json:"user_tokens"`
-	AppOf            *map[string]string             `json:"app_of"`
-	Channels         map[string]map[string]*Channel `json:"channels"`
-	PageSize         *int                           `json:"page_size"`
-	RequestURL       map[string]*string             `json:"request_url"`
-	ExtraConnections map[string]*int                `json:"extra_connections"`
-	MessagesTabOff   *[]string                      `json:"messages_tab_off"`
+	Scopes           map[string]*string               `json:"scopes"`
+	Revoked          *[]string                        `json:"revoked"`
+	UserTokens       *[]string                        `json:"user_tokens"`
+	AppOf            *map[string]string               `json:"app_of"`
+	Channels         map[string]map[string]*Channel   `json:"channels"`
+	Usergroups       map[string]map[string]*UserGroup `json:"usergroups"`
+	PageSize         *int                             `json:"page_size"`
+	RequestURL       map[string]*string               `json:"request_url"`
+	ExtraConnections map[string]*int                  `json:"extra_connections"`
+	MessagesTabOff   *[]string                        `json:"messages_tab_off"`
 }
 
-// DefaultConfig is the configuration of a new fake: both apps with DefaultScopes and the default channels, nothing
-// revoked, no person's token, the published pairing of tokens and apps, pages of the size conversations.list asks, no
-// request_url and no other program's connections.
+// DefaultConfig is the configuration of a new fake: both apps with DefaultScopes, which lack usergroups:read, the
+// default channels and the default user groups, nothing revoked, no person's token, the published pairing of tokens
+// and apps, pages of the size conversations.list asks, no request_url and no other program's connections.
 func DefaultConfig() Config {
 	return Config{Scopes: map[string]string{AppA: DefaultScopes, AppB: DefaultScopes}, Revoked: []string{},
 		UserTokens: []string{}, AppOf: map[string]string{},
 		Channels:   map[string]map[string]Channel{AppA: defaultChannels(), AppB: defaultChannels()},
+		Usergroups: map[string]map[string]UserGroup{AppA: defaultUserGroups(), AppB: defaultUserGroups()},
 		RequestURL: map[string]string{}, ExtraConnections: map[string]int{}, MessagesTabOff: []string{}}
 }
 
@@ -239,9 +246,10 @@ func (f *Fake) Config() Config {
 	return clone(f.config)
 }
 
-// SetConfig replaces the whole configuration; it fails on an app key other than a and b, an empty channel id, a
-// negative page size or number of extra connections and a request_url that is not an absolute http or https URL, and
-// an app without scopes gets DefaultScopes, one without channels the default channels.
+// SetConfig replaces the whole configuration; it fails on an app key other than a and b, an empty channel or user group
+// id, a negative page size or number of extra connections and a request_url that is not an absolute http or https URL,
+// and an app without scopes gets DefaultScopes, one without channels the default channels and one without user groups
+// the default user groups.
 func (f *Fake) SetConfig(c Config) error {
 	c = clone(c)
 	for _, a := range apps {
@@ -250,6 +258,9 @@ func (f *Fake) SetConfig(c Config) error {
 		}
 		if _, ok := c.Channels[a.Key]; !ok {
 			c.Channels[a.Key] = defaultChannels()
+		}
+		if _, ok := c.Usergroups[a.Key]; !ok {
+			c.Usergroups[a.Key] = defaultUserGroups()
 		}
 	}
 	if err := check(c); err != nil {
@@ -280,6 +291,14 @@ func check(c Config) error {
 		}
 		if _, ok := chans[""]; ok {
 			return fmt.Errorf("channels: a channel of the app %q has no id", key)
+		}
+	}
+	for key, groups := range c.Usergroups {
+		if _, ok := appByKey(key); !ok {
+			return fmt.Errorf("usergroups: the app %q is not a or b", key)
+		}
+		if _, ok := groups[""]; ok {
+			return fmt.Errorf("usergroups: a user group of the app %q has no id", key)
 		}
 	}
 	if c.PageSize < 0 {
@@ -313,7 +332,7 @@ func check(c Config) error {
 func clone(c Config) Config {
 	out := Config{Scopes: maps.Clone(c.Scopes), Revoked: slices.Clone(c.Revoked),
 		UserTokens: slices.Clone(c.UserTokens), AppOf: maps.Clone(c.AppOf), Channels: cloneChannels(c.Channels),
-		PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL), ExtraConnections: maps.Clone(c.ExtraConnections),
+		Usergroups: cloneUserGroups(c.Usergroups), PageSize: c.PageSize, RequestURL: maps.Clone(c.RequestURL), ExtraConnections: maps.Clone(c.ExtraConnections),
 		MessagesTabOff: slices.Clone(c.MessagesTabOff)}
 	if out.Scopes == nil {
 		out.Scopes = map[string]string{}
@@ -377,6 +396,22 @@ func (f *Fake) putConfig(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			c.Channels[key][id] = *ch
+		}
+	}
+	for key, groups := range p.Usergroups {
+		if groups == nil {
+			c.Usergroups[key] = defaultUserGroups()
+			continue
+		}
+		if c.Usergroups[key] == nil {
+			c.Usergroups[key] = map[string]UserGroup{}
+		}
+		for id, g := range groups {
+			if g == nil {
+				delete(c.Usergroups[key], id)
+				continue
+			}
+			c.Usergroups[key][id] = *g
 		}
 	}
 	if p.PageSize != nil {
@@ -477,6 +512,7 @@ var acceptedScopes = map[string]string{
 	"users.info":            usersScope,
 	"users.lookupByEmail":   emailScope,
 	"conversations.open":    openScopes,
+	"usergroups.list":       usergroupsScope,
 }
 
 // conversationScopes are the scopes the methods that read conversations accept (F-071).
@@ -538,6 +574,8 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		conversationsInfo(w, c, cfg, scopes, args["channel"])
 	case "conversations.list":
 		conversationsList(w, c, cfg, scopes, args)
+	case "usergroups.list":
+		usergroupsList(w, c, cfg, scopes, args)
 	case "users.list":
 		usersList(w, c, scopes, args)
 	case "users.info":

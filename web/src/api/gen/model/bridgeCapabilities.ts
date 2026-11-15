@@ -5,6 +5,7 @@
 import type { BridgeCapabilitiesButtons } from './bridgeCapabilitiesButtons';
 import type { BridgeCapabilitiesDelete } from './bridgeCapabilitiesDelete';
 import type { BridgeCapabilitiesDirectMessages } from './bridgeCapabilitiesDirectMessages';
+import type { BridgeCapabilitiesEveryoneMentionsItem } from './bridgeCapabilitiesEveryoneMentionsItem';
 import type { BridgeCapabilitiesPrivateAnswersItem } from './bridgeCapabilitiesPrivateAnswersItem';
 import type { BridgeCapabilitiesThreadMessages } from './bridgeCapabilitiesThreadMessages';
 
@@ -22,6 +23,10 @@ export interface BridgeCapabilities {
   private_answers?: BridgeCapabilitiesPrivateAnswersItem[];
   /** Mention markers become the messenger's own mentions, which notify the person. */
   native_mentions?: boolean;
+  /** The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it. */
+  group_mentions?: boolean;
+  /** The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names. */
+  everyone_mentions?: BridgeCapabilitiesEveryoneMentionsItem[];
   /** The messenger can post a new message without notifying anyone (`notify` false). */
   quiet_messages?: boolean;
   /** The messenger can colour a message by `color`; otherwise the bridge shows `emoji`. */

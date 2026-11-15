@@ -442,6 +442,13 @@ func TestConfig(t *testing.T) {
 	if got := s.fake.Config(); got.Replays || got.UserLookup != gen.Email {
 		t.Errorf("Config() after replays off = %+v", got)
 	}
+	// The group mentions and the mentions of everyone of S-139 go through the generated types (C-22.FR-2 revised).
+	s.configure(t, `{"capabilities":{"native_mentions":true,"group_mentions":true,"everyone_mentions":["channel","here"]}}`)
+	i = s.getInfo(t, fakebridge.Token).valid(t)
+	if !slices.Equal(i.Features(), []string{"everyone_mentions", "group_mentions", "native_mentions"}) ||
+		!i.GroupMentions() || !slices.Equal(i.EveryoneMentions(), []string{"channel", "here"}) {
+		t.Errorf("info with group and everyone mentions: %s", i.Raw)
+	}
 
 	for _, bad := range []string{`{`, `{"unknown":1}`, `{"info_padding_bytes":-1}`, `{"limits":{"x":1}}`,
 		`{"info_padding_bytes":8388609}`, `{"event_delivery":"poll"}`, `{} {}`, `{"replays":"no"}`} {

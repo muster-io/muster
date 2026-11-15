@@ -131,6 +131,22 @@ func (q *Queries) DeleteTeamMatchers(ctx context.Context, arg DeleteTeamMatchers
 	return err
 }
 
+const deleteTeamMentions = `-- name: DeleteTeamMentions :exec
+DELETE FROM team_mentions
+WHERE org_id = $1 AND team_id = $2
+`
+
+type DeleteTeamMentionsParams struct {
+	OrgID  int64
+	TeamID int64
+}
+
+// DeleteTeamMentions removes the Team mentions of a Team: before a save writes them again, and at its deletion.
+func (q *Queries) DeleteTeamMentions(ctx context.Context, arg DeleteTeamMentionsParams) error {
+	_, err := q.db.Exec(ctx, deleteTeamMentions, arg.OrgID, arg.TeamID)
+	return err
+}
+
 const deleteTeamUser = `-- name: DeleteTeamUser :execrows
 DELETE FROM team_users
 WHERE org_id = $1 AND team_id = $2 AND user_id = $3
@@ -389,6 +405,48 @@ func (q *Queries) GetTeamLabel(ctx context.Context, orgID int64) (string, error)
 	return team_label, err
 }
 
+const getTeamMention = `-- name: GetTeamMention :one
+SELECT m.group_name, m.slack_usergroup_id, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM team_mentions m
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+JOIN teams t ON t.org_id = m.org_id AND t.id = m.team_id
+WHERE m.org_id = $1 AND m.team_id = $2 AND m.connection_id = $3 AND c.deleted_at IS NULL
+  AND t.deleted_at IS NULL
+`
+
+type GetTeamMentionParams struct {
+	OrgID        int64
+	TeamID       int64
+	ConnectionID int64
+}
+
+type GetTeamMentionRow struct {
+	GroupName           string
+	SlackUsergroupID    pgtype.Text
+	Type                string
+	SlackUsergroupsRead pgtype.Bool
+	GroupMentions       bool
+	Messenger           bool
+}
+
+// GetTeamMention reads the Team mention of a Team that is not deleted for a Connection that is not deleted, with what
+// the Connection can mention, for delivery (S-140).
+func (q *Queries) GetTeamMention(ctx context.Context, arg GetTeamMentionParams) (GetTeamMentionRow, error) {
+	row := q.db.QueryRow(ctx, getTeamMention, arg.OrgID, arg.TeamID, arg.ConnectionID)
+	var i GetTeamMentionRow
+	err := row.Scan(
+		&i.GroupName,
+		&i.SlackUsergroupID,
+		&i.Type,
+		&i.SlackUsergroupsRead,
+		&i.GroupMentions,
+		&i.Messenger,
+	)
+	return i, err
+}
+
 const getTeamUser = `-- name: GetTeamUser :one
 SELECT u.id, u.public_id, u.name, u.login, u.role, u.status, tu.by_hand, tu.by_idp, tu.idp_matches
 FROM team_users tu
@@ -560,6 +618,36 @@ func (q *Queries) InsertTeamMatchers(ctx context.Context, arg InsertTeamMatchers
 		arg.Labels,
 		arg.Ops,
 		arg.MatcherValues,
+	)
+	return err
+}
+
+const insertTeamMentions = `-- name: InsertTeamMentions :exec
+INSERT INTO team_mentions (org_id, team_id, connection_id, group_name, slack_usergroup_id, created_at)
+SELECT $1, $2, m.connection_id, m.group_name, nullif(m.usergroup_id, ''), $3
+FROM (SELECT unnest($4::bigint[]) AS connection_id, unnest($5::text[]) AS group_name,
+             unnest($6::text[]) AS usergroup_id) AS m
+`
+
+type InsertTeamMentionsParams struct {
+	OrgID         int64
+	TeamID        int64
+	Now           time.Time
+	ConnectionIds []int64
+	GroupNames    []string
+	UsergroupIds  []string
+}
+
+// InsertTeamMentions adds the Team mentions of a Team, each a Connection with its group and, for a Slack Connection,
+// the user group's id, empty for the others.
+func (q *Queries) InsertTeamMentions(ctx context.Context, arg InsertTeamMentionsParams) error {
+	_, err := q.db.Exec(ctx, insertTeamMentions,
+		arg.OrgID,
+		arg.TeamID,
+		arg.Now,
+		arg.ConnectionIds,
+		arg.GroupNames,
+		arg.UsergroupIds,
 	)
 	return err
 }
@@ -877,6 +965,54 @@ func (q *Queries) ListLinkedMessengers(ctx context.Context, arg ListLinkedMessen
 	return items, nil
 }
 
+const listMentionConnections = `-- name: ListMentionConnections :many
+SELECT c.id, c.public_id, c.name, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions
+FROM connections c
+WHERE c.org_id = $1 AND c.deleted_at IS NULL
+  AND (c.type <> 'bridge' OR c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)
+ORDER BY c.name, c.public_id
+`
+
+type ListMentionConnectionsRow struct {
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	SlackUsergroupsRead pgtype.Bool
+	GroupMentions       bool
+}
+
+// ListMentionConnections lists the Connections that are not deleted and may have a Destination — every Connection but
+// a Bridge whose stored info lists roles without messenger, a Notification gateway only (S-145) — with what each can
+// mention, by name and public_id.
+func (q *Queries) ListMentionConnections(ctx context.Context, orgID int64) ([]ListMentionConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, listMentionConnections, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMentionConnectionsRow{}
+	for rows.Next() {
+		var i ListMentionConnectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.SlackUsergroupsRead,
+			&i.GroupMentions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamDestinations = `-- name: ListTeamDestinations :many
 
 SELECT td.team_id, td.destination_id, td.severity_condition, d.public_id, d.name, d.type, d.health, d.broken_since,
@@ -1097,6 +1233,73 @@ func (q *Queries) ListTeamMatchers(ctx context.Context, arg ListTeamMatchersPara
 			&i.Label,
 			&i.Op,
 			&i.Value,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamMentions = `-- name: ListTeamMentions :many
+
+SELECT m.team_id, m.connection_id, m.group_name, m.slack_usergroup_id, c.public_id, c.name, c.type,
+       c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM team_mentions m
+JOIN connections c ON c.org_id = m.org_id AND c.id = m.connection_id
+WHERE m.org_id = $1 AND m.team_id = ANY($2::bigint[]) AND c.deleted_at IS NULL
+ORDER BY m.team_id, c.name, c.public_id
+`
+
+type ListTeamMentionsParams struct {
+	OrgID   int64
+	TeamIds []int64
+}
+
+type ListTeamMentionsRow struct {
+	TeamID              int64
+	ConnectionID        int64
+	GroupName           string
+	SlackUsergroupID    pgtype.Text
+	PublicID            string
+	Name                string
+	Type                string
+	SlackUsergroupsRead pgtype.Bool
+	GroupMentions       bool
+	Messenger           bool
+}
+
+// The Team mentions of the Teams (C-25.FR-8): the group that mentions a Team through each Connection whose messenger
+// can mention a group. What a Connection can mention is read from the Connection: its type, whether the last check of a
+// Slack Connection found usergroups:read, and whether the stored info of a Bridge declares group_mentions and the role
+// messenger — the role every bridge has that declares no roles (C-30.FR-1).
+// ListTeamMentions lists the Team mentions of the Teams for Connections that are not deleted, each with its Connection
+// and what the Connection can mention, by Team, then by the Connection's name and public_id.
+func (q *Queries) ListTeamMentions(ctx context.Context, arg ListTeamMentionsParams) ([]ListTeamMentionsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamMentions, arg.OrgID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamMentionsRow{}
+	for rows.Next() {
+		var i ListTeamMentionsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.ConnectionID,
+			&i.GroupName,
+			&i.SlackUsergroupID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.SlackUsergroupsRead,
+			&i.GroupMentions,
+			&i.Messenger,
 		); err != nil {
 			return nil, err
 		}
@@ -1573,6 +1776,63 @@ func (q *Queries) ReleaseOwnedRoutes(ctx context.Context, arg ReleaseOwnedRoutes
 	for rows.Next() {
 		var i ReleaseOwnedRoutesRow
 		if err := rows.Scan(&i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resolveMentionConnections = `-- name: ResolveMentionConnections :many
+SELECT c.id, c.public_id, c.name, c.type, c.slack_usergroups_read,
+       coalesce(c.bridge_info->'capabilities'->'group_mentions' = 'true'::jsonb, false)::boolean AS group_mentions,
+       (c.bridge_info->'roles' IS NULL OR c.bridge_info->'roles' @> '["messenger"]'::jsonb)::boolean AS messenger
+FROM connections c
+WHERE c.org_id = $1 AND c.public_id = ANY($2::text[]) AND c.deleted_at IS NULL
+ORDER BY c.id
+FOR SHARE OF c
+`
+
+type ResolveMentionConnectionsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveMentionConnectionsRow struct {
+	ID                  int64
+	PublicID            string
+	Name                string
+	Type                string
+	SlackUsergroupsRead pgtype.Bool
+	GroupMentions       bool
+	Messenger           bool
+}
+
+// ResolveMentionConnections reads the Connections that are not deleted among the public_ids, with what each can
+// mention, for the Team mentions of a save, FOR SHARE in id order after the Team's own row: the deletion of a
+// Connection, which locks the Teams of its Team mentions and then the Connection, either waits for the save and deletes
+// what it wrote, or commits first and the save finds the Connection deleted.
+func (q *Queries) ResolveMentionConnections(ctx context.Context, arg ResolveMentionConnectionsParams) ([]ResolveMentionConnectionsRow, error) {
+	rows, err := q.db.Query(ctx, resolveMentionConnections, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveMentionConnectionsRow{}
+	for rows.Next() {
+		var i ResolveMentionConnectionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.Type,
+			&i.SlackUsergroupsRead,
+			&i.GroupMentions,
+			&i.Messenger,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

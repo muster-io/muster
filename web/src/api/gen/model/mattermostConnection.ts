@@ -17,6 +17,11 @@ export type MattermostConnection = MattermostConnectionBase & ({
      * @nullable
      */
   readonly bot_username?: string | null;
+  /**
+     * Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.
+     * @nullable
+     */
+  readonly groups_read: boolean | null;
   proxy: ProxyConfig;
   /** A Connection used by Destinations cannot be deleted. */
   destination_count: number;

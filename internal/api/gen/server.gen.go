@@ -221,6 +221,30 @@ func (e BridgeButtonStyle) Valid() bool {
 	}
 }
 
+// Defines values for BridgeCapabilitiesEveryoneMentions.
+const (
+	BridgeCapabilitiesEveryoneMentionsAll      BridgeCapabilitiesEveryoneMentions = "all"
+	BridgeCapabilitiesEveryoneMentionsChannel  BridgeCapabilitiesEveryoneMentions = "channel"
+	BridgeCapabilitiesEveryoneMentionsEveryone BridgeCapabilitiesEveryoneMentions = "everyone"
+	BridgeCapabilitiesEveryoneMentionsHere     BridgeCapabilitiesEveryoneMentions = "here"
+)
+
+// Valid indicates whether the value is a known member of the BridgeCapabilitiesEveryoneMentions enum.
+func (e BridgeCapabilitiesEveryoneMentions) Valid() bool {
+	switch e {
+	case BridgeCapabilitiesEveryoneMentionsAll:
+		return true
+	case BridgeCapabilitiesEveryoneMentionsChannel:
+		return true
+	case BridgeCapabilitiesEveryoneMentionsEveryone:
+		return true
+	case BridgeCapabilitiesEveryoneMentionsHere:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BridgeCapabilitiesPrivateAnswers.
 const (
 	Ephemeral BridgeCapabilitiesPrivateAnswers = "ephemeral"
@@ -597,6 +621,7 @@ const (
 	ConnectionCheckStepNameEventDelivery  ConnectionCheckStepName = "event_delivery"
 	ConnectionCheckStepNameGetMe          ConnectionCheckStepName = "get_me"
 	ConnectionCheckStepNameGetWebhookInfo ConnectionCheckStepName = "get_webhook_info"
+	ConnectionCheckStepNameGroups         ConnectionCheckStepName = "groups"
 	ConnectionCheckStepNameInfo           ConnectionCheckStepName = "info"
 	ConnectionCheckStepNameScopes         ConnectionCheckStepName = "scopes"
 	ConnectionCheckStepNameToken          ConnectionCheckStepName = "token"
@@ -614,6 +639,8 @@ func (e ConnectionCheckStepName) Valid() bool {
 	case ConnectionCheckStepNameGetMe:
 		return true
 	case ConnectionCheckStepNameGetWebhookInfo:
+		return true
+	case ConnectionCheckStepNameGroups:
 		return true
 	case ConnectionCheckStepNameInfo:
 		return true
@@ -1574,6 +1601,33 @@ func (e MentionSettingEveryone) Valid() bool {
 	case MentionSettingEveryoneHere:
 		return true
 	case MentionSettingEveryoneNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MentionUnavailableReason.
+const (
+	BridgeNoGroupMentions MentionUnavailableReason = "bridge_no_group_mentions"
+	BridgeNotDeclared     MentionUnavailableReason = "bridge_not_declared"
+	MessengerHasNoToken   MentionUnavailableReason = "messenger_has_no_token"
+	TelegramNoGroups      MentionUnavailableReason = "telegram_no_groups"
+	UsergroupsReadMissing MentionUnavailableReason = "usergroups_read_missing"
+)
+
+// Valid indicates whether the value is a known member of the MentionUnavailableReason enum.
+func (e MentionUnavailableReason) Valid() bool {
+	switch e {
+	case BridgeNoGroupMentions:
+		return true
+	case BridgeNotDeclared:
+		return true
+	case MessengerHasNoToken:
+		return true
+	case TelegramNoGroups:
+		return true
+	case UsergroupsReadMissing:
 		return true
 	default:
 		return false
@@ -4520,6 +4574,12 @@ type BridgeCapabilities struct {
 		BotCanStart bool `json:"bot_can_start"`
 	} `json:"direct_messages,omitempty"`
 
+	// EveryoneMentions The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names.
+	EveryoneMentions *[]BridgeCapabilitiesEveryoneMentions `json:"everyone_mentions,omitempty"`
+
+	// GroupMentions The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`; the Team mentions and group entries of a Destination need it.
+	GroupMentions *bool `json:"group_mentions,omitempty"`
+
 	// NativeMentions Mention markers become the messenger's own mentions, which notify the person.
 	NativeMentions *bool `json:"native_mentions,omitempty"`
 
@@ -4535,6 +4595,9 @@ type BridgeCapabilities struct {
 	// ThreadMessages The bridge reports people's messages in Threads of the bot's messages — every one, or only those that mention the bot. Text commands need it.
 	ThreadMessages *BridgeCapabilitiesThreadMessages `json:"thread_messages,omitempty"`
 }
+
+// BridgeCapabilitiesEveryoneMentions defines model for BridgeCapabilities.EveryoneMentions.
+type BridgeCapabilitiesEveryoneMentions string
 
 // BridgeCapabilitiesPrivateAnswers defines model for BridgeCapabilities.PrivateAnswers.
 type BridgeCapabilitiesPrivateAnswers string
@@ -5008,6 +5071,12 @@ type ConnectionChannelList struct {
 	union json.RawMessage
 }
 
+// ConnectionCheckOptionalScope An optional scope of a Slack bot token and whether the token has it.
+type ConnectionCheckOptionalScope struct {
+	Present bool   `json:"present"`
+	Scope   string `json:"scope"`
+}
+
 // ConnectionCheckRequest defines model for ConnectionCheckRequest.
 type ConnectionCheckRequest struct {
 	// BaseUrl An unsaved Telegram Bot API base URL. When set, only the dry probe runs against it, without the token: a stored token is sent only to the saved address of its Connection. Kept for API clients; `checkConnectionDraft` checks a draft with its token typed again.
@@ -5058,21 +5127,46 @@ type ConnectionCheckStep struct {
 	// MissingScopes Set with the code `missing_scope` (Slack, step `scopes`), omitted otherwise — the scopes the bot token lacks, in the order Muster lists them, which clients name in their own words; `message` names them in English.
 	MissingScopes *[]string `json:"missing_scopes,omitempty"`
 
-	// Name The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
-	Name    ConnectionCheckStepName `json:"name"`
-	Ok      bool                    `json:"ok"`
-	Skipped *bool                   `json:"skipped,omitempty"`
+	// Name The step: Mattermost `token` and `groups`, which reads the groups and passes whatever the server answers, its `message` saying when the server did not list them, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
+	Name ConnectionCheckStepName `json:"name"`
+	Ok   bool                    `json:"ok"`
+
+	// OptionalScopes Set on the Slack step `scopes` once `token` passed, omitted otherwise — each scope the bot token may have and whether it has it; a missing one never fails the step (C-24.FR-2). `usergroups:read` is the one Team mentions and user group entries need.
+	OptionalScopes *[]ConnectionCheckOptionalScope `json:"optional_scopes,omitempty"`
+	Skipped        *bool                           `json:"skipped,omitempty"`
 
 	// Via How the request travelled.
 	Via *ConnectionPath `json:"via,omitempty"`
 }
 
-// ConnectionCheckStepName The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
+// ConnectionCheckStepName The step: Mattermost `token` and `groups`, which reads the groups and passes whatever the server answers, its `message` saying when the server did not list them, or `dry_probe` and `token` for a draft; Telegram `dry_probe`, `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on a `200` JSON answer `ok: false` with the `error` `not_authed`.
 type ConnectionCheckStepName string
 
 // ConnectionDraft A Connection as its form holds it before it is saved, for `checkConnectionDraft`; `type` selects the variant.
 type ConnectionDraft struct {
 	union json.RawMessage
+}
+
+// ConnectionGroup A group a Connection can mention.
+type ConnectionGroup struct {
+	DisplayName string `json:"display_name"`
+
+	// Id The messenger's id of the group; a Slack user group's is the `group_id` of a Team mention.
+	Id string `json:"id"`
+
+	// MemberCount How many people are in the group; null when the messenger did not say.
+	MemberCount nullable.Nullable[int] `json:"member_count"`
+
+	// Name What a mention names, without `@`; the `group` of a Team mention.
+	Name string `json:"name"`
+}
+
+// ConnectionGroupList defines model for ConnectionGroupList.
+type ConnectionGroupList struct {
+	Items []ConnectionGroup `json:"items"`
+
+	// Truncated More groups may exist than were read.
+	Truncated bool `json:"truncated"`
 }
 
 // ConnectionInput A Connection as written; `type` selects the variant and cannot change on update.
@@ -5088,6 +5182,14 @@ type ConnectionList struct {
 
 // ConnectionPath How the request travelled.
 type ConnectionPath string
+
+// ConnectionRef A Connection by name, with its type.
+type ConnectionRef struct {
+	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	Id   PublicId       `json:"id"`
+	Name string         `json:"name"`
+	Type ConnectionType `json:"type"`
+}
 
 // ConnectionType defines model for ConnectionType.
 type ConnectionType string
@@ -6000,6 +6102,9 @@ type MattermostConnection struct {
 	// Etag The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again.
 	Etag *string `json:"etag,omitempty"`
 
+	// GroupsRead Whether the server listed the groups to the bot at the last successful Connection check (its step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as `bot_username`.
+	GroupsRead nullable.Nullable[bool] `json:"groups_read,omitempty"`
+
 	// Id Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 	Id PublicId `json:"id"`
 
@@ -6213,6 +6318,9 @@ type MentionSettings struct {
 	// SnoozeEnded Whom to mention for one kind of Loud event. The default is nobody.
 	SnoozeEnded MentionSetting `json:"snooze_ended"`
 }
+
+// MentionUnavailableReason Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`; `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`; `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in Mattermost and `@all` and `@everyone` in Slack.
+type MentionUnavailableReason string
 
 // MessageLayout The content of a Root message as structured, plain-text data (C-29.FR-1, FR-8), the same that the Bridge protocol carries next to `body`. Its values are never escaped for any markup.
 type MessageLayout struct {
@@ -8126,6 +8234,9 @@ type SlackConnection struct {
 	// TeamName The workspace's name; null as `bot_name`.
 	TeamName nullable.Nullable[string] `json:"team_name,omitempty"`
 	Type     SlackConnectionType       `json:"type"`
+
+	// UsergroupsRead Whether the bot token had the optional scope `usergroups:read` at the last successful Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps the bot token. Null as `bot_name`.
+	UsergroupsRead nullable.Nullable[bool] `json:"usergroups_read,omitempty"`
 }
 
 // SlackConnectionType defines model for SlackConnection.Type.
@@ -8497,6 +8608,9 @@ type Team struct {
 	// Matchers The Team matchers (C-25.FR-5), in the syntax of Route Matchers on any label; each is enough on its own, so an Alert that any one of them picks belongs to the Team. Replaced as a whole; omit it on an update to keep it. An expression that is not RE2 is refused with `422` `invalid_regex` at `/matchers/{i}/value`.
 	Matchers []Matcher `json:"matchers"`
 
+	// MentionConnections Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or null, and whether it can mention a group.
+	MentionConnections []TeamMentionConnection `json:"mention_connections"`
+
 	// Name Unique, ignoring case, among the Teams that are not deleted.
 	Name string `json:"name"`
 
@@ -8505,6 +8619,9 @@ type Team struct {
 
 	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
+
+	// TeamMentions The Team mentions of Connections that are not deleted, by Connection name.
+	TeamMentions []TeamMention `json:"team_mentions"`
 
 	// UserCount How many people are in the Team, disabled Users included.
 	UserCount int `json:"user_count"`
@@ -8544,6 +8661,9 @@ type TeamInput struct {
 
 	// Slug The value of the Team label that names the Team (`team.slug_format`) — 1 to 63 characters, lowercase letters, digits, `-`, `_` and `.`, starting with a letter or a digit — unique among the Teams that are not deleted. A slug outside the format is refused with `422` `invalid_format` at `/slug`.
 	Slug string `json:"slug"`
+
+	// TeamMentions The Team mentions (C-25.FR-8), at most one per Connection, each the group that mentions the Team through that Connection. Replaced as a whole; omit it on an update to keep them, and a creation without it has none. A Connection that cannot mention a group — a Telegram Connection, a Slack Connection whose last check found no `usergroups:read`, a Bridge Connection whose bridge declares no `group_mentions` in its stored `info`, or one that is a Notification gateway only — is refused with `422` `group_mentions_unsupported` at the entry's `connection_id`; an unknown or deleted Connection with `unknown_id`, and one named twice with `duplicate`, there too. A Team mention identical to a stored one, with the same `connection_id`, `group` and `group_id`, is kept whatever its Connection can mention now, so that one whose Connection lost the ability never blocks a save; only a new or changed one is checked. A Slack Team mention needs `group_id`, which the others refuse with `unsupported` at it. Saving does not call the messenger.
+	TeamMentions *[]TeamMentionInput `json:"team_mentions,omitempty"`
 
 	// WorkingHours The Team's own Working hours, required with `own_working_hours` on a creation and read only with it. A read always carries the effective ones, the Organization's when the Team has none of its own.
 	WorkingHours *WorkingHours `json:"working_hours,omitempty"`
@@ -8587,6 +8707,52 @@ type TeamMembership struct {
 
 	// Team The Team an object names, with its slug; `deleted` is true for a Team that was deleted since.
 	Team TeamRef `json:"team"`
+}
+
+// TeamMention A Team mention as a read gives it, with its Connection and whether the Connection can carry it now. A Team mention whose Connection lost the ability, such as a Slack app reinstalled without `usergroups:read`, stays, reads `available` false with the reason, and mentions nobody.
+type TeamMention struct {
+	Available bool `json:"available"`
+
+	// Connection A Connection by name, with its type.
+	Connection ConnectionRef `json:"connection"`
+
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Group The group that mentions the Team, without `@` — the name of a Mattermost group, the handle of a Slack user group, or a group name of the bridge — of the form of the group names of Mention settings, 1 to 64 letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Another form is refused with `422` `invalid_format` at it.
+	Group string `json:"group"`
+
+	// GroupId The Slack user group's id (`S` followed by digits and capital letters), from `listConnectionGroups`, required for a Slack Connection and refused for the others (`422` `required` or `unsupported` at it, `invalid_format` for another form); Slack mentions the user group by it.
+	GroupId *string `json:"group_id,omitempty"`
+
+	// UnavailableReason Why the Team mention mentions nobody now; null while it is available.
+	UnavailableReason nullable.Nullable[MentionUnavailableReason] `json:"unavailable_reason"`
+}
+
+// TeamMentionConnection A Connection that may have a Destination, with the Team's Team mention for it, for the field of each Connection on the Team page (C-25.FR-8). A Bridge Connection that is a Notification gateway only is not listed.
+type TeamMentionConnection struct {
+	// Available Whether the Connection can mention a group now.
+	Available  bool      `json:"available"`
+	Connection EntityRef `json:"connection"`
+
+	// TeamMention The Team's Team mention for the Connection, null without one.
+	TeamMention nullable.Nullable[TeamMention] `json:"team_mention"`
+	Type        ConnectionType                 `json:"type"`
+
+	// UnavailableReason Why it cannot; null while it can.
+	UnavailableReason nullable.Nullable[MentionUnavailableReason] `json:"unavailable_reason"`
+}
+
+// TeamMentionInput The Team mention of a Team for one Connection (C-25.FR-8).
+type TeamMentionInput struct {
+	// ConnectionId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
+	ConnectionId PublicId `json:"connection_id"`
+
+	// Group The group that mentions the Team, without `@` — the name of a Mattermost group, the handle of a Slack user group, or a group name of the bridge — of the form of the group names of Mention settings, 1 to 64 letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Another form is refused with `422` `invalid_format` at it.
+	Group string `json:"group"`
+
+	// GroupId The Slack user group's id (`S` followed by digits and capital letters), from `listConnectionGroups`, required for a Slack Connection and refused for the others (`422` `required` or `unsupported` at it, `invalid_format` for another form); Slack mentions the user group by it.
+	GroupId *string `json:"group_id,omitempty"`
 }
 
 // TeamOnCall The On-call of a Team's main Schedule now. With `no_schedule` true, the Team has no main Schedule and every other field but `team` is null.
@@ -10088,6 +10254,12 @@ type ListConnectionChannelsParams struct {
 	TeamId *string `form:"team_id,omitempty" json:"team_id,omitempty"`
 
 	// Q Only channels whose name, or a Mattermost channel's display name, contains this text, regardless of case.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// ListConnectionGroupsParams defines parameters for ListConnectionGroups.
+type ListConnectionGroupsParams struct {
+	// Q Only groups whose name or display name contains this text, regardless of case.
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 }
 
@@ -12959,6 +13131,9 @@ type ServerInterface interface {
 	// CheckConnection Check a Connection
 	// (POST /connections/{connection_id}/checks)
 	CheckConnection(w http.ResponseWriter, r *http.Request, connectionId ConnectionId)
+	// ListConnectionGroups List the groups a Connection can mention
+	// (GET /connections/{connection_id}/groups)
+	ListConnectionGroups(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params ListConnectionGroupsParams)
 	// ListDestinations List destinations
 	// (GET /destinations)
 	ListDestinations(w http.ResponseWriter, r *http.Request, params ListDestinationsParams)
@@ -15291,6 +15466,48 @@ func (siw *ServerInterfaceWrapper) CheckConnection(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CheckConnection(w, r, connectionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListConnectionGroups operation middleware
+func (siw *ServerInterfaceWrapper) ListConnectionGroups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "connection_id" -------------
+	var connectionId ConnectionId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "connection_id", r.PathValue("connection_id"), &connectionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "connection_id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListConnectionGroupsParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListConnectionGroups(w, r, connectionId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20687,6 +20904,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/connections/{connection_id}", wrapper.UpdateConnection)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/connections/{connection_id}/checks", wrapper.CheckConnection)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/connections/{connection_id}/channels", wrapper.ListConnectionChannels)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/connections/{connection_id}/groups", wrapper.ListConnectionGroups)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/destinations", wrapper.ListDestinations)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/destinations", wrapper.CreateDestination)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/destinations/{destination_id}", wrapper.DeleteDestination)
@@ -24155,6 +24373,147 @@ type CheckConnection503ApplicationProblemPlusJSONResponse struct {
 }
 
 func (response CheckConnection503ApplicationProblemPlusJSONResponse) VisitCheckConnectionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroupsRequestObject struct {
+	ConnectionId ConnectionId `json:"connection_id"`
+	Params       ListConnectionGroupsParams
+}
+
+type ListConnectionGroupsResponseObject interface {
+	VisitListConnectionGroupsResponse(w http.ResponseWriter) error
+}
+
+type ListConnectionGroups200JSONResponse ConnectionGroupList
+
+func (response ListConnectionGroups200JSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups400ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups401ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups403ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups404ApplicationProblemPlusJSONResponse struct {
+	NotFoundApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups404ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups409ApplicationProblemPlusJSONResponse struct {
+	ConflictApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups409ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups429ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListConnectionGroups503ApplicationProblemPlusJSONResponse struct {
+	LimitedApplicationProblemPlusJSONResponse
+}
+
+func (response ListConnectionGroups503ApplicationProblemPlusJSONResponse) VisitListConnectionGroupsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -41864,6 +42223,9 @@ type StrictServerInterface interface {
 	// CheckConnection Check a Connection
 	// (POST /connections/{connection_id}/checks)
 	CheckConnection(ctx context.Context, request CheckConnectionRequestObject) (CheckConnectionResponseObject, error)
+	// ListConnectionGroups List the groups a Connection can mention
+	// (GET /connections/{connection_id}/groups)
+	ListConnectionGroups(ctx context.Context, request ListConnectionGroupsRequestObject) (ListConnectionGroupsResponseObject, error)
 	// ListDestinations List destinations
 	// (GET /destinations)
 	ListDestinations(ctx context.Context, request ListDestinationsRequestObject) (ListDestinationsResponseObject, error)
@@ -43302,6 +43664,33 @@ func (sh *strictHandler) CheckConnection(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CheckConnectionResponseObject); ok {
 		if err := validResponse.VisitCheckConnectionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListConnectionGroups operation middleware
+func (sh *strictHandler) ListConnectionGroups(w http.ResponseWriter, r *http.Request, connectionId ConnectionId, params ListConnectionGroupsParams) {
+	var request ListConnectionGroupsRequestObject
+
+	request.ConnectionId = connectionId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListConnectionGroups(ctx, request.(ListConnectionGroupsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListConnectionGroups")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListConnectionGroupsResponseObject); ok {
+		if err := validResponse.VisitListConnectionGroupsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

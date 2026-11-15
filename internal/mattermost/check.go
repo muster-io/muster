@@ -16,6 +16,44 @@ import (
 	"github.com/muster-io/muster/internal/outbound"
 )
 
+// StepGroups is the step of the Connection check of a Mattermost Connection that reads the groups (C-25.FR-8); it
+// passes whatever the server answers, its message saying when the server refused the read.
+const StepGroups = "groups"
+
+// messageGroupsRefused is the message of the step groups when the server did not list the groups, with what it
+// answered.
+const messageGroupsRefused = "The server did not list its groups to the bot (%s): the Team mentions of this " +
+	"Connection are saved by name, without a list to choose from."
+
+// GroupsCheck is the result of the step groups: whether the server listed the groups, its latency on the real clock,
+// and the message when it did not, in English.
+type GroupsCheck struct {
+	Read    bool
+	Latency time.Duration
+	Message string
+}
+
+// CheckGroups runs the step groups through run: GET /api/v4/groups with the bot token, timed on the real clock. A 200
+// reads the groups (F-122); any other answer, or none, is a server that did not list them, which the message names and
+// which never fails the step. Its error is the runner's own.
+func CheckGroups(ctx context.Context, c *Client, run Runner, realClock clock.Clock) (GroupsCheck, error) {
+	var r Result
+	var latency time.Duration
+	if _, err := run(ctx, func(ctx context.Context, call delivery.Call) delivery.Outcome {
+		start := realClock.Now()
+		_, r = c.Groups(ctx, call.Class)
+		latency = realClock.Now().Sub(start)
+		return r.Outcome
+	}); err != nil {
+		return GroupsCheck{}, err
+	}
+	out := GroupsCheck{Read: r.OK(), Latency: latency}
+	if !out.Read {
+		out.Message = fmt.Sprintf(messageGroupsRefused, cmp.Or(string(r.Outcome.Error), "no answer"))
+	}
+	return out, nil
+}
+
 // The steps of the Destination check of a Mattermost Destination and their messages (C-13.FR-10).
 const (
 	StepToken        = "token"

@@ -242,6 +242,49 @@ func TestCheckMissingScope(t *testing.T) {
 	}
 }
 
+// TestCheckOptionalScope covers C-24.FR-1 and FR-2 revised for L2: the step scopes reports usergroups:read as present
+// or missing and never fails on it, the check carries whether the bot token has it, and a check that no longer finds
+// it reports it missing; with a required scope missing it is still reported.
+func TestCheckOptionalScope(t *testing.T) {
+	f := startFake(t)
+	c := fakeClient(t, f, false)
+	without := fakeslack.DefaultScopes
+	with := without + ",usergroups:read"
+	for _, tc := range []struct {
+		scopes  string
+		present bool
+		names   string
+	}{
+		{without, false, "token:ok scopes:ok"},
+		{with, true, "token:ok scopes:ok"},
+		{without, false, "token:ok scopes:ok"},
+		{"chat:write,usergroups:read", true, "token:ok scopes:fail"},
+	} {
+		if err := f.SetConfig(fakeslack.Config{Scopes: map[string]string{fakeslack.AppA: tc.scopes}}); err != nil {
+			t.Fatal(err)
+		}
+		res, err := RunCheck(t.Context(), c, direct, tick(), EventModeHTTP)
+		if err != nil || names(res) != tc.names || res.UsergroupsRead == nil || *res.UsergroupsRead != tc.present {
+			t.Fatalf("%q: check = %+v, %v", tc.scopes, res, err)
+		}
+		st := res.Steps[1]
+		if !slices.Equal(st.OptionalScopes, []OptionalScope{{Scope: ScopeUsergroupsRead, Present: tc.present}}) ||
+			res.Steps[0].OptionalScopes != nil {
+			t.Fatalf("%q: optional scopes %+v", tc.scopes, res.Steps)
+		}
+		if tc.names == "token:ok scopes:ok" && (st.Code != "" || st.Message != "" || st.MissingScopes != nil) {
+			t.Fatalf("%q: the step scopes failed on an optional scope: %+v", tc.scopes, st)
+		}
+	}
+	if err := f.SetConfig(fakeslack.Config{Revoked: []string{fakeslack.BotToken}}); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := RunCheck(t.Context(), c, direct, tick(), EventModeHTTP); res.UsergroupsRead != nil ||
+		res.Steps[1].OptionalScopes != nil {
+		t.Fatalf("a check whose token failed says what scopes it has: %+v", res)
+	}
+}
+
 // TestCheckAppMismatch covers C-24.FR-2 and AC-1: an app-level token of another app than the bot's fails app_token
 // with app_mismatch, and no app is found.
 func TestCheckAppMismatch(t *testing.T) {

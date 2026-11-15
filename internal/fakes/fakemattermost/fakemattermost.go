@@ -6,7 +6,8 @@
 // channels and two people, posts, Thread replies, edits, ephemeral posts — refused with 403 unless the bot is a system
 // admin — the system roles with their permissions, direct messages, notifications, button presses sent to the
 // integration URL with the ephemeral_text of their answers, the rate limit, and the system ping, which answers without
-// a token (F-069). Every other call is recorded and answered 501. The control endpoints under /_fake/ list what
+// a token (F-069), and the custom groups GroupPayments and GroupDevops (F-121 to F-123), which GET /api/v4/groups
+// lists to any bot unless groups_forbidden is configured. Every other call is recorded and answered 501. The control endpoints under /_fake/ list what
 // happened and change the fixtures: posts, notifications, ephemeral posts, presses, the server log, channel members,
 // archived channels, the server configuration, and the direct messages of the bots, which the posts leave out.
 //
@@ -131,6 +132,9 @@ type Config struct {
 	// BotSystemAdmin gives the bot the system admin role. Off by default, as for a bot with the role Member, which
 	// gets 403 from POST /api/v4/posts/ephemeral (F-063).
 	BotSystemAdmin bool `json:"bot_system_admin"`
+	// GroupsForbidden makes GET /api/v4/groups answer 403 api.context.permissions.app_error, as for a bot whose role
+	// may not read groups. Off by default: a bot with the role Member reads them (F-122).
+	GroupsForbidden bool `json:"groups_forbidden"`
 }
 
 type RateLimitConfig struct {
@@ -142,8 +146,9 @@ type configPatch struct {
 	RateLimit                           *struct {
 		Enabled *bool `json:"enabled"`
 	} `json:"rate_limit"`
-	RevokedTokens  *[]string `json:"revoked_tokens"`
-	BotSystemAdmin *bool     `json:"bot_system_admin"`
+	RevokedTokens   *[]string `json:"revoked_tokens"`
+	BotSystemAdmin  *bool     `json:"bot_system_admin"`
+	GroupsForbidden *bool     `json:"groups_forbidden"`
 }
 
 // User is a Mattermost user as the API shows it.
@@ -291,6 +296,7 @@ func New() *Fake {
 	f.api.HandleFunc("POST /api/v4/channels/direct", f.handleDirect)
 	f.api.HandleFunc("GET /api/v4/config/client", f.handleClientConfig)
 	f.api.HandleFunc("POST /api/v4/roles/names", f.handleRolesByNames)
+	f.api.HandleFunc("GET /api/v4/groups", f.handleGroups)
 	f.api.HandleFunc("POST /api/v4/posts", f.handleCreatePost)
 	f.api.HandleFunc("POST /api/v4/posts/ephemeral", f.handleEphemeral)
 	f.api.HandleFunc("GET /api/v4/posts/{post_id}", f.handleGetPost)
@@ -421,6 +427,9 @@ func (f *Fake) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.BotSystemAdmin != nil {
 		c.BotSystemAdmin = *p.BotSystemAdmin
+	}
+	if p.GroupsForbidden != nil {
+		c.GroupsForbidden = *p.GroupsForbidden
 	}
 	f.mu.Unlock()
 	fakeserver.WriteJSON(w, http.StatusOK, f.Config())
@@ -627,6 +636,70 @@ func (f *Fake) handleRolesByNames(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	fakeserver.WriteJSON(w, http.StatusOK, out)
+}
+
+// The custom groups of the fake (F-121 to F-123): payments_team with alice and devops_team with bob.
+const (
+	GroupPayments = "payments_team"
+	GroupDevops   = "devops_team"
+)
+
+// Group is a Mattermost group as GET /api/v4/groups answers it (F-122); MemberCount is there only with
+// include_member_count.
+type Group struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	DisplayName    string    `json:"display_name"`
+	Description    string    `json:"description"`
+	Source         string    `json:"source"`
+	RemoteID       *string   `json:"remote_id"`
+	CreateAt       int64     `json:"create_at"`
+	UpdateAt       int64     `json:"update_at"`
+	DeleteAt       int64     `json:"delete_at"`
+	HasSyncables   bool      `json:"has_syncables"`
+	AllowReference bool      `json:"allow_reference"`
+	MemberIDs      *[]string `json:"member_ids"`
+	MemberCount    *int      `json:"member_count,omitempty"`
+}
+
+// groups are the custom groups of the fake, each with its members.
+var groups = []struct {
+	group   Group
+	members []string
+}{
+	{Group{ID: "groupdevpaymentsfake000000", Name: GroupPayments, DisplayName: "Payments team", Source: "custom",
+		CreateAt: 1763200000000, UpdateAt: 1763200000000, AllowReference: true}, []string{AliceUserID}},
+	{Group{ID: "groupdevdevopsfake00000000", Name: GroupDevops, DisplayName: "DevOps team", Source: "custom",
+		CreateAt: 1763200000000, UpdateAt: 1763200000000, AllowReference: true}, []string{BobUserID}},
+}
+
+// handleGroups lists the groups as Mattermost 11.2.2 does to a bot with the role Member (F-122): every group whatever
+// its source, those with allow_reference with filter_allow_reference=true — all of them, as a custom group always
+// has it (F-123) — with member_count only when include_member_count=true, and at most per_page of them (60 by default).
+// With groups_forbidden it answers 403 api.context.permissions.app_error.
+func (f *Fake) handleGroups(w http.ResponseWriter, r *http.Request) {
+	if f.Config().GroupsForbidden {
+		forbidden(w)
+		return
+	}
+	q := r.URL.Query()
+	perPage := 60
+	if n, err := strconv.Atoi(q.Get("per_page")); err == nil && n > 0 {
+		perPage = min(n, 200)
+	}
+	out := []Group{}
+	for _, g := range groups {
+		if q.Get("filter_allow_reference") == "true" && !g.group.AllowReference {
+			continue
+		}
+		v := g.group
+		if q.Get("include_member_count") == "true" {
+			n := len(g.members)
+			v.MemberCount = &n
+		}
+		out = append(out, v)
+	}
+	fakeserver.WriteJSON(w, http.StatusOK, out[:min(len(out), perPage)])
 }
 
 func (f *Fake) handleMyTeams(w http.ResponseWriter, _ *http.Request) {

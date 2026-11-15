@@ -5439,7 +5439,10 @@ paths:
       - Connections
       summary: Delete Connection
       description: 'A Connection used by Destinations cannot be deleted: `409` (`in_use`). Deleted Destinations do not count;
-        deleting the Connection abandons the final edits still pending for them, which end as Not delivered.'
+        deleting the Connection abandons the final edits still pending for them, which end as Not delivered. The
+        deletion also deletes the Team mentions of the Connection, each recorded in the Audit log of its Team; when
+        Teams keep giving the Connection a first Team mention while it runs, it is run again, and after three attempts
+        it answers `409` (`team_mentions_changed`) and deletes nothing: delete it again.'
       x-permission: connections:write
       x-listener: app
       security:
@@ -5555,6 +5558,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConnectionChannelList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          $ref: '#/components/responses/Limited'
+  /connections/{connection_id}/groups:
+    get:
+      operationId: listConnectionGroups
+      tags:
+      - Connections
+      summary: List the groups a Connection can mention
+      description: 'The groups of a Connection for its Team mentions and the group entries of its Destinations
+        (C-25.FR-8), by name. A Mattermost Connection answers the groups that may be mentioned, read with
+        `GET /api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200` (F-122), `truncated`
+        when that page was full. A Slack Connection whose last check found `usergroups:read` answers the user groups
+        that are not disabled, read with `usergroups.list` (F-125); `name` is the handle. A Telegram or Bridge
+        Connection, and a Slack Connection without the scope, answer `409` `groups_not_listed`; a server that refuses
+        the read answers `409`. Requires `connections:write` because it calls out with the bot token. Runs on the
+        interactive path: when no limiter token is free within `delivery.interactive_budget`, or Slack answers `429`,
+        the answer is `503` with `Retry-After`, Slack''s own when it sent one.'
+      x-permission: connections:write
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+      - name: q
+        in: query
+        description: Only groups whose name or display name contains this text, regardless of case.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: The groups.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionGroupList'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -9829,6 +9880,10 @@ components:
         - code: contact_required
           description: A call of a User's Notification rules, or their state `call`, through a Notification gateway at
             which the User has no confirmed contact; the pointer is the action's or `/gateway_id`.
+        - code: group_mentions_unsupported
+          description: A Team mention for a Connection that cannot mention a group — Telegram, a Slack Connection whose
+            last check found no `usergroups:read`, a Bridge Connection whose bridge declares no group mentions; the
+            pointer is the Team mention's `connection_id`.
         - code: webhook_call_failed
           description: Saving a Telegram Connection that enters the webhook update mode, or changes its base URL or bot
             token in it, called `setWebhook`, or one that leaves it called `deleteWebhook`, and the call failed; nothing
@@ -9917,6 +9972,12 @@ components:
           description: Slack refused the direct message with the code because the Messages tab of the Slack app is off
             (`startSlackLink`); no account of the Connection gets a code until an admin of the Slack app turns the tab
             on under App Home.
+        - code: team_mentions_changed
+          description: The deletion of a Connection found, three times, a Team that had given the Connection its first
+            Team mention while the deletion ran (`deleteConnection`); nothing was deleted. Delete it again.
+        - code: groups_not_listed
+          description: The Connection lists no groups (`listConnectionGroups`) — a Telegram or Bridge Connection, or a
+            Slack Connection whose last check found no `usergroups:read`.
         - code: last_admin
           description: The change would leave the Organization without an active Admin; the last active Admin cannot be
             disabled, deleted or given a lower Role.
@@ -12533,6 +12594,22 @@ components:
             `duplicate`, at the entry's `destination_id`. A change reaches the open Alert Groups at their next change.
           items:
             $ref: '#/components/schemas/DestinationEntry'
+        team_mentions:
+          type: array
+          maxItems: 100
+          description: The Team mentions (C-25.FR-8), at most one per Connection, each the group that mentions the Team
+            through that Connection. Replaced as a whole; omit it on an update to keep them, and a creation without it
+            has none. A Connection that cannot mention a group — a Telegram Connection, a Slack Connection whose last
+            check found no `usergroups:read`, a Bridge Connection whose bridge declares no `group_mentions` in its
+            stored `info`, or one that is a Notification gateway only — is refused with `422`
+            `group_mentions_unsupported` at the entry's `connection_id`; an unknown or deleted Connection with
+            `unknown_id`, and one named twice with `duplicate`, there too. A Team mention identical to a stored one,
+            with the same `connection_id`, `group` and `group_id`, is kept whatever its Connection can mention now, so
+            that one whose Connection lost the ability never blocks a save; only a new or changed one is checked. A
+            Slack Team mention needs `group_id`, which the others refuse with `unsupported` at it. Saving does not
+            call the messenger.
+          items:
+            $ref: '#/components/schemas/TeamMentionInput'
     TeamIdpEntry:
       type: object
       description: An identity provider entry of a Team.
@@ -12551,6 +12628,105 @@ components:
             below it at `/` boundaries. An empty group, or `*` anywhere but a trailing `/*`, is refused with `422`
             `invalid_format` at the entry's `group`.
           example: teams/payments/*
+    TeamMentionInput:
+      type: object
+      description: The Team mention of a Team for one Connection (C-25.FR-8).
+      required:
+      - connection_id
+      - group
+      properties:
+        connection_id:
+          $ref: '#/components/schemas/PublicId'
+        group:
+          type: string
+          description: The group that mentions the Team, without `@` — the name of a Mattermost group, the handle of a
+            Slack user group, or a group name of the bridge — of the form of the group names of Mention settings, 1 to
+            64 letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Another form is refused with `422`
+            `invalid_format` at it.
+          example: payments_team
+        group_id:
+          type: string
+          description: The Slack user group's id (`S` followed by digits and capital letters), from
+            `listConnectionGroups`, required for a Slack Connection and refused for the others (`422` `required` or
+            `unsupported` at it, `invalid_format` for another form); Slack mentions the user group by it.
+          example: S0FAKEPAYTEAM
+    MentionUnavailableReason:
+      type: string
+      description: 'Why a Connection cannot mention a target (C-25.FR-8, C-28.FR-2): `telegram_no_groups`, Telegram has
+        no group mentions and no mentions of everyone; `usergroups_read_missing`, a Slack Connection whose last check
+        found no `usergroups:read`; `bridge_no_group_mentions`, a bridge that declares no `group_mentions`;
+        `bridge_not_declared`, a mention of everyone that the bridge does not declare in `everyone_mentions`;
+        `messenger_has_no_token`, a mention of everyone that the messenger does not have, such as `@everyone` in
+        Mattermost and `@all` and `@everyone` in Slack.'
+      enum:
+      - telegram_no_groups
+      - usergroups_read_missing
+      - bridge_no_group_mentions
+      - bridge_not_declared
+      - messenger_has_no_token
+    ConnectionRef:
+      type: object
+      description: A Connection by name, with its type.
+      required:
+      - id
+      - name
+      - type
+      properties:
+        id:
+          $ref: '#/components/schemas/PublicId'
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ConnectionType'
+    TeamMention:
+      description: A Team mention as a read gives it, with its Connection and whether the Connection can carry it now. A
+        Team mention whose Connection lost the ability, such as a Slack app reinstalled without `usergroups:read`, stays,
+        reads `available` false with the reason, and mentions nobody.
+      allOf:
+      - $ref: '#/components/schemas/TeamMentionInput'
+      - type: object
+        required:
+        - connection
+        - available
+        - unavailable_reason
+        properties:
+          connection:
+            $ref: '#/components/schemas/ConnectionRef'
+          available:
+            type: boolean
+          unavailable_reason:
+            description: Why the Team mention mentions nobody now; null while it is available.
+            oneOf:
+            - $ref: '#/components/schemas/MentionUnavailableReason'
+            - type: 'null'
+    TeamMentionConnection:
+      type: object
+      description: A Connection that may have a Destination, with the Team's Team mention for it, for the field of each
+        Connection on the Team page (C-25.FR-8). A Bridge Connection that is a Notification gateway only is not listed.
+      required:
+      - connection
+      - type
+      - available
+      - unavailable_reason
+      - team_mention
+      properties:
+        connection:
+          $ref: '#/components/schemas/EntityRef'
+        type:
+          $ref: '#/components/schemas/ConnectionType'
+        available:
+          type: boolean
+          description: Whether the Connection can mention a group now.
+        unavailable_reason:
+          description: Why it cannot; null while it can.
+          oneOf:
+          - $ref: '#/components/schemas/MentionUnavailableReason'
+          - type: 'null'
+        team_mention:
+          description: The Team's Team mention for the Connection, null without one.
+          oneOf:
+          - $ref: '#/components/schemas/TeamMention'
+          - type: 'null'
     Team:
       allOf:
       - $ref: '#/components/schemas/TeamInput'
@@ -12563,6 +12739,8 @@ components:
         - idp_entries
         - destination_entries
         - destinations
+        - team_mentions
+        - mention_connections
         - user_count
         - created_at
         - etag
@@ -12574,6 +12752,18 @@ components:
             description: The Destinations of the Team's `destination_entries`, by name, with their health.
             items:
               $ref: '#/components/schemas/DestinationRef'
+          team_mentions:
+            type: array
+            description: The Team mentions of Connections that are not deleted, by Connection name.
+            items:
+              $ref: '#/components/schemas/TeamMention'
+          mention_connections:
+            type: array
+            description: Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose
+              stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or
+              null, and whether it can mention a group.
+            items:
+              $ref: '#/components/schemas/TeamMentionConnection'
           user_count:
             type: integer
             description: How many people are in the Team, disabled Users included.
@@ -15401,6 +15591,7 @@ components:
         - proxy
         - destination_count
         - callback_url
+        - groups_read
         - created_at
         - etag
         properties:
@@ -15415,6 +15606,14 @@ components:
             readOnly: true
             description: The bot's username, as the last successful Connection check found it; null before one and after
               the server URL or the bot token changed.
+          groups_read:
+            type:
+            - boolean
+            - 'null'
+            readOnly: true
+            description: Whether the server listed the groups to the bot at the last successful Connection check (its
+              step `groups`), which `listConnectionGroups` needs; a Team mention is saved by name either way. Null as
+              `bot_username`.
           proxy:
             $ref: '#/components/schemas/ProxyConfig'
           destination_count:
@@ -15739,6 +15938,7 @@ components:
         - team_id
         - team_name
         - app_id
+        - usergroups_read
         - proxy
         - destination_count
         - created_at
@@ -15791,6 +15991,15 @@ components:
             readOnly: true
             description: The Slack app's id (`A…`), found by the step `app_token` of a check in `socket` mode; null
               before one and after the bot token changed.
+          usergroups_read:
+            type:
+            - boolean
+            - 'null'
+            readOnly: true
+            description: Whether the bot token had the optional scope `usergroups:read` at the last successful
+              Connection check (C-24.FR-1), which Team mentions and user group entries need; a check that no longer
+              finds it sets it false. An installed Slack app gets a new scope only when it is reinstalled, which keeps
+              the bot token. Null as `bot_name`.
           socket:
             readOnly: true
             description: Socket Mode only. What the last `hello` of the Leader's Socket Mode connection counted
@@ -16008,6 +16217,21 @@ components:
         native_mentions:
           type: boolean
           description: Mention markers become the messenger's own mentions, which notify the person.
+        group_mentions:
+          type: boolean
+          description: The bridge renders a group mention that Muster sends as a `mentions` entry of the kind `group`;
+            the Team mentions and group entries of a Destination need it.
+        everyone_mentions:
+          type: array
+          description: The mentions of everyone in the chat that the bridge's messenger has, by their symbolic names.
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - channel
+            - here
+            - all
+            - everyone
         quiet_messages:
           type: boolean
           description: The messenger can post a new message without notifying anyone (`notify` false).
@@ -16423,7 +16647,9 @@ components:
       properties:
         name:
           type: string
-          description: 'The step: Mattermost `token`, or `dry_probe` and `token` for a draft; Telegram `dry_probe`,
+          description: 'The step: Mattermost `token` and `groups`, which reads the groups and passes whatever the
+            server answers, its `message` saying when the server did not list them, or `dry_probe` and `token` for a
+            draft; Telegram `dry_probe`,
             `get_me` and `get_webhook_info`; a Bridge `info` and `event_delivery`, or `dry_probe` before them for a
             draft; Slack `token`, `scopes` and, in `socket` mode, `app_token`, or `dry_probe` before them for a draft
             that may send no token — `POST https://slack.com/api/auth.test` without `Authorization`, which passes on
@@ -16437,6 +16663,7 @@ components:
           - event_delivery
           - scopes
           - app_token
+          - groups
         ok:
           type: boolean
         skipped:
@@ -16466,6 +16693,25 @@ components:
             English.
           items:
             type: string
+        optional_scopes:
+          type: array
+          description: Set on the Slack step `scopes` once `token` passed, omitted otherwise — each scope the bot token
+            may have and whether it has it; a missing one never fails the step (C-24.FR-2). `usergroups:read` is the
+            one Team mentions and user group entries need.
+          items:
+            $ref: '#/components/schemas/ConnectionCheckOptionalScope'
+    ConnectionCheckOptionalScope:
+      type: object
+      description: An optional scope of a Slack bot token and whether the token has it.
+      required:
+      - scope
+      - present
+      properties:
+        scope:
+          type: string
+          example: usergroups:read
+        present:
+          type: boolean
     NullableConnectionCheckCode:
       type:
       - string
@@ -16686,6 +16932,41 @@ components:
       oneOf:
       - $ref: '#/components/schemas/MattermostChannelList'
       - $ref: '#/components/schemas/SlackChannelList'
+    ConnectionGroup:
+      type: object
+      description: A group a Connection can mention.
+      required:
+      - id
+      - name
+      - display_name
+      - member_count
+      properties:
+        id:
+          type: string
+          description: The messenger's id of the group; a Slack user group's is the `group_id` of a Team mention.
+        name:
+          type: string
+          description: What a mention names, without `@`; the `group` of a Team mention.
+        display_name:
+          type: string
+        member_count:
+          type:
+          - integer
+          - 'null'
+          description: How many people are in the group; null when the messenger did not say.
+    ConnectionGroupList:
+      type: object
+      required:
+      - items
+      - truncated
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionGroup'
+        truncated:
+          type: boolean
+          description: More groups may exist than were read.
     DestinationType:
       type: string
       enum:

@@ -33,6 +33,7 @@ type Connections interface {
 	CheckDraft(ctx context.Context, d connections.Draft) (connections.CheckResult, error)
 	Channels(ctx context.Context, publicID, teamID, q string) ([]connections.Channel, error)
 	SlackChannels(ctx context.Context, publicID, q string) (slack.ChannelList, error)
+	Groups(ctx context.Context, publicID, q string) (connections.GroupList, error)
 	CallbackURL(publicID string) string
 	BridgeCallbackURL(publicID string) string
 	SlackCallbackURL(publicID string) string
@@ -316,6 +317,13 @@ func checkResultOf(res connections.CheckResult) gen.ConnectionCheckResult {
 			scopes := slices.Clone(st.MissingScopes)
 			step.MissingScopes = &scopes
 		}
+		if len(st.OptionalScopes) > 0 {
+			optional := make([]gen.ConnectionCheckOptionalScope, len(st.OptionalScopes))
+			for i, o := range st.OptionalScopes {
+				optional[i] = gen.ConnectionCheckOptionalScope{Scope: o.Scope, Present: o.Present}
+			}
+			step.OptionalScopes = &optional
+		}
 		out.Steps = append(out.Steps, step)
 	}
 	if res.BotName != "" {
@@ -393,6 +401,27 @@ func (s *Server) ListConnectionChannels(ctx context.Context, req gen.ListConnect
 		return nil, connections.ErrNotMattermost
 	}
 	return gen.ListConnectionChannels200JSONResponse(body), nil
+}
+
+// ListConnectionGroups is listConnectionGroups on the interactive path (C-25.FR-8): the groups of a Mattermost
+// Connection that may be mentioned and the user groups of a Slack Connection whose last check found usergroups:read,
+// by name; a Telegram or Bridge Connection, or a Slack one without the scope, answers 409 groups_not_listed.
+func (s *Server) ListConnectionGroups(ctx context.Context, req gen.ListConnectionGroupsRequestObject) (
+	gen.ListConnectionGroupsResponseObject, error) {
+	var q string
+	if req.Params.Q != nil {
+		q = *req.Params.Q
+	}
+	list, err := s.connections.Groups(ctx, req.ConnectionId, q)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ConnectionGroupList{Items: make([]gen.ConnectionGroup, 0, len(list.Groups)), Truncated: list.Truncated}
+	for _, g := range list.Groups {
+		out.Items = append(out.Items, gen.ConnectionGroup{Id: g.ID, Name: g.Name, DisplayName: g.DisplayName,
+			MemberCount: nullableInt(g.MemberCount)})
+	}
+	return gen.ListConnectionGroups200JSONResponse(out), nil
 }
 
 // channelTypeOf is the API name of a Mattermost channel type.
@@ -491,7 +520,8 @@ func (s *Server) connectionOf(c connections.Connection) (gen.Connection, error) 
 	m := gen.MattermostConnection{Id: c.PublicID, Type: gen.MattermostConnectionTypeMattermost, Name: c.Name,
 		ServerUrl: c.ServerURL, BotTokenStatus: keyStatusOf(c.BotToken), Proxy: proxyOf(c.Proxy, c.ProxyPassword),
 		Limiter:          gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)},
-		DestinationCount: int(c.DestinationCount), CallbackUrl: &callback, CreatedAt: c.CreatedAt, Etag: &tag}
+		DestinationCount: int(c.DestinationCount), CallbackUrl: &callback, CreatedAt: c.CreatedAt, Etag: &tag,
+		GroupsRead: nullableBool(c.MattermostGroupsRead)}
 	if c.BotUsername != nil {
 		m.BotUsername.Set(*c.BotUsername)
 	} else {
@@ -630,7 +660,8 @@ func (s *Server) slackConnectionOf(c connections.Connection) (gen.Connection, er
 		CallbackUrl: &callback, BotName: nullableString(c.BotUsername), BotUserId: nullableString(c.BotUserID),
 		TeamId: nullableString(c.SlackTeamID), TeamName: nullableString(c.SlackTeamName),
 		AppId: nullableString(c.SlackAppID), Socket: slackSocketOf(c.SlackSocket),
-		Proxy: proxyOf(c.Proxy, c.ProxyPassword), DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt,
+		UsergroupsRead: nullableBool(c.SlackUsergroupsRead),
+		Proxy:          proxyOf(c.Proxy, c.ProxyPassword), DestinationCount: int(c.DestinationCount), CreatedAt: c.CreatedAt,
 		Limiter: gen.Limiter{Limit: int(c.Limiter.Limit), PerSeconds: int(c.Limiter.PerSeconds)}, Etag: &tag}
 	var out gen.Connection
 	if err := out.FromSlackConnection(sl); err != nil {

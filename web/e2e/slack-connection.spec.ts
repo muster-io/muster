@@ -41,6 +41,15 @@ const SHARED =
   "Another program is connected to this Slack app through Socket Mode: presses are shared between them at random. Use one Slack app for each Connection and share it with no other Connection or installation.";
 const IDENTITY = "Bot: muster-dev-bot-b · Workspace: Example workspace B · App: A0MUSTERDEVB";
 
+/**
+ * The optional scope usergroups:read under the step Scopes, missing for the fake's bot tokens by default: the step
+ * passes and says that Team mentions and Slack user groups need it (C-24.FR-2).
+ */
+const USERGROUPS_MISSING =
+  "usergroups:read: missing, optional; Team mentions and Slack user groups need it";
+const USERGROUPS_MISSING_RU =
+  "usergroups:read: нет, необязательно; без него нельзя упоминать команды и группы пользователей Slack";
+
 let connectionId = "";
 
 function steps(page: Page) {
@@ -122,7 +131,7 @@ test("creates a Slack Connection in Socket Mode, checks it before and after savi
     );
     await expect(steps(page)).toHaveText([
       /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
-      "Scopes: ok · direct",
+      `Scopes: ok · direct${USERGROUPS_MISSING}`,
       /^App-level token: ok · \d+ ms · direct · App: A0MUSTERDEVB$/,
     ]);
     await shot(page, "slack-connection-new-check");
@@ -283,7 +292,7 @@ test("creates a Slack Connection in HTTP mode and deletes it from its page", asy
   await page.getByRole("button", { name: "Check connection" }).click();
   await expect(steps(page)).toHaveText([
     /^Token: ok · \d+ ms · direct · Bot: muster-dev-bot-b · Workspace: Example workspace B$/,
-    "Scopes: ok · direct",
+    `Scopes: ok · direct${USERGROUPS_MISSING}`,
   ]);
   await expect(page.getByTestId("connection-bot")).toHaveText(
     "Bot: muster-dev-bot-b · Workspace: Example workspace B",
@@ -350,7 +359,7 @@ async function russianAdmin(browser: Browser): Promise<void> {
   );
   await expect(steps(page)).toHaveText([
     /^Токен: успешно · \d+ мс · напрямую · Бот: muster-dev-bot-b · Рабочее пространство: Example workspace B$/,
-    "Права: успешно · напрямую",
+    `Права: успешно · напрямую${USERGROUPS_MISSING_RU}`,
     /^Токен уровня приложения: успешно · \d+ мс · напрямую · Приложение: A0MUSTERDEVB$/,
   ]);
   await expectNoHorizontalScroll(page);

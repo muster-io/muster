@@ -5,6 +5,7 @@
 import type { DestinationEntry } from './destinationEntry';
 import type { Matcher } from './matcher';
 import type { TeamIdpEntry } from './teamIdpEntry';
+import type { TeamMentionInput } from './teamMentionInput';
 import type { WorkingHours } from './workingHours';
 
 export interface TeamInput {
@@ -44,4 +45,9 @@ export interface TeamInput {
      * @maxItems 100
      */
   destination_entries?: DestinationEntry[];
+  /**
+     * The Team mentions (C-25.FR-8), at most one per Connection, each the group that mentions the Team through that Connection. Replaced as a whole; omit it on an update to keep them, and a creation without it has none. A Connection that cannot mention a group — a Telegram Connection, a Slack Connection whose last check found no `usergroups:read`, a Bridge Connection whose bridge declares no `group_mentions` in its stored `info`, or one that is a Notification gateway only — is refused with `422` `group_mentions_unsupported` at the entry's `connection_id`; an unknown or deleted Connection with `unknown_id`, and one named twice with `duplicate`, there too. A Team mention identical to a stored one, with the same `connection_id`, `group` and `group_id`, is kept whatever its Connection can mention now, so that one whose Connection lost the ability never blocks a save; only a new or changed one is checked. A Slack Team mention needs `group_id`, which the others refuse with `unsupported` at it. Saving does not call the messenger.
+     * @maxItems 100
+     */
+  team_mentions?: TeamMentionInput[];
 }

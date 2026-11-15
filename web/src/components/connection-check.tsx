@@ -75,6 +75,8 @@ function stepName(t: TFunction, name: ConnectionCheckStepName): string {
       return t("connections.check.steps.scopes");
     case "app_token":
       return t("connections.check.steps.appToken");
+    case "groups":
+      return t("connections.check.steps.groups");
     default:
       return unreachable(name);
   }
@@ -509,6 +511,18 @@ function Step({
             )}
           </span>
         )}
+        {!skipped &&
+          step.optional_scopes?.map((o) => (
+            <span
+              key={o.scope}
+              className="wrap-anywhere text-muted-foreground"
+              data-testid="connection-check-optional-scope"
+            >
+              {o.present
+                ? t("connections.check.optionalScopeGranted", { scope: o.scope })
+                : t("connections.check.optionalScopeMissing", { scope: o.scope })}
+            </span>
+          ))}
         {found && (
           <span
             className="wrap-anywhere text-muted-foreground"

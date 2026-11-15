@@ -735,6 +735,8 @@
       "hint": "Checks the bot token on the Mattermost server and shows the bot's name. Before saving, the check uses the values in the form; a saved token is sent only to the saved address through the saved proxy.",
       "latency": "{{ms}} ms",
       "ok": "ok",
+      "optionalScopeGranted": "{{scope}}: granted",
+      "optionalScopeMissing": "{{scope}}: missing, optional; Team mentions and Slack user groups need it",
       "passed": "The check passed.",
       "pendingUpdates_one": "{{count}} pending update",
       "pendingUpdates_other": "{{count}} pending updates",
@@ -758,6 +760,7 @@
         "eventDelivery": "Event delivery",
         "getMe": "getMe",
         "getWebhookInfo": "getWebhookInfo",
+        "groups": "Groups",
         "info": "Bridge info",
         "scopes": "Scopes",
         "token": "Token"

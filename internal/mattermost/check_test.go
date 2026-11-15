@@ -818,3 +818,53 @@ func TestRoute(t *testing.T) {
 		t.Fatalf("a blocked request reached the fake: %d requests", n)
 	}
 }
+
+// TestCheckGroups covers C-25.FR-8 and F-122: the step groups reads GET /api/v4/groups with the bot token, with the
+// filter of groups that may be mentioned and their member counts and no source filter, and finds them readable;
+// a server that refuses the read, or answers otherwise, leaves them unread with a message naming its answer, which
+// never fails the step; the runner's own error ends it.
+func TestCheckGroups(t *testing.T) {
+	f := startFake(t)
+	c := newClient(t, f.URL(), nil)
+	res, err := mattermost.CheckGroups(t.Context(), c, interactive, clock.NewManual(t0))
+	if err != nil || !res.Read || res.Message != "" {
+		t.Fatalf("groups = %+v, %v", res, err)
+	}
+	reqs := f.Requests()
+	last := reqs[len(reqs)-1]
+	if last.Method != http.MethodGet || last.Path != "/api/v4/groups" ||
+		last.Query != "filter_allow_reference=true&include_member_count=true&per_page=200" ||
+		last.Headers["Authorization"][0] != "Bearer "+token {
+		t.Fatalf("request %+v", last)
+	}
+	groups, r := c.Groups(t.Context(), outbound.ClassInteractive)
+	if !r.OK() || len(groups) != 2 || groups[0].Name != fakemattermost.GroupPayments || groups[0].MemberCount == nil ||
+		*groups[0].MemberCount != 1 || !groups[0].AllowReference || groups[0].Source != "custom" {
+		t.Fatalf("groups %+v, %+v", groups, r)
+	}
+
+	control(t, http.MethodPut, f.URL()+"/_fake/config", `{"groups_forbidden":true}`)
+	res, err = mattermost.CheckGroups(t.Context(), c, interactive, clock.NewManual(t0))
+	if err != nil || res.Read || !strings.Contains(res.Message, "api.context.permissions.app_error") ||
+		!strings.Contains(res.Message, "saved by name") {
+		t.Fatalf("refused = %+v, %v", res, err)
+	}
+	control(t, http.MethodPut, f.URL()+"/_fake/config", `{"groups_forbidden":false}`)
+	if err := f.SetFault(fakeserver.Fault{Path: "/api/v4/groups", Status: http.StatusNotFound,
+		Body:  `{"id":"api.context.404.app_error","message":"Sorry, we could not find the page."}`,
+		Times: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := mattermost.CheckGroups(t.Context(), c, interactive, clock.NewManual(t0)); err != nil || res.Read ||
+		!strings.Contains(res.Message, "404") {
+		t.Fatalf("a server without groups = %+v, %v", res, err)
+	}
+
+	boom := errors.New("limiter down")
+	if _, err := mattermost.CheckGroups(t.Context(), c, func(context.Context,
+		func(ctx context.Context, c delivery.Call) delivery.Outcome) (delivery.Outcome, error) {
+		return delivery.Outcome{}, boom
+	}, clock.NewManual(t0)); !errors.Is(err, boom) {
+		t.Fatalf("the runner's error = %v", err)
+	}
+}

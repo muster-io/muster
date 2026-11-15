@@ -14,6 +14,7 @@ import type {
   Connection,
   ConnectionChannelList,
   ConnectionCheckResult,
+  ConnectionGroupList,
   ConnectionList
 } from '../../model';
 
@@ -23,11 +24,12 @@ import {
   getCreateConnectionResponseMock,
   getGetConnectionResponseMock,
   getListConnectionChannelsResponseMock,
+  getListConnectionGroupsResponseMock,
   getListConnectionsResponseMock,
   getUpdateConnectionResponseMock
 } from './connections.faker';
 
-export { getListConnectionsResponseMock, getCreateConnectionResponseMock, getCheckConnectionDraftResponseMock, getGetConnectionResponseMock, getUpdateConnectionResponseMock, getCheckConnectionResponseMock, getListConnectionChannelsResponseMock } from './connections.faker';
+export { getListConnectionsResponseMock, getCreateConnectionResponseMock, getCheckConnectionDraftResponseMock, getGetConnectionResponseMock, getUpdateConnectionResponseMock, getCheckConnectionResponseMock, getListConnectionChannelsResponseMock, getListConnectionGroupsResponseMock } from './connections.faker';
 
 
 export const getListConnectionsMockHandler = (overrideResponse?: ConnectionList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<ConnectionList> | ConnectionList), options?: RequestHandlerOptions) => {
@@ -123,6 +125,18 @@ export const getListConnectionChannelsMockHandler = (overrideResponse?: Connecti
       })
   }, options)
 }
+
+export const getListConnectionGroupsMockHandler = (overrideResponse?: ConnectionGroupList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<ConnectionGroupList> | ConnectionGroupList), options?: RequestHandlerOptions) => {
+  return http.get('*/connections/:connectionId/groups', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListConnectionGroupsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
 export const getConnectionsMock = () => [
   getListConnectionsMockHandler(),
   getCreateConnectionMockHandler(),
@@ -131,5 +145,6 @@ export const getConnectionsMock = () => [
   getUpdateConnectionMockHandler(),
   getDeleteConnectionMockHandler(),
   getCheckConnectionMockHandler(),
-  getListConnectionChannelsMockHandler()
+  getListConnectionChannelsMockHandler(),
+  getListConnectionGroupsMockHandler()
 ]

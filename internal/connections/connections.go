@@ -122,6 +122,9 @@ var (
 	ErrVersionMismatch = errors.New("the connection changed since it was read")
 	// ErrInUse is the deletion of a Connection that a Destination that is not deleted uses (C-13.FR-6).
 	ErrInUse = errors.New("destinations use the connection")
+	// ErrTeamMentionsChanged is the deletion of a Connection that Teams kept giving a first Team mention while it ran,
+	// deletionAttempts times: each attempt found a Team with a Team mention for the Connection that it had not locked.
+	ErrTeamMentionsChanged = errors.New("teams kept adding team mentions for the connection while it was deleted")
 	// ErrNotMattermost is a Mattermost operation, such as the channel list, on a Telegram, Bridge or Slack Connection.
 	ErrNotMattermost = errors.New("the connection is not a mattermost connection")
 	// errNotTelegram is a Telegram operation on a Mattermost Connection.
@@ -175,7 +178,9 @@ type Limiter struct {
 // PushSecret, BridgeInfo — the last info its check read, as the bridge sent it, nil before — and BridgeInfoReadAt are a
 // Bridge Connection's; EventMode, AppToken, SlackSigningSecret, what its last passing check learned — SlackTeamID,
 // SlackTeamName and SlackAppID, nil before — and SlackSocket — what the last hello of its Socket Mode connection
-// counted, nil in http mode and before the first hello after a save — are a Slack Connection's.
+// counted, nil in http mode and before the first hello after a save — are a Slack Connection's. SlackUsergroupsRead
+// and MattermostGroupsRead are what the last passing check of a Slack or a Mattermost Connection found of its groups,
+// nil before one (C-25.FR-8).
 type Connection struct {
 	ID                 int64
 	PublicID           string
@@ -197,15 +202,19 @@ type Connection struct {
 	SlackTeamName      *string
 	SlackAppID         *string
 	SlackSocket        *SlackSocket
-	BotToken           keyring.SecretStatus
-	BotUsername        *string
-	BotUserID          *string
-	Proxy              proxyconf.Config
-	ProxyPassword      keyring.SecretStatus
-	Limiter            Limiter
-	DestinationCount   int64
-	CreatedAt          time.Time
-	Version            int64
+	// SlackUsergroupsRead is whether the bot token of a Slack Connection has usergroups:read (C-24.FR-1 revised).
+	SlackUsergroupsRead *bool
+	// MattermostGroupsRead is whether the bot of a Mattermost Connection may read the groups (C-25.FR-8).
+	MattermostGroupsRead *bool
+	BotToken             keyring.SecretStatus
+	BotUsername          *string
+	BotUserID            *string
+	Proxy                proxyconf.Config
+	ProxyPassword        keyring.SecretStatus
+	Limiter              Limiter
+	DestinationCount     int64
+	CreatedAt            time.Time
+	Version              int64
 	// Gateway is the state of a Notification gateway (C-30.FR-8), nil for a Connection that is none: a Bridge
 	// Connection whose stored info declares the role gateway, or that is Broken.
 	Gateway *GatewayState
@@ -273,6 +282,13 @@ type Queries interface {
 	UpdateConnection(ctx context.Context, arg dbgen.UpdateConnectionParams) error
 	RenameConnection(ctx context.Context, arg dbgen.RenameConnectionParams) error
 	SetBotIdentity(ctx context.Context, arg dbgen.SetBotIdentityParams) error
+	SetGroupsRead(ctx context.Context, arg dbgen.SetGroupsReadParams) (int64, error)
+	LockConnectionTeams(ctx context.Context, arg dbgen.LockConnectionTeamsParams) ([]int64, error)
+	ListConnectionTeams(ctx context.Context, arg dbgen.ListConnectionTeamsParams) ([]int64, error)
+	ListConnectionTeamMentions(ctx context.Context, arg dbgen.ListConnectionTeamMentionsParams) (
+		[]dbgen.ListConnectionTeamMentionsRow, error)
+	DeleteConnectionTeamMentions(ctx context.Context, arg dbgen.DeleteConnectionTeamMentionsParams) error
+	BumpTeamVersions(ctx context.Context, arg dbgen.BumpTeamVersionsParams) error
 	SetBridgeInfo(ctx context.Context, arg dbgen.SetBridgeInfoParams) (int64, error)
 	SetSlackIdentity(ctx context.Context, arg dbgen.SetSlackIdentityParams) (int64, error)
 	CountConnectionDestinations(ctx context.Context, arg dbgen.CountConnectionDestinationsParams) (int64, error)
@@ -839,8 +855,10 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 
 // Delete deletes the Connection publicID (C-13.FR-6); a non-nil version must be its current one. While a Destination
 // that is not deleted uses it the deletion is ErrInUse. Otherwise, in one transaction, it is marked deleted and its
-// secrets are wiped, delivery abandons the final edits still pending for its deleted Destinations (C-11.FR-14), and
-// the Audit log entry connection.deleted is written. A Telegram Connection in the webhook update mode then has its
+// secrets are wiped, delivery abandons the final edits still pending for its deleted Destinations (C-11.FR-14), its
+// Team mentions are deleted, each in the Audit log diff of its Team (C-25.FR-11), and the Audit log entry
+// connection.deleted is written. A Team that gives the Connection its first Team mention while the deletion waits for
+// the Teams it locked makes it run again, up to deletionAttempts times, after which it is ErrTeamMentionsChanged. A Telegram Connection in the webhook update mode then has its
 // webhook removed as a best effort (unhook).
 func (s *Service) Delete(ctx context.Context, r Requester, publicID string, version *int64) error {
 	id, err := publicid.Parse(publicid.Connection, publicID)
@@ -849,7 +867,40 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 	}
 	var done func(context.Context)
 	var deleted dbgen.GetConnectionRow
-	err = s.cfg.Store.InTx(ctx, func(q Queries) error {
+	for attempt := 1; ; attempt++ {
+		done, deleted, err = s.delete(ctx, r, id, version)
+		if !errors.Is(err, ErrTeamMentionsChanged) || attempt == deletionAttempts {
+			break
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if done != nil {
+		done(ctx)
+	}
+	s.forgetBridgeClient(deleted.ID)
+	s.unhook(ctx, deleted)
+	return nil
+}
+
+// deletionAttempts is how often the deletion of a Connection runs before ErrTeamMentionsChanged is returned.
+const deletionAttempts = 3
+
+// delete deletes the Connection id in one transaction (Delete). It locks the Teams of the Connection's Team mentions
+// before the Connection, the order of every path that takes both (LockConnectionTeams); a Team that gave the
+// Connection its first Team mention after that set was read and before the Connection was locked, which no save can do
+// once it is, makes it end with ErrTeamMentionsChanged, so that it is run again with that Team: locking the Team after
+// the Connection would invert the order.
+func (s *Service) delete(ctx context.Context, r Requester, id string, version *int64) (func(context.Context),
+	dbgen.GetConnectionRow, error) {
+	var done func(context.Context)
+	var deleted dbgen.GetConnectionRow
+	err := s.cfg.Store.InTx(ctx, func(q Queries) error {
+		teams, err := q.LockConnectionTeams(ctx, dbgen.LockConnectionTeamsParams{OrgID: s.cfg.OrgID, PublicID: id})
+		if err != nil {
+			return fmt.Errorf("lock the teams of the connection %s: %w", id, err)
+		}
 		lock, err := q.LockConnection(ctx, dbgen.LockConnectionParams{OrgID: s.cfg.OrgID, PublicID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -868,6 +919,16 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if n > 0 {
 			return ErrInUse
 		}
+		current, err := q.ListConnectionTeams(ctx, dbgen.ListConnectionTeamsParams{OrgID: s.cfg.OrgID,
+			ConnectionID: lock.ID})
+		if err != nil {
+			return fmt.Errorf("list the teams of the connection %s: %w", id, err)
+		}
+		for _, t := range current {
+			if !slices.Contains(teams, t) {
+				return ErrTeamMentionsChanged
+			}
+		}
 		row, err := s.row(ctx, q, id)
 		if err != nil {
 			return err
@@ -878,6 +939,11 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 			return err
 		}
 		now := s.cfg.Clocks.Business.Now().UTC()
+		// The Teams read under the Connection's lock, all locked: a Team whose save removed its last Team mention for
+		// the Connection while the deletion waited is left as it is.
+		if err := s.deleteTeamMentions(ctx, q, r, c, current, now); err != nil {
+			return err
+		}
 		if err := q.MarkConnectionDeleted(ctx, dbgen.MarkConnectionDeletedParams{OrgID: s.cfg.OrgID, ID: lock.ID,
 			Now: now}); err != nil {
 			return fmt.Errorf("delete the connection %s: %w", id, err)
@@ -894,14 +960,83 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		}
 		return s.record(ctx, q, r, ActionDeleted, c, []audit.Change{{Pointer: "/deleted_at", After: now}})
 	})
+	return done, deleted, err
+}
+
+// The Audit log action, resource type and live hint of a Team, as internal/teams names them.
+const (
+	actionTeamUpdated = "team.updated"
+	resourceTeam      = "team"
+	hintTeam          = "team"
+)
+
+// teamMentionView is a Team mention as the Audit log diff of its Team shows it, as internal/teams writes it.
+type teamMentionView struct {
+	ConnectionID string `json:"connection_id"`
+	Group        string `json:"group"`
+	GroupID      string `json:"group_id,omitempty"`
+}
+
+// deleteTeamMentions deletes the Team mentions of the Connection c that is being deleted of the Teams locked — those
+// with one for c once c is locked, each of which its deletion locked before c — in the transaction q of the deletion
+// (C-25.FR-11): Teams and Connections are deleted softly, so no foreign key cascades. Each such Team gets a new
+// version, an Audit log entry team.updated by the requester with its Team mentions before and after, read under the
+// Team's lock, and its live hint.
+func (s *Service) deleteTeamMentions(ctx context.Context, q Queries, r Requester, c Connection, locked []int64,
+	now time.Time) error {
+	if len(locked) == 0 {
+		return nil
+	}
+	rows, err := q.ListConnectionTeamMentions(ctx, dbgen.ListConnectionTeamMentionsParams{OrgID: s.cfg.OrgID,
+		ConnectionID: c.ID, TeamIds: locked})
 	if err != nil {
-		return err
+		return fmt.Errorf("list the team mentions of the connection %s: %w", c.PublicID, err)
 	}
-	if done != nil {
-		done(ctx)
+	if len(rows) == 0 {
+		return nil
 	}
-	s.forgetBridgeClient(deleted.ID)
-	s.unhook(ctx, deleted)
+	if err := q.DeleteConnectionTeamMentions(ctx, dbgen.DeleteConnectionTeamMentionsParams{OrgID: s.cfg.OrgID,
+		ConnectionID: c.ID, TeamIds: locked}); err != nil {
+		return fmt.Errorf("delete the team mentions of the connection %s: %w", c.PublicID, err)
+	}
+	type team struct {
+		resource      audit.Resource
+		before, after []teamMentionView
+	}
+	var ids []int64
+	teams := map[int64]*team{}
+	for _, m := range rows {
+		t, ok := teams[m.TeamID]
+		if !ok {
+			t = &team{resource: audit.Resource{Type: resourceTeam, PublicID: m.TeamPublicID, Name: m.TeamName},
+				before: []teamMentionView{}, after: []teamMentionView{}}
+			teams[m.TeamID] = t
+			ids = append(ids, m.TeamID)
+		}
+		v := teamMentionView{ConnectionID: m.ConnectionPublicID, Group: m.GroupName,
+			GroupID: m.SlackUsergroupID.String}
+		t.before = append(t.before, v)
+		if m.ConnectionID != c.ID {
+			t.after = append(t.after, v)
+		}
+	}
+	if err := q.BumpTeamVersions(ctx, dbgen.BumpTeamVersionsParams{OrgID: s.cfg.OrgID, TeamIds: ids,
+		Now: now}); err != nil {
+		return fmt.Errorf("change the version of the teams of the connection %s: %w", c.PublicID, err)
+	}
+	for _, id := range ids {
+		t := teams[id]
+		if err := s.cfg.Audit.Record(ctx, q, audit.Entry{OrgID: s.cfg.OrgID, Actor: r.Actor, Transport: r.Transport,
+			Action: actionTeamUpdated, Resource: t.resource,
+			Diff:          []audit.Change{{Pointer: "/team_mentions", Before: t.before, After: t.after}},
+			Details:       map[string]any{"reason": "connection_deleted", "connection": c.PublicID},
+			SourceAddress: r.Address}); err != nil {
+			return err
+		}
+		if err := q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: hintTeam, ID: t.resource.PublicID}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1004,16 +1139,19 @@ func (s *Service) cachedClient(r dbgen.GetConnectionRow) (*mattermost.Client, er
 
 // Step is a step of a Connection check: whether it passed or was skipped, its latency and path, and when it failed
 // what answered, in English, with its code, which clients translate (ConnectionCheckStep.code), and with missing_scope
-// the scopes the bot token lacks, which clients name in their own words (D396).
+// the scopes the bot token lacks, which clients name in their own words (D396). The step scopes of a Slack check also
+// reports its optional scopes as present or missing (C-24.FR-2 revised); a step that passed may have a message, as the
+// step groups of a Mattermost check has when the server did not list the groups.
 type Step struct {
-	Name          string
-	OK            bool
-	Skipped       bool
-	Latency       time.Duration
-	Via           string
-	Message       string
-	Code          string
-	MissingScopes []string
+	Name           string
+	OK             bool
+	Skipped        bool
+	Latency        time.Duration
+	Via            string
+	Message        string
+	Code           string
+	MissingScopes  []string
+	OptionalScopes []slack.OptionalScope
 }
 
 // Called reports whether the step made a call, so that its Latency is that call's: not when it was skipped, nor for
@@ -1055,8 +1193,10 @@ const WarningPressAnswersInThread = "press_answers_in_thread"
 // mattermost.CodeTokenInvalid, any other failure with the code of mattermost.Result.FailureCode. No limiter token
 // within the budget is a *delivery.LimitedError. Once the token works, a read of the bot's roles tells whether it may
 // make ephemeral posts; when it may not, the check passes with WarningPressAnswersInThread and the roles it read
-// (D284, F-064); a failed read adds nothing. Its requests are recorded as the kind connection_check under one check
-// run, which the result names (C-23.FR-2, FR-5).
+// (D284, F-064); a failed read adds nothing. Then the step groups reads the groups (mattermost.CheckGroups): the
+// server's answer never fails it, a limiter error does, and the check records on the Connection whether the server
+// listed them (C-25.FR-8). Its requests are
+// recorded as the kind connection_check under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string, baseURL *string) (CheckResult, error) {
 	ctx, run := outbound.StartCheck(ctx, outbound.CheckConnection, 0)
 	res, err := s.check(ctx, publicID, baseURL)
@@ -1097,17 +1237,27 @@ func (s *Service) check(ctx context.Context, publicID string, baseURL *string) (
 	if !step.OK {
 		return CheckResult{Steps: []Step{step}}, nil
 	}
+	groups, err := mattermost.CheckGroups(ctx, c, run, s.cfg.Clocks.Real)
+	if err != nil {
+		return CheckResult{}, err
+	}
 	if err := s.cfg.Store.InTx(ctx, func(q Queries) error {
 		if err := q.SetBotIdentity(ctx, dbgen.SetBotIdentityParams{OrgID: s.cfg.OrgID, ID: row.ID,
 			BotUserID: nonEmpty(user.ID), BotUsername: nonEmpty(user.Username)}); err != nil {
 			return fmt.Errorf("record the bot of the connection %s: %w", row.PublicID, err)
+		}
+		if _, err := q.SetGroupsRead(ctx, dbgen.SetGroupsReadParams{OrgID: s.cfg.OrgID, ID: row.ID,
+			Version: row.Version, GroupsRead: groups.Read}); err != nil {
+			return fmt.Errorf("record the groups of the connection %s: %w", row.PublicID, err)
 		}
 		return q.Notify(ctx, db.Hint{OrgID: s.cfg.OrgID, Type: Hint, ID: row.PublicID})
 	}); err != nil {
 		return CheckResult{}, err
 	}
 	warnings, roles := pressWarnings(ctx, c, run, user)
-	return CheckResult{OK: true, Steps: []Step{step}, BotName: user.Username, Warnings: warnings, BotRoles: roles}, nil
+	steps := []Step{step, {Name: mattermost.StepGroups, OK: true, Latency: groups.Latency, Via: c.Via(),
+		Message: groups.Message}}
+	return CheckResult{OK: true, Steps: steps, BotName: user.Username, Warnings: warnings, BotRoles: roles}, nil
 }
 
 // mattermostToken is the step token of a Mattermost check: GET /api/v4/users/me with the bot token of c through run,
@@ -1413,7 +1563,15 @@ func connectionOf(r dbgen.GetConnectionRow) (Connection, error) {
 	}
 	c.SlackSocket = slackSocketOf(r)
 	c.Gateway = gatewayOf(r)
+	c.SlackUsergroupsRead, c.MattermostGroupsRead = boolOf(r.SlackUsergroupsRead), boolOf(r.MattermostGroupsRead)
 	return c, nil
+}
+
+func boolOf(b pgtype.Bool) *bool {
+	if !b.Valid {
+		return nil
+	}
+	return &b.Bool
 }
 
 // gatewayOf is the state of the Connection of r as a Notification gateway, nil when it is none.

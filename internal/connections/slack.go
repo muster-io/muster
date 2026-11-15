@@ -389,8 +389,8 @@ func (s *Service) SlackTarget(ctx context.Context, destinationID int64) (slack.T
 
 // checkSlack runs the check of the Slack Connection row (C-24.FR-2) on the interactive path, limited by the Connection,
 // with slack.RunCheck: token, scopes and, in socket mode, app_token. A passing check records what it found — the
-// workspace, the bot and the app — unless the Connection changed since it was read, and announces it with the live
-// hint; in socket mode it passes with WarningAnotherClientConnected while the last hello counted another connection of
+// workspace, the bot, whether the bot token has usergroups:read (C-24.FR-1 revised) and the app — unless the
+// Connection changed since it was read, and announces it with the live hint; in socket mode it passes with WarningAnotherClientConnected while the last hello counted another connection of
 // the app than the Leader's. It takes no baseURL.
 func (s *Service) checkSlack(ctx context.Context, row dbgen.GetConnectionRow, baseURL *string) (CheckResult, error) {
 	if baseURL != nil {
@@ -408,7 +408,8 @@ func (s *Service) checkSlack(ctx context.Context, row dbgen.GetConnectionRow, ba
 		return CheckResult{}, err
 	}
 	if res.OK() && res.Identity != nil {
-		if err := s.storeSlackIdentity(ctx, row, *res.Identity); err != nil {
+		usergroups := res.UsergroupsRead != nil && *res.UsergroupsRead
+		if err := s.storeSlackIdentity(ctx, row, *res.Identity, usergroups); err != nil {
 			return CheckResult{}, err
 		}
 	}
@@ -419,14 +420,15 @@ func (s *Service) checkSlack(ctx context.Context, row dbgen.GetConnectionRow, ba
 	return out, nil
 }
 
-// storeSlackIdentity records what a passing check of the Slack Connection row found, unless the Connection changed
-// since the check read it, and sends its live hint when it did.
-func (s *Service) storeSlackIdentity(ctx context.Context, row dbgen.GetConnectionRow, id slack.Identity) error {
+// storeSlackIdentity records what a passing check of the Slack Connection row found, with whether the bot token has
+// usergroups:read, unless the Connection changed since the check read it, and sends its live hint when it did.
+func (s *Service) storeSlackIdentity(ctx context.Context, row dbgen.GetConnectionRow, id slack.Identity,
+	usergroups bool) error {
 	return s.cfg.Store.InTx(ctx, func(q Queries) error {
 		n, err := q.SetSlackIdentity(ctx, dbgen.SetSlackIdentityParams{OrgID: s.cfg.OrgID, ID: row.ID,
 			Version: row.Version, TeamID: nonEmpty(id.TeamID), TeamName: nonEmpty(id.TeamName),
 			TeamUrl: nonEmpty(id.TeamURL), BotID: nonEmpty(id.BotID), BotUserID: nonEmpty(id.BotUserID),
-			BotUsername: nonEmpty(id.BotName), AppID: nonEmpty(id.AppID)})
+			BotUsername: nonEmpty(id.BotName), AppID: nonEmpty(id.AppID), UsergroupsRead: usergroups})
 		if err != nil {
 			return fmt.Errorf("record the workspace and the bot of the connection %s: %w", row.PublicID, err)
 		}
@@ -443,7 +445,8 @@ func slackResultOf(res slack.Check) CheckResult {
 	out := CheckResult{OK: res.OK(), Steps: make([]Step, 0, len(res.Steps))}
 	for _, st := range res.Steps {
 		out.Steps = append(out.Steps, Step{Name: st.Name, OK: st.OK, Skipped: st.Skipped, Latency: st.Latency,
-			Via: st.Via, Message: st.Message, Code: st.Code, MissingScopes: st.MissingScopes})
+			Via: st.Via, Message: st.Message, Code: st.Code, MissingScopes: st.MissingScopes,
+			OptionalScopes: st.OptionalScopes})
 	}
 	if id := res.Identity; id != nil {
 		out.BotName = id.BotName
