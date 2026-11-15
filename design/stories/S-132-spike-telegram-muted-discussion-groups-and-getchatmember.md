@@ -11,6 +11,7 @@ files_touched:
   - design/stories/S-164-warnings-about-unreachable-on-calls.md
   - design/stories/S-137-documentation-schedules.md
   - design/stories/S-144-documentation-whom-a-message-mentions-and-team-mentions.md
+  - design/stories/S-172-warnings-about-on-calls-whom-the-destinations-of-their-chains-cannot-mention.md
 acceptance:
   - "[C-27.FR-8] `design/facts.md` has a new entry F-NNN that says what `getChatMember` answers, called by the bot that is an admin of a channel's discussion group, for a person who is a member of the group, one who left it, one who was never in it but is a subscriber of the channel, and one the bot never saw — the status, the HTTP status and the `description` of each — and whether the answer depends on the person's privacy settings, with the Bot API version."
   - "[C-27.FR-8] `design/facts.md` has a new entry F-NNN that says whether a comment of the bot in the discussion group with a `tg://user?id=` Mention of a member makes a notification on that member's phone and desktop when they muted the discussion group, and when they muted it except for Mentions, if the client offers that, with the client versions."

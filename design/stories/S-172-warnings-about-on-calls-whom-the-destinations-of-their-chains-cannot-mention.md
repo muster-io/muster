@@ -55,7 +55,9 @@ issue: 461
   Destinations its query finds are those the vectors expect for those sources (plan review, M4).
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): the step `discussion_group_members` of S-164 also
   asks `getChatMember` for the people with a Telegram Account link for the Connection whom a chain Paging in that
-  Destination can Page through a Schedule, once per person; a failed call leaves the person unknown, as in S-164.
+  Destination can Page through a Schedule, once per person, and reads each answer as S-164 does (F-128): `left`,
+  `kicked` and `400` `Bad Request: PARTICIPANT_ID_INVALID` are absent, and any other failed call leaves the person
+  unknown.
 - **Destinations** (`internal/destinations/query.sql`, `destinations.go`): the query `ListChainPagedTelegramPeople`,
   beside S-164's query of the people of the Teams that name the Destination — the Users with a Telegram Account link for
   the Destination's Connection who are in a Rotation layer, or take an Override that ends after the business clock's

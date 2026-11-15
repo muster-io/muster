@@ -71,6 +71,12 @@ issue: 433
   reaches the bot only after the app is reinstalled, which keeps the bot token, so the Connection is checked again, not
   edited (F-125); Whom a message mentions and Connect Slack — Slack offers no `@everyone`: `<!everyone>` from a bot
   mentions only in the workspace's general channel, where `@channel` reaches the same people (F-127, C-28.FR-2).
+- **What S-132 recorded**, each said where readers need it and citing its fact: Whom a message mentions and the Telegram
+  page — a `tg://user?id=` Mention in a comment rang a member of the discussion group who had muted it, on the desktop
+  and on the phone, so muting the group keeps Mentions (F-129); it did not ring the group's creator, anonymous in it,
+  who had muted it, so a person who created the discussion group or is anonymous in it does not mute it (F-129); a
+  subscriber of the channel who is not in the discussion group is not mentioned (F-014), and the Destination check names
+  the people of its Teams outside the group, a leave showing only some time later, about a minute in F-128.
 - **llms.txt** (`docs/llms.txt.tmpl`): a scenario "Mention the right people" with Concepts → Whom a message mentions and
   Concepts → Teams.
 
