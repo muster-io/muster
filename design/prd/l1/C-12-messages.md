@@ -136,6 +136,12 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   message's Mentions; nothing is written in the Thread, the Alert Group's Timeline records the delivery event "Mention
   not delivered" and the Destination page warns (C-28.FR-3); the Assignees are named like the footer's users
   (C-32.FR-12).
+  _Revised for L2 (2026-11-11, #503):_ a change of the display name of a User — in the profile, by an Admin, or the
+  pseudonym of a deletion — of the name of a Service account, or of a User's Account links — a link made, replaced,
+  made again with another username or display name, or removed — re-renders, Quietly and as edits, the open Root
+  messages whose footer names them as the Owner or as who snoozed; a Root message whose footer the change does not
+  alter, among them those of another identity space, is not edited. The name an OIDC sign-in brings is used only when
+  the account is created, so a sign-in changes no footer.
 - **C-12.FR-13** Rendering exports the metrics listed for C-12 in the [metrics
   catalogue](reference.md#metrics-catalogue): template errors and the rendering time of each kind of template.
 

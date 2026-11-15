@@ -50,19 +50,19 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   _Revised for L2 (2026-11-11, #504, #534, #503):_ within each urgency, an edit of a published Root message that only
   a change of configuration made — the re-render of the open Root messages after a change of a button set, of the
   message settings, of a Route's "Labels in the message", language, Snooze durations or templates, of a Link rule or a
-  Lookup table, or of a Team's name, the evaluation of the Teams, a raised Minimum severity, or the re-render after a
-  key rotation — goes after the Publications, the final edits and the edits of Root messages that Alerts, Commands and
-  timers with a lifecycle event make, of the same urgency. The delivery work that shares a Destination's and a
-  Connection's limiters goes in this order: the Publications, final edits and edits of Root messages that Alerts,
-  Commands and timers with a lifecycle event make, of Urgent Alert Groups; the configuration edits of Urgent Alert
-  Groups; the same work of the other Alert Groups; the Thread replies; the events of outgoing webhooks; the
-  configuration edits of the other Alert Groups. Each rank goes oldest first. Every rank after the first is claimed one
-  batch at a time, so the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one
-  claimed batch of it, and a re-render delays the work before it by at most one claimed batch of its edits; Thread
-  replies and webhook events, Urgent or not, come after the Root-message work of both. Configuration edits that are not
-  Urgent wait as long as the work before them uses up the limiter, which in a Telegram chat at 10 calls a minute is
-  about three Alert Groups a minute that resolve and reopen; none is dropped, and one that waits is carried by the next
-  change of its Alert Group.
+  Lookup table, of a Team's name, or of the name or the Account links of the User or Service account a footer names, the
+  evaluation of the Teams, a raised Minimum severity, or the re-render after a key rotation — goes after the
+  Publications, the final edits and the edits of Root messages that Alerts, Commands and timers with a lifecycle event
+  make, of the same urgency. The delivery work that shares a Destination's and a Connection's limiters goes in this
+  order: the Publications, final edits and edits of Root messages that Alerts, Commands and timers with a lifecycle
+  event make, of Urgent Alert Groups; the configuration edits of Urgent Alert Groups; the same work of the other Alert
+  Groups; the Thread replies; the events of outgoing webhooks; the configuration edits of the other Alert Groups. Each
+  rank goes oldest first. Every rank after the first is claimed one batch at a time, so the Root messages of Urgent
+  Alert Groups wait behind work that is not Urgent for at most one claimed batch of it, and a re-render delays the
+  work before it by at most one claimed batch of its edits; Thread replies and webhook events, Urgent or not, come
+  after the Root-message work of both. Configuration edits that are not Urgent wait as long as the work before them
+  uses up the limiter, which in a Telegram chat at 10 calls a minute is about three Alert Groups a minute that resolve
+  and reopen; none is dropped, and one that waits is carried by the next change of its Alert Group.
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again
@@ -222,6 +222,10 @@ every error class, and a virtual clock; messenger-specific checks are in C-13 to
   made afterwards. A Publication that comes due during a re-render of 200 open Root messages, and an Urgent Publication
   or Urgent configuration edit that comes due while 200 Publications or Thread replies that are not Urgent are
   attempted, goes out within one claimed batch of them.
+- **C-11.AC-17** _Revised for L2 (2026-11-15, #540, #544):_ With 1000 edits of Root messages that Alerts made waiting for
+  the limiter of one Destination, the round makes at most one claimed batch of refused calls to that Destination. A
+  Thread reply or a webhook event due in another Destination whose limiter has tokens is sent after only the
+  Root-message work due before it in such Destinations, within about one round of the delivery worker.
 
 ## Related ADRs
 
