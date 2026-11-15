@@ -55,8 +55,13 @@ issue: 460
 - **Mentions** (`internal/mentions/mentions.go`): a resolved target carries what the adapters need — the Slack user
   group's id, the group's name, the symbolic name — and the Slack and Bridge adapters no longer leave group and
   everyone targets out (S-140's Notes).
-- **Slack** (`internal/slack/layout.go`): `<!subteam^{id}>` and `<!everyone>`, as the facts of S-138 say, in the first
-  line of a Loud message; Quiet messages and edits carry no Mentions (ADR-0005).
+- **Slack** (`internal/slack/layout.go`): `<!subteam^{id}>` and `<!everyone>` in the first line of a Loud message, with
+  its other Mentions; Quiet messages and edits carry no Mentions (ADR-0005). `<!subteam^{id}>` in a `section` block of a
+  Root message and of a Thread reply mentions the user group's members (F-126, which sent it in the blocks only, not in
+  `text`). `<!everyone>` mentions only in the workspace's general channel; elsewhere it is drawn the same and did not
+  mention the channel member who watched, with no error from `chat.postMessage` (F-127), so the adapter writes it as the
+  entry asks wherever the Destination is, and the limit is said where readers need it (S-144) until the maintainer
+  decides the change of C-28.FR-2 proposed by S-138.
 - **Bridge** (`internal/bridge/envelope.go`): `kind` omitted on a `user` entry, so that a bridge that declares no group
   or everyone mentions never sees the new field; `mentions` entries of the kind `group` or `everyone`, each with its ref
   and marker, beside the `user` entries of C-22.FR-16.
@@ -102,7 +107,8 @@ bridge that declares no group mentions, whose envelope carries no `group` entry.
 
 ## Open questions
 
-None. What `<!subteam^ID>` and `<!everyone>` notify is the spike S-138's; it corrects this contract if needed.
+None. What `<!subteam^ID>` and `<!everyone>` mention is recorded by the spike S-138 (F-126, F-127), which corrected
+this contract.
 
 ## Notes
 

@@ -175,11 +175,12 @@ issue: 429
 - **Delivery** (`internal/delivery`): the worker resolves the Mentions of a Loud message through `mentions.Resolve`,
   `destination_joined` with `new_alert_group` and an ack timeout notice with `ack_timeout`; the first publication of a
   Storm summary with `storm_started` instead of L1's `new_alert_group`; the recording test adapter keeps the targets.
-  Mattermost writes group targets as L1 does (`@{name}`, F-113 and the facts of S-138); Slack keeps writing `<!channel>`
-  and `<!here>` as in L1 (`test/e2e/slack_test.go`); until S-171 merges, the Slack adapter leaves out `<!everyone>` and
-  user groups (`<!subteam^ID>`), and the Bridge adapter the group and everyone targets, which they cannot write yet.
-  The in-process live test of delivery (`live_test.go`) sets Mentions through `mention_entries` rows instead of the
-  column, and expects `storm_started` on the first publication of a Storm summary.
+  Mattermost writes group targets as L1 does (`@{name}`, which mentions a custom group's members inside a Root message's
+  attachment and in a Thread reply's `message`, F-123; `@channel`, `@here` and `@all` in both, F-113 and F-124); Slack
+  keeps writing `<!channel>` and `<!here>` as in L1 (`test/e2e/slack_test.go`); until S-171 merges, the Slack adapter
+  leaves out `<!everyone>` and user groups (`<!subteam^ID>`), and the Bridge adapter the group and everyone targets,
+  which they cannot write yet. The in-process live test of delivery (`live_test.go`) sets Mentions through
+  `mention_entries` rows instead of the column, and expects `storm_started` on the first publication of a Storm summary.
 - **Outgoing webhooks** (`internal/webhooks/mentions.go`): the data of C-15.FR-11 revised.
 - **Web test fixtures** (`web/src/test/fixtures/destinations.ts`, S-166): `mention_entries` empty in the builders of
   Destination reads. The new enums meet no exhaustive switch of the SPA, and `MentionName` none either.
@@ -302,6 +303,10 @@ None open. Settled:
 - The conversion of `mentions` in requests is the maintainer's decision on the plan review (Q1): ignoring it, as the
   first contract said, would have left every Destination that the end-to-end suites, the L1 editor and 0.1 clients
   write without Mentions.
+- `<!everyone>` mentions only in the Slack workspace's general channel; elsewhere Slack draws it the same and it did not
+  mention the channel member who watched (F-127). A Slack Destination still takes the entry `everyone` on any channel,
+  as C-28.FR-2 says; the pull request of the spike S-138 proposes a change of C-28.FR-2 for the maintainer to decide,
+  and until it is decided this contract does not change.
 - Migration `0034` follows the story map; a story merged out of that order renumbers its migration to the next free
   number in its own pull request (S-131's Notes).
 

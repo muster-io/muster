@@ -55,11 +55,11 @@ acceptance:
   - "[C-25.FR-8, C-25.AC-7, C-25.FR-1] A Team takes `team_mentions` — one per Connection, each a group's name and, for Slack, the user group's id — saved with `If-Match` and recorded in the diff of `team.updated`; one for a Mattermost Connection is saved; one for a Telegram Connection, for a Slack Connection whose last check found no `usergroups:read`, or for a Bridge Connection whose bridge does not declare group mentions is refused with `422` `group_mentions_unsupported` at `/team_mentions/{i}/connection_id` (`mentions_test.go`, `teams_test.go`)."
   - "[C-25.FR-8] `getTeam` lists under `mention_connections` every Connection that may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` —, with its Team mention or none, `available`, and for the unavailable ones the `MentionUnavailableReason` `telegram_no_groups`, `usergroups_read_missing` or `bridge_no_group_mentions`; a Team mention whose Connection later loses the ability stays, reads `available` false with the reason, and mentions nobody (`mentions_test.go`)."
   - "[C-24.FR-1, C-24.FR-2] The Slack Connection check's step `scopes` reports `usergroups:read` as present or missing without failing, `getConnection` of a Slack Connection carries `usergroups_read` from its last successful check, and a check that no longer finds the scope sets it false; the bot needs no other new scope (`check_test.go`)."
-  - "[C-25.FR-8] The Mattermost Connection check gains the step `groups` (`ConnectionCheckStep.name`), which reads the groups as F-NNN of S-138 says and passes, its message saying when the bot may not read them — no new warning value of `ConnectionCheckResult.warnings`; `getConnection` of a Mattermost Connection carries `groups_read` (`check_test.go`)."
+  - "[C-25.FR-8] The Mattermost Connection check gains the step `groups` (`ConnectionCheckStep.name`), which reads the groups with `GET /api/v4/groups` as a bot with the role Member may (F-122) and passes, its message saying when the server refuses the read — no new warning value of `ConnectionCheckResult.warnings`; `getConnection` of a Mattermost Connection carries `groups_read` (`check_test.go`)."
   - "[C-22.FR-2, C-28.FR-2] `api/bridge.yaml` gives `Capabilities` the optional `group_mentions` (boolean) and `everyone_mentions` (an array of `channel`, `here`, `all`, `everyone`, unique), additively in protocol version 1; the Bridge Connection check shows them with the other features of `info`, and Muster reads them from the stored `info`; `make lint` passes Redocly and oasdiff reports no breaking change (`info_test.go`)."
   - "[C-25.FR-8] `listConnectionGroups` lists the Mattermost groups of a Mattermost Connection and the Slack user groups of a Slack Connection whose last check found `usergroups:read` — `id`, `name`, `display_name` and `member_count` — through the interactive path, `503` with `Retry-After` when no limiter token is free in time, and answers `409` `groups_not_listed` for a Telegram or Bridge Connection and a Slack Connection without the scope (`groups_test.go`)."
   - "[C-25.FR-11] Team mentions use the Team's optimistic locking and are in its Audit log diff; deleting a Team or a Connection deletes their Team mentions in the same transaction (`teams_test.go`, `groups_test.go`)."
-  - "[C-25.FR-12, C-24.FR-1] Concepts → Teams has \"Team mentions\" — per messenger, that a Team without one for a Connection is mentioned as nobody and never by its On-call; the Slack manifest of Connect Slack adds `usergroups:read`, and the upgrade notes of 0.2.0 say that an installed Slack app is reinstalled to get the scope; `make docs-check` passes."
+  - "[C-25.FR-12, C-24.FR-1] Concepts → Teams has \"Team mentions\" — per messenger, that a Team without one for a Connection is mentioned as nobody and never by its On-call; the Slack manifest of Connect Slack adds `usergroups:read`, and the upgrade notes of 0.2.0 say that an installed Slack app is reinstalled to get the scope and keeps its bot token (F-125); `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
 operator_attention: false
 issue: 428
@@ -90,6 +90,15 @@ issue: 428
 
 ## Contracts
 
+- **Facts** (S-138, F-121 to F-125): on Mattermost 11.2.2 with the Entry licence a bot with the role Member reads the
+  custom groups with `GET /api/v4/groups` — `member_count` only with `include_member_count=true` — and their members,
+  with no permission added (F-121, F-122); the `source` filter did not filter with LDAP off (F-122); a custom group's
+  `allow_reference` is always `true` (F-123); `@<group>` mentions a custom group's members in a Root message's
+  attachment and in a Thread reply's `message` (F-123). In Slack `usergroups.list` with `usergroups:read` answers `id`,
+  `handle`, `name`, `date_delete` and `user_count`, and `missing_scope` without it; a scope added to an installed app
+  reaches `x-oauth-scopes` only after a reinstall, which keeps the bot token; `usergroups.users.list` and
+  `conversations.info` refused a JSON body and took form arguments (F-125). LDAP-synced groups, editions other than
+  Entry and a bot whose role lacks the custom-group permissions were not checked (Pending in `design/facts.md`).
 - **Spec** (`api/openapi.yaml`, changed first, then generated):
   - `TeamInput` gains `team_mentions` (`TeamMentionInput`[] {`connection_id`, `group` (the Mattermost group's name, the
     Slack user group's handle, or the bridge's group name; 1 to 64 characters of the form of `mentions` group names),
@@ -141,11 +150,19 @@ issue: 428
 - **Connections** (`internal/connections/groups.go`, `slack.go`, `connections.go`): `listConnectionGroups` on the
   interactive path; the Slack check stores `slack_usergroups_read` from `x-oauth-scopes`; the Mattermost check stores
   `mattermost_groups_read`.
-- **Slack** (`internal/slack/check.go`, `client.go`): `usergroups:read` is an optional scope — present or missing,
-  never `missing_scope` — and `usergroups.list` (`include_count=true`), with the user groups whose `date_delete` is 0.
-- **Mattermost** (`internal/mattermost/check.go`, `client.go`): the step `groups` and the read of the groups, as the
-  facts of S-138 say (assumed until then: `GET /api/v4/groups?filter_allow_reference=true&per_page=200`, `403` for a
-  bot without the permission, which the step reports in its message while it passes).
+- **Slack** (`internal/slack/check.go`, `client.go`): `usergroups:read` is an optional scope — present or missing, never
+  `missing_scope` — and `usergroups.list` (`include_count=true`), with the user groups whose `date_delete` is 0,
+  `member_count` from `user_count`; it is a read method, so `client.go` sends its arguments form-encoded, as it does for
+  `conversations.info`, since some read methods refuse a JSON body (F-125: `usergroups.users.list`,
+  `conversations.info`).
+- **Mattermost** (`internal/mattermost/check.go`, `client.go`): the step `groups` and the read of the groups,
+  `GET /api/v4/groups?filter_allow_reference=true&include_member_count=true&per_page=200` with the bot token: a bot
+  with the role Member reads them with `200` (F-122), and `member_count` comes only with `include_member_count=true`.
+  `filter_allow_reference=true` keeps out groups that may not be mentioned, which a custom group never is (F-123); no
+  `source` filter is sent, since it did not filter with LDAP off (F-122), and each group is taken whatever its
+  `source`. Any other answer, which S-138 did not see — the fake's `groups_forbidden` sends `403`
+  `api.context.permissions.app_error`, the refusal F-122 saw for `/groups/{group_id}/stats` — sets `groups_read`
+  false, and the step reports it in its message while it passes.
 - **Bridge** (`internal/bridge/info.go`): `Info` gains `GroupMentions` and `EveryoneMentions`, read from the stored
   `info`; `Features()` names them, so the check shows them.
 - **Web test fixtures**: the builders of S-166 (`connections.ts`: `usergroups_read` and `groups_read` null) and of
@@ -155,20 +172,23 @@ issue: 428
   case `groups` with the text "Groups" / «Группы» in `en.json` and `ru.json`, so that `make generate` and the
   TypeScript check pass; the bridge's new `info` fields and `MentionUnavailableReason` meet no exhaustive switch yet.
 - **Fake servers**: the fake Mattermost server answers `GET /api/v4/groups` with the groups `payments_team` (alice) and
-  `devops_team` (bob), and `PUT /_fake/config` with `groups_forbidden` makes it answer `403`; the fake Slack server
-  answers `usergroups.list` with the user group `S0FAKEPAYTEAM` (`payments-team`, with `U0FAKEALICE`) to a token whose
-  scopes include `usergroups:read`, and `missing_scope` otherwise, and `/_fake/config` takes `usergroups` by app key;
-  the fake bridge's `/_fake/config` takes `capabilities.group_mentions` and `capabilities.everyone_mentions` through the
-  generated types, with no change of its code.
+  `devops_team` (bob), each with `source` `custom` and `allow_reference` `true`, and `member_count` only when the
+  request has `include_member_count=true` (F-122), and `PUT /_fake/config` with `groups_forbidden` makes it answer `403`
+  `api.context.permissions.app_error`; the fake Slack server answers `usergroups.list` with the user group
+  `S0FAKEPAYTEAM` (`payments-team`, with `U0FAKEALICE`; `date_delete` 0 and `user_count` 1, F-125) to a token whose
+  scopes include `usergroups:read`, and `missing_scope` with `needed` and `provided` otherwise, and `/_fake/config`
+  takes `usergroups` by app key; the fake bridge's `/_fake/config` takes `capabilities.group_mentions` and
+  `capabilities.everyone_mentions` through the generated types, with no change of its code.
 - **AGENTS.md**: the paragraph on development mode names the groups of the fake Mattermost server, the user groups and
   scopes of the fake Slack server set through `/_fake/config`, and the group mentions and mentions of everyone that the
   fake bridge's `info` declares.
 - **Settings**: none new; `connection.slack.*` unchanged.
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/teams.md` — "Team mentions"; `docs/messengers/slack.md` — the manifest with
-  `usergroups:read`, what it is for, and reinstalling an installed app; `docs/install/versions.md` — the Slack scope
-  in the upgrade notes of 0.2.0. What a Mattermost bot needs to read groups goes into Connect Mattermost with S-144,
-  once the facts of S-138 say it.
+  `usergroups:read`, what it is for, and reinstalling an installed app, which the scope needs and which keeps the bot
+  token, so the Connection is checked again rather than edited (F-125); `docs/install/versions.md` — the Slack scope
+  and the reinstall in the upgrade notes of 0.2.0. What a Mattermost bot needs to read groups — nothing beyond the role
+  Member (F-122) — goes into Connect Mattermost with S-144.
 
 ## Steps
 
@@ -212,7 +232,8 @@ TM "[{\"connection_id\":\"$CM\",\"group\":\"payments_team\"},{\"connection_id\":
   jq -c '[.team_mentions[].connection.type]'                                                                        # ["mattermost","slack"]
 
 # Mattermost groups; the bridge declares group mentions
-curl -s "${A[@]}" $API/connections/$CM/groups | jq -c '[.items[].name]'                                              # ["devops_team","payments_team"]
+curl -s "${A[@]}" $API/connections/$CM/groups | jq -c '[.items[] | {name, member_count}]'
+# [{"name":"devops_team","member_count":1},{"name":"payments_team","member_count":1}]
 curl -s "${A[@]}" $API/teams/$TP | jq -c '[.mention_connections[] | select(.connection.id == "'$CB'") | {available, unavailable_reason}]'
 # [{"available":false,"unavailable_reason":"bridge_no_group_mentions"}]
 curl -s -X PUT $FB/config -d '{"capabilities":{"native_mentions":true,"group_mentions":true,"everyone_mentions":["channel","here"]}}' > /dev/null
@@ -233,11 +254,12 @@ configuration as in S-097; "a" is the key of the demo Slack app.
 
 ## Open questions
 
-1. **Corrections after the spike S-138 — open until the spike's facts are recorded.** The reading of Mattermost groups —
-   the endpoint, the permission and whether a Team mention is saved when the bot may not read groups — is assumed here
-   as above. Recommended: S-138 corrects this contract before it is implemented, as its acceptance says; if Mattermost
-   groups cannot be read by a bot at all, the Team mention stays a typed name with no picker. It stays open because it
-   depends on the facts of the spike, not on a decision.
+None. Settled:
+
+1. **Settled by the spike S-138: reading Mattermost groups** (F-121 to F-123). A bot with the role Member reads the
+   custom groups with `GET /api/v4/groups` on Mattermost 11.2.2 with the Entry licence, so the picker lists them; a
+   Team mention stays a group's name, saved also when the bot may not read groups (`groups_read` false), as the
+   end-to-end test of the Verification checks.
 
 ## Notes
 
