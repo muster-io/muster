@@ -195,26 +195,32 @@ SELECT pg_notify(@channel::text, '');
 -- rank: Urgent or not (@urgent), and configuration only or not (@configuration_only, which a change of configuration
 -- alone sets, SetDesired). Within the rank, the earliest first, then the one delivered longest ago, so that deliveries
 -- waiting for the same token take turns; another claimer skips the rows this one locked. The worker's round claims the
--- Urgent deliveries that are not configuration only, then the Urgent configuration edits, both due now; then, due by
--- the start of the round and each until a claim comes back short, the other deliveries that are not configuration only,
--- the Thread replies and the head events of outgoing webhooks, and last the other configuration edits, with one batch
--- each of those three, due now, between two of their batches (Round), so that a re-render of every open Root message
--- never delays a Publication, an edit of a Root message that an Alert or a Command made, or a Thread reply of its
--- urgency or below, and the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one
--- claimed batch of it; Thread replies and webhook events, Urgent or not, come after the Root-message work of both.
--- @skip_destinations are the Destinations whose limiter refused a take earlier in the round (Round) — for the Urgent
--- claims, only those whose refused token is not due yet: their rows are left untouched for the next round, so a spent
--- limiter costs a round at most one claimed batch of refused takes of the work that is not Urgent; NULL skips none. It
--- is a filter, not part of the index range: the claim reads past the skipped rows due before the others. The order is
--- order only and strict: configuration edits wait as long as the work before them uses up the limiter — Alert Groups
--- that keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of its Alert
--- Group, which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at once, due
--- when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work before it.
--- A delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its final edit or,
--- never published there, to end it (prepare): an Enqueue that read the Destination's entries before its deletion
--- committed can create one after the deletion ended the others, and a Publication claimed before it committed can fail
--- meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may plan it as
--- the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
+-- Urgent deliveries that are not configuration only, then the Urgent configuration edits, the first due by the start of
+-- each of its drains and the second by the start of the round; then, due by the start and each until a claim comes back
+-- short, the other deliveries that are not configuration only, the Thread replies and the head events of outgoing
+-- webhooks, and last the other configuration edits, with one batch each of those three, due now, between two of their
+-- batches; after every later batch that claimed a row it claims the two Urgent ranks again, the second due by then, and
+-- one batch of the first due now after each drain of it and at the end of a visit, after a last batch of the second
+-- that claimed a row or a full batch due now (Round). So a re-render of every open Root message never delays a
+-- Publication, an edit of a Root message that an Alert or a Command made, or a Thread reply of its urgency or below,
+-- and the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one claimed batch of it;
+-- Thread replies and webhook events, Urgent or not, come after the Root-message work of both. @skip_destinations are
+-- the Destinations whose limiter refused a take earlier in the round (Round) — for the Urgent claims, those whose
+-- refused token is not due yet and, for those bounded by the start of a drain or a visit, those refused during the
+-- current visit of the Urgent ranks: their rows are left untouched for the next round, so a spent limiter costs a round
+-- at most one claimed batch of refused takes of the work that is not Urgent, and of the Urgent work one per visit of
+-- the Urgent ranks and one per batch due now that finds its token due; NULL skips none. It is a filter, not part of the
+-- index range: the claim reads past the skipped rows due before the others. The order is order only. It is not strict
+-- between the Urgent ranks, and across rounds: a refused row waits until its token's time plus TokenMargin, and work
+-- due before then can take that token. Configuration edits wait as long as the work before them uses up the limiter —
+-- Alert Groups that keep flapping, for one — and none is dropped: an edit that waits is carried by the next change of
+-- its Alert Group, which ends the mark, and a delivered edit ends it too. A claimed edit without a token is released at
+-- once, due when the token is (RescheduleDelivery), so a claimed batch never holds a token or a lease against the work
+-- before it. A delivery a Storm holds waits for its Storm, and one of a deleted Destination is claimed only for its
+-- final edit or, never published there, to end it (prepare): an Enqueue that read the Destination's entries before its
+-- deletion committed can create one after the deletion ended the others, and a Publication claimed before it committed
+-- can fail meanwhile (C-11.FR-14). The choice is a materialized CTE, run once: as a subquery in FROM, PostgreSQL may
+-- plan it as the inner side of a nested loop over every delivery, run once per row. The two equalities bound a range of
 -- deliveries_due_v2_idx, read in next_attempt_at order; an OR of ranks would be a filter over every pending delivery.
 -- The claims of ClaimDueReplies and ClaimDueWebhookEvents here and of ClaimDueTimers (internal/timers) copy this shape,
 -- without the ranks, which only Root messages have; a fix of it applies to them too.

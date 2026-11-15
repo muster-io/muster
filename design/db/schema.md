@@ -1843,28 +1843,35 @@ work before them uses up the limiter, take every token it leaves, by age, and an
 change of its Alert Group, which clears the mark. The configuration edits that are not Urgent wait while Root-message
 work, Thread replies and webhook events together use up the limiter: in a Telegram chat at 10 calls a minute, about
 three Alert Groups a minute that resolve and open again, each taking up to four calls (a Root message edit and a Thread
-reply each time), leave them nothing. The two Urgent claims take what is due now, an Urgent configuration edit queued
-during the round included: the first is drained, the second takes one batch at a time, with the first drained again
-after a full one, until it comes back short. The four later claims take only the rows due when the round started, in
-order, each one batch at a time until it comes back short; between two batches of the configuration edits the round
-claims one batch each, due now, of the other three, never repeated while full; after every later batch that claimed a
-row the round goes back to the Urgent claims. A Destination whose limiter refused a take is left out of the later claims
-of the round (`skip_destinations`), and out of the Urgent claims until the refused token is due: its rows stay
-untouched, not leased and not rescheduled, for the next round, and Urgent work that comes due meanwhile still gets its
-next token within one claimed batch. A refusal of a Connection's limiter is recorded as its Destination's, an exception
-to the order: another Destination of the Connection can take a token the Connection gets back ahead of earlier work of
-the first. So new Urgent Root-message work waits at most one claimed batch of a later rank, other new work during a pass
-of configuration edits at most one batch of them per batch of its own rank, a Thread reply or a webhook event waits for
-the Root-message work due before it on Destinations whose limiter has tokens and for at most one claimed batch of
-refused takes per Destination whose limiter is spent, and a token that comes back to a refused Destination during the
-round goes only to its Urgent work. Each row of the claims bounded by the start is attempted at most once a round,
+reply each time), leave them nothing. The two Urgent claims take only the rows due when their pass started: the first is
+drained, each drain due by its own start, the second takes one batch at a time, due by the start of the round or of the
+visit, with the first drained again after a full one, until it comes back short; after each drain, and at the end of a
+visit after a last batch of the second that claimed a row or a full batch due now, the visit claims one batch of the
+first due now, never repeated while full. The four later claims take only the rows due when the round started, in order,
+each one batch at a time until it comes back short; between two batches of the configuration edits the round claims one
+batch each, due now, of the other three, never repeated while full; after every later batch that claimed a row the round
+visits the Urgent claims again, due by then. Urgent work that comes due during the round goes within one claimed batch,
+behind the rows of its rank due before it; a visit leaves for the next visit, or for the next round when no later batch
+follows, only the Urgent configuration edits that come due during it, the Urgent work that comes due during its last
+batch due now, and what comes due during its last drain beyond two batches. A Destination whose limiter refused a take
+is left out of the later claims of the round (`skip_destinations`), and out of the Urgent claims until the refused token
+is due, the bounded ones for the rest of the visit that saw the refusal too: its rows stay untouched, not leased and not
+rescheduled, for the next round, and Urgent work that comes due meanwhile still gets its next token within one claimed
+batch once that token is due, from a batch due now. A refusal of a Connection's limiter is recorded as its
+Destination's, an exception to the order: another Destination of the Connection can take a token the Connection gets
+back ahead of earlier work of the first. So new Urgent Root-message work waits at most one claimed batch of a later
+rank, other new work during a pass of configuration edits at most one batch of them per batch of its own rank, a Thread
+reply or a webhook event waits for the Root-message work due before it on Destinations whose limiter has tokens and, per
+Destination whose limiter is spent, for at most one claimed batch of refused takes of the bounded claims and one per
+batch due now of the Urgent claims that finds its token due, and a token that comes back to a refused Destination during
+the round goes only to its Urgent work. Each row of the claims bounded by the start is attempted at most once a round,
 unless its lease runs out within it, a round makes at most one batch of refused takes per Destination for the work that
-is not Urgent and one per Destination and token interval for the Urgent work; under a lasting backlog the skipped rows
-stay due and the rounds repeat every `MinWait`, each with about ten claims per Organization, and work that is not Urgent
-and comes due during ranks 3 to 5 goes in the next round. The skip is a filter, not part of the index range: with 1,000
-skipped rows due first, a claim reads them and still takes about a millisecond. A `RetryAfter` sets `next_attempt_at`
-exactly and does not touch `attempts`; `Transient` increments `attempts` and starts the time budget at
-`first_failed_at`; running out of either makes the Destination Broken.
+is not Urgent, one per Destination and visit of the Urgent claims, and one per Destination and batch due now that finds
+its token due; under a lasting backlog the skipped rows stay due and the rounds repeat every `MinWait`, each with about
+a dozen claims per Organization, and work that is not Urgent and comes due during ranks 3 to 5 goes in the next round.
+The skip is a filter, not part of the index range: with 1,000 skipped rows due first, a claim reads them and still takes
+about a millisecond. A `RetryAfter` sets `next_attempt_at` exactly and does not touch `attempts`; `Transient` increments
+`attempts` and starts the time budget at `first_failed_at`; running out of either makes the Destination Broken.
 
 **Thread replies and webhook events** (head-of-line per delivery, or per Alert Group and Destination):
 

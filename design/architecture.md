@@ -842,18 +842,21 @@ The delivery worker brings the actual Root message to the latest Desired state w
 is pending collapse into the next one ([ADR-0005], [C-11].FR-1). The HTTP call is made outside any database transaction
 through the delivery client class, which makes one attempt and leaves the next one to the row ([ADR-0015]). The limiters
 are shared by all replicas: their token buckets live in PostgreSQL ([C-11].FR-3). Each round claims the Urgent
-deliveries, then the Urgent edits of a change of configuration, both due now; then, due by the start of the round and
-each until a claim comes back short, the other deliveries, the Thread replies and the outgoing webhook events, and last
-the other edits of a change of configuration, with one batch each of the three before, due now, between two of their
-batches. After every later batch that claimed a row the round goes back to the Urgent claims, so that Urgent Root
+deliveries, then the Urgent edits of a change of configuration, both due by the start of the round, the first drained
+again, due by the start of that drain, after each full batch of the second; then, due by the start of the round and each
+until a claim comes back short, the other deliveries, the Thread replies and the outgoing webhook events, and last the
+other edits of a change of configuration, with one batch each of the three before, due now, between two of their
+batches. After every later batch that claimed a row the round claims the Urgent ranks again, due by then, and within
+such a visit one batch of the Urgent deliveries due now after each drain of them and one at its end, so that Urgent Root
 messages wait behind the rest for at most one claimed batch. A Destination whose limiter refused a take is left out of
 the later claims of the round, its rows untouched for the next one, and out of the Urgent claims until the refused token
-is due, so a spent limiter costs a round at most one claimed batch of refused takes, and Urgent work that comes due
-meanwhile still gets its next token within one batch: a Thread reply or a webhook event waits for the Root-message work
-due before it on Destinations whose limiters have tokens, not for the backlog of a Destination whose limiter is spent,
-work that comes due during a re-render waits at most one batch of it per batch of its own kind, other work that comes
-due during a round goes in the next one, and a re-render of every open Root message takes only the tokens the work
-before it leaves.
+is due, the bounded ones for the rest of that visit of them too, so a spent limiter costs a round at most one claimed
+batch of refused takes, plus one per later visit of the Urgent claims and per batch due now that finds its token due,
+whatever the size of its backlog, Urgent or not, and Urgent work that comes due meanwhile still gets its next token
+within one batch once it is due: a Thread reply or a webhook event waits for the Root-message work due before it on
+Destinations whose limiters have tokens, not for the backlog of a Destination whose limiter is spent, work that comes
+due during a re-render waits at most one batch of it per batch of its own kind, other work that comes due during a round
+goes in the next one, and a re-render of every open Root message takes only the tokens the work before it leaves.
 
 ```mermaid
 sequenceDiagram
