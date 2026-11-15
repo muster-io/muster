@@ -38,7 +38,7 @@ for L2](#l1-requirements-revised-for-l2)
 | C-08 Routing | Observation | 22 | S-025, S-026, S-027 | yes | 22 of 22 |
 | C-09 Alert Group lifecycle | Observation | 51 | S-028, S-029, S-030, S-031, S-065, S-095 | yes | 51 of 51 |
 | C-10 Commands | Observation | 41 | S-032, S-063, S-033, S-092, S-093, S-094, S-100 | yes | 41 of 41 |
-| C-11 Delivery engine | Shadow | 38 | S-034, S-035 | yes | 38 of 38 |
+| C-11 Delivery engine | Shadow | 40 | S-034, S-035 | yes | 40 of 40 |
 | C-12 Messages | Shadow | 19 | S-036, S-037, S-038, S-082, S-098, S-099, S-102 | yes | 19 of 19 |
 | C-13 Mattermost | Shadow | 31 | S-039, S-061, S-040, S-064, S-087, S-105, S-103 | yes | 31 of 31 |
 | C-14 Telegram | Shadow | 36 | S-041, S-042, S-066, S-067, S-043 | yes | 36 of 36 |
@@ -493,7 +493,8 @@ S-065, S-095
 | C-11.AC-15 | S-034 | complete | added by pull request #533 (issue #504), which also revised C-11.FR-3; checked by the e2e test of that pull request, not by a step of S-034 |
 | C-11.AC-16 | S-034 | complete | added by pull request #539 (issue #534), which also revised C-11.FR-3; checked by the integration and unit tests of that pull request, not by a step of S-034 |
 | C-11.AC-17 | S-034 | complete | added by pull request #544 (issue #540), which implements C-11.FR-3 as revised; checked by the unit and integration tests of that pull request, not by a step of S-034 |
-| C-11.AC-18 | S-034 | complete | proposed and implemented by pull request #553 (issue #546), added with the fix of issues #554 and #547; checked by the unit and integration tests of #553, not by a step of S-034 |
+| C-11.AC-18 | S-034 | complete | proposed and implemented by pull request #553 (issue #546), corrected by pull request #559 (issue #554); checked by the unit and integration tests of #553 and #559, not by a step of S-034 |
+| C-11.AC-19 | S-034 | complete | added by pull request #559 (issues #554 and #547), which also revised C-11.FR-3; checked by the unit and integration tests of that pull request, not by a step of S-034 |
 
 ## C-12
 
