@@ -48,11 +48,12 @@ const (
 const maxBridgeChannelLength = 512
 
 // KindDestinationButtons is the kind of the open_group_updates row that a changed button set of a Destination writes
-// (C-28.FR-9), and OpenGroupUpdatesChannel the LISTEN/NOTIFY channel that wakes the workers of internal/groups, which
-// claim it.
+// (C-28.FR-9), KindDestinationConnection that of a changed Connection (C-12.FR-12), and OpenGroupUpdatesChannel the
+// LISTEN/NOTIFY channel that wakes the workers of internal/groups, which claim them.
 const (
-	KindDestinationButtons  = "destination_buttons"
-	OpenGroupUpdatesChannel = "muster_open_group_updates"
+	KindDestinationButtons    = "destination_buttons"
+	KindDestinationConnection = "destination_connection"
+	OpenGroupUpdatesChannel   = "muster_open_group_updates"
 )
 
 // The Audit log actions of saved Destinations (C-03.FR-14).
@@ -376,7 +377,7 @@ type writeQueries interface {
 	UpdateSlackDestination(ctx context.Context, arg dbgen.UpdateSlackDestinationParams) error
 	LockOwningTeam(ctx context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow, error)
 	SetDestinationOwningTeam(ctx context.Context, arg dbgen.SetDestinationOwningTeamParams) error
-	InsertDestinationButtonsUpdate(ctx context.Context, arg dbgen.InsertDestinationButtonsUpdateParams) error
+	InsertDestinationUpdate(ctx context.Context, arg dbgen.InsertDestinationUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
 }
 
@@ -490,8 +491,36 @@ func (s *Service) buttonsChanged(ctx context.Context, q TxQueries, before, d Des
 	if bytes.Equal(before.Buttons.JSON(), d.Buttons.JSON()) {
 		return nil
 	}
-	if err := q.InsertDestinationButtonsUpdate(ctx, dbgen.InsertDestinationButtonsUpdateParams{OrgID: s.orgID,
-		Kind:          KindDestinationButtons,
+	return s.rerenderRequested(ctx, q, KindDestinationButtons, d)
+}
+
+// connectionChanged, in the transaction of the save of d, asks the workers of internal/groups to re-render the open
+// Root messages of d when its Connection changed (C-12.FR-12): the Connection decides the identity space whose footer
+// a Root message shows, which may name its user by another Mention or by their name alone, so each open Root message
+// whose footer reads otherwise in the new space is edited once, Quietly. One open_group_updates row
+// destination_connection, as buttonsChanged writes. A save that keeps the Connection does nothing, and so does one
+// whose identity space cannot change — every Telegram Connection shares one — or whose button set changed too, whose
+// row destination_buttons walks the same Alert Groups.
+func (s *Service) connectionChanged(ctx context.Context, q TxQueries, before, d Destination) error {
+	if deref(before.Connection) == deref(d.Connection) || !spacePerConnection(d.Type) ||
+		!bytes.Equal(before.Buttons.JSON(), d.Buttons.JSON()) {
+		return nil
+	}
+	return s.rerenderRequested(ctx, q, KindDestinationConnection, d)
+}
+
+// spacePerConnection reports whether the identity space of a Destination type is that of its Connection
+// (mentions.IdentitySpace): of every messenger but Telegram, whose Account links form one space whatever the
+// Connection.
+func spacePerConnection(destinationType string) bool {
+	one, two := int64(1), int64(2)
+	return mentions.IdentitySpace(destinationType, &one) != mentions.IdentitySpace(destinationType, &two)
+}
+
+// rerenderRequested inserts the open_group_updates row of the kind given for d, requested at the business time of the
+// save, and a notification that wakes the workers once the transaction commits.
+func (s *Service) rerenderRequested(ctx context.Context, q TxQueries, kind string, d Destination) error {
+	if err := q.InsertDestinationUpdate(ctx, dbgen.InsertDestinationUpdateParams{OrgID: s.orgID, Kind: kind,
 		DestinationID: pgtype.Int8{Int64: d.ID, Valid: true},
 		RequestedAt:   s.writer.Business.Now().UTC()}); err != nil {
 		return fmt.Errorf("re-render the root messages of the destination %s: %w", d.PublicID, err)
@@ -1075,6 +1104,9 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
+			if err := s.connectionChanged(ctx, q, before, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1425,6 +1457,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
+			if err := s.connectionChanged(ctx, q, before, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1639,6 +1674,9 @@ func (s *Service) updateBridge(ctx context.Context, r Requester, before Destinat
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
 				return err
 			}
+			if err := s.connectionChanged(ctx, q, before, d); err != nil {
+				return err
+			}
 			if err := s.renamed(ctx, q, before, d); err != nil {
 				return err
 			}
@@ -1836,6 +1874,9 @@ func (s *Service) updateSlack(ctx context.Context, r Requester, before Destinati
 				return err
 			}
 			if err := s.buttonsChanged(ctx, q, before, d); err != nil {
+				return err
+			}
+			if err := s.connectionChanged(ctx, q, before, d); err != nil {
 				return err
 			}
 			if err := s.renamed(ctx, q, before, d); err != nil {

@@ -144,6 +144,28 @@ SET desired_version     = desired_version + 1,
 WHERE org_id = @org_id AND id = @id
 RETURNING state;
 
+-- GetDesiredMessage reads, after EnsureDelivery locked the delivery, its stored message, whether its Root message may
+-- have been shown — published, or its Publication started and still pending, so possibly in flight — and the type and
+-- Connection of its Destination as they are now, which a change of the Connection committed since the rendering read
+-- them may have changed, for a rendering whose hash is the stored one (storedNeeds in render.go, C-12.FR-12).
+-- name: GetDesiredMessage :one
+SELECT d.desired_payload,
+       (d.published_at IS NOT NULL OR (d.publication_started_at IS NOT NULL AND d.state = 'pending'))::boolean AS shown,
+       ds.type AS destination_type, ds.connection_id
+FROM deliveries d
+JOIN destinations ds ON ds.org_id = d.org_id AND ds.id = d.destination_id
+WHERE d.org_id = @org_id AND d.id = @id;
+
+-- RefreshDesiredMessage writes the text and payload of a rendering that reads as the stored Desired state, whose hash
+-- @desired_hash it keeps, but whose stored message is older in what it keeps for other identity spaces than its
+-- Destination's (storedNeeds in render.go, C-12.FR-12): the version, the state, the due time and the hash stay, so
+-- nothing is sent, and a later send — after a change of the Destination's Connection — writes the footer of the new
+-- space as it is now. A delivery whose hash changed meanwhile is left to the change that made it.
+-- name: RefreshDesiredMessage :exec
+UPDATE deliveries
+SET desired_text = @desired_text::text, desired_payload = @desired_payload
+WHERE org_id = @org_id AND id = @id AND desired_hash = @desired_hash;
+
 -- SetDeliveryUrgent follows the urgency of the Alert Group when its message did not change.
 -- name: SetDeliveryUrgent :exec
 UPDATE deliveries
@@ -2093,7 +2115,8 @@ FOR NO KEY UPDATE SKIP LOCKED;
 -- LockRerenderDeliveries locks the deliveries of the Alert Group to re-render, after its Route's membership lock, in
 -- the order Enqueue locks them (by Destination), with their Destination and its button set with the Organization's.
 -- name: LockRerenderDeliveries :many
-SELECT d.id, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id, ds.public_id AS destination_public_id,
+SELECT d.id, d.desired_version, d.desired_hash, d.desired_button_key_id, ds.id AS destination_id,
+       ds.public_id AS destination_public_id,
        ds.name AS destination_name, ds.type AS destination_type, ds.connection_id, ds.buttons,
        o.buttons AS organization_buttons
 FROM deliveries d

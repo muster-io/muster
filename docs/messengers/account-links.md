@@ -100,7 +100,11 @@ account, which a bridge with native mentions turns into its messenger's mention.
 acknowledged, snoozed or resolved mentions you the same way when Muster posts it to a bridge with native mentions; an
 edit carries no Mentions, so there, and through any other bridge, the footer names you by that name. Without a link, a
 Mention is your Muster name as plain text, which notifies nobody. When you link, change or remove an account, the open
-Root messages whose footer names you are edited Quietly to show the new link.
+Root messages whose footer names you are edited Quietly to show the new link. When a Mattermost, Slack or Bridge
+Destination moves to another Connection, its open Root messages whose footer names you are edited once, Quietly, when
+you have a link in either Connection, so that the footer names you by your link of the new Connection, or by your
+Muster name without one; a move between Telegram Connections edits none. Details are in
+[Messages and templates](../configure/messages-and-templates.md).
 
 ### By a token sent to the bot
 

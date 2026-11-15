@@ -80,6 +80,9 @@ func (s stubRenderer) Roots(_ context.Context, _ messages.DBTX, g delivery.Group
 			m.Footers["telegram"], m.FooterUsers["telegram"] = token, *s.elsewhere
 		}
 		for space, u := range s.others {
+			if m.Footers == nil {
+				m.Footers, m.FooterUsers = map[string]string{}, map[string]messages.FooterUser{}
+			}
 			m.Footers[space], m.FooterUsers[space] = token, u
 		}
 	}

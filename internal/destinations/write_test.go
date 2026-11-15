@@ -108,7 +108,7 @@ func (f *fakeWriter) SetDestinationOwningTeam(context.Context, dbgen.SetDestinat
 	return errBoom
 }
 
-func (f *fakeWriter) InsertDestinationButtonsUpdate(context.Context, dbgen.InsertDestinationButtonsUpdateParams) error {
+func (f *fakeWriter) InsertDestinationUpdate(context.Context, dbgen.InsertDestinationUpdateParams) error {
 	return errBoom
 }
 
@@ -136,9 +136,10 @@ type saveWriter struct {
 	// teams are the Teams that are not deleted by public_id, and owners the owning Teams written.
 	teams  map[string]dbgen.LockOwningTeamRow
 	owners []dbgen.SetDestinationOwningTeamParams
-	// buttonUpdates are the open_group_updates rows destination_buttons, and woken the notifications on their channel.
-	buttonUpdates []dbgen.InsertDestinationButtonsUpdateParams
-	woken         []string
+	// updates are the open_group_updates rows destination_buttons and destination_connection, and woken the
+	// notifications on their channel.
+	updates []dbgen.InsertDestinationUpdateParams
+	woken   []string
 }
 
 func (w *saveWriter) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
@@ -161,12 +162,12 @@ func (w *saveWriter) SetDestinationOwningTeam(_ context.Context, arg dbgen.SetDe
 	return nil
 }
 
-func (w *saveWriter) InsertDestinationButtonsUpdate(_ context.Context,
-	arg dbgen.InsertDestinationButtonsUpdateParams) error {
-	if err := w.fail["InsertDestinationButtonsUpdate"]; err != nil {
+func (w *saveWriter) InsertDestinationUpdate(_ context.Context,
+	arg dbgen.InsertDestinationUpdateParams) error {
+	if err := w.fail["InsertDestinationUpdate"]; err != nil {
 		return err
 	}
-	w.buttonUpdates = append(w.buttonUpdates, arg)
+	w.updates = append(w.updates, arg)
 	return nil
 }
 
@@ -858,8 +859,8 @@ func TestButtonSets(t *testing.T) {
 					return err
 				}, r.pointer, r.code)
 			}
-			if len(w.audit) != 2 || len(w.buttonUpdates) != 0 {
-				t.Fatalf("a refused set was saved: %d entries, %d re-renders", len(w.audit), len(w.buttonUpdates))
+			if len(w.audit) != 2 || len(w.updates) != 0 {
+				t.Fatalf("a refused set was saved: %d entries, %d re-renders", len(w.audit), len(w.updates))
 			}
 
 			version := row.Version
@@ -876,27 +877,27 @@ func TestButtonSets(t *testing.T) {
 					stored+`}}`)) {
 				t.Errorf("updated to its own set: stored %s, diff %s", c.updated(w), w.audit[2].Diff)
 			}
-			if len(w.buttonUpdates) != 1 || w.buttonUpdates[0] != (dbgen.InsertDestinationButtonsUpdateParams{
+			if len(w.updates) != 1 || w.updates[0] != (dbgen.InsertDestinationUpdateParams{
 				OrgID: 1, Kind: "destination_buttons", DestinationID: pgtype.Int8{Int64: c.dbID, Valid: true}, RequestedAt: t0}) ||
 				!slices.Equal(w.woken, []string{OpenGroupUpdatesChannel}) {
-				t.Errorf("re-render requested %+v, woken %v", w.buttonUpdates, w.woken)
+				t.Errorf("re-render requested %+v, woken %v", w.updates, w.woken)
 			}
 
 			row.Buttons, row.Version, row.Health = []byte(stored), version+1, "healthy"
 			w.versions[c.id] = version + 1
 			in = c.input("bs-renamed")
 			if _, err := s.Update(ctx, saver, c.id, nil, in); err != nil || string(c.updated(w)) != stored ||
-				len(w.buttonUpdates) != 1 || bytes.Contains(w.audit[len(w.audit)-1].Diff, []byte("/buttons")) {
+				len(w.updates) != 1 || bytes.Contains(w.audit[len(w.audit)-1].Diff, []byte("/buttons")) {
 				t.Errorf("an update that omits the set: %v, stored %s, %d re-renders", err, c.updated(w),
-					len(w.buttonUpdates))
+					len(w.updates))
 			}
 			row.Name, row.Version = "bs-renamed", version+2
 			w.versions[c.id] = version + 2
 			in.Buttons = &ButtonSetInput{Items: own.Items}
 			if _, err := s.Update(ctx, saver, c.id, nil, in); err != nil || c.updated(w) != nil ||
-				len(w.buttonUpdates) != 2 {
+				len(w.updates) != 2 {
 				t.Errorf("back to the organization's set: %v, stored %s, %d re-renders", err, c.updated(w),
-					len(w.buttonUpdates))
+					len(w.updates))
 			}
 			row.Buttons, row.Version = nil, version+3
 			w.versions[c.id] = version + 3
@@ -905,7 +906,7 @@ func TestButtonSets(t *testing.T) {
 			if _, err := s.Update(ctx, saver, c.id, nil, in); !errors.Is(err, errBoom) {
 				t.Errorf("a failed wake = %v", err)
 			}
-			w.fail = map[string]error{"InsertDestinationButtonsUpdate": errBoom}
+			w.fail = map[string]error{"InsertDestinationUpdate": errBoom}
 			if _, err := s.Update(ctx, saver, c.id, nil, in); !errors.Is(err, errBoom) {
 				t.Errorf("a failed request = %v", err)
 			}
@@ -920,10 +921,101 @@ func TestButtonSets(t *testing.T) {
 	}
 }
 
-// TestOpenGroupUpdateNames: destinations, which inserts the rows of its button sets and wakes the workers, and groups,
-// which claims them, name the kind and the channel alike.
+// TestConnectionChange is C-12.FR-12 on the service, for every messenger type: an update that moves a Destination to
+// another Connection records /connection_id in the diff of destination.updated and, where the identity space follows
+// the Connection — Mattermost, Bridge and Slack — requests the re-render of its open Root messages: one
+// open_group_updates row destination_connection with the Destination, at the business time of the save, and a
+// notification on muster_open_group_updates. A Telegram Destination, whose space is the same for every Connection,
+// requests none. A move that also changes the button set writes only the row destination_buttons, which walks the same
+// Alert Groups; an update that keeps the Connection requests nothing; a failed request or wake fails the save.
+func TestConnectionChange(t *testing.T) {
+	own := &ButtonSetInput{Own: true, Items: []buttons.ItemInput{{Button: buttons.ItemAcknowledge}}}
+	for _, c := range []struct {
+		typ, id, conn string
+		dbID          int64
+		input         func(name string) Input
+		setup         func(*fakeStore, *saveWriter) *dbgen.GetDestinationRow
+		rerenders     bool
+	}{
+		{TypeMattermost, "DSAAAAAAAAAAA1", "CNAAAAAAAAAAA1", 1,
+			func(n string) Input { return mattermostInput(n, "chan") },
+			func(f *fakeStore, _ *saveWriter) *dbgen.GetDestinationRow { return &f.rows[0] }, true},
+		{TypeTelegram, "DSAAAAAAAAAAA2", "CNAAAAAAAAAAA2", 2,
+			func(n string) Input { return telegramInput(n, "@alerts") },
+			func(f *fakeStore, w *saveWriter) *dbgen.GetDestinationRow {
+				w.versions["DSAAAAAAAAAAA2"] = 1
+				return &f.rows[1]
+			}, false},
+		{TypeBridge, "DSAAAAAAAAAAA4", "CNAAAAAAAAAAA3", 4, func(n string) Input { return bridgeInput(n, "ch-alerts") },
+			withBridge, true},
+		{TypeSlack, "DSAAAAAAAAAAA5", "CNAAAAAAAAAAA8", 5,
+			func(n string) Input { return slackInput(n, "C0FAKEALERTS") }, withSlack, true},
+	} {
+		t.Run(c.typ, func(t *testing.T) {
+			s, store, w, _, _ := newSaver(t)
+			ctx := t.Context()
+			row := c.setup(store, w)
+			next := func(name string) {
+				row.Name, row.Version = name, row.Version+1
+				w.versions[c.id] = row.Version
+			}
+			row.ConnectionPublicID = txt("CNAAAAAAAAAAA9")
+			if _, err := s.Update(ctx, saver, c.id, nil, c.input(row.Name)); err != nil {
+				t.Fatal(err)
+			}
+			diff := w.audit[len(w.audit)-1].Diff
+			if !bytes.Contains(diff, []byte(`{"pointer":"/connection_id","before":"CNAAAAAAAAAAA9","after":"`+
+				c.conn+`"}`)) {
+				t.Errorf("the diff of the move %s", diff)
+			}
+			want := []dbgen.InsertDestinationUpdateParams{{OrgID: 1, Kind: "destination_connection",
+				DestinationID: pgtype.Int8{Int64: c.dbID, Valid: true}, RequestedAt: t0}}
+			woken := []string{OpenGroupUpdatesChannel}
+			if !c.rerenders {
+				want, woken = nil, nil
+			}
+			if !slices.Equal(w.updates, want) || !slices.Equal(w.woken, woken) {
+				t.Errorf("re-render requested %+v, woken %v", w.updates, w.woken)
+			}
+
+			w.updates, w.woken = nil, nil
+			row.ConnectionPublicID = txt(c.conn)
+			next("renamed")
+			audits := len(w.audit)
+			if _, err := s.Update(ctx, saver, c.id, nil, c.input("renamed-again")); err != nil ||
+				len(w.audit) != audits+1 || bytes.Contains(w.audit[audits].Diff, []byte("/connection_id")) ||
+				len(w.updates) != 0 {
+				t.Errorf("an update that keeps the connection: %v, %d re-renders", err, len(w.updates))
+			}
+
+			row.ConnectionPublicID = txt("CNAAAAAAAAAAA9")
+			next("renamed-again")
+			in := c.input("renamed-again")
+			in.Buttons = own
+			if _, err := s.Update(ctx, saver, c.id, nil, in); err != nil || len(w.updates) != 1 ||
+				w.updates[0].Kind != KindDestinationButtons {
+				t.Errorf("a move with a new button set: %v, re-renders %+v", err, w.updates)
+			}
+
+			if !c.rerenders {
+				return
+			}
+			row.Buttons = []byte(`[{"button":"acknowledge"}]`)
+			for _, failing := range []string{"InsertDestinationUpdate", "NotifyOpenGroupUpdates"} {
+				w.fail = map[string]error{failing: errBoom}
+				if _, err := s.Update(ctx, saver, c.id, nil, in); !errors.Is(err, errBoom) {
+					t.Errorf("%s failing = %v", failing, err)
+				}
+			}
+		})
+	}
+}
+
+// TestOpenGroupUpdateNames: destinations, which inserts the rows of its button sets and Connections and wakes the
+// workers, and groups, which claims them, name the kinds and the channel alike.
 func TestOpenGroupUpdateNames(t *testing.T) {
 	if KindDestinationButtons != groups.KindDestinationButtons ||
+		KindDestinationConnection != groups.KindDestinationConnection ||
 		OpenGroupUpdatesChannel != groups.OpenGroupUpdatesChannel {
 		t.Error("destinations and groups name the open alert group updates differently")
 	}

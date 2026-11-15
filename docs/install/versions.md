@@ -185,6 +185,18 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       open Root message whose footer names a User with an Account link in any other identity space — a User with only
       a Telegram link, for a Mattermost Destination — gets one Quiet edit, with no visible change, at its next
       re-render.
+    - Migration 0041 does the same for a Destination moved to a Mattermost, Slack or Bridge Connection of another
+      identity space: each open Root message whose footer then reads otherwise — a User with an Account link in
+      either Connection — is edited once, Quietly, at the re-render of the move, so that the footer names the user as
+      the new Connection's messenger knows them; the others are not edited. No data is migrated. Such an edit goes
+      through the new Connection to a message published through the old one, as any edit after a move always did, now
+      at the move instead of at the Alert Group's next change: a message the new Connection cannot find (a 404, as
+      from another Mattermost server) is published again once, Quietly, as a deleted Root message is, and a Mention
+      in its footer may notify; a message the new Connection may not edit (a 403, as from another Connection of the same
+      Mattermost server) makes the Destination Broken. A repair of a Root message that a send after a move may have
+      shown wrong stores a repair hash in `deliveries.desired_hash`; a replica without 0041, during a rolling update
+      or after a downgrade, takes it as a changed Desired state and edits each such Root message once more, Quietly,
+      with no visible change.
 
     **The Route for Muster's own alerts groups by more labels.** An installation that accepted the suggestion "Send
     Muster's own alerts to a Destination" in 0.1 has a Route "Muster internal alerts" whose Group key is `alertname`,
@@ -255,7 +267,8 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     of them reaches the open Root messages only at each Alert Group's next change, so make it after every replica runs
     this version. The same holds for a change of a Route's language, Snooze durations or templates, or of a Link rule
     or a Lookup table, saved on a 0.1 replica or on one of a development image without migration 0039, and for a
-    rename of a User or a Service account or a change of an Account link made on one without migration 0040. A 0.1
+    rename of a User or a Service account or a change of an Account link made on one without migration 0040, and for a
+    change of a Destination's Connection saved on one without migration 0041. A 0.1
     replica ignores Severity conditions and Team Destinations: until the rollout ends, the Alert Groups it changes go to every
     Destination of their Route, whatever its condition, and not to the Destinations of their Teams, and it records no
     `destination_joined`. Set Severity conditions, the Destinations of Teams and "Also
@@ -640,6 +653,33 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
 
     Going back below 0040 deletes the re-renders of these kinds still to do, whose Root messages then catch up at each
     Alert Group's next change; a replica of a version without 0040 neither writes nor claims them.
+
+    Migration 0041 lets a change of a Destination's Connection re-render its open Root messages in three transactions:
+    the first adds the new CHECKs of `open_group_updates`, the second validates them, the third drops the kind CHECK of
+    0040. A failure leaves the schema recorded as dirty at version 41. To recover, with the same database role as
+    Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM pg_constraint
+         WHERE conrelid = 'open_group_updates'::regclass AND conname = 'open_group_updates_kind_v9_check';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 40, dirty = false;`.
+    3. If it returns 1, finish the second and the third transactions and clear the mark:
+
+        ```sql
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_kind_v9_check;
+        ALTER TABLE open_group_updates VALIDATE CONSTRAINT open_group_updates_destination_connection_scope_check;
+        ALTER TABLE open_group_updates DROP CONSTRAINT IF EXISTS open_group_updates_kind_v8_check;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0041 deletes the re-renders of this kind still to do, whose Root messages then catch up at each
+    Alert Group's next change; a replica of a version without 0041 neither writes nor claims them.
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that
