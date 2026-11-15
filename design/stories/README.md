@@ -596,7 +596,7 @@ show the links.
 | [S-138](S-138-spike-mattermost-groups-and-slack-user-groups.md) | C-25 | Spike: Mattermost groups and Slack user groups — reading them, mentioning them, and everyone from a bot | docs | — |
 | [S-139](S-139-team-mentions-with-the-connections-checks-and-connection-groups.md) | C-25 | Team mentions per Connection, with the groups a Connection reads and the group mentions a bridge declares (BE) | be | S-115, S-126, S-138 |
 | [S-140](S-140-mention-entries-their-resolution-the-migration-of-the-l1-settings-and-storm-started.md) | C-28 | Mention entries with their Loud events and their resolution, the migration of the L1 Mention settings, and storm_started (BE) | be | S-121, S-131, S-139 |
-| [S-171](S-171-group-and-everyone-mentions-in-slack-and-through-bridges.md) | C-28 | Group mentions and mentions of everyone in Slack and through bridges, with the kind of a Mention in the Bridge protocol (BE) | be | S-140 |
+| [S-171](S-171-group-and-everyone-mentions-in-slack-and-through-bridges.md) | C-28 | Group mentions in Slack, and group mentions and mentions of everyone through bridges, with the kind of a Mention in the Bridge protocol (BE) | be | S-140 |
 | [S-165](S-165-undelivered-mentions-in-the-timeline-and-the-destination-warnings.md) | C-28 | Undelivered Mentions in the Timeline and the warnings of a Destination (BE) | be | S-140 |
 | [S-141](S-141-go-bridge-library-group-and-everyone-mentions.md) | C-28 | Group mentions and mentions of everyone in the chat in the Go bridge library (BE) — in `muster-io/muster-bridge-go` | be | S-171, S-127 |
 | [S-142](S-142-python-bridge-library-group-and-everyone-mentions.md) | C-28 | Group mentions and mentions of everyone in the chat in the Python bridge library (BE) — in `muster-io/muster-bridge-python` | be | S-171, S-128 |
@@ -647,10 +647,10 @@ extend, and it comes first. In the stage "L2 On call", S-164 was split from S-13
 — the gaps, the gap scan and "On call now" need no messenger, while the warnings about unreachable On-calls need every
 Destination type — and S-165 from S-140, at the boundary between whom a message mentions and what is recorded when it
 cannot; each follows the story it was split from. S-171 was split from S-140 by the review of the contracts: S-140 keeps
-the entries, their migration and their resolution, and S-171 takes writing group mentions and mentions of everyone in
-Slack and through bridges, with the `kind` of a Mention in `api/bridge.yaml`; it follows S-140, needs no migration of
-its own, and the bridge libraries S-141 and S-142, which copy `api/bridge.yaml`, and S-155, which writes Team mentions
-and tokens in the Threads of chains, depend on it.
+the entries, their migration and their resolution, and S-171 takes writing group mentions in Slack, and group mentions
+and mentions of everyone through bridges, with the `kind` of a Mention in `api/bridge.yaml`; it follows S-140, needs no
+migration of its own, and the bridge libraries S-141 and S-142, which copy `api/bridge.yaml`, and S-155, which writes
+Team mentions and tokens in the Threads of chains, depend on it.
 
 In the stage "L2 Paging", S-167, S-168 and S-169 were split when the contracts were written, each because its story
 would have touched about 45 to 50 files. S-167 was split from S-145: S-145 keeps the protocol of the role `gateway`, its

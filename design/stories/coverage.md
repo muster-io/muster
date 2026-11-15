@@ -1047,7 +1047,7 @@ L2 On call (Mentions) · stories: S-113, S-114, S-138, S-139, S-140, S-171, S-16
 | ID | Covered by | Status | Note |
 |---|---|---|---|
 | C-28.FR-1 | S-140 (part), S-143 (part) | complete |  |
-| C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-171 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the validation S-140; writing groups and everyone in Slack and bridges S-171; the bridge libraries S-141, S-142 |
+| C-28.FR-2 | S-138 (part), S-139 (part), S-140 (part), S-171 (part), S-141 (part), S-142 (part), S-143 (part) | complete | the facts of the spike S-138; what each Connection can mention S-139; the validation S-140; writing groups in Slack, and groups and everyone in bridges, S-171; the bridge libraries S-141, S-142 |
 | C-28.FR-3 | S-140 (part), S-165 (part), S-143 (part) | complete |  |
 | C-28.FR-4 | S-140 | complete |  |
 | C-28.FR-5 | S-140 | complete |  |
@@ -1254,4 +1254,4 @@ Every L1 ID of L2 §6 has its row, and every row is complete.
 | C-24.FR-1 | S-139 | complete | the optional scope `usergroups:read` |
 | C-24.FR-2 | S-139 | complete | the step `scopes` reports it and the Connection keeps it |
 | C-24.FR-4 | S-125 | complete |  |
-| C-24.FR-6 | S-171 | complete | `<!everyone>` and `<!subteam^ID>` |
+| C-24.FR-6 | S-171 | complete | `<!subteam^ID>`; no `<!everyone>` (F-127) |

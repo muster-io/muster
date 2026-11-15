@@ -1,7 +1,7 @@
 # Verified facts
 
 - Status: Living document
-- Date: 2026-10-31
+- Date: 2026-11-15
 
 External behaviour that Muster's design relies on and that was checked against the real system rather than taken from
 its documentation: how Telegram, Mattermost, Slack, Alertmanager and Grafana actually behave. Each fact has a stable id
@@ -286,8 +286,9 @@ test user's `mention_count` was read with `GET /api/v4/channels/{channel_id}/mem
 attachment text with `@here` raised it from 0 to 1, with `@channel` from 1 to 2, with `@<username>` of the test user
 from 2 to 3, and a control post without a mention left it at 3; in a second run, the attachment text with `@all`
 raised it from 0 to 1. `@here` notifies only the members who are online, so the online status matters for it. A group
-mention (`@<group>`) inside an attachment was not checked. What the notifications showed was not checked: an email of
-such a post shows no content (F-056), and push and desktop notifications show the attachment's `fallback` (F-115). —
+mention (`@<group>`) inside an attachment was not checked here; F-123 checked it later. What the notifications showed
+was not checked: an email of such a post shows no content (F-056), and push and desktop notifications show the
+attachment's `fallback` (F-115). —
 _2026-10-22 · bot posts in one channel, the mention count read after each · Mattermost 11.2.2_ · Used in C-12.FR-1,
 C-13.FR-3, C-13.FR-8.
 
@@ -365,6 +366,61 @@ token (the bot has the system admin role) · Mattermost 11.2.2_ · Used in C-13.
 only the system user role, deleted its own post, the plain read `GET /api/v4/posts/{id}` of it answered `404`, as in
 F-058. — _2026-10-08 · the post of F-060, deleted through the API and read again · Mattermost 11.2.2_ · Used in
 C-13.FR-5.
+
+### Groups
+
+The entries of this section were checked on 2026-11-15 against a test Mattermost 11.2.2 server with the Entry licence,
+unlike the section's other entries (Enterprise Edition without a licence, a bot with the system admin role). A test bot
+with the role Member (`system_user`) only, as Muster's bot is created, used the REST API v4 in a test channel with
+`curl`; an admin created a custom group `payments_team` whose one member was a test account, and that account's
+`mention_count` in the channel was read with `GET /api/v4/channels/{channel_id}/members/{user_id}` before each post and
+4 s after it. The posts were looked at in the web client in a browser, with collapsed threads always on. Not checked:
+LDAP-synced groups (LDAP was off on the server), phones (push notifications were off on the server), a channel member
+outside the group, and desktop notification banners (none was recorded).
+
+**F-121. Custom groups exist under the Entry licence; LDAP groups were not checked.** The server answered
+`BuildEnterpriseReady` `true` in `GET /api/v4/config/client?format=old` and, in the client licence, `IsLicensed` `true`,
+`SkuShortName` `entry`, `Cloud` `false`, `LDAP` `true` and `LDAPGroups` `true`; its System Console describes the Entry
+licence as Enterprise Advanced capabilities with limits. Under it, an admin created a custom group with
+`POST /api/v4/groups` (`source` `custom`, `allow_reference` `true`), answered `201`. LDAP was in the licence but off in
+the server's configuration (`LdapSettings.Enable` `false`), so whether LDAP-synced groups exist and behave as custom
+groups do was not checked; nor were Team Edition, an Enterprise build without a licence, or the Professional and
+Enterprise licences. — _2026-11-15 · the client configuration and licence, read three times, and the group's creation ·
+Mattermost 11.2.2, Entry licence_ · Used in C-25.FR-8, C-28.FR-2.
+
+**F-122. A bot with the role Member reads the groups and their members.** With the bot's token, and no permission added
+to it: `GET /api/v4/groups?per_page=10` answered `200` with an array whose group has `id`, `name`, `display_name`,
+`description`, `source` (`custom`), `remote_id` (null), `create_at`, `update_at`, `delete_at` (`0`), `has_syncables`,
+`allow_reference` (`true`) and `member_ids` (null), and no `member_count`; `?filter_allow_reference=true` answered `200`
+with the same group; `?source=custom&include_member_count=true` answered `200` with `member_count` `1`; and
+`GET /api/v4/groups/{group_id}/members?per_page=10` answered `200` with the member.
+`?source=ldap&include_member_count=true` also answered `200` with the custom group, so with LDAP off the `source` filter
+did not filter, and a reader goes by each group's `source`. `GET /api/v4/groups/{group_id}/stats` was refused with `403`
+`api.context.permissions.app_error`, which names no permission. The bot's role `system_user`, built in and managed by
+the permission scheme, held by default `create_custom_group`, `edit_custom_group`, `delete_custom_group`,
+`restore_custom_group` and `manage_custom_group_members` (`POST /api/v4/roles/names`). What these reads answer to a bot
+whose role lacks those permissions, or on a server without groups, was not checked. — _2026-11-15 · three runs of the
+same calls, the same answers · Mattermost 11.2.2, Entry licence_ · Used in C-25.FR-8, C-28.FR-2.
+
+**F-123. `@<group>` from a bot mentions a custom group's members, in an attachment and in a Thread reply.** A bot post
+with an empty `message` and one attachment whose text starts with `@payments_team` raised the member's `mention_count`
+from 0 to 1, put the badge 1 on the channel, and the web client highlighted the mention inside the attachment as a
+mention of the member. A Thread reply under a bot post without a mention, its `message` starting with `@payments_team`,
+raised the member's `mention_count` from 1 to 2 and showed under Threads (the badge 1, the Thread among the followed
+ones), highlighted, though the channel's badge did not change, as a Thread reply goes to Threads when collapsed threads
+are on. The bot post without a mention left the count at 1. `allow_reference` cannot be turned off for a custom group:
+an admin's `PUT /api/v4/groups/{group_id}/patch` with `{"allow_reference": false}` was refused with `400` and a
+localized message that `allow_reference` must be `true` for custom groups, and the group kept `true`; so it never stops
+a custom group's mention, and for LDAP groups it was not checked. — _2026-11-15 · three bot posts in one channel, the
+count read after each, and the patch with an admin's token · Mattermost 11.2.2, Entry licence, web client_ · Used in
+C-25.FR-8, C-28.FR-2, C-13.FR-8.
+
+**F-124. `@channel`, `@here` and `@all` from a bot mention in `message` and in an attachment alike (adds to F-113).**
+With the test account online in the web client, the bot posted each of `@channel`, `@here` and `@all` once as its
+`message` and once at the start of an attachment's text with an empty `message`: each of the six posts raised the
+account's `mention_count` by one, from 0 to 6, the channel's badge showed 6, and the web client highlighted all six as
+mentions of the account. — _2026-11-15 · six bot posts in one channel, the count read after each · Mattermost 11.2.2,
+Entry licence, web client_ · Used in C-28.FR-2, C-13.FR-8.
 
 ## Alertmanager
 
@@ -882,6 +938,56 @@ URL. — _2026-10-19 · the documentation's example vector in Go; [verifying
 requests](https://docs.slack.dev/authentication/verifying-requests-from-slack), [Events
 API](https://docs.slack.dev/apis/events-api)_ · Used in C-24.FR-9.
 
+### User groups and mentions of everyone
+
+The entries of this section were checked on 2026-11-15 on another test workspace in Slack's cloud, on the Pro plan
+during its trial: an app installed with the bot scopes `chat:write`, `channels:read` and `users:read`, to which
+`usergroups:read` was added during the check; the workspace's general channel and one other public channel, the bot a
+member of both; and one person, a member of the user group `payments-team`, who watched in the Slack desktop client for
+macOS (its version not recorded) and installed the mobile client during the last step. The Web API was called with
+`curl` with a JSON body, except `usergroups.users.list` and `conversations.info`, which refused one and were sent with
+form arguments (F-125). Not checked: a channel member outside the user group, other people than the one person, a
+disabled user group, and the notifications themselves — no banner appeared on the desktop in any step, nor on the phone
+once installed, for a reason in the clients' settings that was not established, so the client's highlighting, its badges
+and its Activity are the evidence.
+
+**F-125. User groups, the scope `usergroups:read` and a reinstall.** The workspace allowed only Workspace Admins and
+Owners, not Members, to create and change user groups; the person, being an Admin or Owner, created one with the handle
+`payments-team`. Without the scope, `usergroups.list` answered
+`{"ok":false,"error":"missing_scope","needed":"usergroups:read","provided":"chat:write,channels:read,users:read"}` with
+`x-accepted-oauth-scopes: usergroups:read`. With the scope added to the app's bot token scopes in its settings (OAuth &
+Permissions) and the app not reinstalled, the settings asked for a reinstall, `x-oauth-scopes` of `auth.test` stayed
+`chat:write,channels:read,users:read` and `usergroups.list` still answered `missing_scope`. After the reinstall
+`x-oauth-scopes` was `chat:write,channels:read,users:read,usergroups:read`, and the bot token was the same: the token
+used before the reinstall carried the new scope. `usergroups.list`, with `include_count` and `include_disabled` in a
+JSON body, then answered `ok` with each user group's `id` (`S…`), `handle`, `name`, `date_delete` (`0`) and `user_count`
+(`1`, right), beside `team_id`, `description`, `is_external`, `date_create`, `date_update`, `created_by`, `updated_by`,
+`deleted_by`, `prefs` and `channel_count`; `usergroups.users.list` answered `users` with the member's `U…`.
+`usergroups.users.list` with a JSON body answered `invalid_arguments` ("missing required field: usergroup"), and so did
+`conversations.info`; with form arguments both answered, `conversations.info` with the channel's `name`, `is_general`,
+`is_private` and `is_member` among its fields. — _2026-11-15 · `auth.test` and `usergroups.list` before the scope, after
+adding it and after the reinstall · Slack Pro (trial)_ · Used in C-24.FR-1, C-24.FR-2, C-25.FR-8, C-28.FR-2.
+
+**F-126. `<!subteam^ID>` from a bot mentions the user group's members, in a Root message and in a Thread reply.** A
+bot's `chat.postMessage` in the other channel, with `text` "Muster spike test" and one `section` block whose mrkdwn
+starts with `<!subteam^S…>`, was drawn as `@payments-team`, highlighted for the member as a mention of them, with the
+red badge 1 on the channel and a badge on the app's icon in the macOS Dock. A Thread reply with the same block under a
+bot message without a mention was drawn and highlighted alike and counted too: the Dock badge went to 2. The person's
+Activity listed each of the last three Root messages as "Mention in #<channel>" and each of the three Thread replies as
+"Mention in #<channel> thread", by the times written into the posts. — _2026-11-15 · a Root message and a Thread reply,
+repeated four and three times; the Activity seen in a screenshot · Slack Pro (trial), desktop client_ · Used in
+C-24.FR-6, C-25.FR-8, C-28.FR-2.
+
+**F-127. `<!everyone>` from a bot mentions only in the general channel.** The bot's `chat.postMessage` with a `section`
+block starting with `<!everyone>` was answered `ok` in both channels. In the general channel (`is_general` `true` in
+`conversations.info`) it was drawn as `@everyone`, highlighted, and the person's Activity listed it as "Mention in
+#<channel>". In the other channel (`is_general` `false`) it was drawn the same, highlighted, with no error or warning,
+yet it was missing from the person's Activity: it did not mention the person, a member of that channel, and a reader
+cannot tell the two apart. `<!channel>` was listed as "Mention in #<channel>" in both channels; `<!here>` was listed in
+Activity in both, without the label "Mention". The workspace set no limit on who may use them, only its setting that
+warns the sender before such a mention in a channel of six or more people. — _2026-11-15 · `<!everyone>`, `<!here>` and
+`<!channel>` in each channel · Slack Pro (trial), desktop client_ · Used in C-24.FR-6, C-28.FR-2.
+
 ## GitLab
 
 Unless an entry says otherwise, the facts were checked on 2026-10-31 against a self-managed GitLab 18.8.2-ee (revision
@@ -930,14 +1036,6 @@ Before the stories of L2, these spikes check what the core of L2 relies on:
   bot's Thread reply with `<@U…>`) and in Telegram (a comment in a channel's discussion group with a `tg://user?id=`
   link, also when the person muted the group). Until it is checked, the documentation says that at night only a
   Notification gateway is reliable (C-32.FR-20). To check on the test stands with a person's phone.
-- **Mattermost groups** (C-25.FR-8, C-28). Whether `@<group>` notifies the people of a Mattermost group in a Thread
-  reply's `message` and inside the attachment of a Root message, as `@channel` does (F-113); which editions and licences
-  of Mattermost have custom groups and LDAP-synced groups; and how a bot reads the groups (`GET /api/v4/groups`) and with
-  which permission.
-- **Slack user groups** (C-24.FR-1, C-25.FR-8, C-28). What `usergroups.list` answers with the scope `usergroups:read`;
-  whether `<!subteam^ID>` from a bot notifies the people of the user group in a Thread reply and in the blocks of a Root
-  message; whether `<!everyone>` from a bot notifies anyone outside the workspace's general channel; and whether an app
-  that gained the scope in its manifest lacks it in `x-oauth-scopes` until it is reinstalled.
 - **Telegram** (C-27.FR-8, C-28). Whether a `tg://user?id=` Mention in a comment rings a member of the discussion group
   who muted it, and whether the bot can tell with `getChatMember` that a person is not in the discussion group, which the
   warning about an unreachable On-call uses. Forum topics and plain group chats are checked with the later part of L2.
@@ -957,10 +1055,14 @@ Earlier pending checks:
   without the system admin role gets the same answers about a deleted root post as in F-058 — its plain read answered
   `404` on 2026-10-08 (F-061); `403` to an edit and `400` to a reply are still to be seen — and whether it may read the
   post with `?include_deleted=true`, which probably needs that role (not verified; Muster does not use that read).
-  Whether a group Mention (`@<group>`) inside an attachment notifies, as a user's, `@channel`, `@here` and `@all` do
-  (F-113). What push (under `PushNotificationContents` `full` and `generic`) and desktop notifications of a post with
-  an empty `message` and an attachment with a `fallback` show, measured on the test stand: F-115 is read in the source
-  only, since the stand pins `PushNotificationContents` to `generic` by an environment variable.
+  What push (under `PushNotificationContents` `full` and `generic`) and desktop notifications of a post with an empty
+  `message` and an attachment with a `fallback` show, measured on the test stand: F-115 is read in the source only,
+  since the stand pins `PushNotificationContents` to `generic` by an environment variable. Groups (C-25.FR-8,
+  C-28.FR-2): LDAP-synced groups on a server with LDAP on — whether a bot reads them, whether `@<group>` mentions their
+  members and what `allow_reference` turned off does (F-121, F-123); the editions and licences other than Entry
+  (F-121); what the reads of F-122 answer to a bot whose role lacks the custom-group permissions; that a channel member
+  outside a group is not mentioned; and what the phone and desktop notifications of a group mention and of `@channel`,
+  `@here` and `@all` from a bot show (F-123, F-124).
 - **Mattermost 12.** Mattermost 12.0.0 draws message attachments as Mattermost Blocks; whether Root messages, their
   colour and the button styles of F-068 look the same is to be checked once the test stand is upgraded from 11.2.2.
   Since a Root message, a Storm summary and a test message hold all their content in their one attachment (C-13.FR-3),
@@ -977,15 +1079,18 @@ Earlier pending checks:
 - **Slack.** A person's press in both event modes — the real `block_actions` payload and envelope of F-093,
   `response_url`, what the person sees when a press is not confirmed within 3 seconds, and whether Slack ever sends an
   unconfirmed `interactive` envelope or an interaction it could not deliver over HTTP again; which notifications a
-  Mention added by an edit, a Thread reply and an ephemeral answer in a Thread make, and push on phones; whether
-  `<!channel>` and `<!here>` from a bot notify as documented; whether the workspace's edit window applies to the bot's
-  messages hours or days old (`edit_window_closed`, F-084); what `chat.update`, `chat.postMessage` and
-  `conversations.info` answer after the bot is removed from a channel, and in an archived or a private channel (F-098);
-  whether a zero-width space after `*`, `_`, `~` or `` ` `` keeps mrkdwn from pairing them into emphasis (C-24.FR-7);
-  what `apps.connections.open` answers with Socket Mode off, and `link_disabled` (F-101); how long `num_connections`
-  keeps counting a socket that went away without a close, such as a crashed Leader's (F-102); Socket Mode through a
-  SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot token; what `chat.postMessage` to a user id answers
-  with the app's Messages tab off — `messages_tab_disabled`, as Slack's reference for `chat.postMessage` lists it, which
-  `startSlackLink` answers as `409` `messages_tab_disabled` and the fake Slack server answers with `messages_tab_off`
-  (F-096 tried the tab on and read-only only); and the mobile clients — the colour bar, buttons beyond five in a row
-  and `static_select` (F-075, F-082). To check on the test stand with a person, by the Slack stories.
+  Mention added by an edit, a Thread reply and an ephemeral answer in a Thread make, and push on phones; what the phone
+  and desktop notifications of `<!channel>` and `<!here>` from a bot show, which F-127 saw only in the client's
+  Activity; whether the workspace's edit window applies to the bot's messages hours or days old (`edit_window_closed`,
+  F-084); what `chat.update`, `chat.postMessage` and `conversations.info` answer after the bot is removed from a
+  channel, and in an archived or a private channel (F-098); whether a zero-width space after `*`, `_`, `~` or `` ` ``
+  keeps mrkdwn from pairing them into emphasis (C-24.FR-7); what `apps.connections.open` answers with Socket Mode off,
+  and `link_disabled` (F-101); how long `num_connections` keeps counting a socket that went away without a close, such
+  as a crashed Leader's (F-102); Socket Mode through a SOCKS5 or an HTTPS proxy (F-103); a user token given as the bot
+  token; what `chat.postMessage` to a user id answers with the app's Messages tab off — `messages_tab_disabled`, as
+  Slack's reference for `chat.postMessage` lists it, which `startSlackLink` answers as `409` `messages_tab_disabled` and
+  the fake Slack server answers with `messages_tab_off` (F-096 tried the tab on and read-only only); and the mobile
+  clients — the colour bar, buttons beyond five in a row and `static_select` (F-075, F-082); that a channel member
+  outside a user group is not mentioned by `<!subteam^ID>`, what the phone and desktop notifications of `<!subteam^ID>`
+  and `<!everyone>` show (F-126, F-127), and the `date_delete` of a disabled user group (F-125). To check on the test
+  stand with a person, by the Slack stories.

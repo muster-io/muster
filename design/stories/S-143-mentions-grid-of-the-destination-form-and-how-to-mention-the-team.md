@@ -148,8 +148,9 @@ None open. Settled:
 
 1. **Settled: the texts of the other unavailable targets go into reference.md in this pull request**, in the row "Team
    page, Team mention · Destination form, an unavailable Mention target": "{messenger} has no {token}" / «В {messenger}
-   нет {token}» for `messenger_has_no_token` (`@everyone` on Mattermost, `@all` on Slack), and "The bridge does not
-   declare {token}" / «Мост не объявил {token}» for `bridge_not_declared`. S-138 may add more reasons and texts.
+   нет {token}» for `messenger_has_no_token` (`@everyone` on Mattermost, `@all` and `@everyone` on Slack), and "The
+   bridge does not declare {token}" / «Мост не объявил {token}» for `bridge_not_declared`. S-138 may add more reasons
+   and texts.
 
 ## Notes
 
