@@ -29,6 +29,7 @@ import (
 	auditdb "github.com/muster-io/muster/internal/audit/dbgen"
 	"github.com/muster-io/muster/internal/auth"
 	adb "github.com/muster-io/muster/internal/auth/dbgen"
+	"github.com/muster-io/muster/internal/bridge"
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/config"
 	"github.com/muster-io/muster/internal/connections"
@@ -52,6 +53,7 @@ import (
 	ldb "github.com/muster-io/muster/internal/leader/dbgen"
 	"github.com/muster-io/muster/internal/links"
 	linksdb "github.com/muster-io/muster/internal/links/dbgen"
+	"github.com/muster-io/muster/internal/live"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mattermost"
 	"github.com/muster-io/muster/internal/messages"
@@ -1786,6 +1788,34 @@ func TestDeliveryLeaderTasks(t *testing.T) {
 	}
 	if _, err := p.prunePostCopies(t.Context(), 1, time.Now(), 10); !errors.Is(err, errNoDB) {
 		t.Errorf("copies = %v", err)
+	}
+}
+
+// TestHintWakesDelivery: the listener's hint of a change of a Destination or a Connection wakes the delivery worker,
+// which may sleep until a token of a limiter that refused and reads the limiters again in its round; other hints do
+// not.
+func TestHintWakesDelivery(t *testing.T) {
+	for typ, want := range map[string]bool{destinations.Hint: true, connections.Hint: true, schedules.Hint: false} {
+		w := &delivery.Worker{Log: logging.New(io.Discard, logging.LevelInfo),
+			Organizations: func(context.Context) ([]int64, error) { return nil, nil }}
+		p := &process{deliverer: w, hub: live.NewHub(1, nil), destinations: &destinations.Service{},
+			schedules: &schedules.Service{}, poller: &telegram.Poller{}, bridgePoller: &bridge.Poller{},
+			slackSockets: &slack.Sockets{}}
+		p.onHint(db.Hint{OrgID: 2, Type: typ})
+		ctx, cancel := context.WithCancel(t.Context())
+		woken := false
+		w.Wait = func(_ context.Context, _ time.Duration, wake <-chan struct{}) {
+			select {
+			case <-wake:
+				woken = true
+			default:
+			}
+			cancel()
+		}
+		w.Run(ctx)
+		if woken != want {
+			t.Errorf("the hint %s woke the delivery worker: %v, want %v", typ, woken, want)
+		}
 	}
 }
 

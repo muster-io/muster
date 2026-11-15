@@ -196,7 +196,7 @@ func (s *Service) PruneWebhookEvents(ctx context.Context, now time.Time) (int64,
 // then.
 func (w *Worker) claimEvents(until time.Time) func(ctx context.Context, org int64) ([]int64, error) {
 	return func(ctx context.Context, org int64) ([]int64, error) {
-		skip := refusedOf(ctx)
+		skip, _ := refusedOf(ctx)
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueWebhookEventsRow, error) {
 				return w.Store.queries(tx).ClaimDueWebhookEvents(ctx, dbgen.ClaimDueWebhookEventsParams{OrgID: org,
@@ -263,7 +263,7 @@ func (w *Worker) prepareEvent(ctx context.Context, org, id int64) (eventAttempt,
 				Owner: w.Lease.Owner, At: t.due.Add(TokenMargin)}); err != nil {
 				return fmt.Errorf("reschedule the webhook event: %w", err)
 			}
-			noteRefused(ctx, d.ID, t.due)
+			noteRefused(ctx, d, t, false)
 			return nil
 		}
 		if err := q.RenewWebhookEventLease(ctx, dbgen.RenewWebhookEventLeaseParams{OrgID: org, ID: id,

@@ -67,12 +67,13 @@ func (f *fakeDB) eventDue(dest int64, due, now time.Time) bool {
 	})
 }
 
-// eventWork adds the head events of healthy Destinations, or of those whose next event is the probe, to the next
-// work, as NextDeliveryWork does.
-func (f *fakeDB) eventWork(add func(next time.Time, owner string, until time.Time)) {
+// eventWork adds the head events of healthy Destinations, or of those whose next event is the probe, that are not
+// skipped to the next work, as NextDeliveryWork does.
+func (f *fakeDB) eventWork(add func(next time.Time, owner string, until time.Time),
+	skipped func(dest int64) bool) {
 	for _, e := range f.webhookEvents {
 		ds := f.dests[e.dest]
-		if f.head(e) && !ds.deleted && (ds.health == "healthy" || ds.probeOnNext) {
+		if f.head(e) && !ds.deleted && (ds.health == "healthy" || ds.probeOnNext) && !skipped(e.dest) {
 			add(e.next, e.owner, e.until)
 		}
 	}

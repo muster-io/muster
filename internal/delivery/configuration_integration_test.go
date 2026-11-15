@@ -524,3 +524,84 @@ func (l *live) marked(t *testing.T, dest int64) int64 {
 	return l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
 		AND configuration_only`, dest)
 }
+
+// TestIntegrationUrgentFirstOnASharedConnection is C-11.FR-3 on PostgreSQL for #554 and #547: two Mattermost channels
+// share the Connection, whose limiter allows 5 calls a second while theirs have room. 8 Urgent Alert Groups in the
+// first channel and 20 that are not Urgent in the second are acknowledged, the Urgent ones first. The Connection
+// refuses the sixth Urgent edit; the worker then waits for its token instead of running again at once, and the rounds
+// that the NOTIFY of other work would start every MinWait leave both channels alone until then, so every Urgent edit
+// goes through the Connection before any edit of the second channel. The business clock moves 2 ms at every read.
+func TestIntegrationUrgentFirstOnASharedConnection(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		dest := l.dests[0]
+		other := l.newDestNamed(t, "DSAAAAAAAAAAR2")
+		l.newRoute(t, "other", 1_000_000, "DSAAAAAAAAAAR2")
+		w := l.worker("shared")
+		const u, m = 8, 20
+		var urgent, rest []alert
+		for i := range u {
+			urgent = append(urgent, alert{name: fmt.Sprintf("Su%03d/a", i), team: "db", severity: "critical"})
+		}
+		for i := range m {
+			rest = append(rest, alert{name: fmt.Sprintf("Sn%03d/a", i), team: "other"})
+		}
+		l.fireAlerts(t, "urgent", urgent...)
+		l.fireAlerts(t, "rest", rest...)
+		l.round(t, w)
+		if p := l.rec.Count(deliverytest.MethodPublish); p != u+m {
+			t.Fatalf("%d of %d published\n%s", p, u+m, l.log)
+		}
+		for _, a := range urgent {
+			l.ack(t, l.group(t, strings.TrimSuffix(a.name, "/a")))
+		}
+		l.business.Advance(time.Second)
+		for _, a := range rest {
+			l.ack(t, l.group(t, strings.TrimSuffix(a.name, "/a")))
+		}
+		l.exec(t, `UPDATE connections SET limiter_limit = 5, limiter_per_seconds = 1 WHERE id = $1`, l.conn)
+		l.exec(t, `DELETE FROM rate_limit_buckets`)
+		l.business.Advance(time.Second)
+		l.rec.Reset()
+		next, err := w.Round(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sent := len(l.rec.Calls()); sent != 5 || next < delivery.TokenMargin {
+			t.Errorf("%d calls in the first round and a wait of %v, want 5 and the Connection's token plus %v",
+				sent, next, delivery.TokenMargin)
+		}
+		w.Lease.Clocks.Business = ticking{m: l.business, step: 2 * time.Millisecond}
+		edits := func() (string, int) {
+			var b strings.Builder
+			n := 0
+			for _, c := range l.rec.Calls() {
+				switch c.Destination.ID {
+				case dest:
+					b.WriteString("U")
+					n++
+				case other:
+					b.WriteString("o")
+				}
+			}
+			return b.String(), n
+		}
+		for i := 0; ; i++ {
+			if _, n := edits(); n == u {
+				break
+			}
+			if i == 200 {
+				s, _ := edits()
+				t.Fatalf("calls through the Connection after 200 rounds %q", s)
+			}
+			l.business.Advance(delivery.MinWait)
+			l.round(t, w)
+		}
+		w.Lease.Clocks.Business = l.business
+		if s, _ := edits(); !strings.HasPrefix(s, strings.Repeat("U", u)) {
+			t.Fatalf("calls through the Connection %q, want the %d Urgent edits first", s, u)
+		}
+		l.noDeadlock(t)
+	})
+}

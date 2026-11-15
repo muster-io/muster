@@ -717,6 +717,33 @@ func begin(ctx context.Context, opts Options) (*process, error) {
 	return p, nil
 }
 
+// onHint handles a change hint of the listener: it forwards it to the live-update streams of this replica and
+// refreshes what the change concerns. A change of a Destination or a Connection, whose limiter may have been raised,
+// also wakes the delivery worker, which may sleep until a token its memo of refused limiters waits for, and whose
+// round reads them again by the current limits.
+func (p *process) onHint(h db.Hint) {
+	p.hub.Receive(h)
+	switch h.Type {
+	case integrations.Hint:
+		p.integrations.InfoChanged()
+	case routing.Hint:
+		p.router.Invalidate()
+		p.routes.InfoChanged()
+	case destinations.Hint:
+		p.destinations.InfoChanged()
+		p.deliverer.Wake()
+	case teams.Hint:
+		p.teams.InfoChanged()
+	case schedules.Hint:
+		p.schedules.InfoChanged()
+	case connections.Hint:
+		p.poller.Wake()
+		p.bridgePoller.Wake()
+		p.slackSockets.Wake()
+		p.deliverer.Wake()
+	}
+}
+
 // serve starts the listeners and serves until ctx ends or a listener stops.
 func (p *process) serve(ctx context.Context) error {
 	defer p.db.Close()
@@ -1481,26 +1508,7 @@ func (p *process) startWork(ctx context.Context) func(context.Context) {
 		})
 	}
 	wg.Go(func() {
-		p.listener.Run(ctx, func(h db.Hint) {
-			p.hub.Receive(h)
-			switch h.Type {
-			case integrations.Hint:
-				p.integrations.InfoChanged()
-			case routing.Hint:
-				p.router.Invalidate()
-				p.routes.InfoChanged()
-			case destinations.Hint:
-				p.destinations.InfoChanged()
-			case teams.Hint:
-				p.teams.InfoChanged()
-			case schedules.Hint:
-				p.schedules.InfoChanged()
-			case connections.Hint:
-				p.poller.Wake()
-				p.bridgePoller.Wake()
-				p.slackSockets.Wake()
-			}
-		}, func(restored bool) {
+		p.listener.Run(ctx, p.onHint, func(restored bool) {
 			p.hub.Listening(restored)
 			if restored {
 				p.policies.Invalidate()
