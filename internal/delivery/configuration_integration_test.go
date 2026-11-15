@@ -385,6 +385,99 @@ func TestIntegrationReplyWithinOneBatchOfABacklog(t *testing.T) {
 	})
 }
 
+// ticking is a business clock that moves step at every read, as the work of a running replica takes time.
+type ticking struct {
+	m    *clock.Manual
+	step time.Duration
+}
+
+func (c ticking) Now() time.Time {
+	c.m.Advance(c.step)
+	return c.m.Now()
+}
+
+// TestIntegrationUrgentBacklogOnOneChannel is C-11.FR-3 on PostgreSQL for #546: 150 open Urgent Alert Groups are
+// published in one Mattermost channel and acknowledged, and the channel's limiter (20 a second) holds back the 150
+// Urgent edits that the Acknowledges made; 50 Urgent Alert Groups of another Route in another channel are acknowledged
+// after them. The worker's business clock moves 2 ms at every read, so the channel's limiter has a token again after
+// about every claimed batch. In this scenario, where the other channel's edits are all of rank 1 and drained in one
+// pass, the round makes at most two claimed batches of refused calls to the channel — one of the bounded claims of its
+// visit of the Urgent ranks and one of its batch due now — and sends every edit of the other channel; the rest of the
+// channel's edits stay untouched for the next rounds, which send them all.
+func TestIntegrationUrgentBacklogOnOneChannel(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		l := setupLive(t, s)
+		l.fresh(t, 1000, 1)
+		dest := l.dests[0]
+		other := l.newDestNamed(t, "DSAAAAAAAAAAR1")
+		l.newRoute(t, "other", 1_000_000, "DSAAAAAAAAAAR1")
+		w := l.worker("urgent")
+		const n, m = 150, 50
+		var backlog, others []alert
+		for i := range n {
+			backlog = append(backlog, alert{name: fmt.Sprintf("Ub%03d/a", i), team: "db", severity: "critical"})
+		}
+		for i := range m {
+			others = append(others, alert{name: fmt.Sprintf("Uo%03d/a", i), team: "other", severity: "critical"})
+		}
+		l.fireAlerts(t, "backlog", backlog...)
+		l.fireAlerts(t, "other", others...)
+		l.round(t, w)
+		if p := l.rec.Count(deliverytest.MethodPublish); p != n+m {
+			t.Fatalf("%d of %d published\n%s", p, n+m, l.log)
+		}
+		for _, a := range backlog {
+			l.ack(t, l.group(t, strings.TrimSuffix(a.name, "/a")))
+		}
+		l.business.Advance(time.Second)
+		for _, a := range others {
+			l.ack(t, l.group(t, strings.TrimSuffix(a.name, "/a")))
+		}
+		pending := func(dest int64) int64 {
+			t.Helper()
+			return l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
+				AND urgent AND NOT configuration_only`, dest)
+		}
+		if p, o := pending(dest), pending(other); p != n || o != m {
+			t.Fatalf("%d and %d Urgent edits of the Acknowledges pending, want %d and %d", p, o, n, m)
+		}
+		l.exec(t, `UPDATE destinations SET limiter_limit = 20, limiter_per_seconds = 1 WHERE id = $1`, dest)
+		l.exec(t, `DELETE FROM rate_limit_buckets`)
+		l.business.Advance(time.Second)
+		start := l.business.Now()
+		l.rec.Reset()
+		w.Lease.Clocks.Business = ticking{m: l.business, step: 2 * time.Millisecond}
+		l.round(t, w)
+		w.Lease.Clocks.Business = l.business
+		sent := 0
+		for _, c := range l.rec.Calls() {
+			if c.Destination.ID == dest {
+				sent++
+			}
+		}
+		untouched := l.count(t, `SELECT count(*) FROM deliveries WHERE destination_id = $1 AND state = 'pending'
+			AND next_attempt_at <= $2 AND lease_owner IS NULL`, dest, start)
+		attempted := n - int(untouched)
+		t.Logf("%d of the channel's %d edits attempted and %d sent in the round, in %v", attempted, n, sent,
+			l.business.Now().Sub(start))
+		if attempted-sent > 2*int(delivery.Batch) {
+			t.Errorf("%d of the channel's edits attempted and %d sent in the round: %d refused, want at most %d",
+				attempted, sent, attempted-sent, 2*delivery.Batch)
+		}
+		if o := pending(other); o != 0 {
+			t.Errorf("%d edits of the other channel still pending after the round", o)
+		}
+		for i := 0; pending(dest) > 0; i++ {
+			if i == 100 {
+				t.Fatalf("still %d edits pending after 100 rounds", pending(dest))
+			}
+			l.business.Advance(time.Second + delivery.TokenMargin)
+			l.round(t, w)
+		}
+		l.noDeadlock(t)
+	})
+}
+
 // telegramChannel creates a Telegram Connection and Destination, both at 1000 per second, and puts the Destination
 // alone on the Route db.
 func (l *live) telegramChannel(t *testing.T) int64 {

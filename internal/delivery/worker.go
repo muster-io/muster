@@ -229,53 +229,79 @@ func waitReal(ctx context.Context, d time.Duration, wake <-chan struct{}) {
 // batching window keeps the replies of new Alerts to one per window and delivery.
 //
 // The memo. Once a Destination's limiter refused a take in the round, the later claims of the work that is not Urgent
-// skip its rows, untouched — not leased, not rescheduled — for the next round, MinWait later; the Urgent claims skip
-// them only until the refused token is due, so that Urgent work that comes due meanwhile still gets the Destination's
-// next token within one claimed batch (refused, per Organization and round; another replica keeps its own, and the
+// skip its rows, untouched — not leased, not rescheduled — for the next round, MinWait later. The bounded claims of a
+// visit of the Urgent ranks skip the Destinations refused during the visit for the rest of it, and those refused
+// earlier in the round until the refused token is due; its batches of rank 1 due now skip a refused Destination only
+// until its token is due, so that Urgent work that comes due meanwhile still gets the Destination's next token within
+// one claimed batch once that token is due (refused, per Organization and round; another replica keeps its own, and the
 // buckets in PostgreSQL stay the authority). So a Destination whose limiter is spent costs a round at most one claimed
-// batch of refused takes of the work that is not Urgent, and the Urgent work one per token interval, whatever its
-// backlog in any rank, and within one replica a token it gets back during the round goes only to Urgent work: the order
-// among its rows is strict. A Connection's limiter is not in the memo, an exception to the order of C-11.FR-3: a
-// refusal is recorded as the Destination's, each of the Connection's Destinations is skipped after its own refusal, and
-// a token the Connection gets back between two such refusals can go to a later rank of another of its Destinations.
-// Across replicas the order is likely but not strict: one replica can take a token ahead of a row that another claimed,
-// and each such race costs the row one token interval.
+// batch of refused takes of the work that is not Urgent, and of the Urgent work one per visit and one per batch due now
+// that finds its token due, whatever its backlog in any rank, and within one replica a token it gets back during the
+// round goes only to Urgent work; between the Urgent ranks, and across rounds, the order is not strict: a refused row
+// waits until its token's time plus TokenMargin, and work due before then can take that token. A Connection's limiter
+// is not in the memo, an exception to the order of C-11.FR-3: a refusal is recorded as the Destination's, each of the
+// Connection's Destinations is skipped after its own refusal, and a token the Connection gets back between two such
+// refusals can go to a later rank of another of its Destinations. Across replicas the order is likely but not strict:
+// one replica can take a token ahead of a row that another claimed, and each such race costs the row one token
+// interval.
 //
-// The Urgent ranks claim what is due now: rank 1 is drained, then rank 2 is claimed one batch at a time, with rank 1
-// drained again after each full one, until a claim of rank 2 comes back short. Ranks 3, 4 and 5 then go in this order,
-// each claimed one batch at a time until a claim comes back short, and only the rows due when the round started; after
-// every batch of ranks 3 to 6 that claimed a row, a short one included, the round goes back to the Urgent ranks, so
-// Urgent work that comes due meanwhile waits at most one claimed batch. Rank 6 comes last, also only the rows due at
-// the start, one batch at a time; between two of its batches the round claims one batch each of ranks 3, 4 and 5 due
-// now, in this order and never repeated while full, so that a Publication, an edit that Alerts or a Command made, a
-// Thread reply or a webhook event that comes due during a long pass of configuration edits goes within one batch of
-// configuration edits per batch of its rank, behind the rows of its rank due before it.
+// The round starts with a visit of the Urgent ranks: rank 1 is drained, then one batch of rank 1 due now is claimed,
+// then one batch of rank 2; while that batch comes back full the visit repeats these three steps, and at its end, after
+// a short one that claimed a row or after a full batch due now, it claims one more batch of rank 1 due now. Each drain
+// of rank 1 claims only the rows due when it starts, and rank 2 only those due when the visit started, the round's
+// start for the first; a batch due now is never repeated while full. Ranks 3, 4 and 5 then go in this order, each
+// claimed one batch at a time until a claim comes back short, and only the rows due when the round started; after every
+// batch of ranks 3 to 6 that claimed a row, a short one included, the round visits the Urgent ranks again, due by then.
+// So Urgent work that comes due during the round goes within one claimed batch, behind the rows of its rank due before
+// it: in the next batch of rank 1 due now of a visit, or in the next visit after a batch of a later rank, and in a
+// Destination whose limiter refused during the visit once its token is due; a visit leaves for the next visit, after
+// the next batch of a later rank, or else for the next round, which the NOTIFY of its Enqueue starts at once, only the
+// Urgent configuration edits that come due during it, the Urgent work that comes due during its last batch due now, and
+// what comes due during its last drain beyond two batches. Rank 6 comes last, also only the rows due at the start, one
+// batch at a time; between two of its batches the round claims one batch each of ranks 3, 4 and 5 due now, in this
+// order and never repeated while full, so that a Publication, an edit that Alerts or a Command made, a Thread reply or
+// a webhook event that comes due during a long pass of configuration edits goes within one batch of configuration edits
+// per batch of its rank, behind the rows of its rank due before it.
 //
 // So a Thread reply or a webhook event due when a round starts waits for the Root-message work due before it on the
-// Destinations whose limiters have tokens, each one batch at a time, plus at most one claimed batch of refused takes
-// per Destination whose limiter is spent; one that comes due during ranks 3 to 5 goes in the next round. Measured on
-// the fake environment at 2 ms a take, with 1000-row backlogs of ranks 3, 4, 5 and 6 on one outgoing webhook at 5 a
-// second and a Publication on another Destination injected at take 25 to 3500: a round makes 10 limiter takes in 20 ms
-// and the Publication goes about 120 ms after it came due, against rounds of 8000 takes in 16 s and waits of 8 to 13 s
-// without the memo, and against 388,892 takes in about 13 minutes for a round that drains ranks 3 to 5 on what is due
-// now.
+// Destinations whose limiters have tokens, each one batch at a time, plus, per Destination whose limiter is spent, at
+// most one claimed batch of refused takes of the bounded claims and one per batch due now of the Urgent ranks that
+// finds its token due; one that comes due during ranks 3 to 5 goes in the next round. Measured on the fake environment
+// at 2 ms a take, with 1000-row backlogs of ranks 3, 4, 5 and 6 on one outgoing webhook at 5 a second and a Publication
+// on another Destination injected at take 25 to 3500: a round makes 10 limiter takes in 20 ms and the Publication goes
+// about 120 ms after it came due, against rounds of 8000 takes in 16 s and waits of 8 to 13 s without the memo, and
+// against 388,892 takes in about 13 minutes for a round that drains ranks 3 to 5 on what is due now. With 1000 Urgent
+// edits on one Mattermost Destination at 100 a second, whose limiter has a token again after almost every batch, the
+// round makes about 170 takes in a third of a second, and the edits due in another Destination and the next
+// Organization go after 130 to 165, against 4082 takes in 8.2 s, the edits after 1001 and 4070 takes and the next
+// Organization after 4078, when the visits of the Urgent ranks claimed what is due now and skipped a refused
+// Destination only until its token was due; at 5 a second both make about 23 takes. An Urgent Publication injected
+// during such a round goes after 3 to 13 takes, against 852.
 //
-// Termination. A row of ranks 3 to 6 due at the start that a batch bounded by the start claimed leaves those claims for
-// the round: it is delivered or ended; or rescheduled — to its token's time plus TokenMargin, a backoff or a
-// Retry-After — after the start; or it keeps a lease past now; or its Destination became Broken or is in the memo, its
-// Root message is gone or a Storm holds it, which the claims skip. A row that comes due during the round, a Root
-// message published again included, is due after the start. So each row of ranks 3 to 6 due at the start is claimed at
-// most once a round by those claims, unless its lease runs out within it, and ranks 3 to 6 end after at most the rows
-// due at the start, divided by Batch and rounded up, plus those lease expiries, full batches. The batches due now of
-// ranks 3 to 5 come only between two batches of rank 6, one of each rank and never repeated while full, so they add at
-// most 3 times Batch limiter takes, and three claims, per full batch of rank 6. The memo bounds the refused takes of a
-// round by one claimed batch per Destination for the work that is not Urgent and one per Destination and token interval
-// for the Urgent work. The Urgent ranks end, as before, on a short claim; the memo also ends them on a Destination
-// whose token is not due, so a large Urgent backlog, after a key rotation over hundreds of Urgent Root messages in one
-// channel for one, holds the round only while its limiter has tokens. Under a lasting backlog the skipped rows stay
-// due, next is 0, and the rounds repeat every MinWait: each makes about one batch of refused takes per spent
-// Destination and about ten claims per Organization, and each claim reads past the skipped rows due before the others,
-// about a millisecond per 3,000.
+// Termination. Every claim of the round but the batches due now is bounded: those of ranks 3 to 6 by the start, those
+// of rank 2 by the start of their visit, those of a drain of rank 1 by the start of the drain. A row that a bounded
+// claim took leaves the claims of that bound: it is delivered or ended; or rescheduled — to its token's time plus
+// TokenMargin, a backoff or a Retry-After — after the bound; or it keeps a lease past now; or its Destination became
+// Broken or is skipped by the memo, its Root message is gone or a Storm holds it, which the claims skip. A row that
+// comes due later, a Root message published again included, is due after the bound. So each row due at a bound is
+// claimed at most once by the claims of that bound, unless its lease runs out meanwhile: ranks 3 to 6 end after at most
+// the rows due at the start, divided by Batch and rounded up, plus those lease expiries, full batches, a visit after at
+// most the rows of rank 2 due at its start, so divided, and a drain after at most the rows of rank 1 due at its start,
+// so divided. The first visit's bounded claims claim each Urgent row due at the start at most once, unless it is moved
+// to a time within the visit without a refusal — by TelegramPressEditDelay or a short Transient backoff — or its lease
+// runs out: a later drain of a long visit then claims it again. The batches due now come one after each drain, so one
+// per batch of rank 2 of a visit, and one more at its end, after a last batch of rank 2 that claimed a row or a full
+// batch due now, and one of each of ranks 3, 4 and 5 between two batches of rank 6: those add at most 3 times Batch
+// limiter takes, three claims and three visits per full batch of rank 6. A visit comes only at the start and after a
+// batch of ranks 3 to 6 that claimed a row. The memo bounds the refused takes of a round by one claimed batch per
+// Destination for the bounded claims of the work that is not Urgent, one per Destination and visit for the bounded
+// Urgent claims, and one per Destination and batch of rank 1 due now that finds its token due: with a limiter that has
+// a token again after about every batch, one per batch of rank 2 of the visit, a cost bounded by that work, which also
+// gives the Destination its tokens. With 300 Urgent edits in a Destination at 100 a second and 200 Urgent configuration
+// edits in another, that is about 140 refused takes in a round. Under a lasting backlog the skipped rows stay due, next
+// is 0, and the rounds repeat every MinWait: each makes about one batch of refused takes per spent Destination and
+// about a dozen claims per Organization, and each claim reads past the skipped rows due before the others, about a
+// millisecond per 3,000.
 func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 	orgs, err := w.Organizations(ctx)
 	if err != nil {
@@ -298,52 +324,70 @@ func (w *Worker) Round(ctx context.Context) (time.Duration, error) {
 // reconcile works the due deliveries, Thread replies and webhook events of the Organization in the order of Round.
 func (w *Worker) reconcile(ctx context.Context, org int64) error {
 	start := w.Lease.Clocks.Business.Now()
-	ctx = context.WithValue(ctx, refusedKey{}, &refused{until: map[int64]time.Time{}})
+	ctx = context.WithValue(ctx, refusedKey{}, &refused{until: map[int64]time.Time{}, last: map[int64]int{}})
 	type pass struct {
 		claim func(ctx context.Context, org int64) ([]int64, error)
 		work  func(ctx context.Context, org, id int64)
 	}
-	passes := []pass{{w.claimDeliveries(true, false, time.Time{}), w.deliver},
-		{w.claimDeliveries(true, true, time.Time{}), w.deliver}, {w.claimDeliveries(false, false, start), w.deliver},
-		{w.claimReplies(start), w.reply}, {w.claimEvents(start), w.sendEvent},
-		{w.claimDeliveries(false, true, start), w.deliver}}
+	// Ranks 3 to 6, due by the start.
+	passes := []pass{{w.claimDeliveries(false, false, start), w.deliver}, {w.claimReplies(start), w.reply},
+		{w.claimEvents(start), w.sendEvent}, {w.claimDeliveries(false, true, start), w.deliver}}
 	// Ranks 3, 4 and 5 again, due now: one batch of each between two batches of rank 6.
 	live := []pass{{w.claimDeliveries(false, false, time.Time{}), w.deliver}, {w.claimReplies(time.Time{}), w.reply},
 		{w.claimEvents(time.Time{}), w.sendEvent}}
 	// The first error of each rank, rank 1's at 0: the loops may claim a rank many times.
-	errs := make([]error, len(passes))
+	errs := make([]error, 2+len(passes))
 	keep := func(i int, err error) {
 		if errs[i] == nil {
 			errs[i] = err
 		}
 	}
-	urgent := func() {
+	// now1 claims one batch of rank 1 due now, which skips a refused Destination only until its token is due, and
+	// says whether it was full.
+	now1 := func() bool {
+		n, err := w.batchOnce(ctx, org, w.claimDeliveries(true, false, time.Time{}), w.deliver)
+		keep(0, err)
+		return n == int(w.batch())
+	}
+	// urgent visits the Urgent ranks: rank 1 drained, due by the start of each drain, then one batch of rank 1 due
+	// now, then one batch of rank 2 due by until, again while that comes back full; after a short batch of rank 2 that
+	// claimed a row, or after a full batch due now, one more batch of rank 1 due now, never repeated while full: with a
+	// limiter that has a token again after every batch it would stay full. The bounded claims skip the Destinations
+	// whose limiter refused a take during the visit, and those refused earlier in the round whose token is not due yet;
+	// the batches due now skip a refused Destination only until its token is due (refusedUrgent).
+	urgent := func(until time.Time) {
+		visitRefused(ctx)
 		for {
-			keep(0, w.drain(ctx, org, passes[0].claim, passes[0].work))
-			n, err := w.batchOnce(ctx, org, passes[1].claim, passes[1].work)
+			drain := w.claimDeliveries(true, false, w.Lease.Clocks.Business.Now())
+			keep(0, w.drain(ctx, org, drain, w.deliver))
+			full := now1()
+			n, err := w.batchOnce(ctx, org, w.claimDeliveries(true, true, until), w.deliver)
 			keep(1, err)
 			if n < int(w.batch()) {
+				if n > 0 || full {
+					now1()
+				}
 				return
 			}
 		}
 	}
-	// once claims one batch of p, rank i+1 of ranks 3 to 6, and goes back to the Urgent ranks when it claimed a row; it
-	// says whether the batch was full.
+	// once claims one batch of p, rank i+1 of ranks 3 to 6, and visits the Urgent ranks again, due by now, when it
+	// claimed a row; it says whether the batch was full.
 	once := func(i int, p pass) bool {
 		n, err := w.batchOnce(ctx, org, p.claim, p.work)
 		keep(i, err)
 		if n > 0 {
-			urgent()
+			urgent(w.Lease.Clocks.Business.Now())
 		}
 		return n == int(w.batch())
 	}
-	// untilShort claims rank i+1, one batch at a time, until a claim comes back short.
+	// untilShort claims rank i+1 of ranks 3 to 5, one batch at a time, until a claim comes back short.
 	untilShort := func(i int) {
 		for full := true; full; {
-			full = once(i, passes[i])
+			full = once(i, passes[i-2])
 		}
 	}
-	urgent()
+	urgent(start)
 	for i := 2; i < 5; i++ {
 		untilShort(i)
 	}
@@ -353,20 +397,27 @@ func (w *Worker) reconcile(ctx context.Context, org int64) error {
 				once(2+i, p)
 			}
 		}
-		if !once(5, passes[5]) {
+		if !once(5, passes[3]) {
 			return errors.Join(errs...)
 		}
 	}
 }
 
-// refused is the memo of one reconcile, of one Organization in one round: the Destinations whose limiter refused a
-// take in it, in the order they were added, with the time the refused token is due. The claims of the work that is
-// not Urgent skip their rows, untouched, for the rest of the round; the Urgent claims skip them only until that token
-// is due, so that Urgent work still gets the Destination's next token within one claimed batch. It lives in the
-// context of the reconcile; the buckets in PostgreSQL stay the authority, and another replica keeps its own memo.
+// refused is the memo of one reconcile, of one Organization in one round: the Destinations whose limiter refused a take
+// in it, in the order they were added, with the time the refused token is due and the number of the latest refusal. The
+// claims of the work that is not Urgent skip their rows, untouched, for the rest of the round; the bounded Urgent
+// claims of a visit of the Urgent ranks skip those refused during the visit, and the others until their token is due;
+// the batches of rank 1 due now skip them only until their token is due, so that Urgent work still gets the
+// Destination's next token within one claimed batch of it being due. It lives in the context of the reconcile; the
+// buckets in PostgreSQL stay the authority, and another replica keeps its own memo.
 type refused struct {
 	until map[int64]time.Time
 	ids   []int64
+	// seq numbers the refusals, last is each Destination's latest, and visit the last one before the current visit of
+	// the Urgent ranks.
+	seq   int
+	last  map[int64]int
+	visit int
 }
 
 type refusedKey struct{}
@@ -384,6 +435,15 @@ func noteRefused(ctx context.Context, dest int64, due time.Time) {
 	if due.After(r.until[dest]) {
 		r.until[dest] = due
 	}
+	r.seq++
+	r.last[dest] = r.seq
+}
+
+// visitRefused starts a visit of the Urgent ranks in the memo of the reconcile of ctx.
+func visitRefused(ctx context.Context) {
+	if r, ok := ctx.Value(refusedKey{}).(*refused); ok {
+		r.visit = r.seq
+	}
 }
 
 // refusedOf is the Destinations of the memo of the reconcile of ctx, none without one.
@@ -394,15 +454,17 @@ func refusedOf(ctx context.Context) []int64 {
 	return nil
 }
 
-// refusedUntil is the Destinations of the memo of the reconcile of ctx whose refused token is not due yet at now.
-func refusedUntil(ctx context.Context, now time.Time) []int64 {
+// refusedUrgent is the Destinations of the memo of the reconcile of ctx that an Urgent claim skips at now: those whose
+// refused token is not due yet and, for a claim bounded by the start of a drain or a visit, those refused during the
+// current visit of the Urgent ranks.
+func refusedUrgent(ctx context.Context, now time.Time, bounded bool) []int64 {
 	r, ok := ctx.Value(refusedKey{}).(*refused)
 	if !ok {
 		return nil
 	}
 	var out []int64
 	for _, id := range r.ids {
-		if r.until[id].After(now) {
+		if bounded && r.last[id] > r.visit || r.until[id].After(now) {
 			out = append(out, id)
 		}
 	}
@@ -442,7 +504,7 @@ func (w *Worker) claimDeliveries(urgent, configurationOnly bool, until time.Time
 	return func(ctx context.Context, org int64) ([]int64, error) {
 		skip := refusedOf(ctx)
 		if urgent {
-			skip = refusedUntil(ctx, w.Lease.Clocks.Business.Now())
+			skip = refusedUrgent(ctx, w.Lease.Clocks.Business.Now(), !until.IsZero())
 		}
 		rows, err := db.Claim(ctx, w.Store.begin, w.Lease, w.batch(),
 			func(ctx context.Context, tx pgx.Tx, p db.ClaimParams) ([]dbgen.ClaimDueDeliveriesRow, error) {

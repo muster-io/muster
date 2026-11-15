@@ -2672,9 +2672,10 @@ func TestDrainBatches(t *testing.T) {
 			groups.System, created())
 	}
 	e.round(t)
-	// The Urgent passes, empty, then the claims of the five, the last one short, each followed by the Urgent passes
-	// again, then the empty claim of the configuration edits that are not Urgent.
-	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 12 {
+	// The visit of the Urgent ranks, three empty claims (the drain of rank 1, its batch due now and rank 2), then the
+	// claims of the five, the last one short, each followed by a visit of the Urgent ranks again, then the empty claim
+	// of the configuration edits that are not Urgent.
+	if e.rec.Count(deliverytest.MethodPublish) != 5 || e.db.calls["ClaimDueDeliveries"] != 16 {
 		t.Errorf("%d publications in %d claims", e.rec.Count(deliverytest.MethodPublish),
 			e.db.calls["ClaimDueDeliveries"])
 	}
