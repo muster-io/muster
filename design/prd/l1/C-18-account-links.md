@@ -47,6 +47,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   _Revised for L2 (2026-10-26):_ the contacts of Notification gateways follow the same rule — only their person sets
   one, from the web session, and an Admin sees and removes it (C-30.FR-3) — but they are not Account links and form no
   Identity space.
+  _Revised for L2 (2026-11-11, #503):_ linking, linking again with a changed username or display name, and unlinking —
+  from the profile, by an Admin or with the User's deletion — edit the open Root messages whose footer names the User
+  (C-12.FR-12).
 - **C-18.FR-7** Linking needs no re-authentication or TOTP beyond the signed-in session.
 - **C-18.FR-8** Presses from linked accounts run the command as the linked User with the Transport of the messenger.
   Presses from unlinked accounts change nothing and are answered privately with a link to the profile that carries no
