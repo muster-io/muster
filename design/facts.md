@@ -157,6 +157,50 @@ both · Bot API 10.3_ · Used in C-12.FR-1, C-14.FR-16.
 Rich Messages can turn this off with `skip_entity_detection`. — _2026-10-03 · a label value in a test post · Bot API
 10.3_ · Not addressed in L1.
 
+### Members and Mentions in the discussion group
+
+The entries of this section were checked on 2026-11-15 against Telegram's cloud Bot API 10.4 (the latest version at the
+time, released 2026-11-09) on another test stand: a new test bot without a webhook, an admin of a test channel with
+comments enabled and of its discussion group; and two test accounts, `alice`, who created the channel and the group, and
+`bob`, a subscriber of the channel who joined the group, left it and joined it again during the check. The Bot API was
+called with `curl` and its answers were logged as raw JSON, the bot token removed. Both accounts were signed in to one
+Telegram Desktop client for macOS, and `bob` also to a phone client; the client versions were not recorded. Not checked:
+a person the bot never saw, as no third account was at hand; a person removed or banned from the group; `alice` on a
+phone; the clients' notification exceptions for a chat; and a comment sent with `disable_notification`.
+
+**F-128. `getChatMember` in the discussion group answers an error for a subscriber of the channel who was never in it,
+and `left` only a while after a leave.** As the bot, with the discussion group's chat id: `bob`, a subscriber of the
+channel who had never been in the group, was answered HTTP `400` with
+`{"ok":false,"error_code":400,"description":"Bad Request: PARTICIPANT_ID_INVALID"}`, not `left`, while the channel
+answered `200` with `status` `member`. Once he had joined, the group answered `member`. He then left with "Leave group":
+about 20 s later the group still answered `member`, and about 70 s later `200` with `status` `left`, which it kept. The
+time of the leave was noted by hand, so the check cannot tell a late answer from a leave that took effect late. The
+channel answered `member` for `bob` in every state of the group. `alice`, the creator, was answered `creator` with
+`is_anonymous` `true` in the group, and `creator` with `is_anonymous` `false` in the channel. After `alice` changed her
+privacy setting Groups & Channels (who may add her to groups and channels) from its default to My Contacts, the answers
+about her were the same; no one else's privacy setting was changed. — _2026-11-15 · `getChatMember` in the group and in
+the channel before `bob` joined, after he joined, about 20 s and about 70 s after he left, and after the privacy change
+· Bot API 10.4_ · Used in C-27.FR-8, C-28.
+
+**F-129. A Mention rings a member who muted the discussion group, but did not ring its anonymous creator.** The bot
+posted in the channel and, under the automatic copy in the discussion group, commented with `sendMessage` (`parse_mode`
+HTML, `reply_parameters` set to the copy, no `disable_notification`) whose text held `<a href="tg://user?id=…">…</a>`;
+the answer returned it as a `text_mention` entity with the person's id, and the copy's id as `message_thread_id`. `bob`,
+an ordinary member again by then, with the group muted (Mute forever): the comment that mentioned him made a
+notification on the desktop client and on his phone, and the chat list showed the group's `@` badge. `alice`, the
+creator and anonymous in the group (F-128), with the group muted on the desktop: the comment that mentioned her made no
+notification and no `@` badge, only the grey unread counter. The check cannot tell whether she was not rung for being
+anonymous or for being the creator. With the group not muted, a comment that mentioned `alice` made a notification on
+the desktop; since a member is notified of every comment in a group not muted (F-014), this shows only that the client
+showed her notifications, nothing about Mentions. With the group muted by `alice`, the automatic copy of the channel
+post did not ring her, while the post in the channel rang on the desktop client (compare F-013); for `bob` the copy was
+not watched. A separate setting to mute a chat except for Mentions was not looked for, since muting let `bob`'s Mention
+through; whether the client can turn off Mentions in muted chats was not checked. Not checked: `alice` on a phone, an
+admin who is not anonymous or not the creator, the automatic copy for an ordinary member who muted the group, the
+clients' notification exceptions for a chat, and a comment with `disable_notification`. — _2026-11-15 · one channel post
+and three comments under its copy, watched in the clients · Bot API 10.4, Telegram Desktop for macOS and a phone client,
+versions not recorded_ · Used in C-27.FR-8, C-28, C-32.FR-11.
+
 ## Mattermost
 
 Unless an entry says otherwise, the facts were checked on 2026-10-04 against a test Mattermost 11.2.2 server
@@ -1034,11 +1078,15 @@ Before the stories of L2, these spikes check what the core of L2 relies on:
 - **Push of Mentions in Threads** (C-32). Whether a Mention in a Thread reply reaches a person's phone as a push: in
   Mattermost (the mobile app through the push proxy, under `PushNotificationContents` `full` and `generic`), in Slack (a
   bot's Thread reply with `<@U…>`) and in Telegram (a comment in a channel's discussion group with a `tg://user?id=`
-  link, also when the person muted the group). Until it is checked, the documentation says that at night only a
-  Notification gateway is reliable (C-32.FR-20). To check on the test stands with a person's phone.
-- **Telegram** (C-27.FR-8, C-28). Whether a `tg://user?id=` Mention in a comment rings a member of the discussion group
-  who muted it, and whether the bot can tell with `getChatMember` that a person is not in the discussion group, which the
-  warning about an unreachable On-call uses. Forum topics and plain group chats are checked with the later part of L2.
+  link, when the person did not mute the group; F-129 saw it reach the phone of a member who muted it). Until it is
+  checked, the documentation says that at night only a Notification gateway is reliable (C-32.FR-20). To check on the
+  test stands with a person's phone.
+- **Telegram** (C-27.FR-8, C-28). Forum topics and plain group chats are checked with the later part of L2. Left open by
+  F-128 and F-129: what `getChatMember` answers in the discussion group about a person the bot never saw and about one
+  removed or banned from it, and how soon after a leave it answers `left`; whether a Mention in a muted discussion group
+  rings an admin who is not anonymous or not the creator, and the anonymous creator on a phone; whether the automatic
+  copy rings an ordinary member who muted the group; the clients' notification exceptions for a chat; and a comment with
+  `disable_notification`.
 
 Earlier pending checks:
 

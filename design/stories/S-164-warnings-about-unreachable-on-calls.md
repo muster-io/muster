@@ -36,7 +36,7 @@ files_touched:
 acceptance:
   - "[C-27.FR-8, C-27.AC-6] An On-call without a Mattermost Account link for the Connection of a Mattermost Destination of their Team has, in `getScheduleOnCall`, a warning `unreachable` with the person, the Destination, the messenger `mattermost` and the reason `no_account_link` for the current segment and for each segment of the next `schedule.gap_view` in which they are On-call, and `getOnCallNow` marks the Team's On-call `unreachable` with the same; an On-call with the link has none (`reach_test.go`, `oncallnow_test.go`, `schedule_reach_test.go`)."
   - "[C-27.FR-8] The reasons follow the Destination: `no_account_link` for a Mattermost, Slack, Telegram or Bridge Destination without the person's Account link in the Identity space of its Connection; `bridge_no_native_mentions` for a Bridge Destination whose bridge does not declare `native_mentions`; `webhook_no_thread_reply` for an outgoing webhook Destination in template mode without a \"reply in thread\" request; `not_in_discussion_group` for a Telegram Destination whose last Destination check saw the person outside its discussion group; an outgoing webhook in events mode has no warning (`reach_test.go`)."
-  - "[C-27.FR-8] The Destination check of a Telegram Destination of a Team calls `getChatMember` of its discussion group for each person of the Teams that name it who has a Telegram Account link for its Connection, as F-NNN of S-132 says, records the Muster Users who are not members with the time of the check, and passes with the item `discussion_group_members` whose `absent_users` names them; a failed `getChatMember` call of one person leaves that person unknown and does not fail the check (`destcheck_test.go`)."
+  - "[C-27.FR-8] The Destination check of a Telegram Destination of a Team calls `getChatMember` of its discussion group for each person of the Teams that name it who has a Telegram Account link for its Connection, records as not members, with the time of the check, the Muster Users it answers with the status `left` or `kicked` or with `400` `Bad Request: PARTICIPANT_ID_INVALID` (F-128), and passes with the item `discussion_group_members` whose `absent_users` names them; any other failed `getChatMember` call of one person leaves that person unknown and does not fail the check (`destcheck_test.go`)."
   - "[C-27.FR-9] `getOnCallNow` gives each Team's On-call `unreachable` ({`destination`, `messenger`, `reason`}[]) for the current segment (`oncallnow_test.go`)."
   - "[C-27.FR-14] Concepts → Schedules has \"Unreachable On-calls\" with each reason and what to do about it; `make docs-check` passes."
 verify: "make ci test-integration e2e-go docs-check"
@@ -91,12 +91,18 @@ issue: 453
 - **Telegram Destination check** (`internal/telegram/destcheck.go`): after its steps of C-14.FR-14 pass, on save, on
   "Check" and in `muster doctor` — never as the Broken probe — the step `discussion_group_members` calls `getChatMember`
   of the discussion group for each User with a Telegram Account link for the Connection who is in a Team that names the
-  Destination (settled 1), through the interactive client class like the other steps, and stores the people whose
-  status is `left` or `kicked`, or whom the answer does not know, as the facts of S-132 say; the step always passes.
-  `internal/destinations` stores the result.
-- **Fake Telegram server** (`internal/fakes/faketelegram/chats.go`): `getChatMember` answers a person who never joined
-  a chat as the facts of S-132 say — `left` until then, as today — and `PUT /_fake/chats/{chat}/members/{user}` sets a
-  person's membership.
+  Destination (settled 1), through the interactive client class like the other steps, and stores the people whose status
+  is `left` or `kicked`, and those it answers `400` `Bad Request: PARTICIPANT_ID_INVALID`, as Telegram answers a
+  subscriber of the channel who was never in the discussion group (F-128); any other error leaves the person unknown.
+  `creator`, `administrator` and `member` count as in the group, an admin with `is_anonymous` included, and `restricted`
+  by its `is_member`, as the Bot API reference documents (not seen in F-128). A leave reaches the answer only after a
+  while — `member` about 20 s after it, `left` about 70 s after (F-128) — so a check just after a leave may still see
+  the person in the group, until the next check. The step always passes. `internal/destinations` stores the result.
+- **Fake Telegram server** (`internal/fakes/faketelegram/chats.go`): in a supergroup, such as a discussion group,
+  `getChatMember` answers a person who is not one of the fake's bots and has no membership there with `400`
+  `Bad Request: PARTICIPANT_ID_INVALID` (F-128) instead of `left` as today; a channel keeps answering `left`, which no
+  fact checked, and the fake's bots keep their answers (F-003). `PUT /_fake/chats/{chat}/members/{user}` sets a
+  person's membership, `left` included, which `getChatMember` answers at once.
 - **AGENTS.md**: the paragraph on development mode names the answers of `getChatMember` and `PUT
   /_fake/chats/{chat}/members/{user}` of the fake Telegram server.
 - **Imports** (ADR-0016): `schedules` imports `mentions` for `IdentitySpace`; `mentions` never imports `schedules`
@@ -109,7 +115,8 @@ issue: 453
 - **Log events, metrics**: none new.
 - **Documentation**: `docs/concepts/schedules.md` — "Unreachable On-calls": the reasons, linking an account in the
   profile, a bridge that declares `native_mentions`, the "reply in thread" request of an outgoing webhook, joining the
-  discussion group of a Telegram channel and checking the Destination again.
+  discussion group of a Telegram channel and checking the Destination again, and that a leave may show in the check
+  only some time later, about a minute in F-128.
 
 ## Steps
 
@@ -148,9 +155,10 @@ curl -s "${A[@]}" "$API/on-call-now" | jq -c '.items[] | select(.team.slug == "p
 
 `test/e2e/schedule_reach_test.go` repeats this and adds a Bridge Destination of the Team on a fake bridge whose `info`
 declares no `native_mentions` (`bridge_no_native_mentions`), an outgoing webhook in template mode without "reply in
-thread" (`webhook_no_thread_reply`), and a Telegram Destination of the Team with a person linked to Telegram whom
-`PUT /_fake/chats/{group}/members/{user}` leaves out of the discussion group: after "Check" the warning
-`not_in_discussion_group` appears, and after the person joins and "Check" runs again it is gone.
+thread" (`webhook_no_thread_reply`), and a Telegram Destination of the Team with a person linked to Telegram who was
+never in the discussion group, whom the fake answers `400` `Bad Request: PARTICIPANT_ID_INVALID` (F-128): after "Check"
+the warning `not_in_discussion_group` appears; after `PUT /_fake/chats/{group}/members/{user}` makes the person a
+member and "Check" runs again it is gone, and after it sets them `left` and "Check" runs again it is back.
 
 ## Open questions
 
@@ -171,8 +179,13 @@ None open. Settled:
   every Destination type. It takes the next free ID, S-164, and keeps its place after S-133 in the story map.
 - The warning never changes delivery: a Mention entry of the On-call still records "Mention not delivered" (S-165) when
   it reaches nobody; the warning only says it ahead of time.
-- The facts of S-132 decide how a person the bot never saw is answered; until they are recorded the fake keeps
-  answering `left`.
+- F-128 settles the answers the step relies on: `400` `Bad Request: PARTICIPANT_ID_INVALID` for a subscriber of the
+  channel who was never in the discussion group, and `left` a while after a leave; the privacy setting for groups and
+  channels did not change the answer about the creator. A person the bot never saw was not checked: if Telegram answers
+  them with another error, they stay unknown and get no warning until a fact says otherwise. F-129 found that a Mention
+  in a muted discussion group did not ring its anonymous creator; the check sees such a person only as `creator` or
+  `is_anonymous`, never the mute, and C-27.FR-8 names no such reason, so the warning does not use it and the
+  documentation says it (S-137).
 
 ## Coverage
 

@@ -47,8 +47,12 @@ issue: 426
 - **Examples**: generic and from C-27's scenarios only — Teams `payments`, `devops`, `search`; people `petr`, `sergey`,
   `olga`, `ivan`; Rotation layers "Around the clock" and "Working hours 11–19". No employer and no work-specific system
   is named.
-- **Facts**: what S-132 recorded about Mentions in a muted discussion group of Telegram is said where the page explains
-  unreachable On-calls, citing the fact.
+- **Facts**: where the page explains unreachable On-calls, what S-132 recorded about Telegram, citing the facts: a
+  `tg://user?id=` Mention in a comment rang a member of the discussion group who had muted it, on the desktop and on the
+  phone, so an On-call may mute the discussion group (F-129); it did not ring the group's creator, anonymous in it, who
+  had muted it, so an On-call who created the discussion group or is anonymous in it does not mute it, which the
+  Destination check cannot see (F-129); and a person who leaves the discussion group may show as unreachable only some
+  time later, about a minute in F-128.
 - **Screenshots** (`web/e2e/screenshots/schedules.spec.ts`, Playwright on `muster dev`): the Schedule page with the
   two-week view, a gap and a warning; the Override form in the mode "I give my Shift to…"; "On call now" on the Home
   page; the images go to `docs/assets/screenshots/concepts/schedules/` and are never listed.
