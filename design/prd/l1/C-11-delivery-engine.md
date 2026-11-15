@@ -57,13 +57,15 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md).
   Destination's and a Connection's limiters goes in this order: the Publications, final edits and edits of Root messages
   that Alerts, Commands and timers with a lifecycle event make, of Urgent Alert Groups; the configuration edits of
   Urgent Alert Groups; the same work of the other Alert Groups; the Thread replies; the events of outgoing webhooks; the
-  configuration edits of the other Alert Groups. Each rank goes oldest first. Every rank after the first is claimed one
-  batch at a time, so the Root messages of Urgent Alert Groups wait behind work that is not Urgent for at most one
-  claimed batch of it, and a re-render delays the work before it by at most one claimed batch of its edits; Thread
-  replies and webhook events, Urgent or not, come after the Root-message work of both. Configuration edits that are not
-  Urgent wait as long as the work before them uses up the limiter, which in a Telegram chat at 10 calls a minute is
-  about three Alert Groups a minute that resolve and reopen; none is dropped, and one that waits is carried by the next
-  change of its Alert Group.
+  configuration edits of the other Alert Groups. Each rank goes oldest first by the time its work is due: a delivery
+  that a limiter refused is due again only once the limiter's token is due plus a short margin, so newer work of its
+  rank that came due before then may take that token first, while the work of later ranks waits for the refused
+  delivery. Every rank after the first is claimed one batch at a time, so the Root messages of Urgent Alert Groups
+  wait behind work that is not Urgent for at most one claimed batch of it, and a re-render delays the work before it
+  by at most one claimed batch of its edits; Thread replies and webhook events, Urgent or not, come after the
+  Root-message work of both. Configuration edits that are not Urgent wait as long as the work before them uses up the
+  limiter, which in a Telegram chat at 10 calls a minute is about three Alert Groups a minute that resolve and reopen;
+  none is dropped, and one that waits is carried by the next change of its Alert Group.
 - **C-11.FR-4** New Alerts are sent to the Thread with a leading and a trailing edge: the first immediately, opening the
   Thread batching window (`route.thread_batching_window`, a Route policy field added here); everything else that arrives
   within the window as one reply when it closes. After a quiet period longer than the window, the next one is again
@@ -227,12 +229,19 @@ every error class, and a virtual clock; messenger-specific checks are in C-13 to
   the limiter of one Destination, the round makes at most one claimed batch of refused calls to that Destination. A
   Thread reply or a webhook event due in another Destination whose limiter has tokens is sent after only the
   Root-message work due before it in such Destinations, within about one round of the delivery worker.
-- **C-11.AC-18** _Revised for L2 (2026-11-15, #546, #553):_ With 300 Urgent edits of Root messages that Alerts made
-  waiting for the limiter of one Destination, whose limiter has a token again during the round, the round attempts each
-  of them at most once, makes at most one claimed batch of refused calls to that Destination per pass over the Urgent
-  work, and sends the work due in other Destinations whose limiters have tokens and reaches the next Organization within
-  that round. An Urgent Publication that comes due during the round goes out within one claimed batch, behind the
-  Root-message work of its rank due before it.
+- **C-11.AC-18** _Revised for L2 (2026-11-15, #546, #553; corrected 2026-11-15, #554, #559):_ With 300 Urgent edits of
+  Root messages that Alerts made waiting for the limiter of one Destination, whose limiter has a token again during the
+  round, the round attempts each of them at most once, makes at most one claimed batch of refused calls to that
+  Destination per pass over the Urgent work and one per claimed batch of the Urgent work due now that finds the
+  Destination's token due, and sends the work due in other Destinations whose limiters have tokens and reaches the next
+  Organization within that round. An Urgent Publication that comes due during the round goes out within one claimed
+  batch, behind the Root-message work of its rank due before it.
+- **C-11.AC-19** _Added for L2 (2026-11-15, #554, #547, #559):_ With 8 Urgent edits and 500 configuration edits that are
+  not Urgent waiting for the limiter of one Destination at 1 call a second, every Urgent edit is sent before any
+  configuration edit; within one replica no delivery takes a token of a Destination's or a Connection's limiter that a
+  refused delivery of an earlier rank waits for. With 1000 edits waiting for the limiter of a Telegram chat at 10 calls
+  a minute, the worker makes about one claimed batch of refused calls per message sent and sleeps until the next token,
+  and a raised limit is applied to the Urgent work at its next token.
 
 ## Related ADRs
 
