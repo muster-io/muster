@@ -117,7 +117,7 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   |---|---|---|
   | Mattermost | a Thread reply with `@username` | they have an Account link for the Connection; push to phones is [still to be verified](../../facts.md#pending) |
   | Slack | a Thread reply with `<@U…>` | they have an Account link for the Connection; push to phones is still to be verified |
-  | Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group ([F-014](../../facts.md#notifications)) |
+  | Telegram | a comment in the discussion group with a `tg://user?id=` link | they have a Telegram Account link and are in the discussion group ([F-014](../../facts.md#notifications)); the creator of the group, anonymous in it, who muted it was not rung by a Mention ([F-129](../../facts.md#members-and-mentions-in-the-discussion-group)) |
   | Bridge | a Thread reply with a Mention marker (C-22.FR-16) | they have an Account link for the Connection and the bridge declares `native_mentions`; otherwise their plain name reaches nobody |
   | Outgoing webhook, events mode | the event `paged`, with the people as `mentions` data (C-15.FR-11) | the receiver acts on it |
   | Outgoing webhook, template mode | the "reply in thread" request, when it has one | the receiver acts on it |
