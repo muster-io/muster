@@ -71,14 +71,16 @@ type RotationLayerShifts struct {
 	Shifts        []RotationLayerShift
 }
 
-// Warning names a person of a Rotation layer or of an Override in the period who may not be Paged, or with the kind
-// gap a gap of the period, from Start to End, and no person.
+// Warning names a person of a Rotation layer or of an Override in the period who may not be Paged; with the kind gap
+// a gap of the period, from Start to End, and no person; or with the kind unreachable a segment from Start to End in
+// which a Mention of its person, On-call by the Rotation layer or the Override, cannot reach Unreachable.Destination.
 type Warning struct {
 	Kind          string
 	User          Person
 	RotationLayer *RotationLayerRef
 	Override      string
 	Start, End    time.Time
+	Unreachable   *Unreachable
 }
 
 // Result is the Result of a Schedule over a period: its segments, the Shifts of each Rotation layer, from the lowest,
@@ -240,4 +242,29 @@ func sameSource(a, b *Source) bool {
 		return a == b
 	}
 	return *a == *b
+}
+
+// unreachableWarnings are the warnings unreachable of the Result of a Schedule of the Team team (C-27.FR-8): for each
+// segment with a person, in order, one for each Destination of the Team that a Mention of the person cannot reach.
+func unreachableWarnings(res Result, team int64, r reach) []Warning {
+	var out []Warning
+	for _, seg := range res.Segments {
+		if seg.User == nil {
+			continue
+		}
+		for _, u := range r.unreachable(team, seg.User.ID) {
+			w := Warning{Kind: WarningUnreachable, User: *seg.User, Start: seg.Start, End: seg.End, Unreachable: &u}
+			if seg.Source != nil {
+				switch seg.Source.Kind {
+				case SourceOverride:
+					w.Override = seg.Source.Override
+				case SourceRotationLayer:
+					ref := seg.Source.RotationLayer
+					w.RotationLayer = &ref
+				}
+			}
+			out = append(out, w)
+		}
+	}
+	return out
 }

@@ -18,19 +18,22 @@ import (
 
 // TeamOnCall is a Team in "On call now" (C-27.FR-9): its main Schedule, nil for a Team without one, with the segment
 // of its Result at the business clock's now and the one that follows within schedule.gap_view, nil when the current
-// one lasts beyond it. A segment without a person is a gap.
+// one lasts beyond it. A segment without a person is a gap. Unreachable are the Destinations of the Team that a
+// Mention of the current On-call cannot reach (C-27.FR-8), empty in a gap and without a main Schedule.
 type TeamOnCall struct {
 	Team     TeamRef
 	Schedule *Schedule
 	Current  *Segment
 	Next     *Segment
 	// Until is the end of the current segment, nil when it lasts beyond schedule.gap_view.
-	Until *time.Time
+	Until       *time.Time
+	Unreachable []Unreachable
 }
 
 // OnCallNow lists every Team that is not deleted by name — or with memberID those of that User, "My Teams" — each with
-// the On-call of its main Schedule now, until when and what follows (C-27.FR-9). The Results of the main Schedules are
-// computed together, from the business clock's now over schedule.gap_view.
+// the On-call of its main Schedule now, until when, what follows and the Destinations of the Team that cannot mention
+// them (C-27.FR-8, FR-9). The Results of the main Schedules are computed together, from the business clock's now over
+// schedule.gap_view, and the reach of their On-calls is read once.
 func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, error) {
 	p := dbgen.ListOnCallTeamsParams{OrgID: s.orgID}
 	if memberID != 0 {
@@ -41,6 +44,9 @@ func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, 
 		return nil, fmt.Errorf("list the teams for on call now: %w", err)
 	}
 	out := make([]TeamOnCall, len(rows))
+	for i := range out {
+		out[i].Unreachable = []Unreachable{}
+	}
 	var mains []Schedule
 	var at []int // the position in out of each main Schedule
 	for i, r := range rows {
@@ -63,9 +69,22 @@ func (s *Service) OnCallNow(ctx context.Context, memberID int64) ([]TeamOnCall, 
 	if err != nil {
 		return nil, err
 	}
+	teams, people := map[int64]bool{}, map[int64]bool{}
+	for j, sc := range mains {
+		if u := res[j].Segments[0].User; u != nil {
+			teams[sc.Team.ID], people[u.ID] = true, true
+		}
+	}
+	r, err := s.readReach(ctx, s.store, teams, people)
+	if err != nil {
+		return nil, err
+	}
 	for j, i := range at {
 		sc, segs := mains[j], res[j].Segments
 		out[i].Schedule, out[i].Current = &sc, &segs[0]
+		if u := segs[0].User; u != nil {
+			out[i].Unreachable = r.unreachable(sc.Team.ID, u.ID)
+		}
 		cur := run(segs, 0)
 		if cur == len(segs) {
 			continue

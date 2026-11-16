@@ -963,6 +963,7 @@
         "channel": "Канал",
         "channelExists": "Канал существует",
         "discussionGroup": "Группа обсуждения",
+        "discussionGroupMembers": "Участники группы обсуждения",
         "token": "Токен"
       },
       "itemsLabel": "Проверки",

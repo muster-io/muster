@@ -522,7 +522,8 @@ func overrideViewOf(o Override) overrideView {
 }
 
 // OnCall is the Result of the Schedule scheduleID from from to to: by default from the business clock's now to
-// schedule.gap_view after it. A from or a to more than Reach from now is an out_of_range FieldError at /query/from or
+// schedule.gap_view after it, with the warnings of its gaps and of the segments whose On-call a Destination of the
+// Team cannot mention (C-27.FR-7, FR-8). A from or a to more than Reach from now is an out_of_range FieldError at /query/from or
 // /query/to; so is a to that is not after from, or later than the length of ical.window after it.
 func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.Time) (Result, error) {
 	now := s.clock.Now().UTC()
@@ -555,6 +556,9 @@ func (s *Service) OnCall(ctx context.Context, scheduleID string, from, to *time.
 		return Result{}, err
 	}
 	res.Warnings = append(res.Warnings, gapWarnings(res)...)
+	if err := s.withReach(ctx, s.store, sc.Team.ID, &res); err != nil {
+		return Result{}, err
+	}
 	return res, nil
 }
 

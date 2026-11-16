@@ -1626,7 +1626,7 @@ func probeTelegramAdapter(ctx context.Context, svc *connections.Service, clocks 
 	errs = append(errs, probeTester(ctx, &telegram.Tester{Adapter: a, Path: path, Renderer: probeRenderer(clocks),
 		Real: clocks.Real}, dest))
 	res, err := svc.CheckTelegramChannel(ctx, destinations.TelegramChannelCheck{Connection: publicID,
-		Destination: &dest.ID, ChannelID: "@probe"})
+		Destination: &dest.ID, ChannelID: "@probe", People: []telegram.GroupPerson{{UserID: 1, TelegramID: 4242}}})
 	errs = append(errs, err, errors.New(string(res.Check.Outcome.Error)))
 	for _, st := range res.Check.Steps {
 		errs = append(errs, errors.New(st.Message))
@@ -3582,6 +3582,13 @@ func (s *probeConnections) ListTelegramDestinations(context.Context, int64) ([]c
 	return []cdb.ListTelegramDestinationsRow{{ID: 1, PublicID: "DSAAAAAAAAAAA1", Name: "probe",
 		ConnectionID: pgtype.Int8{Int64: 1, Valid: true}, TelegramChannelID: pgtype.Text{String: "@probe",
 			Valid: true}}}, nil
+}
+
+// ListTelegramDestinationPeople is one person of the Teams of the probe Destination, whom the doctor's step
+// discussion_group_members asks the stand-in about with the probed bot token.
+func (s *probeConnections) ListTelegramDestinationPeople(context.Context, cdb.ListTelegramDestinationPeopleParams) (
+	[]cdb.ListTelegramDestinationPeopleRow, error) {
+	return []cdb.ListTelegramDestinationPeopleRow{{ID: 1, Login: "probe", ExternalID: "4242"}}, nil
 }
 
 // GetSlackDestinationTarget is the Destination 3 of the Connection, on the stand-in's channel C0PROBE01, with the

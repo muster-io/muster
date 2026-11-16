@@ -1259,23 +1259,72 @@ func (q *Queries) ListSocketConnections(ctx context.Context, orgID int64) ([]Lis
 	return items, nil
 }
 
+const listTelegramDestinationPeople = `-- name: ListTelegramDestinationPeople :many
+SELECT u.id, u.login, al.external_id
+FROM users u
+JOIN account_links al ON al.org_id = u.org_id AND al.user_id = u.id AND al.identity_space = 'telegram'
+WHERE u.org_id = $1 AND u.status = 'active' AND u.role <> 'viewer'
+  AND EXISTS (SELECT 1
+              FROM team_destinations td
+              JOIN teams t ON t.org_id = td.org_id AND t.id = td.team_id AND t.deleted_at IS NULL
+              JOIN team_users tu ON tu.org_id = td.org_id AND tu.team_id = td.team_id
+              WHERE td.org_id = $1 AND td.destination_id = $2 AND tu.user_id = u.id)
+ORDER BY lower(u.name), u.id
+`
+
+type ListTelegramDestinationPeopleParams struct {
+	OrgID         int64
+	DestinationID int64
+}
+
+type ListTelegramDestinationPeopleRow struct {
+	ID         int64
+	Login      string
+	ExternalID string
+}
+
+// ListTelegramDestinationPeople lists the active Users who are not Viewers — whom a Schedule never makes On-call — in
+// a Team that is not deleted and names the Telegram Destination (C-26.FR-1), with a Telegram Account link, with the
+// Telegram user id of the link, by name: the people whose membership of its discussion group muster doctor reads
+// (C-27.FR-8).
+func (q *Queries) ListTelegramDestinationPeople(ctx context.Context, arg ListTelegramDestinationPeopleParams) ([]ListTelegramDestinationPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listTelegramDestinationPeople, arg.OrgID, arg.DestinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTelegramDestinationPeopleRow{}
+	for rows.Next() {
+		var i ListTelegramDestinationPeopleRow
+		if err := rows.Scan(&i.ID, &i.Login, &i.ExternalID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTelegramDestinations = `-- name: ListTelegramDestinations :many
-SELECT id, public_id, name, connection_id, telegram_channel_id
+SELECT id, public_id, name, connection_id, telegram_channel_id, telegram_discussion_chat_id
 FROM destinations
 WHERE org_id = $1 AND type = 'telegram' AND deleted_at IS NULL
 ORDER BY id
 `
 
 type ListTelegramDestinationsRow struct {
-	ID                int64
-	PublicID          string
-	Name              string
-	ConnectionID      pgtype.Int8
-	TelegramChannelID pgtype.Text
+	ID                       int64
+	PublicID                 string
+	Name                     string
+	ConnectionID             pgtype.Int8
+	TelegramChannelID        pgtype.Text
+	TelegramDiscussionChatID pgtype.Int8
 }
 
-// ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection
-// and channel, for muster doctor.
+// ListTelegramDestinations lists the Telegram Destinations that are not deleted, in id order, with their Connection,
+// channel and stored discussion group, for muster doctor.
 func (q *Queries) ListTelegramDestinations(ctx context.Context, orgID int64) ([]ListTelegramDestinationsRow, error) {
 	rows, err := q.db.Query(ctx, listTelegramDestinations, orgID)
 	if err != nil {
@@ -1291,6 +1340,7 @@ func (q *Queries) ListTelegramDestinations(ctx context.Context, orgID int64) ([]
 			&i.Name,
 			&i.ConnectionID,
 			&i.TelegramChannelID,
+			&i.TelegramDiscussionChatID,
 		); err != nil {
 			return nil, err
 		}

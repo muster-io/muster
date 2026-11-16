@@ -389,3 +389,30 @@ WHERE t.org_id = @org_id AND t.deleted_at IS NULL
         FROM team_users tu
         WHERE tu.org_id = @org_id AND tu.team_id = t.id AND tu.user_id = sqlc.narg('member_id')::bigint))
 ORDER BY lower(t.name), t.id;
+
+-- ListTeamReach reads the Destinations of the Teams @team_ids that are not deleted — their part of the reach rule of
+-- C-26.FR-1, every condition included, as delivery reads them — by Team and the Destination's name, with what decides
+-- whether a Mention of an On-call reaches each (C-27.FR-8): the Connection, the mode of an outgoing webhook and
+-- whether its template has a "reply in thread" request, whether the info the Connection of a Bridge Destination last
+-- read declares native_mentions — false while none was read — and the Users the last check of a Telegram Destination
+-- saw outside its discussion group.
+-- name: ListTeamReach :many
+SELECT td.team_id, d.id, d.public_id, d.name, d.type, d.health, d.broken_since, d.broken_reason, d.connection_id,
+       coalesce(d.webhook_mode, '')::text AS webhook_mode,
+       coalesce(jsonb_typeof(d.webhook_template_config -> 'reply_in_thread') = 'object', false)::boolean
+           AS reply_in_thread,
+       coalesce(c.bridge_info -> 'capabilities' -> 'native_mentions' = 'true'::jsonb, false)::boolean
+           AS native_mentions,
+       coalesce(d.telegram_absent_user_ids, '{}')::bigint[] AS telegram_absent_user_ids
+FROM team_destinations td
+JOIN destinations d ON d.org_id = td.org_id AND d.id = td.destination_id
+LEFT JOIN connections c ON c.org_id = d.org_id AND c.id = d.connection_id
+WHERE td.org_id = @org_id AND td.team_id = ANY(@team_ids::bigint[]) AND d.deleted_at IS NULL
+ORDER BY td.team_id, lower(d.name), d.id;
+
+-- ListAccountLinkSpaces reads the Identity spaces in which the Users @user_ids have an Account link (C-27.FR-8).
+-- name: ListAccountLinkSpaces :many
+SELECT user_id, identity_space
+FROM account_links
+WHERE org_id = @org_id AND user_id = ANY(@user_ids::bigint[])
+ORDER BY user_id, identity_space;

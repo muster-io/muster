@@ -13,6 +13,7 @@ import (
 
 	"github.com/muster-io/muster/internal/api/gen"
 	"github.com/muster-io/muster/internal/auth"
+	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/publicid"
 	"github.com/muster-io/muster/internal/schedules"
 )
@@ -230,7 +231,12 @@ func (s *Server) GetOnCallNow(ctx context.Context, req gen.GetOnCallNowRequestOb
 // teamOnCallOf is the API form of a Team in "On call now".
 func teamOnCallOf(t schedules.TeamOnCall) gen.TeamOnCall {
 	team := gen.TeamRef{Id: t.Team.PublicID, Name: t.Team.Name, Slug: t.Team.Slug, Deleted: t.Team.Deleted}
-	out := gen.TeamOnCall{Team: team, NoSchedule: t.Schedule == nil}
+	out := gen.TeamOnCall{Team: team, NoSchedule: t.Schedule == nil, Unreachable: make([]gen.OnCallReach, 0,
+		len(t.Unreachable))}
+	for _, u := range t.Unreachable {
+		out.Unreachable = append(out.Unreachable, gen.OnCallReach{Destination: reachDestinationOf(u.Destination),
+			Messenger: gen.DestinationType(u.Messenger), Reason: gen.ReachReason(u.Reason)})
+	}
 	out.Schedule.SetNull()
 	out.User.SetNull()
 	out.RotationLayer.SetNull()
@@ -514,5 +520,21 @@ func warningOf(w schedules.Warning) gen.ScheduleWarning {
 	if w.Override != "" {
 		out.OverrideId.Set(w.Override)
 	}
+	out.Destination.SetNull()
+	out.Messenger.SetNull()
+	out.Reason.SetNull()
+	if u := w.Unreachable; u != nil {
+		out.Start.Set(w.Start.UTC())
+		out.End.Set(w.End.UTC())
+		out.Destination.Set(reachDestinationOf(u.Destination))
+		out.Messenger.Set(gen.DestinationType(u.Messenger))
+		out.Reason.Set(gen.ReachReason(u.Reason))
+	}
 	return out
+}
+
+// reachDestinationOf is the API form of a Destination that a Mention of an On-call cannot reach.
+func reachDestinationOf(d schedules.DestinationRef) gen.DestinationRef {
+	return gen.DestinationRef{Id: d.PublicID, Name: d.Name, Type: gen.DestinationType(d.Type),
+		Health: healthOf(destinations.Health{State: d.Health, Since: d.BrokenSince, Reason: d.BrokenReason})}
 }

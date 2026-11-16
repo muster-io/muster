@@ -17,6 +17,7 @@ import (
 	"github.com/muster-io/muster/internal/destinations"
 	"github.com/muster-io/muster/internal/logging"
 	"github.com/muster-io/muster/internal/mentions"
+	"github.com/muster-io/muster/internal/telegram"
 	"github.com/muster-io/muster/internal/webhooks"
 )
 
@@ -208,7 +209,8 @@ func (s *Server) UpdateDestination(ctx context.Context, req gen.UpdateDestinatio
 
 // CheckDestination is checkDestination (C-13.FR-10, C-14.FR-14, C-22.FR-3, C-24.FR-3) on the interactive path: each
 // check with its result, its English message, the code clients translate and the scopes a missing_scope names (D396),
-// and the health after it; a passing check ends a Broken state.
+// and the health after it, with the people a Telegram Destination's step discussion_group_members saw outside its
+// discussion group (C-27.FR-8); a passing check ends a Broken state.
 func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationRequestObject) (
 	gen.CheckDestinationResponseObject, error) {
 	res, err := s.destinations.Check(ctx, req.DestinationId)
@@ -232,6 +234,14 @@ func (s *Server) CheckDestination(ctx context.Context, req gen.CheckDestinationR
 		if len(it.MissingScopes) > 0 {
 			scopes := slices.Clone(it.MissingScopes)
 			item.MissingScopes = &scopes
+		}
+		if it.Name == telegram.StepDiscussionGroupMembers {
+			users := make([]gen.UserRef, 0, len(it.AbsentUsers))
+			for _, u := range it.AbsentUsers {
+				users = append(users, gen.UserRef{Id: u.PublicID, Name: u.Name, Login: &u.Login,
+					Deactivated: u.Deactivated})
+			}
+			item.AbsentUsers = &users
 		}
 		out.Checks = append(out.Checks, item)
 	}

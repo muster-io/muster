@@ -409,6 +409,9 @@ type Service struct {
 	tgClients     map[int64]cachedTelegram
 	bridgeClients map[int64]cachedBridge
 	slackClients  map[int64]cachedSlack
+
+	// groupPeopleBudget replaces telegram.GroupPeopleBudget when set, which only tests do.
+	groupPeopleBudget time.Duration
 }
 
 // cachedClient is the client of a version of a Connection.

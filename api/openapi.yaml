@@ -3919,7 +3919,9 @@ paths:
         On-call or none in a gap, the Shifts of each Rotation layer and the Overrides in the period, and the warnings
         about the people who may not be Paged — Viewers, disabled Users and Users not in the Team, whose Shifts and
         Overrides are skipped — followed by a warning `gap` with its `start` and `end` for each gap of the period, cut
-        to it (C-27.FR-7). The period is from `from` to `to`, by default the business clock''s now and
+        to it (C-27.FR-7), and by a warning `unreachable` for each segment of the period with a person, for each
+        Destination of the Schedule''s Team that a Mention of the person cannot reach, with the reason (C-27.FR-8). The
+        period is from `from` to `to`, by default the business clock''s now and
         `schedule.gap_view` after it; `from` and `to` are at most 10 years from now, else `422` `out_of_range` at
         `/query/from` or `/query/to`, and `to` must be after `from` and at most the length of `ical.window` after it,
         else `422` `out_of_range` at `/query/to`. A wall-clock time that a change of the clocks skips is the instant the
@@ -4205,8 +4207,9 @@ paths:
       summary: Read who is On-call now in each Team
       description: '"On call now" (C-27.FR-9): for each Team that is not deleted, sorted by name ignoring case, the
         On-call of its main Schedule at the business clock''s now with the Rotation layer that decides it, until when,
-        and the segment that follows — its person, or a gap — within `schedule.gap_view`; a Team without a main Schedule
-        has `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
+        and the segment that follows — its person, or a gap — within `schedule.gap_view`, and the Destinations of the
+        Team that a Mention of the On-call cannot reach (C-27.FR-8, FR-9); a Team without a main Schedule has
+        `no_schedule` true. Overrides count as in the Result of the Schedule. Every Role reads it.'
       x-permission: schedules:read
       x-listener: app
       security:
@@ -13365,7 +13368,9 @@ components:
     ScheduleWarningKind:
       type: string
       description: '`disabled`, `viewer` and `not_in_team` name a person whose Shifts or Override are skipped; `gap` is
-        a gap of the period, with its `start` and `end` and no person; `unreachable` comes with a later release of 0.2.'
+        a gap of the period, with its `start` and `end` and no person; `unreachable` is a segment of the period, with its
+        `start` and `end`, in which its person is On-call and a Mention of them cannot reach the `destination`, with
+        the `messenger` and the `reason` (C-27.FR-8).'
       enum:
       - disabled
       - viewer
@@ -13381,6 +13386,9 @@ components:
       - override_id
       - start
       - end
+      - destination
+      - messenger
+      - reason
       properties:
         kind:
           $ref: '#/components/schemas/ScheduleWarningKind'
@@ -13390,23 +13398,72 @@ components:
           - $ref: '#/components/schemas/UserRef'
           - type: 'null'
         rotation_layer:
+          description: The Rotation layer of the Shifts that are skipped, or for `unreachable` the one whose Shift makes
+            the person On-call in the segment; null otherwise.
           oneOf:
           - $ref: '#/components/schemas/EntityRef'
           - type: 'null'
         override_id:
           $ref: '#/components/schemas/NullablePublicId'
+          description: The Override that is skipped, or for `unreachable` the one that makes the person On-call in the
+            segment; null otherwise.
         start:
-          description: The start of the gap, cut to the period; null for another kind.
+          description: The start of the gap, or of the segment of `unreachable`, cut to the period; null for another
+            kind.
           type:
           - string
           - 'null'
           format: date-time
         end:
-          description: The end of the gap, cut to the period; null for another kind.
+          description: The end of the gap, or of the segment of `unreachable`, cut to the period; null for another kind.
           type:
           - string
           - 'null'
           format: date-time
+        destination:
+          description: The Destination of the Team that a Mention of the person cannot reach; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/DestinationRef'
+          - type: 'null'
+        messenger:
+          description: The messenger of `destination` — the type of its Connection, or `webhook` for an outgoing
+            webhook; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/DestinationType'
+          - type: 'null'
+        reason:
+          description: Why a Mention of the person cannot reach `destination`; null for another kind.
+          oneOf:
+          - $ref: '#/components/schemas/ReachReason'
+          - type: 'null'
+    ReachReason:
+      type: string
+      description: 'Why a Mention of an On-call cannot reach a Destination of their Team (C-27.FR-8): `no_account_link`
+        — the person has no Account link in the Identity space of the Connection of a Mattermost, Slack, Telegram or
+        Bridge Destination; `bridge_no_native_mentions` — the bridge of a Bridge Destination does not declare
+        `native_mentions` in the `info` its Connection check last read; `webhook_no_thread_reply` — an outgoing
+        webhook in template mode has no "reply in thread" request; `not_in_discussion_group` — the last Destination
+        check of a Telegram Destination saw the person outside the discussion group of its channel.'
+      enum:
+      - no_account_link
+      - bridge_no_native_mentions
+      - webhook_no_thread_reply
+      - not_in_discussion_group
+    OnCallReach:
+      type: object
+      description: A Destination of the Team that a Mention of its On-call cannot reach, with why (C-27.FR-8).
+      required:
+      - destination
+      - messenger
+      - reason
+      properties:
+        destination:
+          $ref: '#/components/schemas/DestinationRef'
+        messenger:
+          $ref: '#/components/schemas/DestinationType'
+          description: The messenger of the Destination — the type of its Connection, or `webhook`.
+        reason:
+          $ref: '#/components/schemas/ReachReason'
     ScheduleOnCall:
       type: object
       description: The Result of a Schedule over a period, with what it is made of.
@@ -13467,6 +13524,7 @@ components:
       - rotation_layer
       - until
       - next
+      - unreachable
       properties:
         team:
           $ref: '#/components/schemas/TeamRef'
@@ -13501,6 +13559,12 @@ components:
           oneOf:
           - $ref: '#/components/schemas/OnCallNext'
           - type: 'null'
+        unreachable:
+          type: array
+          description: The Destinations of the Team that a Mention of the On-call now cannot reach (C-27.FR-8, FR-9), by
+            the Destination's name; empty in a gap, without a Schedule and when every Destination reaches them.
+          items:
+            $ref: '#/components/schemas/OnCallReach'
     OnCallNext:
       type: object
       description: The segment of a Schedule's Result after the current one, cut to `schedule.gap_view`.
@@ -18157,7 +18221,10 @@ components:
             `bot_rights_channel`; `bot_rights_group` fails when the bot is not an admin of the discussion group (the message
             says to make the bot an admin there). Bridge: `channel`, the bridge''s `checkChannel` — whether the bot can
             post, edit and reply in the channel. Slack: `channel`, `conversations.info` — whether the channel exists, is
-            not archived and has the bot as a member.'
+            not archived and has the bot as a member. Telegram, after the others pass: `discussion_group_members`, which
+            always passes, reads with `getChatMember` whether each person of the Teams that name the Destination, with
+            a Telegram Account link, is in the discussion group, and names in `absent_users` those it saw outside
+            (C-27.FR-8).'
           enum:
           - token
           - bot_in_channel
@@ -18166,6 +18233,7 @@ components:
           - bot_rights_channel
           - bot_rights_group
           - channel
+          - discussion_group_members
         ok:
           type: boolean
         message:
@@ -18182,6 +18250,14 @@ components:
             needed (`needed` of its answer), which clients name in their own words; `message` names them in English.
           items:
             type: string
+        absent_users:
+          type: array
+          description: 'Set with `discussion_group_members` only, omitted otherwise — the people `getChatMember`
+            answered as outside the discussion group (`left`, `kicked`, `restricted` and not a member, or `400` `Bad
+            Request: PARTICIPANT_ID_INVALID`), by name; a person whose call failed otherwise is not named. Telegram shows
+            a leave only a while after it, about a minute.'
+          items:
+            $ref: '#/components/schemas/UserRef'
     NullableDestinationCheckCode:
       type:
       - string

@@ -921,6 +921,7 @@
         "channel": "Channel",
         "channelExists": "Channel exists",
         "discussionGroup": "Discussion group",
+        "discussionGroupMembers": "Members of the discussion group",
         "token": "Token"
       },
       "itemsLabel": "Checks",

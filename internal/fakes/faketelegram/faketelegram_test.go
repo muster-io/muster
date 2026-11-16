@@ -443,6 +443,57 @@ func TestBotOutsideGroupIsForbidden(t *testing.T) {
 	}
 }
 
+// TestPeopleInTheDiscussionGroup is F-128 in the fake: in the discussion group a person who is not one of the fake's
+// bots and has no membership is answered 400 PARTICIPANT_ID_INVALID, while the channel answers left and the bots keep
+// their answers (F-003); PUT /_fake/chats/{chat}/members/{user} sets a membership that getChatMember answers at once —
+// member, then left, restricted with is_member, an anonymous creator — or an error to answer instead.
+func TestPeopleInTheDiscussionGroup(t *testing.T) {
+	_, base := start(t)
+	const person = 424242
+	ask := func(t *testing.T, chat int64) (int, answer) {
+		t.Helper()
+		return bot(t, base, "getChatMember", fmt.Sprintf(`{"chat_id":%d,"user_id":%d}`, chat, person))
+	}
+	if s, a := ask(t, faketelegram.GroupID); s != http.StatusBadRequest || a.ErrorCode != http.StatusBadRequest ||
+		a.Description != faketelegram.DescriptionParticipantInvalid {
+		t.Fatalf("a person never in the group = %d %+v", s, a)
+	}
+	if s, a := ask(t, faketelegram.ChannelID); s != http.StatusOK || !strings.Contains(string(a.Result),
+		`"status":"left"`) {
+		t.Fatalf("a person outside the channel = %d %+v", s, a)
+	}
+	for _, id := range []int64{faketelegram.BotID, faketelegram.SecondBotID} {
+		s, a := bot(t, base, "getChatMember", fmt.Sprintf(`{"chat_id":%d,"user_id":%d}`, faketelegram.GroupID, id))
+		if s != http.StatusOK || !strings.Contains(string(a.Result), `"status":"administrator"`) {
+			t.Fatalf("bot %d in the group = %d %+v", id, s, a)
+		}
+	}
+	put := func(t *testing.T, body string) {
+		t.Helper()
+		if s, b, _ := call(t, http.MethodPut, fmt.Sprintf("%s/_fake/chats/%d/members/%d", base, faketelegram.GroupID,
+			person), body); s != http.StatusOK {
+			t.Fatalf("put %s = %d %s", body, s, b)
+		}
+	}
+	for _, c := range []struct{ body, want string }{
+		{`{"status":"member"}`, `{"status":"member","user":{"id":424242,`},
+		{`{"status":"left"}`, `{"status":"left","user":{"id":424242,`},
+		{`{"status":"restricted","is_member":true}`, `{"status":"restricted","is_member":true,"user":{"id":424242,`},
+		{`{"status":"restricted"}`, `{"status":"restricted","is_member":false,"user":{"id":424242,`},
+		{`{"status":"creator","is_anonymous":true}`, `{"status":"creator","is_anonymous":true,"user":{"id":424242,`},
+		{`{"status":"member","is_anonymous":true,"is_member":false}`, `{"status":"member","user":{"id":424242,`},
+	} {
+		put(t, c.body)
+		if s, a := ask(t, faketelegram.GroupID); s != http.StatusOK || !strings.HasPrefix(string(a.Result), c.want) {
+			t.Errorf("after %s = %d %s", c.body, s, a.Result)
+		}
+	}
+	put(t, `{"error_code":400,"description":"Bad Request: user not found"}`)
+	if s, a := ask(t, faketelegram.GroupID); s != http.StatusBadRequest || a.Description != "Bad Request: user not found" {
+		t.Errorf("a scripted error = %d %+v", s, a)
+	}
+}
+
 const keyboard = `{"inline_keyboard":[[{"text":"Ack","callback_data":"a"}]]}`
 
 // F-011 and F-017: an edit without reply_markup removes the keyboard; an edit that changes nothing is refused.
@@ -670,6 +721,8 @@ func TestChatControl(t *testing.T) {
 		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{"status":"owner"}`},
 		{http.MethodPut, "/_fake/chats/@muster_alerts/members/x", `{"status":"member"}`},
 		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{`},
+		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{"error_code":200,"description":"x"}`},
+		{http.MethodPut, "/_fake/chats/@muster_alerts/members/1", `{"error_code":400}`},
 	} {
 		if s, _, _ := call(t, c.method, base+c.path, c.body); s/100 != 4 {
 			t.Errorf("%s %s = %d", c.method, c.path, s)

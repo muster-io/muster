@@ -116,6 +116,15 @@ func (f *fakeWriter) InsertDestinationUpdate(context.Context, dbgen.InsertDestin
 
 func (f *fakeWriter) NotifyOpenGroupUpdates(context.Context, string) error { return errBoom }
 
+func (f *fakeWriter) ListTelegramGroupPeople(context.Context, dbgen.ListTelegramGroupPeopleParams) (
+	[]dbgen.ListTelegramGroupPeopleRow, error) {
+	return nil, errBoom
+}
+
+func (f *fakeWriter) SetTelegramAbsences(context.Context, dbgen.SetTelegramAbsencesParams) error {
+	return errBoom
+}
+
 // saveWriter is the database of the saves in memory: the Mattermost Connections that are not deleted, the inserted
 // and updated rows, the versions the locks read, the Audit log and the hints.
 type saveWriter struct {
@@ -142,6 +151,34 @@ type saveWriter struct {
 	// notifications on their channel.
 	updates []dbgen.InsertDestinationUpdateParams
 	woken   []string
+	// tgPeople are the people of the Teams of a Telegram Destination, by its id, and tgSeen what its checks recorded.
+	tgPeople map[int64][]dbgen.ListTelegramGroupPeopleRow
+	tgSeen   []dbgen.SetTelegramAbsencesParams
+	// tx counts the transactions; tgSeenTx and tgWriteTx are the transactions of the records of tgSeen and of the
+	// Telegram inserts and updates.
+	tx        int
+	tgSeenTx  []int
+	tgWriteTx []int
+}
+
+func (w *saveWriter) ListTelegramGroupPeople(_ context.Context, arg dbgen.ListTelegramGroupPeopleParams) (
+	[]dbgen.ListTelegramGroupPeopleRow, error) {
+	if err := w.fail["ListTelegramGroupPeople"]; err != nil {
+		return nil, err
+	}
+	if arg.OrgID != 1 {
+		return nil, nil
+	}
+	return w.tgPeople[arg.DestinationID], nil
+}
+
+func (w *saveWriter) SetTelegramAbsences(_ context.Context, arg dbgen.SetTelegramAbsencesParams) error {
+	if err := w.fail["SetTelegramAbsences"]; err != nil {
+		return err
+	}
+	w.tgSeen = append(w.tgSeen, arg)
+	w.tgSeenTx = append(w.tgSeenTx, w.tx)
+	return nil
 }
 
 func (w *saveWriter) LockOwningTeam(_ context.Context, arg dbgen.LockOwningTeamParams) (dbgen.LockOwningTeamRow,
@@ -181,7 +218,10 @@ func (w *saveWriter) NotifyOpenGroupUpdates(_ context.Context, channel string) e
 	return nil
 }
 
-func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error { return fn(w) }
+func (w *saveWriter) InTx(_ context.Context, fn func(TxQueries) error) error {
+	w.tx++
+	return fn(w)
+}
 
 func (w *saveWriter) LockDestination(_ context.Context, arg dbgen.LockDestinationParams) (dbgen.LockDestinationRow,
 	error) {
@@ -245,6 +285,7 @@ func (w *saveWriter) InsertTelegramDestination(_ context.Context, arg dbgen.Inse
 		return 0, err
 	}
 	w.tgIns = append(w.tgIns, arg)
+	w.tgWriteTx = append(w.tgWriteTx, w.tx)
 	return int64(30 + len(w.tgIns)), nil
 }
 
@@ -253,6 +294,7 @@ func (w *saveWriter) UpdateTelegramDestination(_ context.Context, arg dbgen.Upda
 		return err
 	}
 	w.tgSets = append(w.tgSets, arg)
+	w.tgWriteTx = append(w.tgWriteTx, w.tx)
 	return nil
 }
 
@@ -376,12 +418,16 @@ func (c *fakeChecker) CheckChannel(ctx context.Context, in ChannelCheck) (Channe
 }
 
 // fakeTelegram stands for the Connections: the Destination check of a Telegram channel through the Connection
-// CNAAAAAAAAAAA2, by its channel.
+// CNAAAAAAAAAAA2, by its channel. With members a check that passes has the step discussion_group_members, which sees
+// outside the discussion group the people of the check whose Telegram user ids are in outside.
 type fakeTelegram struct {
-	calls []TelegramChannelCheck
-	links []outbound.Links
-	err   error
-	title string
+	calls   []TelegramChannelCheck
+	links   []outbound.Links
+	err     error
+	title   string
+	members bool
+	outside []int64
+	unknown []int64
 }
 
 func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChannelCheck) (TelegramChannelChecked,
@@ -419,11 +465,25 @@ func (c *fakeTelegram) CheckTelegramChannel(ctx context.Context, in TelegramChan
 	if title == "" {
 		title = "Muster alerts"
 	}
-	return TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{
+	out := TelegramChannelChecked{ConnectionID: 6, Check: telegram.DestinationCheck{
 		Steps: []telegram.DestinationStep{ok(telegram.StepChannelExists), ok(telegram.StepDiscussionGroup),
 			ok(telegram.StepBotRightsChannel), ok(telegram.StepBotRightsGroup)},
 		ChannelID: -1001000000001, ChannelTitle: title, GroupID: -1001000000002, GroupTitle: "Muster alerts Chat",
-		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}, nil
+		Outcome: delivery.Outcome{Kind: delivery.OutcomeOK}}}
+	if c.members {
+		var absent, unknown []int64
+		for _, m := range in.People {
+			switch {
+			case slices.Contains(c.outside, m.TelegramID):
+				absent = append(absent, m.UserID)
+			case slices.Contains(c.unknown, m.TelegramID):
+				unknown = append(unknown, m.UserID)
+			}
+		}
+		out.Check.Steps = append(out.Check.Steps, telegram.DestinationStep{Name: telegram.StepDiscussionGroupMembers,
+			OK: true, Absent: absent, Unknown: unknown})
+	}
+	return out, nil
 }
 
 // fakeBridge stands for the Connections: the Destination check of a Bridge channel through the Connection
@@ -1662,6 +1722,88 @@ func TestCheckTelegramDestination(t *testing.T) {
 	tg.err = errBoom
 	if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
 		t.Errorf("failed check = %v", err)
+	}
+}
+
+// TestTelegramGroupPeople is the step discussion_group_members of C-27.FR-8 in the saves and "Check": the check of a saved
+// Destination is given the people of its Teams with a Telegram Account link — a link whose Telegram user id is not a
+// number left out — and the item names those it saw outside the discussion group; a check that passes records them
+// with its time on the business clock, by Muster User id, and so does a save — a creation with nobody, since no Team
+// names a new Destination; a check that finds another group than the stored one records nothing. Failures to read the
+// people or to record them fail the check.
+func TestTelegramGroupPeople(t *testing.T) {
+	s, store, w, _, _ := newSaver(t)
+	tg := s.writer.Telegram.(*fakeTelegram)
+	tg.members, tg.outside, tg.unknown = true, []int64{9002}, []int64{9001}
+	ctx := t.Context()
+	store.rows[1].TelegramChannelID = txt("@muster_alerts")
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+	w.tgPeople = map[int64][]dbgen.ListTelegramGroupPeopleRow{2: {
+		{ID: 11, PublicID: "SRAAAAAAAAAAA1", Name: "Alice", Login: "alice", ExternalID: "9001"},
+		{ID: 12, PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob", ExternalID: "9002"},
+		{ID: 13, PublicID: "SRAAAAAAAAAAA3", Name: "Carol", Login: "carol", ExternalID: "x"}}}
+	res, err := s.Check(ctx, "DSAAAAAAAAAAA2")
+	if err != nil || !res.OK || len(res.Items) != 5 {
+		t.Fatalf("check = %+v, %v", res, err)
+	}
+	if it := res.Items[4]; it.Name != telegram.StepDiscussionGroupMembers || !it.OK ||
+		!slices.Equal(it.AbsentUsers, []UserRef{{PublicID: "SRAAAAAAAAAAA2", Name: "Bob", Login: "bob"}}) {
+		t.Errorf("item = %+v", it)
+	}
+	if c := tg.calls[len(tg.calls)-1]; !slices.Equal(c.People, []telegram.GroupPerson{{UserID: 11, TelegramID: 9001},
+		{UserID: 12, TelegramID: 9002}}) {
+		t.Errorf("members given = %+v", c.People)
+	}
+	if len(w.tgSeen) != 1 || !slices.Equal(w.tgSeen[0].AbsentUserIds, []int64{12}) ||
+		!slices.Equal(w.tgSeen[0].UnknownUserIds, []int64{11}) ||
+		!w.tgSeen[0].CheckedAt.Equal(t0) || w.tgSeen[0].ID != 2 || w.tgSeen[0].OrgID != 1 ||
+		w.tgSeen[0].GroupID != (pgtype.Int8{Int64: -1001000000002, Valid: true}) {
+		t.Errorf("recorded %+v", w.tgSeen)
+	}
+
+	// A check that found another group than the stored one fails, and its write names the group it read, which the
+	// stored one is not, so that it writes nothing (telegramGroupPeople of TestLive in internal/connections checks the
+	// SQL).
+	store.rows[1].TelegramDiscussionChatID.Int64 = -100200
+	if res, err := s.Check(ctx, "DSAAAAAAAAAAA2"); err != nil || res.OK || len(w.tgSeen) != 2 ||
+		w.tgSeen[1].GroupID.Int64 != -1001000000002 {
+		t.Errorf("another group = %+v, %v, recorded %+v", res, err, w.tgSeen)
+	}
+	store.rows[1].TelegramDiscussionChatID.Int64 = -1001000000002
+
+	// A save records the members in its transaction, after the update.
+	w.versions["DSAAAAAAAAAAA2"] = 1
+	if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.tgSeen) != 3 || w.tgSeen[2].ID != 2 || !slices.Equal(w.tgSeen[2].AbsentUserIds, []int64{12}) ||
+		len(w.tgSets) == 0 || w.tgSeenTx[2] != w.tgWriteTx[len(w.tgWriteTx)-1] {
+		t.Errorf("recorded by a save %+v in %v, written in %v", w.tgSeen, w.tgSeenTx, w.tgWriteTx)
+	}
+	d, err := s.Create(ctx, saver, telegramInput("new", "@muster_alerts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tg.calls[len(tg.calls)-1]; c.People != nil || len(w.tgSeen) != 4 || w.tgSeen[3].ID != d.ID ||
+		w.tgSeen[3].AbsentUserIds == nil || len(w.tgSeen[3].AbsentUserIds) != 0 || w.tgSeen[3].UnknownUserIds == nil ||
+		w.tgSeenTx[3] != w.tgWriteTx[len(w.tgWriteTx)-1] {
+		t.Errorf("a creation: members %+v, recorded %+v in %v", c.People, w.tgSeen, w.tgSeenTx)
+	}
+
+	for _, name := range []string{"ListTelegramGroupPeople", "SetTelegramAbsences"} {
+		w.fail[name] = errBoom
+		if _, err := s.Check(ctx, "DSAAAAAAAAAAA2"); !errors.Is(err, errBoom) {
+			t.Errorf("%s fails the check: %v", name, err)
+		}
+		if _, err := s.Update(ctx, saver, "DSAAAAAAAAAAA2", nil, telegramInput("alerts", "@muster_alerts")); !errors.Is(
+			err, errBoom) {
+			t.Errorf("%s fails the save: %v", name, err)
+		}
+		delete(w.fail, name)
+	}
+	w.fail["SetTelegramAbsences"] = errBoom
+	if _, err := s.Create(ctx, saver, telegramInput("newer", "@muster_alerts")); !errors.Is(err, errBoom) {
+		t.Errorf("SetTelegramAbsences fails the creation: %v", err)
 	}
 }
 

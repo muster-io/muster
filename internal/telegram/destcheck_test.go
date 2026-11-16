@@ -6,8 +6,11 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/muster-io/muster/internal/clock"
 	"github.com/muster-io/muster/internal/delivery"
@@ -215,5 +218,120 @@ func TestDestinationCheckRunnerErrors(t *testing.T) {
 		delivery.Subject{Connection: &id}), "@muster_alerts")
 	if err != nil || !res.OK() {
 		t.Fatalf("check = %+v, %v", res, err)
+	}
+}
+
+// TestDestinationCheckGroupPeople is the step discussion_group_members of C-27.FR-8 after the steps of C-14.FR-14: one
+// getChatMember of the discussion group per person, in order; left, kicked, restricted without is_member and 400
+// PARTICIPANT_ID_INVALID (F-128) are outside the group, by Muster User id; member, an anonymous creator and an
+// anonymous administrator, and restricted with is_member are in it; another failure — a 502, or another 400 — leaves
+// the person unknown, which the step names, and the step passes.
+func TestDestinationCheckGroupPeople(t *testing.T) {
+	f := startFake(t)
+	c := newClient(t, Settings{BaseURL: f.URL(), Token: testToken})
+	yes, no := true, false
+	people := []struct {
+		tg     int64
+		member *faketelegram.Member
+	}{
+		{101, &faketelegram.Member{Status: faketelegram.StatusMember}},
+		{102, &faketelegram.Member{Status: faketelegram.StatusLeft}},
+		{103, &faketelegram.Member{Status: faketelegram.StatusKicked}},
+		{104, nil}, // never in the group: 400 PARTICIPANT_ID_INVALID
+		{105, &faketelegram.Member{Status: faketelegram.StatusCreator, IsAnonymous: true}},
+		{106, &faketelegram.Member{Status: faketelegram.StatusAdministrator, IsAnonymous: true}},
+		{107, &faketelegram.Member{Status: faketelegram.StatusRestricted, IsMember: &yes}},
+		{108, &faketelegram.Member{Status: faketelegram.StatusRestricted, IsMember: &no}},
+		{109, &faketelegram.Member{ErrorCode: 400, Description: "Bad Request: user not found"}},
+		{110, &faketelegram.Member{Status: faketelegram.StatusLeft}}, // answered 502 by a fault
+	}
+	var group []GroupPerson
+	for i, p := range people {
+		if p.member != nil {
+			if err := f.SetMember(faketelegram.GroupID, p.tg, *p.member); err != nil {
+				t.Fatal(err)
+			}
+		}
+		group = append(group, GroupPerson{UserID: int64(i + 1), TelegramID: p.tg})
+	}
+	res, err := CheckDestination(t.Context(), c, probe, "@muster_alerts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ResetRequests()
+	calls := 0
+	run := func(ctx context.Context, fn func(ctx context.Context, c delivery.Call) delivery.Outcome) (delivery.Outcome,
+		error) {
+		calls++
+		if calls == len(people) {
+			fault(t, f, "getChatMember", 502, `{"ok":false,"error_code":502,"description":"Bad Gateway"}`, 1)
+		}
+		return fn(ctx, delivery.Call{Class: outbound.ClassInteractive}), nil
+	}
+	res = CheckGroupPeople(t.Context(), c, run, res, group)
+	absent, unknown, ok := res.GroupPeople()
+	if !res.OK() || !ok || stepNames(res) != "channel_exists:ok discussion_group:ok bot_rights_channel:ok "+
+		"bot_rights_group:ok discussion_group_members:ok" || !slices.Equal(absent, []int64{2, 3, 4, 8}) ||
+		!slices.Equal(unknown, []int64{9, 10}) {
+		t.Fatalf("people = %s, absent %v, unknown %v", stepNames(res), absent, unknown)
+	}
+	reqs := f.Requests()
+	if len(reqs) != len(people) {
+		t.Fatalf("%d requests, want one per person", len(reqs))
+	}
+	for i, r := range reqs {
+		if !strings.HasSuffix(r.Path, "/getChatMember") || !strings.Contains(r.Body,
+			fmt.Sprintf(`"user_id":%d`, people[i].tg)) || !strings.Contains(r.Body, `-1001000000002`) {
+			t.Errorf("request %d = %s %s", i, r.Path, r.Body)
+		}
+	}
+}
+
+// TestDestinationCheckGroupPeopleEdges: a check that failed runs no step; no people make a step with nobody absent and
+// no request; a runner that refuses a request — no limiter token — and a deadline that passes leave the people not
+// asked yet unknown, and the step passes.
+func TestDestinationCheckGroupPeopleEdges(t *testing.T) {
+	f := startFake(t)
+	c := newClient(t, Settings{BaseURL: f.URL(), Token: testToken})
+	failed := DestinationCheck{Steps: []DestinationStep{{Name: StepChannelExists}}}
+	if got := CheckGroupPeople(t.Context(), c, probe, failed, []GroupPerson{{UserID: 1, TelegramID: 101}}); len(
+		got.Steps) != 1 {
+		t.Errorf("a failed check = %s", stepNames(got))
+	}
+	if _, _, ok := failed.GroupPeople(); ok {
+		t.Error("a failed check has the step")
+	}
+	res, err := CheckDestination(t.Context(), c, probe, "@muster_alerts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ResetRequests()
+	if absent, unknown, ok := CheckGroupPeople(t.Context(), c, probe, res, nil).GroupPeople(); !ok ||
+		len(absent) != 0 || absent == nil || unknown == nil || len(unknown) != 0 || len(f.Requests()) != 0 {
+		t.Errorf("nobody = %v %v %v, %d requests", absent, unknown, ok, len(f.Requests()))
+	}
+	people := []GroupPerson{{UserID: 1, TelegramID: 201}, {UserID: 2, TelegramID: 202}, {UserID: 3, TelegramID: 203}}
+	if absent, unknown, ok := CheckGroupPeople(t.Context(), c, limited(1), res, people).GroupPeople(); !ok ||
+		!slices.Equal(absent, []int64{1}) || !slices.Equal(unknown, []int64{2, 3}) {
+		t.Errorf("a refused request = %v %v %v", absent, unknown, ok)
+	}
+	// The second request outlasts the deadline: its person and the third are unknown, and the third is not asked.
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	f.ResetRequests()
+	calls := 0
+	slow := func(ctx context.Context, fn func(ctx context.Context, c delivery.Call) delivery.Outcome) (delivery.Outcome,
+		error) {
+		if calls++; calls == 2 {
+			if err := f.SetFault(fakeserver.Fault{Path: "/bot" + testToken + "/getChatMember", DelayMs: 1000,
+				Status: 200, Body: `{"ok":true,"result":{"status":"member"}}`, Times: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return fn(ctx, delivery.Call{Class: outbound.ClassInteractive}), nil
+	}
+	if absent, unknown, ok := CheckGroupPeople(ctx, c, slow, res, people).GroupPeople(); !ok ||
+		!slices.Equal(absent, []int64{1}) || !slices.Equal(unknown, []int64{2, 3}) || len(f.Requests()) != 2 {
+		t.Errorf("past the deadline = %v %v %v, %d requests", absent, unknown, ok, len(f.Requests()))
 	}
 }

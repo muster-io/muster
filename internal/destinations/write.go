@@ -114,6 +114,17 @@ type CheckItem struct {
 	Code          string
 	MissingScopes []string
 	Pointer       string
+	// AbsentUsers are, with the step discussion_group_members of a Telegram Destination, the people it saw outside the
+	// discussion group (C-27.FR-8).
+	AbsentUsers []UserRef
+}
+
+// UserRef names a User: deactivated when disabled.
+type UserRef struct {
+	PublicID    string
+	Name        string
+	Login       string
+	Deactivated bool
 }
 
 // CheckFailedError is a save that its Destination check refused: nothing was saved. Items are the failing checks.
@@ -372,11 +383,13 @@ type MattermostChecker interface {
 
 // TelegramChannelCheck is the Destination check of a Telegram channel through the Connection Connection (public_id):
 // of the saved Destination Destination (its id) when it exists, so that its limiter applies, else of the Connection
-// alone.
+// alone. Members are the people whose membership of the discussion group its step discussion_group_members reads
+// (C-27.FR-8), none before the Destination exists, since no Team names it yet.
 type TelegramChannelCheck struct {
 	Connection  string
 	Destination *int64
 	ChannelID   string
+	People      []telegram.GroupPerson
 }
 
 // TelegramChannelChecked is the result of a TelegramChannelCheck: the id of the Connection and the check.
@@ -477,6 +490,9 @@ type writeQueries interface {
 	SetDestinationOwningTeam(ctx context.Context, arg dbgen.SetDestinationOwningTeamParams) error
 	InsertDestinationUpdate(ctx context.Context, arg dbgen.InsertDestinationUpdateParams) error
 	NotifyOpenGroupUpdates(ctx context.Context, channel string) error
+	ListTelegramGroupPeople(ctx context.Context, arg dbgen.ListTelegramGroupPeopleParams) (
+		[]dbgen.ListTelegramGroupPeopleRow, error)
+	SetTelegramAbsences(ctx context.Context, arg dbgen.SetTelegramAbsencesParams) error
 }
 
 // view is what the Audit log diff of a saved Destination shows: never a secret, whose change is marked apart.
@@ -1257,7 +1273,8 @@ type CheckResult struct {
 // Check runs the Destination check of the Destination publicID from checkDestination (C-13.FR-10, C-14.FR-14,
 // C-22.FR-3, C-24.FR-3) on the interactive path, limited by the Destination: each check with its result. A passing
 // check of a Broken Destination ends its Broken state. A Bridge or Slack Destination's check keeps no channel name it
-// reads: a save does.
+// reads: a save does. A Telegram Destination's check that passes keeps what its step discussion_group_members saw of
+// the people of its Teams (C-27.FR-8), with them in the item's AbsentUsers.
 // A type without a Destination check here is a *FieldError check_not_supported. Its requests are recorded as the kind
 // destination_check with the Destination under one check run, which the result names (C-23.FR-2, FR-5).
 func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, error) {
@@ -1279,14 +1296,22 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message, Code: st.Code})
 		}
 	case d.Type == TypeTelegram && d.Connection != nil:
+		members, refs, err := s.telegramGroupPeople(ctx, &d.ID)
+		if err != nil {
+			return CheckResult{}, err
+		}
 		res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: *d.Connection,
-			Destination: &d.ID, ChannelID: deref(d.TelegramChannelID)})
+			Destination: &d.ID, ChannelID: deref(d.TelegramChannelID), People: members})
 		if err != nil {
 			return CheckResult{}, err
 		}
 		out = CheckResult{OK: res.Check.OK(), Health: d.Health}
 		for _, st := range res.Check.Steps {
-			out.Items = append(out.Items, CheckItem{Name: st.Name, OK: st.OK, Message: st.Message, Code: st.Code})
+			item := CheckItem{Name: st.Name, OK: st.OK, Message: st.Message, Code: st.Code}
+			if st.Name == telegram.StepDiscussionGroupMembers {
+				item.AbsentUsers = absentUsers(st.Absent, refs)
+			}
+			out.Items = append(out.Items, item)
 		}
 		// A group other than the stored one fails the check until the Destination is saved again, since its Thread
 		// replies go to the stored group.
@@ -1299,6 +1324,11 @@ func (s *Service) Check(ctx context.Context, publicID string) (CheckResult, erro
 						telegram.CodeMoved
 				}
 			}
+		}
+		// What the check saw of another group than the stored one is kept only once a save stores that group, which
+		// the write checks against the stored group.
+		if err := s.recordGroupPeople(ctx, d.ID, res.Check); err != nil {
+			return CheckResult{}, err
 		}
 	case d.Type == TypeBridge && d.Connection != nil:
 		res, err := s.writer.Bridge.CheckBridgeChannel(ctx, BridgeChannelCheck{Connection: *d.Connection,
@@ -1416,10 +1446,14 @@ func (s *Service) validateTelegram(in *Input) error {
 // /connection_id when the bot token was refused. Its requests are recorded as destination_check under a check run of
 // their own (C-23.FR-2).
 func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *int64) (TelegramChannelChecked, error) {
+	members, _, err := s.telegramGroupPeople(ctx, destinationID)
+	if err != nil {
+		return TelegramChannelChecked{}, err
+	}
 	ctx, _ = outbound.StartCheck(ctx, outbound.CheckDestination, idOf(destinationID))
 	t := in.Telegram
 	res, err := s.writer.Telegram.CheckTelegramChannel(ctx, TelegramChannelCheck{Connection: t.Connection,
-		Destination: destinationID, ChannelID: t.ChannelID})
+		Destination: destinationID, ChannelID: t.ChannelID, People: members})
 	if errors.Is(err, ErrUnknownConnection) {
 		return TelegramChannelChecked{}, unknownTelegramConnection()
 	}
@@ -1444,6 +1478,83 @@ func (s *Service) checkTelegram(ctx context.Context, in Input, destinationID *in
 	return TelegramChannelChecked{}, failed
 }
 
+// telegramGroupPeople reads the people of the Teams that name the Destination id, with a Telegram Account link, whose
+// membership of its discussion group its check reads (C-27.FR-8), by name, with their references by User id; none for
+// a Destination not created yet. A link whose Telegram user id is not a number names nobody Telegram knows, and is
+// left out.
+func (s *Service) telegramGroupPeople(ctx context.Context, id *int64) ([]telegram.GroupPerson, map[int64]UserRef,
+	error) {
+	refs := map[int64]UserRef{}
+	if id == nil {
+		return nil, refs, nil
+	}
+	var rows []dbgen.ListTelegramGroupPeopleRow
+	if err := s.writer.Writer.InTx(ctx, func(q TxQueries) error {
+		var err error
+		rows, err = q.ListTelegramGroupPeople(ctx, dbgen.ListTelegramGroupPeopleParams{OrgID: s.orgID,
+			DestinationID: *id})
+		return err
+	}); err != nil {
+		return nil, nil, fmt.Errorf("list the people of the teams of destination %d: %w", *id, err)
+	}
+	var out []telegram.GroupPerson
+	for _, r := range rows {
+		tg, err := strconv.ParseInt(r.ExternalID, 10, 64)
+		if err != nil {
+			continue
+		}
+		out = append(out, telegram.GroupPerson{UserID: r.ID, TelegramID: tg})
+		refs[r.ID] = UserRef{PublicID: r.PublicID, Name: r.Name, Login: r.Login}
+	}
+	return out, refs, nil
+}
+
+// absentUsers are the references of the Users ids, in their order, which is by name.
+func absentUsers(ids []int64, refs map[int64]UserRef) []UserRef {
+	out := make([]UserRef, 0, len(ids))
+	for _, id := range ids {
+		if r, ok := refs[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// recordGroupPeople stores in a transaction of its own what the check c of the Telegram Destination id saw of the
+// people of its discussion group, as setGroupPeople does.
+func (s *Service) recordGroupPeople(ctx context.Context, id int64, c telegram.DestinationCheck) error {
+	if _, _, ok := c.GroupPeople(); !ok {
+		return nil
+	}
+	return s.writer.Writer.InTx(ctx, func(q TxQueries) error { return s.setGroupPeople(ctx, q, id, c) })
+}
+
+// setGroupPeople stores through q what the step discussion_group_members of the check c of the Telegram Destination id
+// saw: the Users outside the discussion group, with those stored as outside it whom the check could not tell, and the
+// time of the check on the business clock, only while the Destination's stored group is the one the check read, so
+// that a slow check never overwrites a save that moved the Destination to another group. A check without the step
+// stores nothing. It is not a change of the configuration: no version, no Audit log entry, no hint.
+func (s *Service) setGroupPeople(ctx context.Context, q TxQueries, id int64, c telegram.DestinationCheck) error {
+	absent, unknown, ok := c.GroupPeople()
+	if !ok {
+		return nil
+	}
+	if err := q.SetTelegramAbsences(ctx, dbgen.SetTelegramAbsencesParams{OrgID: s.orgID, ID: id,
+		AbsentUserIds: orEmpty(absent), UnknownUserIds: orEmpty(unknown), CheckedAt: s.writer.Business.Now().UTC(),
+		GroupID: pgtype.Int8{Int64: c.GroupID, Valid: true}}); err != nil {
+		return fmt.Errorf("record the members of the discussion group of destination %d: %w", id, err)
+	}
+	return nil
+}
+
+// orEmpty is ids, empty for nil, which PostgreSQL would read as a null array.
+func orEmpty(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
+}
+
 // telegramFound sets on d what the check of its channel found: the ids and titles of the channel and of its
 // discussion group.
 func telegramFound(d *Destination, c telegram.DestinationCheck) {
@@ -1453,7 +1564,8 @@ func telegramFound(d *Destination, c telegram.DestinationCheck) {
 }
 
 // createTelegram creates a Telegram Destination from its channel once its Destination check passed (C-14.FR-2,
-// FR-14), keeping the discussion group the check found. It is recorded as destination.created.
+// FR-14), keeping the discussion group the check found and what it saw of its members (C-27.FR-8). It is recorded as
+// destination.created.
 func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (Destination, error) {
 	checked, err := s.checkTelegram(ctx, in, nil)
 	if err != nil {
@@ -1491,6 +1603,9 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 			return fmt.Errorf("create the destination: %w", nameTaken(err))
 		}
 		d.ID = id
+		if err := s.setGroupPeople(ctx, q, id, c); err != nil {
+			return err
+		}
 		if err := s.writeOwner(ctx, q, id, d); err != nil {
 			return err
 		}
@@ -1507,7 +1622,8 @@ func (s *Service) createTelegram(ctx context.Context, r Requester, in Input) (De
 
 // updateTelegram replaces the configured fields of the Telegram Destination before, already validated, once its
 // Destination check passed, limited by the Destination, and keeps what the check found; a passing check of a Broken
-// Destination ends its Broken state. An update that changes nothing, and whose check found the same, writes nothing.
+// Destination ends its Broken state. An update that changes nothing, and whose check found the same, writes only what
+// the check saw of the members of the discussion group (C-27.FR-8).
 func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destination, in Input) (Destination,
 	error) {
 	checked, err := s.checkTelegram(ctx, in, &before.ID)
@@ -1563,6 +1679,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 				return fmt.Errorf("update the destination %s: %w", before.PublicID, nameTaken(err))
 			}
 			d.Version++
+			if err := s.setGroupPeople(ctx, q, before.ID, c); err != nil {
+				return err
+			}
 			if err := s.writeOwner(ctx, q, before.ID, d); err != nil {
 				return err
 			}
@@ -1586,6 +1705,9 @@ func (s *Service) updateTelegram(ctx context.Context, r Requester, before Destin
 		if err != nil {
 			return Destination{}, err
 		}
+	} else if err := s.recordGroupPeople(ctx, before.ID, checked.Check); err != nil {
+		// Nothing else changed, so nothing was saved before this write.
+		return Destination{}, err
 	}
 	if before.Health.State == healthBroken {
 		if err := s.healthy(ctx, before.ID); err != nil {

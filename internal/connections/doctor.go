@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/muster-io/muster/internal/bridge"
@@ -52,8 +54,78 @@ type DoctorQueries interface {
 	ListConnections(ctx context.Context, arg dbgen.ListConnectionsParams) ([]dbgen.ListConnectionsRow, error)
 	ListMattermostDestinations(ctx context.Context, orgID int64) ([]dbgen.ListMattermostDestinationsRow, error)
 	ListTelegramDestinations(ctx context.Context, orgID int64) ([]dbgen.ListTelegramDestinationsRow, error)
+	ListTelegramDestinationPeople(ctx context.Context, arg dbgen.ListTelegramDestinationPeopleParams) (
+		[]dbgen.ListTelegramDestinationPeopleRow, error)
 	ListBridgeDestinations(ctx context.Context, orgID int64) ([]dbgen.ListBridgeDestinationsRow, error)
 	ListSlackDestinations(ctx context.Context, orgID int64) ([]dbgen.ListSlackDestinationsRow, error)
+}
+
+// doctorGroupPeople runs the step discussion_group_members of the Telegram Destination id whose check res passed on its
+// stored group, at once in the background class, for the people of its Teams with a Telegram Account link
+// (C-27.FR-8): each call within each, one at most every pace, the interval of the Connection's limiter, so that the
+// calls do not burst past the bot's limit, and all of them within telegram.GroupPeopleBudget, after which the rest are
+// not asked. It warns naming those outside its discussion group, and those it could not tell, empty when it saw
+// everybody in the group. It records nothing.
+func (s *Service) doctorGroupPeople(ctx context.Context, q DoctorQueries, c *telegram.Client, id int64,
+	res telegram.DestinationCheck, each, pace time.Duration) (string, error) {
+	rows, err := q.ListTelegramDestinationPeople(ctx, dbgen.ListTelegramDestinationPeopleParams{
+		OrgID: s.cfg.OrgID, DestinationID: id})
+	if err != nil {
+		return "", fmt.Errorf("list the people of the teams of the telegram destinations: %w", err)
+	}
+	people := make([]telegram.GroupPerson, 0, len(rows))
+	logins := map[int64]string{}
+	for _, r := range rows {
+		if tg, err := strconv.ParseInt(r.ExternalID, 10, 64); err == nil {
+			people = append(people, telegram.GroupPerson{UserID: r.ID, TelegramID: tg})
+			logins[r.ID] = r.Login
+		}
+	}
+	direct := telegram.Direct(delivery.Call{Class: outbound.ClassBackground})
+	calls := 0
+	run := func(ctx context.Context, f func(ctx context.Context, c delivery.Call) delivery.Outcome) (
+		delivery.Outcome, error) {
+		if calls++; calls > 1 {
+			t := time.NewTimer(pace)
+			defer t.Stop()
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				return delivery.Outcome{}, ctx.Err()
+			}
+		}
+		callCtx, cancel := context.WithTimeout(ctx, each)
+		defer cancel()
+		return direct(callCtx, f)
+	}
+	stepCtx, cancel := context.WithTimeout(ctx, cmp.Or(s.groupPeopleBudget, telegram.GroupPeopleBudget))
+	defer cancel()
+	absent, unknown, _ := telegram.CheckGroupPeople(stepCtx, c, run, res, people).GroupPeople()
+	named := func(ids []int64) string {
+		names := make([]string, len(ids))
+		for i, id := range ids {
+			names[i] = logins[id]
+		}
+		return strings.Join(names, ", ")
+	}
+	var parts []string
+	if len(absent) > 0 {
+		parts = append(parts, "people of its Teams outside its discussion group, whom Mentions do not reach: "+
+			named(absent))
+	}
+	if len(unknown) > 0 {
+		parts = append(parts, "people of its Teams whom Telegram did not answer about: "+named(unknown))
+	}
+	return strings.Join(parts, "; "), nil
+}
+
+// pace is the interval between two requests that a limiter of limit per perSeconds allows, none for a limiter that
+// allows none.
+func pace(limit, perSeconds int64) time.Duration {
+	if limit <= 0 {
+		return 0
+	}
+	return time.Duration(perSeconds) * time.Second / time.Duration(limit)
 }
 
 // doctorSlackClient is the client of a Slack Connection that passed muster doctor's check, with the bot's name the
@@ -72,14 +144,17 @@ type doctorSlackClient struct {
 // (conversations.info, C-24.FR-3), each request made at once in the background client class, whose retries each check
 // bounds by each. A Telegram, Bridge or Slack Connection that fails names the failing step with its message, and a
 // Bridge or Slack Destination the item channel; a Slack Connection in socket mode that passes warns when the last hello
-// of its Socket Mode connection counted another connection of its Slack app than the Leader's. It only reads: it
-// records nothing of what it finds, not even a Bridge's info or a Slack workspace. It needs the Keyring and the Network
-// of the Service only, and the Slack route under muster dev; without a Keyring every check fails, for the bot tokens
-// cannot be opened.
+// of its Socket Mode connection counted another connection of its Slack app than the Leader's, and a Telegram
+// Destination that passes runs the step discussion_group_members and warns naming the people of its Teams outside its
+// discussion group (C-27.FR-8), or warns as "Check" fails when it found another group than the stored one. It only
+// reads: it records nothing of what it finds, not even a Bridge's info or a Slack workspace. It needs the Keyring and
+// the Network of the Service only, and the Slack route under muster dev; without a Keyring every check fails, for the
+// bot tokens cannot be opened.
 func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duration) ([]Finding, error) {
 	var out []Finding
 	clients := map[int64]*mattermost.Client{}
 	tgClients := map[int64]*telegram.Client{}
+	tgPace := map[int64]time.Duration{} // the interval of a Telegram Connection's limiter
 	brClients := map[int64]*bridge.Client{}
 	slClients := map[int64]doctorSlackClient{}
 	failed := map[int64]string{}
@@ -118,6 +193,7 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 				c, f.Message = s.doctorTelegram(ctx, dbgen.GetConnectionRow(r), each)
 				if f.OK() {
 					tgClients[r.ID] = c
+					tgPace[r.ID] = pace(r.LimiterLimit, r.LimiterPerSeconds)
 				} else {
 					failed[r.ID] = f.Message
 				}
@@ -184,6 +260,15 @@ func (s *Service) Doctor(ctx context.Context, q DoctorQueries, each time.Duratio
 			case !res.OK():
 				st := res.Steps[len(res.Steps)-1]
 				f.Message = st.Name + ": " + cmp.Or(st.Message, checkFailed)
+			case res.Moved(0, d.TelegramDiscussionChatID.Int64):
+				// A group other than the stored one is not where Muster writes until the Destination is saved, as
+				// "Check" says; its members are not read.
+				f.Warning = telegram.StepDiscussionGroup + ": " + telegram.MessageMoved
+			default:
+				if f.Warning, err = s.doctorGroupPeople(ctx, q, c, d.ID, res, each,
+					tgPace[d.ConnectionID.Int64]); err != nil {
+					return nil, err
+				}
 			}
 		case failed[d.ConnectionID.Int64] != "":
 			f.Message = "its Connection failed its check: " + failed[d.ConnectionID.Int64]

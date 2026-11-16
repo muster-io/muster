@@ -299,6 +299,9 @@ type Queries interface {
 	ListGapScanSchedules(ctx context.Context, orgID int64) ([]dbgen.ListGapScanSchedulesRow, error)
 	GetOrganizationTeamLabel(ctx context.Context, orgID int64) (string, error)
 	ListOnCallTeams(ctx context.Context, arg dbgen.ListOnCallTeamsParams) ([]dbgen.ListOnCallTeamsRow, error)
+	ListTeamReach(ctx context.Context, arg dbgen.ListTeamReachParams) ([]dbgen.ListTeamReachRow, error)
+	ListAccountLinkSpaces(ctx context.Context, arg dbgen.ListAccountLinkSpacesParams) (
+		[]dbgen.ListAccountLinkSpacesRow, error)
 	audit.Store
 	Notify(ctx context.Context, h db.Hint) error
 }

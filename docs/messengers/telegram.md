@@ -101,7 +101,12 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
 
     - `getChat` on the channel: it exists and is a channel, and it names its discussion group;
     - `getChatMember` for the bot in the channel: an admin allowed to post and to edit messages;
-    - `getChatMember` for the bot in the discussion group: an admin there.
+    - `getChatMember` for the bot in the discussion group: an admin there;
+    - once those pass, `getChatMember` in the discussion group for each person of the Teams that name the Destination
+      with a Telegram Account link, the item **Members of the discussion group**, which always passes and names the
+      people outside the group, whom a Mention in a Thread does not notify
+      ([Unreachable On-calls](../concepts/schedules.md#unreachable-on-calls)). A new Destination has no Team yet, so
+      its save asks about nobody.
 
     A Destination that fails the check is not saved, and the check says what to fix:
 
@@ -126,7 +131,9 @@ A Telegram Destination is the channel only: Muster finds its discussion group.
 Muster keeps sending to that channel and that group: when comments are moved to another group later, or the
 `@username` to another channel, the check fails with "The channel or its discussion group changed since the
 Destination was saved. Save the Destination again." until you save it. **Check** on the Destination page runs the same
-check at any time, and `muster doctor` prints one line per Telegram Destination with its result. When Telegram refuses
+check at any time, and `muster doctor` prints one line per Telegram Destination with its result: a warning that names
+the people of its Teams outside the discussion group, and the same warning as **Check** when the channel or its
+discussion group changed since the Destination was saved. When Telegram refuses
 the bot later — for example, someone removed its admin rights — the Destination becomes **Broken**; Muster runs the
 same check every few minutes while nothing waits for the Destination, and ends the Broken state once the check passes
 again.
