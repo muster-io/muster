@@ -4350,10 +4350,15 @@ paths:
       tags:
       - Alert groups
       summary: Read Alert Group statistics
-      description: Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals
-        and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with
-        `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned.
-        An Alert Group with Alerts from several Integrations counts for each.
+      description: Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as
+        totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as
+        `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime
+        overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`,
+        `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for
+        every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams).
+        Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert
+        Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several
+        Teams for each Team; one without a Team counts for no Team.
       x-permission: alert-groups:read
       x-listener: app
       security:
@@ -4369,20 +4374,15 @@ paths:
           enum:
           - route
           - integration
-      - name: route
-        in: query
-        description: Only these Routes (`public_id`); with `group_by=route`.
-        schema:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicId'
-      - name: integration
-        in: query
-        description: Only these Integrations (`public_id`); with `group_by=integration`.
-        schema:
-          type: array
-          items:
-            $ref: '#/components/schemas/PublicId'
+          - team
+      - $ref: '#/components/parameters/StatisticsRoute'
+      - $ref: '#/components/parameters/StatisticsIntegration'
+      - $ref: '#/components/parameters/AgSeverity'
+      - $ref: '#/components/parameters/AgUrgent'
+      - $ref: '#/components/parameters/AgTeam'
+      - $ref: '#/components/parameters/AgReopened'
+      - $ref: '#/components/parameters/LabelMatchers'
+      - $ref: '#/components/parameters/AgFirstAcknowledgedBy'
       - $ref: '#/components/parameters/From'
       - $ref: '#/components/parameters/To'
       - name: time_zone
@@ -4405,6 +4405,58 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+  /alert-group-actor-statistics:
+    get:
+      operationId: getAlertGroupActorStatistics
+      tags:
+      - Alert groups
+      summary: Read Alert Group statistics by people
+      description: 'Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine
+        with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them
+        first or resolved at least one, and one per Service account that resolved at least one.
+        `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`,
+        with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives
+        at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one
+        resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first
+        acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or
+        on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with
+        `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count`
+        of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not
+        paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name,
+        then by `public_id`.'
+      x-permission: alert-groups:read
+      x-listener: app
+      security:
+      - sessionCookie: []
+      - apiToken: []
+      parameters:
+      - $ref: '#/components/parameters/StatisticsRoute'
+      - $ref: '#/components/parameters/StatisticsIntegration'
+      - $ref: '#/components/parameters/AgSeverity'
+      - $ref: '#/components/parameters/AgUrgent'
+      - $ref: '#/components/parameters/AgTeam'
+      - $ref: '#/components/parameters/AgReopened'
+      - $ref: '#/components/parameters/LabelMatchers'
+      - $ref: '#/components/parameters/AgFirstAcknowledgedBy'
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      responses:
+        '200':
+          description: The statistics by people.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertGroupActorStatistics'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/Unprocessable'
         '429':
@@ -9110,6 +9162,32 @@ components:
         token). An unknown Team is `422` `unknown_id`.
       schema:
         type: string
+    AgFirstAcknowledgedBy:
+      name: first_acknowledged_by
+      in: query
+      description: Only Alert Groups whose first acknowledgement this User made (C-09.FR-27), by the User's `public_id`,
+        deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). Only Users
+        acknowledge (C-04.FR-2), so an id that names no User, a Service account's included, is `422` `unknown_id`.
+      schema:
+        type: string
+    StatisticsRoute:
+      name: route
+      in: query
+      description: Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with
+        `group_by=route` also the items.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/PublicId'
+    StatisticsIntegration:
+      name: integration
+      in: query
+      description: Only the Alert Groups with Alerts from these Integrations (`public_id`); in
+        `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/PublicId'
     AgSnoozedNoEnd:
       name: snoozed_no_end
       in: query
@@ -14288,8 +14366,9 @@ components:
       description: 'A User. Used wherever the person must be a User: the Owner and the previous Owner.'
     ActorRef:
       type: object
-      description: 'Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`),
-        because a Service account cannot become an Owner.'
+      description: 'Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a
+        Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a
+        Service account is a row of the statistics by people only through what it resolved.'
       required:
       - kind
       - id
@@ -14728,6 +14807,7 @@ components:
           enum:
           - route
           - integration
+          - team
         from:
           type: string
           format: date-time
@@ -14738,6 +14818,47 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AlertGroupStatisticsItem'
+    AlertGroupActorStatistics:
+      type: object
+      required:
+      - from
+      - to
+      - items
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertGroupActorStatisticsItem'
+    AlertGroupActorStatisticsItem:
+      type: object
+      required:
+      - actor
+      - acknowledged_first_count
+      - resolved_count
+      - time_to_acknowledge
+      properties:
+        actor:
+          description: The User or Service account; null for the item of the Alert Groups whose first acknowledgement
+            names nobody ("Unknown").
+          oneOf:
+          - $ref: '#/components/schemas/ActorRef'
+          - type: 'null'
+        acknowledged_first_count:
+          type: integer
+          description: The Alert Groups whose first acknowledgement the actor made; 0 for a Service account.
+        resolved_count:
+          type: integer
+          description: The Alert Groups the actor resolved, by their resolver; 0 for the item with `actor` null.
+        time_to_acknowledge:
+          description: From the start of each Alert Group to its first acknowledgement, over the Alert Groups the actor
+            acknowledged first; its `count` is `acknowledged_first_count`.
+          $ref: '#/components/schemas/DurationStats'
     AlertGroupStatisticsItem:
       type: object
       required:

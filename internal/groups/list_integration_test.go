@@ -424,7 +424,7 @@ func TestIntegrationRelatedAndStatistics(t *testing.T) {
 			made = append(made, r)
 		}
 		out, err := e.groups.Statistics(ctx, groups.StatisticsRequest{GroupBy: groups.ByRoute, TimeZone: "Europe/Berlin",
-			Routes: []string{st.PublicID}})
+			Filter: groups.Filter{Routes: []string{st.PublicID}}})
 		if err != nil || len(out.Items) != 1 {
 			t.Fatalf("statistics = %+v, %v", out, err)
 		}
@@ -437,7 +437,7 @@ func TestIntegrationRelatedAndStatistics(t *testing.T) {
 		}
 		// In UTC the first two started on the 6th.
 		if out, _ := e.groups.Statistics(ctx, groups.StatisticsRequest{GroupBy: groups.ByRoute, TimeZone: "UTC",
-			Routes: []string{st.PublicID}}); len(out.Items[0].PerDay) != 2 || out.Items[0].PerDay[0].AlertGroupCount != 2 {
+			Filter: groups.Filter{Routes: []string{st.PublicID}}}); len(out.Items[0].PerDay) != 2 || out.Items[0].PerDay[0].AlertGroupCount != 2 {
 			t.Errorf("in UTC = %+v", out.Items[0].PerDay)
 		}
 		// Every Route that is not deleted, one item each (C-09.AC-23).
@@ -670,7 +670,8 @@ func TestIntegrationListPlans(t *testing.T) {
 			}, []string{"alert_groups_related_idx"}},
 			{"statistics per route", func() {
 				_, _ = q.RouteStatistics(ctx, dbgen.RouteStatisticsParams{OrgID: e.orgID, TimeZone: "UTC",
-					RangeFrom: t0.Add(-groups.ListRange), RangeTo: t0, RouteIds: []int64{}})
+					RangeFrom: t0.Add(-groups.ListRange), RangeTo: t0, RouteIds: []int64{}, IntegrationIds: []int64{},
+					Severities: []string{}, TeamIds: []int64{}, Ids: []int64{}})
 			}, []string{"alert_groups_"}},
 		} {
 			c.run()

@@ -9,4 +9,5 @@ export type AlertGroupStatisticsGroupBy = typeof AlertGroupStatisticsGroupBy[key
 export const AlertGroupStatisticsGroupBy = {
   route: 'route',
   integration: 'integration',
+  team: 'team',
 } as const;

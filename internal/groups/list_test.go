@@ -387,6 +387,7 @@ func (f *fakeDB) RouteStatistics(_ context.Context, arg dbgen.RouteStatisticsPar
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls["RouteStatistics "+arg.TimeZone]++
+	f.statsArgs = arg
 	return f.stats, f.call("RouteStatistics")
 }
 
@@ -395,6 +396,7 @@ func (f *fakeDB) IntegrationStatistics(_ context.Context, arg dbgen.IntegrationS
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls["IntegrationStatistics "+arg.TimeZone]++
+	f.statsArgs = dbgen.RouteStatisticsParams(arg)
 	out := make([]dbgen.IntegrationStatisticsRow, len(f.stats))
 	for i, r := range f.stats {
 		out[i] = dbgen.IntegrationStatisticsRow(r)
@@ -436,6 +438,118 @@ func (f *fakeDB) ListStatisticsIntegrations(_ context.Context, arg dbgen.ListSta
 		}
 	}
 	slices.SortFunc(out, func(a, b dbgen.ListStatisticsIntegrationsRow) int {
+		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
+}
+
+func (f *fakeDB) TeamStatistics(_ context.Context, arg dbgen.TeamStatisticsParams) ([]dbgen.TeamStatisticsRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls["TeamStatistics "+arg.TimeZone]++
+	f.statsArgs = dbgen.RouteStatisticsParams(arg)
+	out := make([]dbgen.TeamStatisticsRow, len(f.stats))
+	for i, r := range f.stats {
+		out[i] = dbgen.TeamStatisticsRow(r)
+	}
+	return out, f.call("TeamStatistics")
+}
+
+func (f *fakeDB) ActorStatistics(_ context.Context, arg dbgen.ActorStatisticsParams) ([]dbgen.ActorStatisticsRow,
+	error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.actorArgs = arg
+	if f.actorStats != nil {
+		return f.actorStats, f.call("ActorStatistics")
+	}
+	return f.actorStatsOfGroups(arg), f.call("ActorStatistics")
+}
+
+// actorStatsOfGroups aggregates the Alert Groups that started in the period as ActorStatistics does, without its
+// filters: per User of the first acknowledgement, with nobody's as one row, and per resolver of a person's Resolve.
+func (f *fakeDB) actorStatsOfGroups(arg dbgen.ActorStatisticsParams) []dbgen.ActorStatisticsRow {
+	type resolver struct{ user, account pgtype.Int8 }
+	acks, resolved := map[pgtype.Int8][]float64{}, map[resolver]int64{}
+	for _, g := range f.groups {
+		if g.CreatedAt.Before(arg.RangeFrom) || !g.CreatedAt.Before(arg.RangeTo) {
+			continue
+		}
+		if g.FirstAcknowledgedAt.Valid {
+			acks[g.FirstAcknowledgedByUserID] = append(acks[g.FirstAcknowledgedByUserID],
+				g.FirstAcknowledgedAt.Time.Sub(g.CreatedAt).Seconds())
+		}
+		if g.ResolvedByKind.String == ResolvedByUser {
+			resolved[resolver{g.ResolvedByUserID, g.ResolvedByServiceAccountID}]++
+		}
+	}
+	var out []dbgen.ActorStatisticsRow
+	for user, ds := range acks {
+		slices.Sort(ds)
+		r := dbgen.ActorStatisticsRow{AcknowledgedByUserID: user, AcknowledgedFirstCount: int64(len(ds)),
+			AckMedian: percentileCont(ds, 0.5), AckP95: percentileCont(ds, 0.95)}
+		if n, ok := resolved[resolver{user: user}]; ok && user.Valid {
+			r.ResolvedByUserID, r.ResolvedCount = user, n
+			delete(resolved, resolver{user: user})
+		}
+		out = append(out, r)
+	}
+	for r, n := range resolved {
+		out = append(out, dbgen.ActorStatisticsRow{ResolvedByUserID: r.user, ServiceAccountID: r.account,
+			ResolvedCount: n})
+	}
+	return out
+}
+
+// percentileCont is percentile_cont of sorted values: interpolated between the two nearest ranks.
+func percentileCont(sorted []float64, p float64) float64 {
+	pos := p * float64(len(sorted)-1)
+	lo := int(pos)
+	if lo+1 >= len(sorted) {
+		return sorted[lo]
+	}
+	return sorted[lo] + (pos-float64(lo))*(sorted[lo+1]-sorted[lo])
+}
+
+func (f *fakeDB) ListStatisticsGroupLabels(_ context.Context, arg dbgen.ListStatisticsGroupLabelsParams) (
+	[]dbgen.ListStatisticsGroupLabelsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListStatisticsGroupLabels"); err != nil {
+		return nil, err
+	}
+	byLabels := map[string][]int64{}
+	for _, g := range f.groups {
+		if g.CreatedAt.Before(arg.RangeFrom) || !g.CreatedAt.Before(arg.RangeTo) {
+			continue
+		}
+		byLabels[string(g.CommonLabels)] = append(byLabels[string(g.CommonLabels)], g.ID)
+	}
+	var out []dbgen.ListStatisticsGroupLabelsRow
+	for _, labels := range slices.Sorted(maps.Keys(byLabels)) {
+		ids := byLabels[labels]
+		slices.Sort(ids)
+		out = append(out, dbgen.ListStatisticsGroupLabelsRow{CommonLabels: []byte(labels), Ids: ids})
+	}
+	return out, nil
+}
+
+func (f *fakeDB) ListStatisticsTeams(_ context.Context, arg dbgen.ListStatisticsTeamsParams) (
+	[]dbgen.ListStatisticsTeamsRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.call("ListStatisticsTeams"); err != nil {
+		return nil, err
+	}
+	var out []dbgen.ListStatisticsTeamsRow
+	for _, r := range f.teamsOf().refs {
+		if (len(arg.OnlyIds) > 0 && slices.Contains(arg.OnlyIds, r.ID)) ||
+			(len(arg.OnlyIds) == 0 && (!r.Deleted || slices.Contains(arg.WithIds, r.ID))) {
+			out = append(out, dbgen.ListStatisticsTeamsRow{ID: r.ID, PublicID: r.PublicID, Name: r.Name})
+		}
+	}
+	slices.SortFunc(out, func(a, b dbgen.ListStatisticsTeamsRow) int {
 		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil

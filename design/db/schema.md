@@ -111,7 +111,10 @@
   FR-7, S-140) and
   [`0044_telegram_discussion_members`](../../internal/db/migrations/0044_telegram_discussion_members.up.sql)
   (what the last Destination check of a Telegram Destination saw of the members of its discussion group,
-  `destinations.telegram_absent_user_ids` and `destinations.telegram_members_checked_at`, C-27.FR-8, S-164), in
+  `destinations.telegram_absent_user_ids` and `destinations.telegram_members_checked_at`, C-27.FR-8, S-164) and
+  [`0045_first_acknowledged_by`](../../internal/db/migrations/0045_first_acknowledged_by.up.sql)
+  (`alert_groups.first_acknowledged_by_user_id`, who made the first acknowledgement, filled from the Timeline where it
+  is whole, C-09.FR-27, S-174), in
   `internal/db/migrations/` — golang-migrate
   format, hand-written SQL,
   embedded in the binary, the same directory `sqlc` reads
@@ -1263,7 +1266,7 @@ Columns by concern:
 |---|---|
 | Identity | `number` (`#N`, unique per Organization), `public_id`, `route_id`, `moved_from_route_id` (set when the Alert Group was moved to the Default route), `group_key_labels` and `group_key_values` (the key as it was at creation), `group_key_sha256` |
 | Display and search | `title`, `title_from_group_key` (the single allowed title switch, C-09.FR-23), `summary`, `description` (the `description` annotation of the first Alert that has one, set once like `summary`, C-29.FR-1, migration 0029; null for an Alert Group created before it), `common_labels`, `common_annotations`, `integration_ids` |
-| Status | `status`, `severity_level`, `urgent`, `owner_user_id` and `acknowledged_at`, `first_acknowledged_at`, `snooze_until`, `snooze_no_end`, `snoozed_while_urgent`, `snoozed_by_user_id` or `snoozed_by_service_account_id` |
+| Status | `status`, `severity_level`, `urgent`, `owner_user_id` and `acknowledged_at`, `first_acknowledged_at` and `first_acknowledged_by_user_id` (migration 0045), `snooze_until`, `snooze_no_end`, `snoozed_while_urgent`, `snoozed_by_user_id` or `snoozed_by_service_account_id` |
 | Resolution | `resolved_at`, `resolved_by_kind` (`user` or `system`), `resolved_by_user_id` or `resolved_by_service_account_id` (the `ActorRef` kinds), `resolve_reason` and `resolve_reason_text` |
 | Reopen window | `reopen_deadline`, `prior_status`, `prior_owner_user_id`, `prior_snooze_until`, `prior_snooze_no_end`, `prior_snoozed_while_urgent`, `prior_snoozed_by_user_id`, `prior_snoozed_by_service_account_id` |
 | Grace period | `grace_deadline`, `firing_again_after_id` ("firing again after a manual resolve of #N"; `ON DELETE SET NULL` since migration 0003, so that summary retention can delete the earlier Alert Group) |
@@ -1280,11 +1283,22 @@ Invariants, enforced by `CHECK`:
   reason code; a system resolve names nobody and carries a reason;
 - a Reopen window (`reopen_deadline`) only after a system resolve, with the status to return to (`prior_status`), and
   never on an Alert Group moved to the Default route; a Grace period (`grace_deadline`) only after a person's resolve;
-- `unclaimed` only while `firing` (Unclaimed ends when the Alert Group stops being firing, C-17.FR-3).
+- `unclaimed` only while `firing` (Unclaimed ends when the Alert Group stops being firing, C-17.FR-3);
+- who made the first acknowledgement (`first_acknowledged_by_user_id`, a User by foreign key) only with
+  `first_acknowledged_at` (`alert_groups_first_acknowledged_by_check`, migration 0045).
 
 `first_acknowledged_at` is set by the first acknowledgement and never changed afterwards — Takeover, Unacknowledge and
 Reopen leave it — and gives the time to acknowledge of the statistics (C-09.FR-15); an Alert Group that was never
-acknowledged has none and is left out of it. Who set the current Snooze ("Snoozed by" in the Root message,
+acknowledged has none and is left out of it. `first_acknowledged_by_user_id` is the User who made that acknowledgement
+(C-09.FR-27), written by the dispatcher's Acknowledge in the same transaction and never changed afterwards either; there
+is no Service account column, as only Users acknowledge (C-04.FR-2). It is kept with the summary row, a deleted User
+under the name the deletion leaves. Migration 0045 filled it for the Alert Groups acknowledged before it from the
+earliest `acknowledged` entry by (`at`, `id`) of their Timeline (`timeline_entries_group_idx`), only where the
+Timeline is still whole — the `created` entry is kept, and since retention drops whole months, oldest first, so is
+every later entry; an Alert Group whose Timeline is gone or partly gone, and one first acknowledged by a replica of an
+earlier version during the rolling update, keeps it empty, which the statistics by people count as "Unknown"
+(C-09.FR-28). The statistics need no index of their own: every query of them starts from the period on
+`alert_groups_started_idx`. Who set the current Snooze ("Snoozed by" in the Root message,
 `snoozed_by` in the API) is kept on the row: set by Snooze, restored with the Snooze by a Reopen into snoozed (from the
 `prior_snoozed_by_*` columns), and cleared when the Snooze ends, so it never depends on Timeline retention.
 

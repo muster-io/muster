@@ -463,7 +463,7 @@ export const GetScheduleOnCallResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
-}).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
+}).describe('Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string()
 })).describe('The Overrides in the period, in the order they were created.'),
@@ -553,7 +553,7 @@ export const ListScheduleOverridesResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
-}).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
+}).describe('Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string()
 })),
@@ -614,7 +614,7 @@ export const CreateScheduleOverrideResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
-}).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
+}).describe('Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string()
 })
@@ -679,7 +679,7 @@ export const UpdateScheduleOverrideResponse = zod.object({
   "name": zod.string(),
   "login": zod.string().optional().describe('Users only.'),
   "deactivated": zod.boolean().describe('The user or Service account was deleted; the UI shows "(deactivated)".')
-}).describe('Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.'),
+}).describe('Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.'),
   "created_at": zod.iso.datetime({"offset":true}),
   "etag": zod.string()
 })

@@ -39,6 +39,7 @@ type fakeAlertGroups struct {
 	counts    []groups.Filter
 	related   []*groups.ListPosition
 	stats     []groups.StatisticsRequest
+	actors    []groups.Filter
 	open      map[string]int64
 	notes     []*groups.NotePosition
 	presets   []string
@@ -207,6 +208,21 @@ func (f *fakeAlertGroups) Statistics(_ context.Context, r groups.StatisticsReque
 			TimeToResolve: groups.DurationStats{Count: 3, Median: &median, P95: &median},
 			PerDay: []groups.StatisticsDay{{Date: time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC), AlertGroupCount: 3,
 				TimeToResolve: groups.DurationStats{Count: 3, Median: &median, P95: &median}}}}}}, f.err
+}
+
+// ActorStatistics answers Alice, the Service account terraform and the item of the Alert Groups whose first
+// acknowledgement names nobody, or the error of the fake.
+func (f *fakeAlertGroups) ActorStatistics(_ context.Context, fl groups.Filter) (groups.ActorStatistics, error) {
+	f.actors = append(f.actors, fl)
+	m, p := int64(240), int64(1644)
+	u := int64(600)
+	return groups.ActorStatistics{From: t0.Add(-7 * 24 * time.Hour), To: t0, Items: []groups.ActorStatisticsItem{
+		{Actor: &groups.ActorRef{Kind: "user", PublicID: "SRAAAAAAAAAAA9", Name: "Alice", Login: "alice"},
+			AcknowledgedFirst: 3, TimeToAcknowledge: groups.DurationStats{Count: 3, Median: &m, P95: &p}},
+		{Actor: &groups.ActorRef{Kind: "service_account", PublicID: "SAAAAAAAAAAA20", Name: "terraform",
+			Deactivated: true}, Resolved: 1},
+		{AcknowledgedFirst: 1, TimeToAcknowledge: groups.DurationStats{Count: 1, Median: &u, P95: &u}},
+	}}, f.err
 }
 
 func (f *fakeAlertGroups) OpenCounts(_ context.Context, ids []string) (map[string]int64, error) {
@@ -748,9 +764,27 @@ func TestAlertGroupStatisticsAPI(t *testing.T) {
 		!st.Items[0].TimeToAcknowledge.MedianSeconds.IsNull() || st.Items[0].PerDay[0].Date.String() != "2026-10-07" {
 		t.Fatalf("statistics = %d %s", a.status, a.body)
 	}
-	if r := fg.stats[0]; r.GroupBy != "route" || r.TimeZone != "Europe/Berlin" || !slices.Equal(r.Routes,
-		[]string{routeID}) || len(r.Integrations) != 1 || r.From == nil || r.To == nil {
+	if r := fg.stats[0]; r.GroupBy != "route" || r.TimeZone != "Europe/Berlin" || !slices.Equal(r.Filter.Routes,
+		[]string{routeID}) || len(r.Filter.Integrations) != 1 || r.Filter.From == nil || r.Filter.To == nil ||
+		r.Filter.Me.Kind != audit.ActorUser || r.Filter.Me.ID == 0 {
 		t.Errorf("request %+v", r)
+	}
+	// Per Team, with the filters of the list and the User of the first acknowledgement (C-09.FR-29, FR-30).
+	a = x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=team&team=mine"+
+		"&severity=critical&urgent=true&reopened=false&label=namespace%3D%22payments%22&label=pod%3D~%22api-.%2A%22"+
+		"&first_acknowledged_by=me&route="+routeID+"&integration=NTAAAAAAAAAAAA", "")
+	if a.status != http.StatusOK || !strings.Contains(string(a.body), `"group_by":"team"`) {
+		t.Fatalf("per team = %d %s", a.status, a.body)
+	}
+	if f := fg.stats[1].Filter; fg.stats[1].GroupBy != groups.ByTeam || f.Team != groups.TeamMine ||
+		len(f.Severities) != 1 || !*f.Urgent || *f.Reopened || len(f.Matchers) != 2 ||
+		f.FirstAcknowledgedBy != groups.OwnerMe || len(f.Routes) != 1 || len(f.Integrations) != 1 ||
+		f.Me.Kind != audit.ActorUser || f.Me.ID == 0 {
+		t.Errorf("filter %+v", f)
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=team&label=%3D%3D",
+		""); a.status != http.StatusBadRequest {
+		t.Errorf("a bad matcher = %d %s", a.status, a.body)
 	}
 	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=route&time_zone=Mars/Olympus",
 		""); a.status != http.StatusUnprocessableEntity {
@@ -763,6 +797,95 @@ func TestAlertGroupStatisticsAPI(t *testing.T) {
 	fg.err = errBoom
 	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=integration", ""); a.status !=
 		http.StatusInternalServerError {
+		t.Errorf("a failure = %d", a.status)
+	}
+}
+
+// TestAlertGroupActorStatisticsAPI is getAlertGroupActorStatistics (C-09.FR-28, FR-30, C-09.AC-30, AC-32, AC-33): the
+// items with their actor, a Service account marked as one and deactivated, and the item of nobody with actor null;
+// the filters reach the service with the caller, whom me and mine name; a Viewer's session and a token with only
+// alert-groups:read read it, as an Admin's does, without it the answer is 403 and without authentication 401; the
+// refusals of the service — me or mine from a Service account, an unknown id — are 422 at their parameter.
+func TestAlertGroupActorStatisticsAPI(t *testing.T) {
+	x, fg, _ := newAlertGroupsAPI(t)
+	path := "/api/v1/alert-group-actor-statistics"
+	a := x.as(t, groupsReader, http.MethodGet, path+"?route="+routeID+"&integration=NTAAAAAAAAAAAA&severity=critical"+
+		"&urgent=true&team=TM0000000000PA&reopened=true&label=cluster%3D~%22s.%22&first_acknowledged_by=SRAAAAAAAAAAA9"+
+		"&from=2026-10-01T00:00:00Z&to=2026-10-08T00:00:00Z", "")
+	want := `{"from":"2026-09-28T12:00:00Z","items":[{"acknowledged_first_count":3,"actor":{"deactivated":false,` +
+		`"id":"SRAAAAAAAAAAA9","kind":"user","login":"alice","name":"Alice"},"resolved_count":0,` +
+		`"time_to_acknowledge":{"count":3,"median_seconds":240,"p95_seconds":1644}},{"acknowledged_first_count":0,` +
+		`"actor":{"deactivated":true,"id":"SAAAAAAAAAAA20","kind":"service_account","name":"terraform"},` +
+		`"resolved_count":1,"time_to_acknowledge":{"count":0,"median_seconds":null,"p95_seconds":null}},` +
+		`{"acknowledged_first_count":1,"actor":null,"resolved_count":0,"time_to_acknowledge":{"count":1,` +
+		`"median_seconds":600,"p95_seconds":600}}],"to":"2026-10-05T12:00:00Z"}`
+	if a.status != http.StatusOK || strings.TrimSpace(string(a.body)) != want {
+		t.Fatalf("by people = %d %s", a.status, a.body)
+	}
+	if f := fg.actors[0]; len(f.Routes) != 1 || len(f.Integrations) != 1 || len(f.Severities) != 1 || !*f.Urgent ||
+		f.Team != "TM0000000000PA" || !*f.Reopened || len(f.Matchers) != 1 || f.FirstAcknowledgedBy != "SRAAAAAAAAAAA9" ||
+		f.From == nil || f.To == nil || f.Me.Kind != audit.ActorUser || f.Me.ID == 0 {
+		t.Errorf("filter %+v", f)
+	}
+	for name, a := range map[string]answer{
+		"admin":       x.as(t, fullToken, http.MethodGet, path, ""),
+		"reader":      x.as(t, groupsReader, http.MethodGet, path, ""),
+		"viewer":      x.call(t, http.MethodGet, path, "", "Cookie", viewerCookie),
+		"none":        x.as(t, groupsNone, http.MethodGet, path, ""),
+		"no identity": x.call(t, http.MethodGet, path, ""),
+		"no identity, per route": x.call(t, http.MethodGet, "/api/v1/alert-group-statistics?group_by=route",
+			""),
+	} {
+		want := map[string]int{"none": http.StatusForbidden, "no identity": http.StatusUnauthorized,
+			"no identity, per route": http.StatusUnauthorized}[name]
+		if want == 0 {
+			want = http.StatusOK
+			if strings.TrimSpace(string(a.body)) != strings.TrimSpace(string(x.as(t, fullToken, http.MethodGet, path,
+				"").body)) {
+				t.Errorf("%s reads other values: %s", name, a.body)
+			}
+		}
+		if a.status != want {
+			t.Errorf("%s = %d %s", name, a.status, a.body)
+		}
+	}
+	if a := x.as(t, serviceToken, http.MethodGet, path+"?team=mine&first_acknowledged_by=me", ""); a.status !=
+		http.StatusOK || fg.actors[len(fg.actors)-1].Me.Kind != audit.ActorServiceAccount ||
+		fg.actors[len(fg.actors)-1].Me.ID == 0 {
+		t.Errorf("a service account's filter = %d %+v", a.status, fg.actors[len(fg.actors)-1])
+	}
+	if a := x.as(t, groupsReader, http.MethodGet, path+"?label=%3D%3D", ""); a.status != http.StatusBadRequest {
+		t.Errorf("a bad matcher = %d %s", a.status, a.body)
+	}
+	// A malformed id of a Route or an Integration is refused by the validation of the request, as on the statistics
+	// per subject.
+	for _, p := range []string{path + "?route=bad", path + "?integration=bad",
+		"/api/v1/alert-group-statistics?group_by=route&route=bad",
+		"/api/v1/alert-group-statistics?group_by=integration&integration=bad"} {
+		if a := x.as(t, groupsReader, http.MethodGet, p, ""); a.status != http.StatusBadRequest ||
+			!strings.Contains(string(a.body), `"pointer":"/query/`) {
+			t.Errorf("%s = %d %s", p, a.status, a.body)
+		}
+	}
+	for _, c := range []struct {
+		token, query, err string
+	}{
+		{serviceToken, "?first_acknowledged_by=me", "/query/first_acknowledged_by unsupported"},
+		{serviceToken, "?team=mine", "/query/team unsupported"},
+		{groupsReader, "?first_acknowledged_by=SAAAAAAAAAAA20", "/query/first_acknowledged_by unknown_id"},
+		{groupsReader, "?team=TMZZZZZZZZZZZZ", "/query/team unknown_id"},
+	} {
+		parts := strings.SplitN(c.err, " ", 2)
+		fg.err = &groups.FieldError{Pointer: parts[0], Code: parts[1], Detail: "x"}
+		for _, p := range []string{path + c.query, "/api/v1/alert-group-statistics" + c.query + "&group_by=route"} {
+			if a := x.as(t, c.token, http.MethodGet, p, ""); a.status != http.StatusUnprocessableEntity ||
+				problemCode(t, a) != c.err {
+				t.Errorf("%s = %d %s", p, a.status, a.body)
+			}
+		}
+	}
+	fg.err = errBoom
+	if a := x.as(t, groupsReader, http.MethodGet, path, ""); a.status != http.StatusInternalServerError {
 		t.Errorf("a failure = %d", a.status)
 	}
 }

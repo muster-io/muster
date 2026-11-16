@@ -222,6 +222,16 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       writes neither column, and a check it runs leaves what the last check on 0.2.0 saw. A Telegram Destination that
       such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
       the old group until its next check: select **Check** on it once every replica runs 0.2.0.
+    - Migration 0045 records who made the first acknowledgement of each Alert Group, for the statistics by people.
+      For the Alert Groups acknowledged before its fill starts it fills it from the earliest `acknowledged` entry of
+      their Timeline, but only where the Timeline is still whole, its `created` entry kept (`retention.alert_details`);
+      the older Alert Groups name nobody, and the statistics by people count them in the row "Unknown". It is expand
+      only: a 0.1 replica neither reads nor writes the column and leaves it as it is. The fill sees the Alert Groups
+      as they were when it started: a first acknowledgement that a 0.1 replica records before then is filled with the
+      others; one it records after the fill started, while the rollout lasts, names nobody and counts as "Unknown"
+      too. A change that a 0.1 replica makes to an Alert Group the fill is writing waits until the fill commits; should
+      the two ever deadlock, PostgreSQL ends one of them, and a failed fill is recovered as described below. Their time
+      to acknowledge is kept as before.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps
@@ -730,6 +740,69 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
     same database role as Muster, run `UPDATE schema_migrations SET version = 43, dirty = false;` and start the 0.2.0
     replica again, or run `muster migrate`. Going back below 0044 loses what the checks saw, and with it the warnings
     `not_in_discussion_group`; once 0044 is back, each Telegram Destination's next check finds them again.
+
+    Migration 0045 runs in three transactions: the first adds `alert_groups.first_acknowledged_by_user_id` with its
+    foreign key and `alert_groups_first_acknowledged_by_check`, both `NOT VALID`; the second validates them; the third
+    fills the column in one `UPDATE`. The fill reads the `created` entries of the Timeline that is kept and, for each
+    acknowledged Alert Group among them, its earliest `acknowledged` entry on `timeline_entries_group_idx`, and writes
+    only the Alert Groups acknowledged within `retention.alert_details`. On a test machine (8 vCPU, PostgreSQL 17) it
+    took 7 seconds for 200,000 Alert Groups, of which it filled 76,000, and 40 seconds for 1,000,000 Alert Groups with
+    3.3 million kept Timeline entries, of which it filled 380,000: about 100 seconds per million filled Alert Groups,
+    nearly all of it writing the rows. It runs under `statement_timeout = '5min'`, so an installation with more than
+    about 3 million acknowledged Alert Groups in its kept Timeline may reach the timeout. Before the upgrade, this
+    counts at most the Alert Groups the fill writes, to predict its duration at about 100 seconds per million:
+
+    ```sql
+    SELECT count(*) FROM alert_groups g
+     WHERE g.first_acknowledged_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM timeline_entries c
+                    WHERE c.org_id = g.org_id AND c.alert_group_id = g.id AND c.event = 'created');
+    ```
+
+    A failure leaves the schema recorded as dirty at version 45. To recover, with the same database role as Muster:
+
+    1. Check whether the first transaction took effect:
+
+        ```sql
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema() AND table_name = 'alert_groups'
+           AND column_name = 'first_acknowledged_by_user_id';
+        ```
+
+    2. If it returns 0, clear the failed attempt: `UPDATE schema_migrations SET version = 44, dirty = false;`.
+    3. If it returns 1, finish the second transaction, run the third without its timeout and clear the mark; the
+       `UPDATE` skips the Alert Groups already filled, so it can run again after an interruption:
+
+        ```sql
+        ALTER TABLE alert_groups VALIDATE CONSTRAINT alert_groups_first_acknowledged_by_user_id_fkey;
+        ALTER TABLE alert_groups VALIDATE CONSTRAINT alert_groups_first_acknowledged_by_check;
+        SET statement_timeout = 0;
+        UPDATE alert_groups g
+        SET first_acknowledged_by_user_id = f.actor_user_id
+        FROM (
+            SELECT s.org_id, s.id, a.actor_user_id
+            FROM alert_groups s
+            CROSS JOIN LATERAL (
+                SELECT e.actor_user_id
+                FROM timeline_entries e
+                WHERE e.org_id = s.org_id AND e.alert_group_id = s.id AND e.event = 'acknowledged'
+                ORDER BY e.at, e.id
+                LIMIT 1
+            ) a
+            WHERE s.first_acknowledged_at IS NOT NULL AND s.first_acknowledged_by_user_id IS NULL
+              AND EXISTS (SELECT 1
+                          FROM timeline_entries c
+                          WHERE c.org_id = s.org_id AND c.alert_group_id = s.id AND c.event = 'created')
+        ) f
+        WHERE g.org_id = f.org_id AND g.id = f.id AND f.actor_user_id IS NOT NULL;
+        UPDATE schema_migrations SET dirty = false;
+        ```
+
+    4. Start the 0.2.0 replica again, or run `muster migrate`.
+
+    Going back below 0045 loses who made each first acknowledgement; once 0045 is back, it is filled again from the
+    Timeline that is still whole, and the Alert Groups acknowledged since then whose Timeline was removed count as
+    "Unknown".
 
 0.1.1
 :   Migration 0020 is expand only: it adds the column `oidc_settings.groups_claim_seen_at`, and replicas of 0.1.0 that

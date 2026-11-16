@@ -116,6 +116,7 @@ func (e AlertGroupNoticeKind) Valid() bool {
 const (
 	AlertGroupStatisticsGroupByIntegration AlertGroupStatisticsGroupBy = "integration"
 	AlertGroupStatisticsGroupByRoute       AlertGroupStatisticsGroupBy = "route"
+	AlertGroupStatisticsGroupByTeam        AlertGroupStatisticsGroupBy = "team"
 )
 
 // Valid indicates whether the value is a known member of the AlertGroupStatisticsGroupBy enum.
@@ -124,6 +125,8 @@ func (e AlertGroupStatisticsGroupBy) Valid() bool {
 	case AlertGroupStatisticsGroupByIntegration:
 		return true
 	case AlertGroupStatisticsGroupByRoute:
+		return true
+	case AlertGroupStatisticsGroupByTeam:
 		return true
 	default:
 		return false
@@ -4163,6 +4166,7 @@ func (e AgSort) Valid() bool {
 const (
 	GetAlertGroupStatisticsParamsGroupByIntegration GetAlertGroupStatisticsParamsGroupBy = "integration"
 	GetAlertGroupStatisticsParamsGroupByRoute       GetAlertGroupStatisticsParamsGroupBy = "route"
+	GetAlertGroupStatisticsParamsGroupByTeam        GetAlertGroupStatisticsParamsGroupBy = "team"
 )
 
 // Valid indicates whether the value is a known member of the GetAlertGroupStatisticsParamsGroupBy enum.
@@ -4171,6 +4175,8 @@ func (e GetAlertGroupStatisticsParamsGroupBy) Valid() bool {
 	case GetAlertGroupStatisticsParamsGroupByIntegration:
 		return true
 	case GetAlertGroupStatisticsParamsGroupByRoute:
+		return true
+	case GetAlertGroupStatisticsParamsGroupByTeam:
 		return true
 	default:
 		return false
@@ -4330,7 +4336,7 @@ type ActiveStorm struct {
 // ActorKind defines model for ActorKind.
 type ActorKind string
 
-// ActorRef Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+// ActorRef Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 type ActorRef struct {
 	// Deactivated The user or Service account was deleted; the UI shows "(deactivated)".
 	Deactivated bool `json:"deactivated"`
@@ -4413,6 +4419,28 @@ type AlertGroup struct {
 
 	// Urgent True exactly when `severity_level` is `critical`.
 	Urgent bool `json:"urgent"`
+}
+
+// AlertGroupActorStatistics defines model for AlertGroupActorStatistics.
+type AlertGroupActorStatistics struct {
+	From  time.Time                       `json:"from"`
+	Items []AlertGroupActorStatisticsItem `json:"items"`
+	To    time.Time                       `json:"to"`
+}
+
+// AlertGroupActorStatisticsItem defines model for AlertGroupActorStatisticsItem.
+type AlertGroupActorStatisticsItem struct {
+	// AcknowledgedFirstCount The Alert Groups whose first acknowledgement the actor made; 0 for a Service account.
+	AcknowledgedFirstCount int `json:"acknowledged_first_count"`
+
+	// Actor The User or Service account; null for the item of the Alert Groups whose first acknowledgement names nobody ("Unknown").
+	Actor nullable.Nullable[ActorRef] `json:"actor"`
+
+	// ResolvedCount The Alert Groups the actor resolved, by their resolver; 0 for the item with `actor` null.
+	ResolvedCount int `json:"resolved_count"`
+
+	// TimeToAcknowledge From the start of each Alert Group to its first acknowledgement, over the Alert Groups the actor acknowledged first; its `count` is `acknowledged_first_count`.
+	TimeToAcknowledge DurationStats `json:"time_to_acknowledge"`
 }
 
 // AlertGroupAlert defines model for AlertGroupAlert.
@@ -6746,7 +6774,7 @@ type NotPageableReason string
 
 // Note defines model for Note.
 type Note struct {
-	// Author Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+	// Author Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 	Author    ActorRef  `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
@@ -8188,7 +8216,7 @@ type ScheduleOnCall struct {
 type ScheduleOverride struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+	// CreatedBy Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 	CreatedBy ActorRef  `json:"created_by"`
 	End       time.Time `json:"end"`
 	Etag      *string   `json:"etag,omitempty"`
@@ -10158,6 +10186,9 @@ type AccountLinkId = PublicId
 // AgDeliveryProblem defines model for AgDeliveryProblem.
 type AgDeliveryProblem = bool
 
+// AgFirstAcknowledgedBy defines model for AgFirstAcknowledgedBy.
+type AgFirstAcknowledgedBy = string
+
 // AgIntegration defines model for AgIntegration.
 type AgIntegration = []string
 
@@ -10272,6 +10303,12 @@ type SecretName = string
 // ServiceAccountId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type ServiceAccountId = PublicId
 
+// StatisticsIntegration defines model for StatisticsIntegration.
+type StatisticsIntegration = []PublicId
+
+// StatisticsRoute defines model for StatisticsRoute.
+type StatisticsRoute = []PublicId
+
 // StoredSnapshotId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type StoredSnapshotId = PublicId
 
@@ -10335,6 +10372,39 @@ type Unauthorized = Problem
 // Unprocessable RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Unprocessable = Problem
 
+// GetAlertGroupActorStatisticsParams defines parameters for GetAlertGroupActorStatistics.
+type GetAlertGroupActorStatisticsParams struct {
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
+	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
+
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
+
+	// Severity Only these Severity levels.
+	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
+
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
+	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
+
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
+
+	// Reopened True: Reopen count above zero.
+	Reopened *AgReopened `form:"reopened,omitempty" json:"reopened,omitempty"`
+
+	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
+	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
+
+	// FirstAcknowledgedBy Only Alert Groups whose first acknowledgement this User made (C-09.FR-27), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). Only Users acknowledge (C-04.FR-2), so an id that names no User, a Service account's included, is `422` `unknown_id`.
+	FirstAcknowledgedBy *AgFirstAcknowledgedBy `form:"first_acknowledged_by,omitempty" json:"first_acknowledged_by,omitempty"`
+
+	// From Start of the time range (RFC 3339, UTC).
+	From *From `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the time range (RFC 3339, UTC).
+	To *To `form:"to,omitempty" json:"to,omitempty"`
+}
+
 // GetAlertGroupCountsParams defines parameters for GetAlertGroupCounts.
 type GetAlertGroupCountsParams struct {
 	// Route Only these Routes (`public_id`).
@@ -10391,11 +10461,29 @@ type GetAlertGroupStatisticsParams struct {
 	// GroupBy What one item stands for.
 	GroupBy GetAlertGroupStatisticsParamsGroupBy `form:"group_by" json:"group_by"`
 
-	// Route Only these Routes (`public_id`); with `group_by=route`.
-	Route *[]PublicId `form:"route,omitempty" json:"route,omitempty"`
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
+	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
 
-	// Integration Only these Integrations (`public_id`); with `group_by=integration`.
-	Integration *[]PublicId `form:"integration,omitempty" json:"integration,omitempty"`
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
+
+	// Severity Only these Severity levels.
+	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
+
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
+	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
+
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
+
+	// Reopened True: Reopen count above zero.
+	Reopened *AgReopened `form:"reopened,omitempty" json:"reopened,omitempty"`
+
+	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
+	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
+
+	// FirstAcknowledgedBy Only Alert Groups whose first acknowledgement this User made (C-09.FR-27), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). Only Users acknowledge (C-04.FR-2), so an id that names no User, a Service account's included, is `422` `unknown_id`.
+	FirstAcknowledgedBy *AgFirstAcknowledgedBy `form:"first_acknowledged_by,omitempty" json:"first_acknowledged_by,omitempty"`
 
 	// From Start of the time range (RFC 3339, UTC).
 	From *From `form:"from,omitempty" json:"from,omitempty"`
@@ -13467,6 +13555,13 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// GetAlertGroupActorStatistics Read Alert Group statistics by people
+	//
+	// Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least one. `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`, with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name, then by `public_id`.
+	//
+	// Corresponds with GET /alert-group-actor-statistics (the `GetAlertGroupActorStatistics` operationId).
+	GetAlertGroupActorStatistics(ctx context.Context, params *GetAlertGroupActorStatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetAlertGroupCounts Count Alert Groups per status
 	//
 	// Counts per status tab for the same filters as `listAlertGroups`, `status` excluded.
@@ -13476,7 +13571,7 @@ type ClientInterface interface {
 
 	// GetAlertGroupStatistics Read Alert Group statistics
 	//
-	// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
+	// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`, `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams). Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several Teams for each Team; one without a Team counts for no Team.
 	//
 	// Corresponds with GET /alert-group-statistics (the `GetAlertGroupStatistics` operationId).
 	GetAlertGroupStatistics(ctx context.Context, params *GetAlertGroupStatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -15542,6 +15637,23 @@ type ClientInterface interface {
 	ResetUserTotp(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
+// GetAlertGroupActorStatistics Read Alert Group statistics by people
+//
+// Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least one. `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`, with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name, then by `public_id`.
+//
+// Corresponds with GET /alert-group-actor-statistics (the `GetAlertGroupActorStatistics` operationId).
+func (c *Client) GetAlertGroupActorStatistics(ctx context.Context, params *GetAlertGroupActorStatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAlertGroupActorStatisticsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetAlertGroupCounts Count Alert Groups per status
 //
 // Counts per status tab for the same filters as `listAlertGroups`, `status` excluded.
@@ -15561,7 +15673,7 @@ func (c *Client) GetAlertGroupCounts(ctx context.Context, params *GetAlertGroupC
 
 // GetAlertGroupStatistics Read Alert Group statistics
 //
-// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
+// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`, `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams). Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several Teams for each Team; one without a Team counts for no Team.
 //
 // Corresponds with GET /alert-group-statistics (the `GetAlertGroupStatistics` operationId).
 func (c *Client) GetAlertGroupStatistics(ctx context.Context, params *GetAlertGroupStatisticsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -20276,6 +20388,168 @@ func (c *Client) ResetUserTotp(ctx context.Context, userId UserId, reqEditors ..
 	return c.Client.Do(req)
 }
 
+// NewGetAlertGroupActorStatisticsRequest constructs an http.Request for the GetAlertGroupActorStatistics method
+func NewGetAlertGroupActorStatisticsRequest(server string, params *GetAlertGroupActorStatisticsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/alert-group-actor-statistics")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Route != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "route", *params.Route, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Integration != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "integration", *params.Integration, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Severity != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "severity", *params.Severity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Urgent != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "urgent", *params.Urgent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "team", *params.Team, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Reopened != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "reopened", *params.Reopened, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Label != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "label", *params.Label, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.FirstAcknowledgedBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "first_acknowledged_by", *params.FirstAcknowledgedBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.From != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "from", *params.From, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.To != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "to", *params.To, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetAlertGroupCountsRequest constructs an http.Request for the GetAlertGroupCounts method
 func NewGetAlertGroupCountsRequest(server string, params *GetAlertGroupCountsParams) (*http.Request, error) {
 	var err error
@@ -20561,6 +20835,78 @@ func NewGetAlertGroupStatisticsRequest(server string, params *GetAlertGroupStati
 		if params.Integration != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "integration", *params.Integration, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Severity != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "severity", *params.Severity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Urgent != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "urgent", *params.Urgent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Team != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "team", *params.Team, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Reopened != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "reopened", *params.Reopened, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Label != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "label", *params.Label, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.FirstAcknowledgedBy != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "first_acknowledged_by", *params.FirstAcknowledgedBy, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -29936,6 +30282,15 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// GetAlertGroupActorStatisticsWithResponse Read Alert Group statistics by people
+	//
+	// Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least one. `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`, with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name, then by `public_id`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /alert-group-actor-statistics (the `GetAlertGroupActorStatistics` operationId).
+	GetAlertGroupActorStatisticsWithResponse(ctx context.Context, params *GetAlertGroupActorStatisticsParams, reqEditors ...RequestEditorFn) (*GetAlertGroupActorStatisticsResponse, error)
+
 	// GetAlertGroupCountsWithResponse Count Alert Groups per status
 	//
 	// Counts per status tab for the same filters as `listAlertGroups`, `status` excluded.
@@ -29947,7 +30302,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetAlertGroupStatisticsWithResponse Read Alert Group statistics
 	//
-	// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
+	// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`, `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams). Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several Teams for each Team; one without a Team counts for no Team.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -32269,6 +32624,89 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /users/{user_id}/reset-totp (the `ResetUserTotp` operationId).
 	ResetUserTotpWithResponse(ctx context.Context, userId UserId, reqEditors ...RequestEditorFn) (*ResetUserTotpResponse, error)
+}
+
+// GetAlertGroupActorStatisticsResponse429Headers the declared response headers of an HTTP 429 response for GetAlertGroupActorStatistics
+type GetAlertGroupActorStatisticsResponse429Headers struct {
+	RetryAfter *int
+}
+
+type GetAlertGroupActorStatisticsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AlertGroupActorStatistics
+	// ApplicationproblemJSON400 the response for an HTTP 400 `application/problem+json` response
+	ApplicationproblemJSON400 *BadRequest
+	// ApplicationproblemJSON401 the response for an HTTP 401 `application/problem+json` response
+	ApplicationproblemJSON401 *Unauthorized
+	// ApplicationproblemJSON403 the response for an HTTP 403 `application/problem+json` response
+	ApplicationproblemJSON403 *Forbidden
+	// ApplicationproblemJSON422 the response for an HTTP 422 `application/problem+json` response
+	ApplicationproblemJSON422 *Unprocessable
+	// ApplicationproblemJSON429 the response for an HTTP 429 `application/problem+json` response
+	ApplicationproblemJSON429 *TooManyRequests
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *GetAlertGroupActorStatisticsResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAlertGroupActorStatisticsResponse) GetJSON200() *AlertGroupActorStatistics {
+	return r.JSON200
+}
+
+// GetApplicationproblemJSON400 returns the response for an HTTP 400 `application/problem+json` response
+func (r GetAlertGroupActorStatisticsResponse) GetApplicationproblemJSON400() *BadRequest {
+	return r.ApplicationproblemJSON400
+}
+
+// GetApplicationproblemJSON401 returns the response for an HTTP 401 `application/problem+json` response
+func (r GetAlertGroupActorStatisticsResponse) GetApplicationproblemJSON401() *Unauthorized {
+	return r.ApplicationproblemJSON401
+}
+
+// GetApplicationproblemJSON403 returns the response for an HTTP 403 `application/problem+json` response
+func (r GetAlertGroupActorStatisticsResponse) GetApplicationproblemJSON403() *Forbidden {
+	return r.ApplicationproblemJSON403
+}
+
+// GetApplicationproblemJSON422 returns the response for an HTTP 422 `application/problem+json` response
+func (r GetAlertGroupActorStatisticsResponse) GetApplicationproblemJSON422() *Unprocessable {
+	return r.ApplicationproblemJSON422
+}
+
+// GetApplicationproblemJSON429 returns the response for an HTTP 429 `application/problem+json` response
+func (r GetAlertGroupActorStatisticsResponse) GetApplicationproblemJSON429() *TooManyRequests {
+	return r.ApplicationproblemJSON429
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAlertGroupActorStatisticsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAlertGroupActorStatisticsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAlertGroupActorStatisticsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAlertGroupActorStatisticsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 // GetAlertGroupCountsResponse429Headers the declared response headers of an HTTP 429 response for GetAlertGroupCounts
@@ -48765,6 +49203,21 @@ func (r ResetUserTotpResponse) ContentType() string {
 	return ""
 }
 
+// GetAlertGroupActorStatisticsWithResponse Read Alert Group statistics by people
+//
+// Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least one. `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`, with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name, then by `public_id`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /alert-group-actor-statistics (the `GetAlertGroupActorStatistics` operationId).
+func (c *ClientWithResponses) GetAlertGroupActorStatisticsWithResponse(ctx context.Context, params *GetAlertGroupActorStatisticsParams, reqEditors ...RequestEditorFn) (*GetAlertGroupActorStatisticsResponse, error) {
+	rsp, err := c.GetAlertGroupActorStatistics(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAlertGroupActorStatisticsResponse(rsp)
+}
+
 // GetAlertGroupCountsWithResponse Count Alert Groups per status
 //
 // Counts per status tab for the same filters as `listAlertGroups`, `status` excluded.
@@ -48782,7 +49235,7 @@ func (c *ClientWithResponses) GetAlertGroupCountsWithResponse(ctx context.Contex
 
 // GetAlertGroupStatisticsWithResponse Read Alert Group statistics
 //
-// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
+// Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`, `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams). Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several Teams for each Team; one without a Team counts for no Team.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -52693,6 +53146,80 @@ func (c *ClientWithResponses) ResetUserTotpWithResponse(ctx context.Context, use
 		return nil, err
 	}
 	return ParseResetUserTotpResponse(rsp)
+}
+
+// ParseGetAlertGroupActorStatisticsResponse parses an HTTP response from a GetAlertGroupActorStatisticsWithResponse call
+func ParseGetAlertGroupActorStatisticsResponse(rsp *http.Response) (*GetAlertGroupActorStatisticsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAlertGroupActorStatisticsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AlertGroupActorStatistics
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Unprocessable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest TooManyRequests
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.ApplicationproblemJSON429 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 429:
+		var headers GetAlertGroupActorStatisticsResponse429Headers
+		if values := rsp.Header.Values("Retry-After"); len(values) > 0 {
+			var value int
+			if err := runtime.BindStyledParameterWithOptions("simple", "Retry-After", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.RetryAfter = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
 }
 
 // ParseGetAlertGroupCountsResponse parses an HTTP response from a GetAlertGroupCountsWithResponse call

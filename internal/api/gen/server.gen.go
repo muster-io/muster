@@ -114,6 +114,7 @@ func (e AlertGroupNoticeKind) Valid() bool {
 const (
 	AlertGroupStatisticsGroupByIntegration AlertGroupStatisticsGroupBy = "integration"
 	AlertGroupStatisticsGroupByRoute       AlertGroupStatisticsGroupBy = "route"
+	AlertGroupStatisticsGroupByTeam        AlertGroupStatisticsGroupBy = "team"
 )
 
 // Valid indicates whether the value is a known member of the AlertGroupStatisticsGroupBy enum.
@@ -122,6 +123,8 @@ func (e AlertGroupStatisticsGroupBy) Valid() bool {
 	case AlertGroupStatisticsGroupByIntegration:
 		return true
 	case AlertGroupStatisticsGroupByRoute:
+		return true
+	case AlertGroupStatisticsGroupByTeam:
 		return true
 	default:
 		return false
@@ -4161,6 +4164,7 @@ func (e AgSort) Valid() bool {
 const (
 	GetAlertGroupStatisticsParamsGroupByIntegration GetAlertGroupStatisticsParamsGroupBy = "integration"
 	GetAlertGroupStatisticsParamsGroupByRoute       GetAlertGroupStatisticsParamsGroupBy = "route"
+	GetAlertGroupStatisticsParamsGroupByTeam        GetAlertGroupStatisticsParamsGroupBy = "team"
 )
 
 // Valid indicates whether the value is a known member of the GetAlertGroupStatisticsParamsGroupBy enum.
@@ -4169,6 +4173,8 @@ func (e GetAlertGroupStatisticsParamsGroupBy) Valid() bool {
 	case GetAlertGroupStatisticsParamsGroupByIntegration:
 		return true
 	case GetAlertGroupStatisticsParamsGroupByRoute:
+		return true
+	case GetAlertGroupStatisticsParamsGroupByTeam:
 		return true
 	default:
 		return false
@@ -4328,7 +4334,7 @@ type ActiveStorm struct {
 // ActorKind defines model for ActorKind.
 type ActorKind string
 
-// ActorRef Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+// ActorRef Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 type ActorRef struct {
 	// Deactivated The user or Service account was deleted; the UI shows "(deactivated)".
 	Deactivated bool `json:"deactivated"`
@@ -4411,6 +4417,28 @@ type AlertGroup struct {
 
 	// Urgent True exactly when `severity_level` is `critical`.
 	Urgent bool `json:"urgent"`
+}
+
+// AlertGroupActorStatistics defines model for AlertGroupActorStatistics.
+type AlertGroupActorStatistics struct {
+	From  time.Time                       `json:"from"`
+	Items []AlertGroupActorStatisticsItem `json:"items"`
+	To    time.Time                       `json:"to"`
+}
+
+// AlertGroupActorStatisticsItem defines model for AlertGroupActorStatisticsItem.
+type AlertGroupActorStatisticsItem struct {
+	// AcknowledgedFirstCount The Alert Groups whose first acknowledgement the actor made; 0 for a Service account.
+	AcknowledgedFirstCount int `json:"acknowledged_first_count"`
+
+	// Actor The User or Service account; null for the item of the Alert Groups whose first acknowledgement names nobody ("Unknown").
+	Actor nullable.Nullable[ActorRef] `json:"actor"`
+
+	// ResolvedCount The Alert Groups the actor resolved, by their resolver; 0 for the item with `actor` null.
+	ResolvedCount int `json:"resolved_count"`
+
+	// TimeToAcknowledge From the start of each Alert Group to its first acknowledgement, over the Alert Groups the actor acknowledged first; its `count` is `acknowledged_first_count`.
+	TimeToAcknowledge DurationStats `json:"time_to_acknowledge"`
 }
 
 // AlertGroupAlert defines model for AlertGroupAlert.
@@ -6744,7 +6772,7 @@ type NotPageableReason string
 
 // Note defines model for Note.
 type Note struct {
-	// Author Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+	// Author Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 	Author    ActorRef  `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
@@ -8186,7 +8214,7 @@ type ScheduleOnCall struct {
 type ScheduleOverride struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreatedBy Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+	// CreatedBy Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
 	CreatedBy ActorRef  `json:"created_by"`
 	End       time.Time `json:"end"`
 	Etag      *string   `json:"etag,omitempty"`
@@ -10156,6 +10184,9 @@ type AccountLinkId = PublicId
 // AgDeliveryProblem defines model for AgDeliveryProblem.
 type AgDeliveryProblem = bool
 
+// AgFirstAcknowledgedBy defines model for AgFirstAcknowledgedBy.
+type AgFirstAcknowledgedBy = string
+
 // AgIntegration defines model for AgIntegration.
 type AgIntegration = []string
 
@@ -10270,6 +10301,12 @@ type SecretName = string
 // ServiceAccountId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type ServiceAccountId = PublicId
 
+// StatisticsIntegration defines model for StatisticsIntegration.
+type StatisticsIntegration = []PublicId
+
+// StatisticsRoute defines model for StatisticsRoute.
+type StatisticsRoute = []PublicId
+
 // StoredSnapshotId Opaque public identifier (`public_id`): a type prefix of one or two letters followed by 12 random characters of Crockford base32 (`0`–`9` and `A`–`Z` without `I`, `L`, `O` and `U`; 60 bits), such as `AGK7M3QX9P2RTA` for an Alert Group. Prefixes use the same letters and differ per type: `AG` Alert Group, `AE` Audit log entry, `AK` Account link, `AR` Account link request, `CA` call through a Notification gateway, `CN` Connection, `CR` check run, `DE` delivery event, `DS` Destination, `GC` contact at a Notification gateway, `KR` Link rule, `NE` Note, `NK` Integration token, `NT` Integration, `PT` Personal access token, `RG` Organization, `RQ` record of the Request log, `RT` Route, `RY` Rotation layer, `SA` Service account, `SC` Schedule, `SN` session, `SR` User, `SS` Stored Snapshot, `ST` Service account token, `TB` Lookup table, `TE` Timeline entry, `TM` Team, `VR` Override. Responses always carry the canonical upper-case form. Input is case-insensitive and normalized before lookup — `O` reads as `0`, `I` and `L` as `1` — so the pattern also admits lower case and those letters. People refer to Alert Groups by `#N`, never by `public_id`.
 type StoredSnapshotId = PublicId
 
@@ -10333,6 +10370,39 @@ type Unauthorized = Problem
 // Unprocessable RFC 9457 problem details, served as `application/problem+json`. `type` is a stable URI under `https://muster-io.github.io/muster/problems/`; clients branch on `type`, `code` and `errors[].code`, never on `title` or `detail`. Validation errors raised by the request-validation middleware and by the strict server are mapped to this schema by one function. Every `code` is listed in `x-problem-codes`.
 type Unprocessable = Problem
 
+// GetAlertGroupActorStatisticsParams defines parameters for GetAlertGroupActorStatistics.
+type GetAlertGroupActorStatisticsParams struct {
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
+	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
+
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
+
+	// Severity Only these Severity levels.
+	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
+
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
+	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
+
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
+
+	// Reopened True: Reopen count above zero.
+	Reopened *AgReopened `form:"reopened,omitempty" json:"reopened,omitempty"`
+
+	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
+	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
+
+	// FirstAcknowledgedBy Only Alert Groups whose first acknowledgement this User made (C-09.FR-27), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). Only Users acknowledge (C-04.FR-2), so an id that names no User, a Service account's included, is `422` `unknown_id`.
+	FirstAcknowledgedBy *AgFirstAcknowledgedBy `form:"first_acknowledged_by,omitempty" json:"first_acknowledged_by,omitempty"`
+
+	// From Start of the time range (RFC 3339, UTC).
+	From *From `form:"from,omitempty" json:"from,omitempty"`
+
+	// To End of the time range (RFC 3339, UTC).
+	To *To `form:"to,omitempty" json:"to,omitempty"`
+}
+
 // GetAlertGroupCountsParams defines parameters for GetAlertGroupCounts.
 type GetAlertGroupCountsParams struct {
 	// Route Only these Routes (`public_id`).
@@ -10389,11 +10459,29 @@ type GetAlertGroupStatisticsParams struct {
 	// GroupBy What one item stands for.
 	GroupBy GetAlertGroupStatisticsParamsGroupBy `form:"group_by" json:"group_by"`
 
-	// Route Only these Routes (`public_id`); with `group_by=route`.
-	Route *[]PublicId `form:"route,omitempty" json:"route,omitempty"`
+	// Route Only the Alert Groups of these Routes (`public_id`); in `getAlertGroupStatistics` with `group_by=route` also the items.
+	Route *StatisticsRoute `form:"route,omitempty" json:"route,omitempty"`
 
-	// Integration Only these Integrations (`public_id`); with `group_by=integration`.
-	Integration *[]PublicId `form:"integration,omitempty" json:"integration,omitempty"`
+	// Integration Only the Alert Groups with Alerts from these Integrations (`public_id`); in `getAlertGroupStatistics` with `group_by=integration` also the items, of those Integrations only.
+	Integration *StatisticsIntegration `form:"integration,omitempty" json:"integration,omitempty"`
+
+	// Severity Only these Severity levels.
+	Severity *AgSeverity `form:"severity,omitempty" json:"severity,omitempty"`
+
+	// Urgent Only Urgent (true) or non-Urgent (false) Alert Groups. An Alert Group is Urgent exactly when its Severity level is critical.
+	Urgent *AgUrgent `form:"urgent,omitempty" json:"urgent,omitempty"`
+
+	// Team Only Alert Groups that have this Team among their Teams (C-25.FR-6), deleted or not, by its `public_id`; or `mine` for those that have any Team of the calling User ("My Teams"; `422` `unsupported` for a Service account token). An unknown Team is `422` `unknown_id`.
+	Team *AgTeam `form:"team,omitempty" json:"team,omitempty"`
+
+	// Reopened True: Reopen count above zero.
+	Reopened *AgReopened `form:"reopened,omitempty" json:"reopened,omitempty"`
+
+	// Label Label filter: one Alertmanager-syntax Matcher per repeat of the parameter, combined with AND. Each value is a whole matcher: `label=namespace%3D%22payments%22&label=pod%3D~%22api-.*%22` means `namespace="payments"` and `pod=~"api-.*"`. There is no per-label shorthand. On Alert Groups the Matchers are matched against the common labels — the labels every Alert of the group has with the same value — so the filter also works on summary rows after the Alerts were removed; a label the Alerts do not share counts as absent. On the Alerts view of an Integration they are matched against each Alert's labels.
+	Label *LabelMatchers `form:"label,omitempty" json:"label,omitempty"`
+
+	// FirstAcknowledgedBy Only Alert Groups whose first acknowledgement this User made (C-09.FR-27), by the User's `public_id`, deleted Users included; or `me`, the calling User (`422` `unsupported` for a Service account token). Only Users acknowledge (C-04.FR-2), so an id that names no User, a Service account's included, is `422` `unknown_id`.
+	FirstAcknowledgedBy *AgFirstAcknowledgedBy `form:"first_acknowledged_by,omitempty" json:"first_acknowledged_by,omitempty"`
 
 	// From Start of the time range (RFC 3339, UTC).
 	From *From `form:"from,omitempty" json:"from,omitempty"`
@@ -13393,6 +13481,9 @@ func (t *TimelineEntry) UnmarshalJSON(b []byte) error {
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetAlertGroupActorStatistics Read Alert Group statistics by people
+	// (GET /alert-group-actor-statistics)
+	GetAlertGroupActorStatistics(w http.ResponseWriter, r *http.Request, params GetAlertGroupActorStatisticsParams)
 	// GetAlertGroupCounts Count Alert Groups per status
 	// (GET /alert-group-counts)
 	GetAlertGroupCounts(w http.ResponseWriter, r *http.Request, params GetAlertGroupCountsParams)
@@ -14001,6 +14092,156 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// GetAlertGroupActorStatistics operation middleware
+func (siw *ServerInterfaceWrapper) GetAlertGroupActorStatistics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetAlertGroupActorStatisticsParams
+
+	// ------------- Optional query parameter "route" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "route", r.URL.Query(), &params.Route, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "route"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "route", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "integration" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "integration", r.URL.Query(), &params.Integration, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "integration"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "integration", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "severity" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "severity", r.URL.Query(), &params.Severity, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "severity"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "severity", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "urgent" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "urgent", r.URL.Query(), &params.Urgent, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "urgent"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "urgent", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "team" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "team", r.URL.Query(), &params.Team, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "team"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "team", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "reopened" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "reopened", r.URL.Query(), &params.Reopened, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "reopened"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reopened", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "label" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "label", r.URL.Query(), &params.Label, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "label"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "label", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "first_acknowledged_by" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "first_acknowledged_by", r.URL.Query(), &params.FirstAcknowledgedBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "first_acknowledged_by"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "first_acknowledged_by", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAlertGroupActorStatistics(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetAlertGroupCounts operation middleware
 func (siw *ServerInterfaceWrapper) GetAlertGroupCounts(w http.ResponseWriter, r *http.Request) {
 
@@ -14273,6 +14514,84 @@ func (siw *ServerInterfaceWrapper) GetAlertGroupStatistics(w http.ResponseWriter
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "integration"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "integration", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "severity" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "severity", r.URL.Query(), &params.Severity, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "severity"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "severity", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "urgent" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "urgent", r.URL.Query(), &params.Urgent, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "urgent"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "urgent", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "team" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "team", r.URL.Query(), &params.Team, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "team"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "team", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "reopened" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "reopened", r.URL.Query(), &params.Reopened, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "reopened"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "reopened", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "label" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "label", r.URL.Query(), &params.Label, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "label"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "label", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "first_acknowledged_by" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "first_acknowledged_by", r.URL.Query(), &params.FirstAcknowledgedBy, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "first_acknowledged_by"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "first_acknowledged_by", Err: err})
 		}
 		return
 	}
@@ -21234,6 +21553,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-groups", wrapper.ListAlertGroups)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-group-counts", wrapper.GetAlertGroupCounts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-group-statistics", wrapper.GetAlertGroupStatistics)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-group-actor-statistics", wrapper.GetAlertGroupActorStatistics)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-groups/{alert_group_id}", wrapper.GetAlertGroup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-groups/{alert_group_id}/alerts", wrapper.ListAlertGroupAlerts)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/alert-groups/{alert_group_id}/timeline", wrapper.GetAlertGroupTimeline)
@@ -21469,6 +21789,111 @@ type TooManyRequestsApplicationProblemPlusJSONResponse struct {
 type UnauthorizedApplicationProblemPlusJSONResponse Problem
 
 type UnprocessableApplicationProblemPlusJSONResponse Problem
+
+type GetAlertGroupActorStatisticsRequestObject struct {
+	Params GetAlertGroupActorStatisticsParams
+}
+
+type GetAlertGroupActorStatisticsResponseObject interface {
+	VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error
+}
+
+type GetAlertGroupActorStatistics200JSONResponse AlertGroupActorStatistics
+
+func (response GetAlertGroupActorStatistics200JSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlertGroupActorStatistics400ApplicationProblemPlusJSONResponse struct {
+	BadRequestApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupActorStatistics400ApplicationProblemPlusJSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlertGroupActorStatistics401ApplicationProblemPlusJSONResponse struct {
+	UnauthorizedApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupActorStatistics401ApplicationProblemPlusJSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlertGroupActorStatistics403ApplicationProblemPlusJSONResponse struct {
+	ForbiddenApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupActorStatistics403ApplicationProblemPlusJSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlertGroupActorStatistics422ApplicationProblemPlusJSONResponse struct {
+	UnprocessableApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupActorStatistics422ApplicationProblemPlusJSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlertGroupActorStatistics429ApplicationProblemPlusJSONResponse struct {
+	TooManyRequestsApplicationProblemPlusJSONResponse
+}
+
+func (response GetAlertGroupActorStatistics429ApplicationProblemPlusJSONResponse) VisitGetAlertGroupActorStatisticsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/problem+json")
+	if response.Headers.RetryAfter != nil {
+		w.Header().Set("Retry-After", fmt.Sprint(*response.Headers.RetryAfter))
+	}
+	w.WriteHeader(429)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type GetAlertGroupCountsRequestObject struct {
 	Params GetAlertGroupCountsParams
@@ -42485,6 +42910,9 @@ func (response ResetUserTotp429ApplicationProblemPlusJSONResponse) VisitResetUse
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// GetAlertGroupActorStatistics Read Alert Group statistics by people
+	// (GET /alert-group-actor-statistics)
+	GetAlertGroupActorStatistics(ctx context.Context, request GetAlertGroupActorStatisticsRequestObject) (GetAlertGroupActorStatisticsResponseObject, error)
 	// GetAlertGroupCounts Count Alert Groups per status
 	// (GET /alert-group-counts)
 	GetAlertGroupCounts(ctx context.Context, request GetAlertGroupCountsRequestObject) (GetAlertGroupCountsResponseObject, error)
@@ -43121,6 +43549,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// GetAlertGroupActorStatistics operation middleware
+func (sh *strictHandler) GetAlertGroupActorStatistics(w http.ResponseWriter, r *http.Request, params GetAlertGroupActorStatisticsParams) {
+	var request GetAlertGroupActorStatisticsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAlertGroupActorStatistics(ctx, request.(GetAlertGroupActorStatisticsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAlertGroupActorStatistics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAlertGroupActorStatisticsResponseObject); ok {
+		if err := validResponse.VisitGetAlertGroupActorStatisticsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetAlertGroupCounts operation middleware

@@ -133,6 +133,7 @@ type Queries interface {
 	DB() DBTX
 	readQueries
 	listQueries
+	statisticsQueries
 	retentionQueries
 	updateQueries
 	audit.Store
@@ -249,9 +250,12 @@ type Group struct {
 	Severity         organization.SeverityLevel
 	Urgent           bool
 
-	OwnerUserID             *int64
-	AcknowledgedAt          *time.Time
-	FirstAcknowledgedAt     *time.Time
+	OwnerUserID         *int64
+	AcknowledgedAt      *time.Time
+	FirstAcknowledgedAt *time.Time
+	// FirstAcknowledgedBy is the User of the first acknowledgement, set with FirstAcknowledgedAt (C-09.FR-27); nil
+	// when a replica of an earlier version made it, or before the Timeline it was filled from was kept.
+	FirstAcknowledgedBy     *int64
 	SnoozeUntil             *time.Time
 	SnoozeNoEnd             bool
 	SnoozedWhileUrgent      bool
@@ -306,9 +310,10 @@ func groupOf(r dbgen.LockGroupsRow) (*Group, error) {
 		ResolveReasonText: textOf(r.ResolveReasonText), ReopenDeadline: timeOf(r.ReopenDeadline),
 		GraceDeadline: timeOf(r.GraceDeadline), FiringAgainAfterID: int8Of(r.FiringAgainAfterID),
 		EventSeq: r.EventSeq, CreatedAt: r.CreatedAt, LastChangedAt: r.LastChangedAt,
-		FirstAcknowledgedAt: timeOf(r.FirstAcknowledgedAt), FirstPublishedAt: timeOf(r.FirstPublishedAt),
-		AckTimeoutStartedAt: timeOf(r.AckTimeoutStartedAt), AckTimeoutNoticesSent: r.AckTimeoutNoticesSent,
-		Unclaimed: r.Unclaimed, RemindersSent: r.RemindersSent, RemindersUnanswered: r.RemindersUnanswered,
+		FirstAcknowledgedAt: timeOf(r.FirstAcknowledgedAt), FirstAcknowledgedBy: int8Of(r.FirstAcknowledgedByUserID),
+		FirstPublishedAt: timeOf(r.FirstPublishedAt), AckTimeoutStartedAt: timeOf(r.AckTimeoutStartedAt),
+		AckTimeoutNoticesSent: r.AckTimeoutNoticesSent,
+		Unclaimed:             r.Unclaimed, RemindersSent: r.RemindersSent, RemindersUnanswered: r.RemindersUnanswered,
 		LastReminderAt: timeOf(r.LastReminderAt), OwnerAnsweredAt: timeOf(r.OwnerAnsweredAt),
 	}
 	if r.PriorStatus.Valid {
@@ -344,7 +349,8 @@ func (g *Group) saveParams(orgID int64) dbgen.SaveGroupParams {
 		ResolvedByServiceAccountID: nullInt(g.ResolvedByServiceAccount), ResolveReason: text(g.ResolveReason),
 		ResolveReasonText: text(g.ResolveReasonText), ReopenDeadline: timestamptz(g.ReopenDeadline),
 		GraceDeadline: timestamptz(g.GraceDeadline), EventSeq: g.EventSeq, LastChangedAt: g.LastChangedAt,
-		FirstAcknowledgedAt: timestamptz(g.FirstAcknowledgedAt), FirstPublishedAt: timestamptz(g.FirstPublishedAt),
+		FirstAcknowledgedAt:       timestamptz(g.FirstAcknowledgedAt),
+		FirstAcknowledgedByUserID: nullInt(g.FirstAcknowledgedBy), FirstPublishedAt: timestamptz(g.FirstPublishedAt),
 		AckTimeoutStartedAt: timestamptz(g.AckTimeoutStartedAt), AckTimeoutNoticesSent: g.AckTimeoutNoticesSent,
 		Unclaimed: g.Unclaimed, RemindersSent: g.RemindersSent, RemindersUnanswered: g.RemindersUnanswered,
 		LastReminderAt: timestamptz(g.LastReminderAt), OwnerAnsweredAt: timestamptz(g.OwnerAnsweredAt),
