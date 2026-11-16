@@ -558,7 +558,7 @@ export const useUpdateTeam = <TError = BadRequestResponse | UnauthorizedResponse
 }
 
 /**
- * Removes the Team's people and Working hours and leaves the Routes and Destinations it owned without an owner, each with a new `version`; the Team stays, marked deleted, for what names it, and its slug is free at once. A Team that has Schedules, and from the Escalation chains on one that owns chains, is refused with `409` `team_in_use`, which names them in `in_use_by`.
+ * Removes the Team's people and Working hours and leaves the Routes and Destinations it owned without an owner, each with a new `version`; the Team stays, marked deleted, for what names it, and its slug is free at once. A Team that has Schedules or owns Escalation chains is refused with `409` `team_in_use`, which names them in `in_use_by`; its `chain_entries` are removed with it.
  * @summary Delete a Team
  */
 export const deleteTeam = async (teamId: string, options?: Parameters<typeof apiFetch>[1]): Promise<void> => {

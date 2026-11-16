@@ -17,6 +17,8 @@
  * | `schedules:read` (Schedules, Rotation layers, Overrides and the On-call) | yes | yes | yes |
  * | `schedules:write` (Schedules and Rotation layers, and a Team's main Schedule) | yes | no | no |
  * | `schedule-overrides:write` (Overrides, when the caller is in the Team or is an Admin) | yes | yes | no |
+ * | `escalation-chains:read` (Escalation chains with their steps) | yes | yes | yes |
+ * | `escalation-chains:write` (Escalation chains with their steps; naming a chain on a Route needs `routes:write`, on a Team `teams:write`) | yes | no | no |
  * | `stored-snapshots:read` | yes | no | no |
  * | `users:read`, `users:write`, `oidc:read`, `oidc:write`, `service-accounts:read`, `service-accounts:write`, `organization:read`, `organization:write` | yes | no | no |
  * | `audit-log:read`, `system-status:read` | yes | no | no |
@@ -65,4 +67,6 @@ export const Permission = {
   'schedules:read': 'schedules:read',
   'schedules:write': 'schedules:write',
   'schedule-overrides:write': 'schedule-overrides:write',
+  'escalation-chains:read': 'escalation-chains:read',
+  'escalation-chains:write': 'escalation-chains:write',
 } as const;

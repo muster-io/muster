@@ -119,8 +119,8 @@ var (
 	ErrVersionMismatch = errors.New("the team changed since it was read")
 	// ErrNotInTeam is a removal of a User who is not in the Team.
 	ErrNotInTeam = errors.New("the user is not in the team")
-	// ErrInUse is the deletion of a Team that has Schedules or, from the Escalation chains on, owns chains
-	// (team_in_use, P-64); InUseError names them.
+	// ErrInUse is the deletion of a Team that has Schedules or owns Escalation chains (team_in_use, P-64);
+	// InUseError names them.
 	ErrInUse = errors.New("the team has schedules or escalation chains")
 )
 
@@ -174,6 +174,11 @@ type Team struct {
 	DestinationEntries []DestinationEntry
 	Destinations       []DestinationRef
 
+	// ChainEntries are the Escalation chains of the Team with their Severity conditions by public_id, and Chains the
+	// same chains by name (C-32.FR-2).
+	ChainEntries []ChainEntry
+	Chains       []ChainRef
+
 	// Mentions are the Team mentions of Connections that are not deleted, by Connection name, and MentionConnections
 	// the Connections that may have a Destination with the Team's Team mention for each (C-25.FR-8).
 	Mentions           []Mention
@@ -201,6 +206,9 @@ type Input struct {
 	IdpEntries      *[]IdpEntry
 	// DestinationEntries replace the Destinations of the Team as a whole (C-26.FR-1).
 	DestinationEntries *[]DestinationEntry
+	// ChainEntries replace the Escalation chains of the Team as a whole (C-32.FR-2); nil keeps them on an update and
+	// is none on a creation.
+	ChainEntries *[]ChainEntry
 	// Mentions replace the Team mentions of the Team as a whole (C-25.FR-8); nil keeps them on an update and is none
 	// on a creation.
 	Mentions *[]MentionInput
@@ -264,6 +272,12 @@ type Queries interface {
 	DeleteTeam(ctx context.Context, arg dbgen.DeleteTeamParams) error
 	DeleteTeamUsers(ctx context.Context, arg dbgen.DeleteTeamUsersParams) error
 	ListTeamSchedules(ctx context.Context, arg dbgen.ListTeamSchedulesParams) ([]dbgen.ListTeamSchedulesRow, error)
+	ListTeamOwnedChains(ctx context.Context, arg dbgen.ListTeamOwnedChainsParams) ([]dbgen.ListTeamOwnedChainsRow,
+		error)
+	ListTeamChains(ctx context.Context, arg dbgen.ListTeamChainsParams) ([]dbgen.ListTeamChainsRow, error)
+	ResolveTeamChains(ctx context.Context, arg dbgen.ResolveTeamChainsParams) ([]dbgen.ResolveTeamChainsRow, error)
+	DeleteTeamChainsExcept(ctx context.Context, arg dbgen.DeleteTeamChainsExceptParams) error
+	UpsertTeamChains(ctx context.Context, arg dbgen.UpsertTeamChainsParams) error
 	ReleaseOwnedDestinations(ctx context.Context, arg dbgen.ReleaseOwnedDestinationsParams) (
 		[]dbgen.ReleaseOwnedDestinationsRow, error)
 	ReleaseOwnedRoutes(ctx context.Context, arg dbgen.ReleaseOwnedRoutesParams) ([]dbgen.ReleaseOwnedRoutesRow, error)
@@ -486,6 +500,9 @@ func (s *Service) List(ctx context.Context, f ListFilter) (Page, error) {
 	if err := s.withDestinations(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
 	}
+	if err := s.withChains(ctx, s.store, page.Teams); err != nil {
+		return Page{}, err
+	}
 	if err := s.withMentions(ctx, s.store, page.Teams); err != nil {
 		return Page{}, err
 	}
@@ -545,6 +562,9 @@ func (s *Service) get(ctx context.Context, q Queries, publicID string) (Team, er
 		return Team{}, err
 	}
 	if err := s.withDestinations(ctx, q, out); err != nil {
+		return Team{}, err
+	}
+	if err := s.withChains(ctx, q, out); err != nil {
 		return Team{}, err
 	}
 	if err := s.withMentions(ctx, q, out); err != nil {
@@ -789,6 +809,13 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
+		var chains map[string]teamChain
+		if in.ChainEntries != nil {
+			var err error
+			if chains, err = s.resolveChains(ctx, q, *in.ChainEntries); err != nil {
+				return err
+			}
+		}
 		now := s.clock.Now().UTC()
 		p := dbgen.InsertTeamParams{OrgID: s.orgID, PublicID: publicid.New(publicid.Team), Name: in.Name,
 			Slug: in.Slug, Description: description, OwnWorkingHours: in.OwnWorkingHours, Now: now}
@@ -818,6 +845,11 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 				return err
 			}
 		}
+		if len(chains) > 0 {
+			if err := s.writeChains(ctx, q, id, chains, now); err != nil {
+				return err
+			}
+		}
 		if err := s.bumpVersion(ctx, q); err != nil {
 			return err
 		}
@@ -832,7 +864,10 @@ func (s *Service) Create(ctx context.Context, r Requester, in Input) (Team, erro
 			SourceAddress: r.Address}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: created.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: created.PublicID}); err != nil {
+			return err
+		}
+		return s.notifyChains(ctx, q, nil, created.ChainEntries, false)
 	})
 	if err != nil {
 		return Team{}, err
@@ -894,6 +929,13 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			}
 			next.DestinationEntries = entriesOf(dests)
 		}
+		var chains map[string]teamChain
+		if in.ChainEntries != nil {
+			if chains, err = s.resolveChains(ctx, q, *in.ChainEntries); err != nil {
+				return err
+			}
+			next.ChainEntries = chainEntriesOf(chains)
+		}
 		var mentions []teamMention
 		if in.Mentions != nil {
 			var inputs []MentionInput
@@ -941,6 +983,11 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 				return err
 			}
 		}
+		if chains != nil && !slices.Equal(before.ChainEntries, next.ChainEntries) {
+			if err := s.writeChains(ctx, q, before.ID, chains, now); err != nil {
+				return err
+			}
+		}
 		if dests != nil && !slices.Equal(before.DestinationEntries, next.DestinationEntries) {
 			if err := s.addTeamEntries(ctx, q, r, before.ID, before.PublicID, before.DestinationEntries, dests,
 				now); err != nil {
@@ -972,7 +1019,25 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 			Action: ActionUpdated, Resource: resourceOf(updated), Diff: changes, SourceAddress: r.Address}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: updated.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: updated.PublicID}); err != nil {
+			return err
+		}
+		// A chain of the Team reads its name and slug and writes in its Destinations; a chain the Team owns reads its
+		// name and slug as its owning Team and as the Team its "whole Team" steps Page by default.
+		renamed := before.Name != updated.Name || before.Slug != updated.Slug
+		var owned []string
+		if renamed {
+			rows, err := q.ListTeamOwnedChains(ctx, dbgen.ListTeamOwnedChainsParams{OrgID: s.orgID,
+				TeamID: pgtype.Int8{Int64: before.ID, Valid: true}})
+			if err != nil {
+				return fmt.Errorf("list the escalation chains of the team %s: %w", before.PublicID, err)
+			}
+			for _, c := range rows {
+				owned = append(owned, c.PublicID)
+			}
+		}
+		return s.notifyChains(ctx, q, before.ChainEntries, updated.ChainEntries,
+			renamed || !slices.Equal(before.DestinationEntries, updated.DestinationEntries), owned...)
 	})
 	if err != nil {
 		return Team{}, err
@@ -984,7 +1049,8 @@ func (s *Service) Update(ctx context.Context, r Requester, publicID string, vers
 }
 
 // Delete deletes the Team publicID (C-25.FR-10); a non-nil version must be its current one. A Team that has Schedules
-// is refused with InUseError, read under the lock that every change of its Schedules takes (P-64). The row stays,
+// or owns Escalation chains is refused with InUseError, read under the lock that every change of its Schedules takes
+// and that a save of a chain naming it as its owner waits for (P-64); the chains the Team names leave it. The row stays,
 // marked deleted, for the names that point at it, and its name and slug are free at once; its people, Working hours and
 // Team mentions are removed, and the Destinations, then the Routes, it owned are left without an owner, each with a new version and
 // its own Audit log entry by the system, in the same transaction. Its Destination entries are removed last, under its
@@ -1007,15 +1073,22 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 		if err != nil {
 			return fmt.Errorf("list the schedules of the team %s: %w", before.PublicID, err)
 		}
-		if len(schedules) > 0 {
-			holders := make([]Holder, len(schedules))
-			for i, sc := range schedules {
-				holders[i] = Holder{Type: HolderSchedule, PublicID: sc.PublicID, Name: sc.Name}
+		owner := pgtype.Int8{Int64: before.ID, Valid: true}
+		chains, err := q.ListTeamOwnedChains(ctx, dbgen.ListTeamOwnedChainsParams{OrgID: s.orgID, TeamID: owner})
+		if err != nil {
+			return fmt.Errorf("list the escalation chains of the team %s: %w", before.PublicID, err)
+		}
+		if len(schedules) > 0 || len(chains) > 0 {
+			holders := make([]Holder, 0, len(schedules)+len(chains))
+			for _, sc := range schedules {
+				holders = append(holders, Holder{Type: HolderSchedule, PublicID: sc.PublicID, Name: sc.Name})
+			}
+			for _, c := range chains {
+				holders = append(holders, Holder{Type: HolderChain, PublicID: c.PublicID, Name: c.Name})
 			}
 			return &InUseError{Holders: holders}
 		}
 		now := s.clock.Now().UTC()
-		owner := pgtype.Int8{Int64: before.ID, Valid: true}
 		dests, err := q.ReleaseOwnedDestinations(ctx, dbgen.ReleaseOwnedDestinationsParams{OrgID: s.orgID,
 			TeamID: owner, Now: now})
 		if err != nil {
@@ -1069,6 +1142,9 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 			TeamID: before.ID}); err != nil {
 			return fmt.Errorf("remove the team mentions of the team %s: %w", before.PublicID, err)
 		}
+		if err := s.writeChains(ctx, q, before.ID, nil, now); err != nil {
+			return err
+		}
 		if err := q.DeleteTeam(ctx, dbgen.DeleteTeamParams{OrgID: s.orgID, ID: before.ID,
 			Now: pgtype.Timestamptz{Time: now, Valid: true}}); err != nil {
 			return fmt.Errorf("delete the team %s: %w", before.PublicID, err)
@@ -1081,7 +1157,11 @@ func (s *Service) Delete(ctx context.Context, r Requester, publicID string, vers
 			SourceAddress: r.Address}); err != nil {
 			return err
 		}
-		return q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: before.PublicID})
+		if err := q.Notify(ctx, db.Hint{OrgID: s.orgID, Type: Hint, ID: before.PublicID}); err != nil {
+			return err
+		}
+		// The chains the deleted object named no longer read it among their referrers.
+		return s.notifyChains(ctx, q, before.ChainEntries, nil, false)
 	})
 	if err != nil {
 		return err
@@ -1335,6 +1415,8 @@ type view struct {
 	DestinationEntries []DestinationEntry `json:"destination_entries"`
 	// TeamMentions are the Team mentions of the Team (C-25.FR-8, FR-11).
 	TeamMentions []MentionInput `json:"team_mentions"`
+	// ChainEntries are the Escalation chains of the Team (C-32.FR-2).
+	ChainEntries []ChainEntry `json:"chain_entries"`
 }
 
 func viewOf(t Team) view {
@@ -1346,9 +1428,13 @@ func viewOf(t Team) view {
 	if dests == nil {
 		dests = []DestinationEntry{}
 	}
+	chains := t.ChainEntries
+	if chains == nil {
+		chains = []ChainEntry{}
+	}
 	return view{Name: t.Name, Slug: t.Slug, Description: t.Description, OwnWorkingHours: t.Own != nil,
 		WorkingHours: t.Own, Matchers: ms, IdpEntries: nonNilEntries(t.IdpEntries), DestinationEntries: dests,
-		TeamMentions: mentionInputs(t.Mentions)}
+		TeamMentions: mentionInputs(t.Mentions), ChainEntries: chains}
 }
 
 // exportInfo sets the muster_team_info series of a Team.

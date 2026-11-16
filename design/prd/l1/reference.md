@@ -356,6 +356,8 @@ with the C-03 sign-in story (P-42).
 | `schedules:read` | Read Schedules, Rotation layers, Overrides, the On-call, gaps and "On call now" (from 0.2.0, C-27) | ✓ | ✓ | ✓ |
 | `schedules:write` | Create, edit and delete Schedules and Rotation layers, and choose a Team's main Schedule (from 0.2.0, C-27) | ✓ | — | — |
 | `schedule-overrides:write` | Create, change and delete Overrides, when the caller is in the Team or is an Admin (from 0.2.0, C-27.FR-6) | ✓ | ✓ | — |
+| `escalation-chains:read` | Read Escalation chains with their steps (from 0.2.0, C-32) | ✓ | ✓ | ✓ |
+| `escalation-chains:write` | Create, edit and delete Escalation chains; attaching one to a Route needs `routes:write`, and to a Team `teams:write` (from 0.2.0, C-32) | ✓ | — | — |
 | `organization:read` | Read the outbound address policy, the Keyring status and the severity values seen | ✓ | — | — |
 | `organization:write` | Change Organization settings, the outbound address policy and the outgoing heartbeat | ✓ | — | — |
 | `audit-log:read`, `system-status:read` | Read the Audit log and the System status | ✓ | — | — |
@@ -378,15 +380,11 @@ by everyone who can read Destinations because they contain only references (`{{ 
 
 ### Permissions added in L2
 
-The capabilities of L2 add these Permissions, with the same rules. Each joins the table above, the `Permission` schema
-and the allocation that the migrations seed in the story that implements it; until then this table holds them.
-Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and changing another
-User's Notification rules and removing their gateway contacts need `users:read` and `users:write`.
-
-| L2 Permission | Allows | Admin | Responder | Viewer | Capability |
-|---|---|---|---|---|---|
-| `escalation-chains:read` | Read Escalation chains | ✓ | ✓ | ✓ | C-32 |
-| `escalation-chains:write` | Create, edit and delete Escalation chains | ✓ | — | — | C-32 |
+The capabilities of L2 add Permissions with the same rules. Each joins the table above, the `Permission` schema and
+the allocation that the migrations seed in the story that implements it; until then this section holds them. None is
+left: `escalation-chains:read` and `escalation-chains:write` joined the table above with the story of the Escalation
+chains (S-154). Attaching an Escalation chain to a Route needs `routes:write`, and to a Team `teams:write`; seeing and
+changing another User's Notification rules and removing their gateway contacts need `users:read` and `users:write`.
 
 ## Internal alerts
 
@@ -476,6 +474,7 @@ Unacknowledge and Reopen do not observe it again, and an Alert Group closed with
 | `muster_schedule_gap` | gauge (Leader) | `schedule` — 1 while the Schedule, whose gap alert is active, has a gap now or one that starts within `schedule.gap_alert_horizon`, 0 for every other Schedule, those whose gap alert is not active included | C-27 |
 | `muster_gateway_calls_total` | counter | `connection`, `outcome` (`accepted`, `retry_after`, `transient`, `fatal`, `unknown`) — every attempt of a call through a Notification gateway that ended, a replayed answer counted as accepted | C-30 |
 | `muster_notification_gateway_broken` | gauge (Leader) | `connection` — 1 while the Notification gateway is Broken, 0 for every other Notification gateway | C-30 |
+| `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
 
 ## Chart rules
 
@@ -517,5 +516,4 @@ holds them, outside the catalogue that the code checks.
 
 | Metric | Type | Labels | Exported from |
 |---|---|---|---|
-| `muster_escalation_chain_info` | gauge | `chain`, `name` | C-32 |
 | `muster_pages_total` | counter | `chain`, `kind` (`mention`, `call`), `outcome` (`delivered`, `not_delivered`) | C-32 |

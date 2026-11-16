@@ -79,6 +79,8 @@ type overrideRec struct {
 
 // fakeStore is the database of the package in memory.
 type fakeStore struct {
+	// chains are the Escalation chains whose steps name each Schedule, by its id.
+	chains    map[int64][]dbgen.ListScheduleChainsRow
 	zone      string
 	teams     []teamRec
 	inTeam    map[int64][]int64
@@ -444,6 +446,14 @@ func (s *fakeStore) FindUser(_ context.Context, arg dbgen.FindUserParams) (int64
 		}
 	}
 	return 0, pgx.ErrNoRows
+}
+
+func (s *fakeStore) ListScheduleChains(_ context.Context, arg dbgen.ListScheduleChainsParams) (
+	[]dbgen.ListScheduleChainsRow, error) {
+	if err := s.err("ListScheduleChains"); err != nil {
+		return nil, err
+	}
+	return s.chains[arg.ScheduleID.Int64], nil
 }
 
 func (s *fakeStore) ListPageable(_ context.Context, arg dbgen.ListPageableParams) ([]dbgen.ListPageableRow, error) {
@@ -1317,7 +1327,7 @@ func TestGetAndList(t *testing.T) {
 
 // TestDelete is C-27.FR-12 with P-66: deleting the main Schedule leaves the Team without one, recorded as
 // schedule.deleted, with the info series gone; a stale If-Match is refused, and a Schedule that Escalation steps
-// name would be refused with schedule_in_use.
+// name is refused with schedule_in_use, naming the chains.
 func TestDelete(t *testing.T) {
 	svc, store, _ := newService(t)
 	ctx := t.Context()
@@ -1332,6 +1342,18 @@ func TestDelete(t *testing.T) {
 	if err := svc.Delete(ctx, admin, sc.PublicID, ptr(int64(3))); !errors.Is(err, ErrVersionMismatch) {
 		t.Errorf("stale = %v", err)
 	}
+	store.chains = map[int64][]dbgen.ListScheduleChainsRow{sc.ID: {{PublicID: "EC0000000000AA", Name: "Pay"}}}
+	err = svc.Delete(ctx, admin, sc.PublicID, nil)
+	if use, ok := errors.AsType[*InUseError](err); !ok || len(use.Referrers) != 1 ||
+		use.Referrers[0] != (Referrer{Type: "escalation_chain", PublicID: "EC0000000000AA", Name: "Pay"}) {
+		t.Errorf("a schedule a step names = %v", err)
+	}
+	store.chains = nil
+	store.fail["ListScheduleChains"] = errBoom
+	if err := svc.Delete(ctx, admin, sc.PublicID, nil); !errors.Is(err, errBoom) {
+		t.Errorf("the chains fail = %v", err)
+	}
+	delete(store.fail, "ListScheduleChains")
 	for _, name := range []string{"DeleteSchedule", "InsertAuditEntry", "Notify"} {
 		store.fail[name] = errBoom
 		if err := svc.Delete(ctx, admin, sc.PublicID, nil); !errors.Is(err, errBoom) {

@@ -537,6 +537,17 @@ var ScheduleInfo = newGauge(Definition{
 	Capability: "C-27",
 })
 
+// EscalationChainInfo is 1 for every Escalation chain; its labels carry the chain's name (C-32.FR-19).
+var EscalationChainInfo = newGauge(Definition{
+	Name: "muster_escalation_chain_info",
+	Help: "Always 1, one series per Escalation chain; the labels carry its public_id and name.",
+	Labels: []Label{
+		entity("chain"),
+		info("name", "the name of the Escalation chain"),
+	},
+	Capability: "C-32",
+})
+
 // ScheduleGap is 1 while a Schedule whose gap alert is active has a gap now or one that starts within
 // schedule.gap_alert_horizon, and 0 for every other Schedule, exported by the Leader, whose gap scan sets it
 // (C-27.FR-7).

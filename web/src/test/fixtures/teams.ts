@@ -32,6 +32,8 @@ export function team(overrides: Partial<Team> = {}): Team {
     idp_entries: [],
     destination_entries: [],
     destinations: [],
+    chain_entries: [],
+    chains: [],
     team_mentions: [],
     mention_connections: [],
     user_count: 0,

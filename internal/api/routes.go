@@ -457,6 +457,18 @@ func routeOf(rt routing.Route) gen.Route {
 		out.DestinationEntries = append(out.DestinationEntries, gen.DestinationEntry{DestinationId: e.DestinationID,
 			SeverityCondition: new(gen.SeverityCondition(e.Condition))})
 	}
+	out.ChainEntries = make([]gen.ChainEntry, len(rt.ChainEntries))
+	for i, e := range rt.ChainEntries {
+		out.ChainEntries[i] = gen.ChainEntry{ChainId: e.ChainID, SeverityCondition: new(gen.SeverityCondition(e.Condition))}
+	}
+	out.Chains = make([]gen.EscalationChainRef, len(rt.Chains))
+	for i, c := range rt.Chains {
+		out.Chains[i] = gen.EscalationChainRef{Id: c.PublicID, Name: c.Name,
+			OwningTeam: teamRefOf("", "", "", false, false)}
+		if o := c.OwningTeam; o != nil {
+			out.Chains[i].OwningTeam = teamRefOf(o.PublicID, o.Name, o.Slug, o.Deleted, true)
+		}
+	}
 	return out
 }
 
@@ -507,6 +519,16 @@ func routeInputOf(in gen.RouteInput) routing.Input {
 			}
 		}
 		out.DestinationEntries = &entries
+	}
+	if in.ChainEntries != nil {
+		entries := make([]routing.ChainEntry, len(*in.ChainEntries))
+		for i, e := range *in.ChainEntries {
+			entries[i] = routing.ChainEntry{ChainID: e.ChainId}
+			if e.SeverityCondition != nil {
+				entries[i].Condition = routing.SeverityCondition(*e.SeverityCondition)
+			}
+		}
+		out.ChainEntries = &entries
 	}
 	for _, m := range in.Matchers {
 		out.Matchers = append(out.Matchers, routing.Matcher{Label: m.Label, Op: string(m.Op), Value: m.Value})

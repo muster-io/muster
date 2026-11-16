@@ -144,7 +144,8 @@ func berlin(t *testing.T, s string) time.Time {
 // Rotation layers in the Organization's time zone when none is given, main as the first of its Team; a second one made
 // main in one transaction; the On-call of scenario 1 and of the new main Schedule; name_taken; a Viewer refused in a
 // Rotation layer; the Audit log; muster_schedule_info refreshed from the database; deleting the main Schedule leaves
-// the Team without one; Referrers names nothing until the Escalation steps.
+// the Team without one; a Schedule that an Escalation step names is refused with schedule_in_use naming the chain
+// (C-27.FR-12, AC-8), through Referrers.
 func TestIntegrationSchedules(t *testing.T) {
 	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
 		e := setup(t, s)
@@ -227,7 +228,8 @@ func TestIntegrationSchedules(t *testing.T) {
 			AND resource_public_id = $1 AND diff::text LIKE '%"/main"%'`, main.PublicID); n != 1 {
 			t.Errorf("%d entries of the main schedule unmarked", n)
 		}
-		if refs, err := e.svc.Referrers(ctx, nil, main); err != nil || len(refs) != 0 {
+		store := schedules.NewStore(e.d.Pool)
+		if refs, err := e.svc.Referrers(ctx, store, main); err != nil || len(refs) != 0 {
 			t.Errorf("referrers = %v, %v", refs, err)
 		}
 
@@ -238,6 +240,27 @@ func TestIntegrationSchedules(t *testing.T) {
 			if got := infoLines(t, sc.PublicID); got != 1 {
 				t.Errorf("%d muster_schedule_info series of %s, want 1", got, sc.Name)
 			}
+		}
+		// Two steps of one chain name the Schedule: the deletion is refused, naming the chain once.
+		if _, err := e.d.Pool.Exec(ctx, `WITH c AS (
+				INSERT INTO escalation_chains (org_id, public_id, name, created_at, updated_at)
+				VALUES ($1, 'EC0000000000PA', 'payments', now(), now()) RETURNING id)
+			INSERT INTO escalation_steps (org_id, chain_id, position, kind, importance, schedule_id)
+			SELECT $1, c.id, p, 'page_on_call', 'normal', $2 FROM c, generate_series(1, 2) AS p`, e.orgID,
+			promoted.ID); err != nil {
+			t.Fatal(err)
+		}
+		refs, err := e.svc.Referrers(ctx, store, promoted)
+		if err != nil || len(refs) != 1 || refs[0] != (schedules.Referrer{Type: schedules.ReferrerChain,
+			PublicID: "EC0000000000PA", Name: "payments"}) {
+			t.Errorf("referrers of a schedule two steps name = %+v, %v", refs, err)
+		}
+		err = e.svc.Delete(ctx, admin, promoted.PublicID, nil)
+		if use, ok := errors.AsType[*schedules.InUseError](err); !ok || len(use.Referrers) != 1 {
+			t.Fatalf("deleting a schedule a step names = %v", err)
+		}
+		if _, err := e.d.Pool.Exec(ctx, `DELETE FROM escalation_chains`); err != nil {
+			t.Fatal(err)
 		}
 		if err := e.svc.Delete(ctx, admin, promoted.PublicID, nil); err != nil {
 			t.Fatal(err)

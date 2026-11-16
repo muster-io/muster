@@ -57,6 +57,9 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   A step that Pages or sends may be limited to Working hours — those of the chain's owning Team, else the Organization's
   (C-25.FR-9) — and to a Severity condition. Paging a person normally or importantly runs their Notification rule of
   that name (C-31.FR-3).
+  _Revised for L2 (2026-11-16, #578):_ a step "Page a whole Team" that names no Team, and not everyone in the chat,
+  Pages the chain's owning Team; a chain without an owning Team must name the Team, and saving one that does not is
+  refused with `422` at the step's Team.
 
 ### When chains run
 
@@ -152,6 +155,10 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
 - **C-32.FR-17** A Route that names a chain and no Destination, and does not deliver to Teams, shows the warning "Only a
   Notification gateway can reach anyone from this Escalation chain: the Route has no Destination." The chain form warns
   about a step for everyone in the chat that one of its Destinations' Connections cannot mention, such as Telegram.
+  _Revised for L2 (2026-11-16, #578):_ a chain whose steps Page nobody — none Pages the On-call, chosen people, a Team or
+  everyone in the chat, or calls, as in an empty chain or one of waits, repeats and webhooks — is saved and warns that it
+  Pages nobody (`pages_nobody`, a warning of the chain without a step); a step "Page a whole Team" whose Team was
+  deleted since warns `team_deleted` with the step's number.
 - **C-32.FR-18** The Alert Group page shows its running chains — each with its current step and when its next step is
   due — and its Assignees with their Teams, and the Timeline shows each Page, skipped step and undelivered Page. The
   Alert Group list gains the column Assignees and the filter Assignee, a User or "me". The Home page lists, under "I am

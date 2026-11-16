@@ -147,6 +147,8 @@ the demo gateway removed for step 1 (S-145). In Playwright at 1280 × 800, in En
 - Suggested commit: `feat(web): build escalation chains and name them on routes and teams`.
 - The approved Route mockup chooses one chain; the form names several, as C-26.FR-2 and C-32.FR-2 do (L2.md §5.2).
 - The chip of a step limited to Working hours names the Organization when the chain has no owning Team (C-25.FR-9).
+- The chain page shows the warnings `pages_nobody` (the chain as a whole, no step Pages anyone) and `team_deleted` (on
+  the step whose Team was deleted), which S-154 added with C-32.FR-17 revised for L2 (#578).
 
 ## Coverage
 

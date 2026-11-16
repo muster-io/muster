@@ -3,6 +3,7 @@
  * Do not edit manually.
  */
 import type { DestinationRef } from './destinationRef';
+import type { EscalationChainRef } from './escalationChainRef';
 import type { PublicId } from './publicId';
 import type { TeamInput } from './teamInput';
 import type { TeamMention } from './teamMention';
@@ -12,6 +13,8 @@ export type Team = TeamInput & {
   id: PublicId;
   /** The Destinations of the Team's `destination_entries`, by name, with their health. */
   destinations: DestinationRef[];
+  /** The Escalation chains of the Team's `chain_entries`, by name. */
+  chains: EscalationChainRef[];
   /** The Team mentions of Connections that are not deleted, by Connection name. */
   team_mentions: TeamMention[];
   /** Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or null, and whether it can mention a group. */
@@ -25,6 +28,8 @@ export type Team = TeamInput & {
   id: PublicId;
   /** The Destinations of the Team's `destination_entries`, by name, with their health. */
   destinations: DestinationRef[];
+  /** The Escalation chains of the Team's `chain_entries`, by name. */
+  chains: EscalationChainRef[];
   /** The Team mentions of Connections that are not deleted, by Connection name. */
   team_mentions: TeamMention[];
   /** Every Connection that is not deleted and may have a Destination — not a Bridge Connection whose stored `info` lists `roles` without `messenger` — by name, each with the Team's Team mention for it or null, and whether it can mention a group. */
@@ -34,4 +39,4 @@ export type Team = TeamInput & {
   created_at: string;
   /** The same value as the `ETag` header; send it as `If-Match` on the next update. Lets a client update an item of a list without reading it again. */
   readonly etag: string;
-}, 'description' | 'working_hours' | 'matchers' | 'idp_entries' | 'destination_entries'>>;
+}, 'description' | 'working_hours' | 'matchers' | 'idp_entries' | 'destination_entries' | 'chain_entries'>>;

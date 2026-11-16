@@ -1167,6 +1167,55 @@ func (q *Queries) ListRotationLayers(ctx context.Context, arg ListRotationLayers
 	return items, nil
 }
 
+const listScheduleChains = `-- name: ListScheduleChains :many
+SELECT DISTINCT c.id, c.public_id, c.name, lower(c.name)::text AS sort_name
+FROM escalation_steps s
+JOIN escalation_chains c ON c.org_id = s.org_id AND c.id = s.chain_id
+WHERE s.org_id = $1 AND s.schedule_id = $2
+ORDER BY sort_name, c.id
+`
+
+type ListScheduleChainsParams struct {
+	OrgID      int64
+	ScheduleID pgtype.Int8
+}
+
+type ListScheduleChainsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+	SortName string
+}
+
+// ListScheduleChains lists the Escalation chains whose steps name a Schedule, each once, by name, which refuse its
+// deletion (schedule_in_use, C-27.FR-12). The deletion holds the Schedule locked FOR UPDATE, and a save of a chain
+// reads the Schedules its steps name FOR KEY SHARE, so a step saved meanwhile is either seen here or waits and finds it
+// gone.
+func (q *Queries) ListScheduleChains(ctx context.Context, arg ListScheduleChainsParams) ([]ListScheduleChainsRow, error) {
+	rows, err := q.db.Query(ctx, listScheduleChains, arg.OrgID, arg.ScheduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListScheduleChainsRow{}
+	for rows.Next() {
+		var i ListScheduleChainsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Name,
+			&i.SortName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScheduleInfo = `-- name: ListScheduleInfo :many
 SELECT public_id, name
 FROM schedules

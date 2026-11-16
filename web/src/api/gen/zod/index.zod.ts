@@ -4,6 +4,7 @@ export * from './api-tokens/api-tokens.zod';
 export * from './audit-log/audit-log.zod';
 export * from './connections/connections.zod';
 export * from './destinations/destinations.zod';
+export * from './escalation-chains/escalation-chains.zod';
 export * from './health-and-metrics/health-and-metrics.zod';
 export * from './ingest/ingest.zod';
 export * from './integrations/integrations.zod';

@@ -99,6 +99,13 @@ type fakeStore struct {
 	mentions    map[int64][]fakeMention
 	// mentionEntries are the Mention entries of each Destination, by its id (C-28.FR-6).
 	mentionEntries map[int64][]mentions.EntryInput
+	// chains are the Escalation chains by public_id, ownedChains the chains each Team owns, and teamChains the chains
+	// each Team names (chains_test.go).
+	chains      map[string]fakeChain
+	ownedChains map[int64][]dbgen.ListTeamOwnedChainsRow
+	teamChains  map[int64][]fakeTeamChain
+	// failHint is a type of live hint that Notify refuses.
+	failHint string
 }
 
 // fakeDestination is a row of destinations as the Destinations of a Team read it.
@@ -455,6 +462,9 @@ func (s *fakeStore) Notify(_ context.Context, h db.Hint) error {
 	if err := s.fail["Notify"]; err != nil {
 		return err
 	}
+	if h.Type == s.failHint && h.Type != "" {
+		return errBoom
+	}
 	s.hints = append(s.hints, h)
 	return nil
 }
@@ -801,7 +811,25 @@ func (s *fakeStore) UpsertTeamDestinations(_ context.Context, arg dbgen.UpsertTe
 	return nil
 }
 
-func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error { return f(s) }
+// InTx runs f and, when it fails, undoes what it did to the Teams, their chains, the Audit log and the hints, as a
+// rolled back transaction would; the other tables of the fake keep what f wrote.
+func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
+	teams := make([]*teamRec, len(s.teams))
+	for i, t := range s.teams {
+		c := *t
+		teams[i] = &c
+	}
+	chains := make(map[int64][]fakeTeamChain, len(s.teamChains))
+	for id, list := range s.teamChains {
+		chains[id] = slices.Clone(list)
+	}
+	audits, hints := len(s.audit), len(s.hints)
+	if err := f(s); err != nil {
+		s.teams, s.teamChains, s.audit, s.hints = teams, chains, s.audit[:audits], s.hints[:hints]
+		return err
+	}
+	return nil
+}
 
 func (s *fakeStore) On(dbgen.DBTX) Queries { return s }
 
@@ -957,7 +985,7 @@ func TestCreate(t *testing.T) {
 	var diff []audit.Change
 	_ = json.Unmarshal(e.Diff, &diff)
 	if e.Action != ActionCreated || e.ResourceType.String != ResourceTeam || e.ResourcePublicID.String !=
-		team.PublicID || len(diff) != 12 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
+		team.PublicID || len(diff) != 13 || !strings.Contains(string(e.Diff), `"pointer":"/slug","after":"payments"`) {
 		t.Errorf("audit %+v %s", e, e.Diff)
 	}
 	if len(store.hints) != 1 || store.hints[0] != (db.Hint{OrgID: orgID, Type: Hint, ID: team.PublicID}) {

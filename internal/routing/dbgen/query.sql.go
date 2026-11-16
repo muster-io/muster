@@ -136,6 +136,23 @@ func (q *Queries) DeleteRoute(ctx context.Context, arg DeleteRouteParams) error 
 	return err
 }
 
+const deleteRouteChainsExcept = `-- name: DeleteRouteChainsExcept :exec
+DELETE FROM route_escalation_chains
+WHERE org_id = $1 AND route_id = $2 AND chain_id <> ALL($3::bigint[])
+`
+
+type DeleteRouteChainsExceptParams struct {
+	OrgID   int64
+	RouteID int64
+	KeepIds []int64
+}
+
+// DeleteRouteChainsExcept removes the Escalation chains of a Route other than those it keeps.
+func (q *Queries) DeleteRouteChainsExcept(ctx context.Context, arg DeleteRouteChainsExceptParams) error {
+	_, err := q.db.Exec(ctx, deleteRouteChainsExcept, arg.OrgID, arg.RouteID, arg.KeepIds)
+	return err
+}
+
 const deleteRouteDestinations = `-- name: DeleteRouteDestinations :exec
 DELETE FROM route_destinations
 WHERE org_id = $1 AND route_id = $2 AND destination_id = ANY($3::bigint[])
@@ -1075,6 +1092,63 @@ func (q *Queries) ListPreviewTeams(ctx context.Context, arg ListPreviewTeamsPara
 	return items, nil
 }
 
+const listRouteChains = `-- name: ListRouteChains :many
+SELECT rc.route_id, rc.severity_condition, c.public_id, c.name, o.public_id AS owner_public_id, o.name AS owner_name,
+       o.slug AS owner_slug, (o.deleted_at IS NOT NULL)::boolean AS owner_deleted
+FROM route_escalation_chains rc
+JOIN escalation_chains c ON c.org_id = rc.org_id AND c.id = rc.chain_id
+LEFT JOIN teams o ON o.org_id = c.org_id AND o.id = c.owning_team_id
+WHERE rc.org_id = $1 AND rc.route_id = ANY($2::bigint[])
+ORDER BY rc.route_id, c.public_id
+`
+
+type ListRouteChainsParams struct {
+	OrgID    int64
+	RouteIds []int64
+}
+
+type ListRouteChainsRow struct {
+	RouteID           int64
+	SeverityCondition string
+	PublicID          string
+	Name              string
+	OwnerPublicID     pgtype.Text
+	OwnerName         pgtype.Text
+	OwnerSlug         pgtype.Text
+	OwnerDeleted      bool
+}
+
+// ListRouteChains lists the Escalation chains of the Routes with their Severity conditions and their owning Teams, by
+// Route, then by public_id.
+func (q *Queries) ListRouteChains(ctx context.Context, arg ListRouteChainsParams) ([]ListRouteChainsRow, error) {
+	rows, err := q.db.Query(ctx, listRouteChains, arg.OrgID, arg.RouteIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRouteChainsRow{}
+	for rows.Next() {
+		var i ListRouteChainsRow
+		if err := rows.Scan(
+			&i.RouteID,
+			&i.SeverityCondition,
+			&i.PublicID,
+			&i.Name,
+			&i.OwnerPublicID,
+			&i.OwnerName,
+			&i.OwnerSlug,
+			&i.OwnerDeleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteDestinationIDs = `-- name: ListRouteDestinationIDs :many
 SELECT rd.route_id, rd.destination_id, d.public_id, rd.severity_condition
 FROM route_destinations rd
@@ -1668,6 +1742,47 @@ func (q *Queries) ResolveDestinations(ctx context.Context, arg ResolveDestinatio
 	return items, nil
 }
 
+const resolveRouteChains = `-- name: ResolveRouteChains :many
+SELECT id, public_id
+FROM escalation_chains
+WHERE org_id = $1 AND public_id = ANY($2::text[])
+ORDER BY id
+FOR KEY SHARE
+`
+
+type ResolveRouteChainsParams struct {
+	OrgID     int64
+	PublicIds []string
+}
+
+type ResolveRouteChainsRow struct {
+	ID       int64
+	PublicID string
+}
+
+// ResolveRouteChains reads the Escalation chains among the public_ids FOR KEY SHARE, for the chains of a Route: the
+// deletion of a chain locks it FOR UPDATE and then reads the entries that name it, so it either sees this save's entry
+// or this save waits and then finds the chain gone.
+func (q *Queries) ResolveRouteChains(ctx context.Context, arg ResolveRouteChainsParams) ([]ResolveRouteChainsRow, error) {
+	rows, err := q.db.Query(ctx, resolveRouteChains, arg.OrgID, arg.PublicIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ResolveRouteChainsRow{}
+	for rows.Next() {
+		var i ResolveRouteChainsRow
+		if err := rows.Scan(&i.ID, &i.PublicID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const restampAlertRoutes = `-- name: RestampAlertRoutes :exec
 UPDATE alerts
 SET route_id = $1
@@ -1856,6 +1971,34 @@ func (q *Queries) UpdateRoute(ctx context.Context, arg UpdateRouteParams) error 
 		arg.Now,
 		arg.OrgID,
 		arg.ID,
+	)
+	return err
+}
+
+const upsertRouteChains = `-- name: UpsertRouteChains :exec
+INSERT INTO route_escalation_chains (org_id, route_id, chain_id, severity_condition, added_at)
+SELECT $1, $2, x.id, x.condition, $3
+FROM (SELECT unnest($4::bigint[]) AS id, unnest($5::text[]) AS condition) AS x
+ON CONFLICT (route_id, chain_id) DO UPDATE SET severity_condition = excluded.severity_condition
+`
+
+type UpsertRouteChainsParams struct {
+	OrgID      int64
+	RouteID    int64
+	Now        time.Time
+	ChainIds   []int64
+	Conditions []string
+}
+
+// UpsertRouteChains adds Escalation chains to a Route now with their Severity conditions, and changes the condition of
+// those it has, which keep the time they were added.
+func (q *Queries) UpsertRouteChains(ctx context.Context, arg UpsertRouteChainsParams) error {
+	_, err := q.db.Exec(ctx, upsertRouteChains,
+		arg.OrgID,
+		arg.RouteID,
+		arg.Now,
+		arg.ChainIds,
+		arg.Conditions,
 	)
 	return err
 }

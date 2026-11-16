@@ -218,7 +218,9 @@ of the Teams, `team_idp_entries` (0030), the Destinations of the Teams, `team_de
 Notification gateways with their codes, `gateway_contacts` and `gateway_contact_codes` (0033), and the calls through
 them, `gateway_calls` and `gateway_call_items` (0034), the Notification rules of the Users, `notification_rules`
 (0037), the Team mentions, `team_mentions` (0042), and the Mention entries of the Destinations, `mention_entries`,
-and the Alert Groups each Storm counts, `storm_alert_groups` (0043), which makes 80 tables.
+and the Alert Groups each Storm counts, `storm_alert_groups` (0043), and the Escalation chains, `escalation_chains`,
+`escalation_steps` and `escalation_step_users`, with the chains of Routes and Teams, `route_escalation_chains` and
+`team_escalation_chains` (0046), which makes 85 tables.
 
 | Group | Tables | Writer | Retention |
 |---|---|---|---|
@@ -230,11 +232,11 @@ and the Alert Groups each Storm counts, `storm_alert_groups` (0043), which makes
 | Messengers | `connections`, `destinations`, `destination_secrets`, `mention_entries`, `account_links`, `account_link_requests`, `bridge_events_seen` | destinations, account links, connections; `teams` clears `destinations.owning_team_id` when it deletes the Team; `mention_entries` mentions, called by destinations at a save and by teams when a Team names a Destination | expired requests and handled Bridge event ids pruned; `mention_entries` with their Destination's row |
 | Ingestion | `integrations`, `integration_tokens`, `ingest_claims`, **`stored_snapshots`**, **`snapshot_bodies`** | integrations, ingest | 14 days, daily partitions |
 | Snapshot semantics | `alertmanager_routes`, `alertmanager_groups`, `alerts`, `alert_presences`, `alert_teams` | ingest, routing; `alert_teams` routing, and `groups`, which only adds | 90 days after resolution, batched delete; `alert_teams` with its Alert |
-| Routing | `routes`, `route_matchers`, `route_destinations`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | — |
+| Routing | `routes`, `route_matchers`, `route_destinations`, `route_escalation_chains`, `route_suggestion_dismissals` | routing; `teams` clears `routes.owning_team_id` when it deletes the Team | `route_escalation_chains` with its chain |
 | Open Alert Group updates | `open_group_updates` | routing, organization, destinations, teams, links, users, account links and tokens insert, `groups` claims and deletes | deleted with the last batch of its run |
-| Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries`, `team_mentions` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams; connections deletes the `team_mentions` of a Connection it deletes and gives each Team they belonged to a new `version` | deleted Teams kept, marked deleted; `team_mentions` with their Team or Connection |
+| Teams | `teams`, `team_users`, `team_matchers`, `team_idp_entries`, `team_mentions`, `team_escalation_chains` | teams, called by OIDC at a sign-in or a re-check for the membership through the identity provider; users takes a deleted user out of `team_users` through the Teams; connections deletes the `team_mentions` of a Connection it deletes and gives each Team they belonged to a new `version` | deleted Teams kept, marked deleted; `team_mentions` with their Team or Connection |
 | Notification gateways | `gateway_contacts`, `gateway_contact_codes`, `gateway_calls`, `gateway_call_items` | gateways; users erases a deleted user's rows through the gateways | codes pruned a day after they expired, with the Account link requests; contacts with their removal or their User's deletion; items with their Alert Group, ended calls once they have none |
-| Paging | `notification_rules` | notificationrules; users deletes a deleted user's row through the Notification rules | with "Reset to the Organization's rules" or the User's deletion |
+| Paging | `notification_rules`, `escalation_chains`, `escalation_steps`, `escalation_step_users` | notificationrules; users deletes a deleted user's row through the Notification rules; escalation | `notification_rules` with "Reset to the Organization's rules" or the User's deletion; steps with their chain |
 | Schedules | `schedules`, `rotation_layers`, `rotation_layer_users`, `schedule_overrides`, `ical_feeds` | schedules; users deletes a deleted user's `ical_feeds` row through the Schedules | deleted with their Schedule; a feed with its revocation or its User's deletion |
 | Alert Groups | `alert_groups`, `alert_group_alerts`, `alert_group_teams`, **`timeline_entries`**, `notes` | `groups` only | summaries, their Notes and their Teams 2 years; details 90 days |
 | Timers and Storms | `timers`, `storms`, `storm_alert_groups` | `groups`, timers, delivery; `storm_alert_groups` delivery, as a Storm starts and joins | queue rows deleted when done; `storm_alert_groups` with its Storm or its Alert Group |
@@ -1226,6 +1228,12 @@ Serves C-08, C-09.FR-19, C-11.FR-14, C-12, C-17; [ADR-0003](../adr/0003-route-fi
   level meets and, with `deliver_to_teams`, the entries of its Teams that it meets, by Destination — is one rule of
   `internal/routing` (`Reach`), which the dispatcher and delivery apply to what each reads under the Route's
   membership lock; the owning Team of a Route adds nothing.
+- **`route_escalation_chains`** (migration 0046, C-32.FR-2) — the Escalation chains of a Route, primary key
+  `(route_id, chain_id)`, each with its `severity_condition` (`any` by default, `critical` or `below_critical`) and
+  `added_at`; a save of the Route's `chain_entries` replaces them, keeping the rows it keeps, after locking the Route's
+  row and then the chains `FOR KEY SHARE` (the lock order of [4.18](#418-paging)). Routes are soft-deleted and keep
+  their rows, which no read returns; `chain_id` cascades, so the rows of deleted Routes go with their chain.
+  `route_escalation_chains_chain_idx` on `(org_id, chain_id)` lists the Routes that name a chain.
 - **`route_suggestion_dismissals`** — suggestions (`heartbeat_lost`, `internal_alerts`) dismissed per user (C-08.FR-11).
 - **`routes.owning_team_id`** — the Team that owns the Route (C-25.FR-2, migration 0022), which only organizes and
   filters and never adds delivery, with the partial index `routes_owning_team_idx` on `(org_id, owning_team_id)`.
@@ -1745,6 +1753,12 @@ Serves C-25 (from 0.2.0, migration 0022); [ADR-0018](../adr/0018-on-call-model-t
   the Connection deleted. A replica without 0042 that deletes a Team
   or a Connection leaves its rows, which no read returns — every read of the Team mentions, `ForConnection` included,
   joins a Team and a Connection that are not deleted — and the Team's next save of its Team mentions replaces them.
+- **`team_escalation_chains`** (migration 0046, C-32.FR-2) — the Escalation chains of each Team, primary key
+  `(team_id, chain_id)`, each with its `severity_condition` and `added_at`, written like `route_escalation_chains`
+  after the Team's row; the deletion of a Team deletes its rows. A Team that owns a chain (`escalation_chains.owning_team_id`)
+  is not deleted (`team_in_use`, P-64): the deletion reads the chains under the Team's lock `FOR NO KEY UPDATE`, which a
+  save of a chain naming the Team as its owner waits for, since it reads the Team `FOR SHARE` first.
+  `team_escalation_chains_chain_idx` on `(org_id, chain_id)` lists the Teams that name a chain.
 - **`team_users`** — the people in each Team, primary key `(team_id, user_id)`; `by_hand` marks a person an Admin
   added (C-25.FR-3), `by_idp` (0030) a person whom an identity provider entry of the Team matched at their last OIDC
   sign-in or re-check, with those entries in `idp_matches` (C-25.FR-4); every row has one or both
@@ -1876,7 +1890,7 @@ stored `info` declares the role `gateway`; it has no table of its own.
 
 ### 4.18 Paging
 
-Serves C-31 (from 0.2.0, migration 0037); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
+Serves C-31 (from 0.2.0, migration 0037) and C-32 (migration 0046); [ADR-0018](../adr/0018-on-call-model-teams-schedules-and-escalation-chains.md).
 
 - **`notification_rules`** — the Notification rules of a User whose state is not "As in the Organization": primary key
   `user_id` (`ON DELETE CASCADE`, though Users are never hard-deleted: their deletion deletes the row in its
@@ -1899,6 +1913,41 @@ Serves C-31 (from 0.2.0, migration 0037); [ADR-0018](../adr/0018-on-call-model-t
   to 60 (`notification_rule.limits`), a Mention or a call in each rule, a call through an existing gateway and, for a
   User, with their confirmed contact there — is in `internal/notificationrules`, the only writer; `users` deletes a
   deleted User's row through it.
+- **`escalation_chains`** (migration 0046, C-32.FR-1) — an Escalation chain with its `EC` `public_id`, a name unique
+  ignoring case (`escalation_chains_name_key` on `(org_id, lower(name))`), a description, an optional
+  `owning_team_id` (`escalation_chains_owning_team_idx` on `(org_id, owning_team_id)` filters by Team and finds the
+  chains that refuse a Team's deletion), `version` and the times of the business clock. Chains are deleted with
+  `DELETE`, which cascades to their steps, the people of the steps and the entries of deleted Routes; a chain that a
+  Route or a Team that is not deleted names is refused (`chain_in_use`) by `internal/escalation`, which locks it `FOR
+  UPDATE` and then reads its entries, so that a save of a Route or a Team that names it — which reads it `FOR KEY SHARE`
+  after its own row — either commits first and refuses the deletion, or waits and finds the chain gone.
+- **`escalation_steps`** (migration 0046, C-32.FR-3) — the steps of a chain, `position` from 1 to 20, unique per chain
+  (`escalation_steps_position_key`), of one `kind` — `page_on_call`, `page_people`, `page_team`, `call`, `wait`,
+  `webhook` or `repeat` — with exactly the fields of its kind (`escalation_steps_fields_check`): `importance` with the
+  Pages of the On-call and of people; `schedule_id` with `page_on_call` and a `call` with the `call_target` `on_call`;
+  `team_id` (null for the chain's owning Team) or `everyone` (`channel`, `here`, `all`, `everyone`) with `page_team`;
+  `call_target` and `gateway_connection_id`, the gateway the save resolved, with `call`; `wait_seconds`, a multiple of
+  60 from 60 to 86400 (`escalation.limits`), with `wait`; `destination_id` with `webhook`; `repeat_from`, an earlier
+  position (`escalation_steps_repeat_from_check`), and `repeat_times`, 1 to 10, with `repeat`; `working_hours_only` and
+  `severity_condition` with every kind but `wait` and `repeat`. A save replaces the steps of its chain as a whole.
+  Teams, Connections, Destinations and Users are soft-deleted, so their foreign keys never act: a step whose gateway or
+  Destination was deleted keeps it and reads a warning. Schedules are deleted with `DELETE`, and one that a step names
+  is refused (`schedule_in_use`): `internal/schedules` reads the steps through `escalation_steps_schedule_idx` on
+  `(schedule_id)`, which also backs the foreign key, under the Schedule's lock `FOR UPDATE`, which a save of a chain
+  waits for, since it reads the Schedules of its steps `FOR KEY SHARE`, in id order; a change of a Schedule that keeps
+  its key, such as making another one main, does not wait for that lock, so the two never deadlock.
+  `escalation_steps_team_idx`, `escalation_steps_gateway_idx` and `escalation_steps_destination_idx` on `(org_id, …)`
+  find the steps that name a Team, a gateway or a Destination.
+- **`escalation_step_users`** (migration 0046) — the people of a `page_people` or `call` step in their order, primary
+  key `(step_id, position)`, each person once in a step (`escalation_step_users_user_key` on `(step_id, user_id)`),
+  deleted with their step.
+- **Lock order of the chains.** A transaction that locks rows of more than one of these locks them in this order: the
+  Organization's row of the Teams, the Teams, the Routes, the Escalation chains, the Schedules. A save of a chain reads
+  its new owning Team `FOR SHARE`, locks the chain's row `FOR NO KEY UPDATE`, then reads the Schedules of its steps `FOR
+  KEY SHARE` in id order; no transaction of a chain locks a Route or a Team for a change.
+
+The Permissions `escalation-chains:read`, for every Role, and `escalation-chains:write`, for Admins, and their
+allocation are reference data of migration 0046, as in 0025.
 
 ## 5. Queues and claims
 

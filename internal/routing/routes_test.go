@@ -100,6 +100,12 @@ type fakeStore struct {
 	teams     map[string]dbgen.LockOwningTeamRow
 	userTeams map[int64][]string
 
+	// chains are the Escalation chains by public_id, and routeChains the chains each Route names (chains_test.go).
+	chains      map[string]fakeChain
+	routeChains map[int64][]routeChain
+	// failHint is a type of live hint that Notify refuses.
+	failHint string
+
 	// The classification by Teams (evaluate_test.go): the Team label and teams_version, the Teams and Team matchers it
 	// reads, and the Teams and the unknown value that routing recorded on each Alert.
 	teamLabel     string
@@ -481,6 +487,9 @@ func (s *fakeStore) Notify(_ context.Context, h db.Hint) error {
 	if err := s.call("Notify"); err != nil {
 		return err
 	}
+	if h.Type == s.failHint && h.Type != "" {
+		return errBoom
+	}
 	s.hints = append(s.hints, h)
 	return nil
 }
@@ -494,9 +503,10 @@ func (s *fakeStore) InTx(_ context.Context, f func(Queries) error) error {
 	}
 	ms, order, audits, hints, next := maps.Clone(s.matchers), s.order, len(s.audit), len(s.hints), s.nextID
 	links, updates, notified := maps.Clone(s.links), len(s.updates), len(s.notified)
+	routeChains := maps.Clone(s.routeChains)
 	if err := f(s); err != nil {
 		s.rows, s.matchers, s.order, s.audit, s.hints, s.nextID = rows, ms, order, s.audit[:audits], s.hints[:hints], next
-		s.links, s.updates, s.notified = links, s.updates[:updates], s.notified[:notified]
+		s.links, s.updates, s.notified, s.routeChains = links, s.updates[:updates], s.notified[:notified], routeChains
 		return err
 	}
 	return nil

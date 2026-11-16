@@ -223,6 +223,13 @@ sql:
         out: internal/notificationrules/dbgen
   - engine: postgresql
     schema: internal/db/migrations
+    queries: internal/escalation/query.sql
+    gen:
+      go:
+        <<: *go
+        out: internal/escalation/dbgen
+  - engine: postgresql
+    schema: internal/db/migrations
     queries: internal/webhooks/query.sql
     gen:
       go:
