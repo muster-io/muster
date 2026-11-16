@@ -58,8 +58,17 @@ files_touched:
   - internal/webhooks/template_test.go
   - internal/runtime/runtime.go
   - test/e2e/mention_entries_test.go
+  - test/e2e/account_links_test.go
   - web/src/test/fixtures/destinations.ts
   - docs/concepts/mentions.md
+  - docs/concepts/loud-and-quiet.md
+  - docs/configure/messages-and-templates.md
+  - docs/messengers/account-links.md
+  - docs/messengers/slack.md
+  - docs/messengers/bridge.md
+  - docs/outgoing-webhooks/templates.md
+  - docs/outgoing-webhooks/events.md
+  - docs/concepts/what-critical-changes.md
   - mkdocs.yml
   - docs/install/versions.md
   - docs/llms.txt.tmpl
@@ -355,6 +364,14 @@ None open. Settled:
   a counted one moved off it; `deliveries.held_by_storm_id` is per Destination, never set on Urgent Alert Groups and
   cleared at hand-over. Alert Groups that 0.1 replicas count during a rolling update have no row, so their Teams add
   no Mentions to the summary (`versions.md`).
+- A person whom an entry names without an Account link is left out of the message, where L1 named them as text
+  (C-28.FR-3, C-12.FR-12 revised for L2): `account_links_test.go` (C-22.AC-20, C-24.AC-15) now expects Bob and Dora
+  absent, and the pages that described the L1 rule — Loud and Quiet, Messages and templates, Account links, Slack and
+  Bridge — describe the entries; the footer still names a person without a link as text. The L1 clause "named as
+  text" of C-22.FR-16, C-22.AC-20, C-24.FR-6 and C-24.AC-15 is superseded for Mention entries by C-28.FR-3 and
+  C-12.FR-12 revised for L2; the Owner's Mentions (a Reminder, an auto-unacknowledge, a Takeover) and the footer keep
+  it. The outgoing webhook pages, Templates and Events, and What a critical change does now name the entries, the
+  Team target and the word `everyone`.
 - The entry "Team {Team}" is not added to a Destination that already has 100 entries, the `maxItems` of
   `mention_entries`, so that sending its read back is never refused; the Admin adds it after removing another entry.
 
