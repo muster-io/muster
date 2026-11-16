@@ -15,7 +15,8 @@ import type { AlertGroupStatisticsItem, DurationStats } from "../api/gen/model";
 import { StatisticsChart, durationText } from "./statistics-chart";
 import { cn } from "./ui/utils";
 
-export type StatisticsSubject = "route" | "integration";
+/** The subjects of the statistics; the page offers route and integration, the API also team. */
+export type StatisticsSubject = "route" | "integration" | "team";
 
 export interface StatisticsTableProps {
   groupBy: StatisticsSubject;

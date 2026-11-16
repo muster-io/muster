@@ -683,7 +683,7 @@ func (t *acknowledge) apply(ctx context.Context, q Queries, g *Group, c *change)
 	clearSnooze(g)
 	g.Status, g.OwnerUserID, g.AcknowledgedAt = StatusAcknowledged, ptr(t.user), ptr(t.now)
 	if g.FirstAcknowledgedAt == nil {
-		g.FirstAcknowledgedAt, t.first = ptr(t.now), true
+		g.FirstAcknowledgedAt, g.FirstAcknowledgedBy, t.first = ptr(t.now), ptr(t.user), true
 	}
 	c.action = ActionAcknowledged
 	c.add(entry{Event: EventAcknowledged, From: from, To: StatusAcknowledged, OwnerUserID: g.OwnerUserID})

@@ -294,6 +294,79 @@ func TestAcknowledge(t *testing.T) {
 	}
 }
 
+// TestFirstAcknowledgement is C-09.FR-27 and C-09.AC-27 in the dispatcher: the first Acknowledge writes who made it
+// with its time, and nothing later changes either: Alice acknowledges 5 minutes after the start, Bob takes over and
+// unacknowledges, Carol acknowledges, the system resolves and the Alert Group reopens into acknowledged, Carol
+// resolves and unresolves it, and the row still names Alice at the time of her acknowledgement. An Auto-unacknowledge
+// leaves them too, and so does the next Acknowledge after it.
+func TestFirstAcknowledgement(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	carol := Caller{Actor: carol.Actor, Transport: audit.TransportUI, Permissions: responder}
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	if g.FirstAcknowledgedAt.Valid || g.FirstAcknowledgedByUserID.Valid {
+		t.Fatalf("a new alert group = %+v", g)
+	}
+	h.clock.Advance(5 * time.Minute)
+	alices := func(step string) {
+		t.Helper()
+		if g.FirstAcknowledgedAt != ts(t0.Add(5*time.Minute)) || g.FirstAcknowledgedByUserID != i8(owner) {
+			t.Errorf("after %s: first acknowledged by %v at %v", step, g.FirstAcknowledgedByUserID,
+				g.FirstAcknowledgedAt)
+		}
+	}
+	run := func(step string, f func() (Result, error)) {
+		t.Helper()
+		h.clock.Advance(time.Minute)
+		if _, err := f(); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		alices(step)
+	}
+	if _, err := h.svc.Acknowledge(t.Context(), alice, g.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	alices("the first acknowledge")
+	run("the takeover", func() (Result, error) { return h.svc.Acknowledge(t.Context(), bob, g.PublicID) })
+	run("the unacknowledge", func() (Result, error) { return h.svc.Unacknowledge(t.Context(), bob, g.PublicID) })
+	run("carol's acknowledge", func() (Result, error) { return h.svc.Acknowledge(t.Context(), carol, g.PublicID) })
+	h.clock.Advance(time.Minute)
+	h.resolve(t, a)
+	alices("the system resolve")
+	h.clock.Advance(time.Minute)
+	h.refire(t, a)
+	if g.Status != "acknowledged" || g.OwnerUserID != i8(carolID) || g.ReopenCount != 1 {
+		t.Fatalf("after the reopen: %s, owner %v, reopen count %d", g.Status, g.OwnerUserID, g.ReopenCount)
+	}
+	alices("the reopen")
+	run("carol's resolve", func() (Result, error) { return h.svc.Resolve(t.Context(), carol, g.PublicID, nil) })
+	run("the unresolve", func() (Result, error) { return h.svc.Unresolve(t.Context(), carol, g.PublicID) })
+
+	t.Run("auto-unacknowledge", func(t *testing.T) {
+		h := newHarness(t)
+		h.people()
+		h.paging()
+		h.db.routes[2].timers.AutoUnacknowledge = true
+		var asked []int64
+		h.svc.SetReminderReached(reachedAll(&asked))
+		g := h.acknowledgedBy(t, bob, "y")
+		h.runUntil(t, g, t0.Add(28*time.Hour))
+		if g.Status != "firing" || g.FirstAcknowledgedAt != ts(t0) || g.FirstAcknowledgedByUserID != i8(bobID) {
+			t.Fatalf("after the auto-unacknowledge: %s, first acknowledged by %v at %v", g.Status,
+				g.FirstAcknowledgedByUserID, g.FirstAcknowledgedAt)
+		}
+		if _, err := h.svc.Acknowledge(t.Context(), alice, g.PublicID); err != nil {
+			t.Fatal(err)
+		}
+		if g.FirstAcknowledgedAt != ts(t0) || g.FirstAcknowledgedByUserID != i8(bobID) {
+			t.Errorf("after the next acknowledge: first acknowledged by %v at %v", g.FirstAcknowledgedByUserID,
+				g.FirstAcknowledgedAt)
+		}
+	})
+}
+
 // TestAcknowledgeThroughGateway is C-30.FR-6 and C-30.AC-4 in the dispatcher: an Acknowledge with the Transport gateway
 // makes a firing or a snoozed Alert Group acknowledged, with gateway in the Timeline and the Audit log; one that
 // another User or the same person owns stays as it is, refused owned_by_other with the Owner's name and logged as a

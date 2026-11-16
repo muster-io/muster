@@ -23,6 +23,7 @@ import type {
 
 import type {
   AlertGroup,
+  AlertGroupActorStatistics,
   AlertGroupAlertList,
   AlertGroupCounts,
   AlertGroupDeliveryList,
@@ -34,6 +35,7 @@ import type {
   CommandResult,
   ConflictResponse,
   ForbiddenResponse,
+  GetAlertGroupActorStatisticsParams,
   GetAlertGroupCountsParams,
   GetAlertGroupStatisticsParams,
   GetAlertGroupTimelineParams,
@@ -314,7 +316,7 @@ export const getGetAlertGroupStatisticsUrl = (params: GetAlertGroupStatisticsPar
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
-    const explodeParameters = ["route","integration"];
+    const explodeParameters = ["route","integration","severity","label"];
 
     if (Array.isArray(value) && explodeParameters.includes(key)) {
       value.forEach((v) => {
@@ -334,7 +336,7 @@ export const getGetAlertGroupStatisticsUrl = (params: GetAlertGroupStatisticsPar
 }
 
 /**
- * Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route or per Integration as `group_by` says. Narrow it with `route` or `integration` ids (the one that matches `group_by`); without them every Route or Integration is returned. An Alert Group with Alerts from several Integrations counts for each.
+ * Number of Alert Groups, time to acknowledge and time to resolve (median and 95th percentile), as totals and per day of start, from the summary rows, one item per Route, per Integration or per Team as `group_by` says. The period selects the Alert Groups that started in [`from`, `to`), not those whose lifetime overlaps it, as the list's time range does. The filters `route`, `integration`, `severity`, `urgent`, `team`, `reopened`, `label` and `first_acknowledged_by` combine with AND, matched as `listAlertGroups` matches them, for every `group_by`; the filter of the kind of `group_by` also chooses the items (`team=mine` the caller's Teams). Without it every Route, Integration or Team that is not deleted is an item, and each deleted one with Alert Groups in the period. An Alert Group with Alerts from several Integrations counts for each, and one with several Teams for each Team; one without a Team counts for no Team.
  * @summary Read Alert Group statistics
  */
 export const getAlertGroupStatistics = async (params: GetAlertGroupStatisticsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupStatistics> => {
@@ -415,6 +417,122 @@ export function useGetAlertGroupStatistics<TData = Awaited<ReturnType<typeof get
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetAlertGroupStatisticsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export const getGetAlertGroupActorStatisticsUrl = (params?: GetAlertGroupActorStatisticsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ["route","integration","severity","label"];
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v));
+      });
+      return;
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/alert-group-actor-statistics?${stringifiedParams}` : `/api/v1/alert-group-actor-statistics`
+}
+
+/**
+ * Who acted on the Alert Groups that started in [`from`, `to`) and match the filters, which combine with AND, matched as in `getAlertGroupStatistics`: one item per User that acknowledged at least one of them first or resolved at least one, and one per Service account that resolved at least one. `acknowledged_first_count` counts the Alert Groups whose first acknowledgement the actor made, also after `to`, with its time to acknowledge; `resolved_count` those the actor resolved, by its resolver. An Alert Group gives at most one of each, to one actor; one never acknowledged counts in no `acknowledged_first_count`, and one resolved by the system in no `resolved_count`. The Alert Groups that were acknowledged but whose first acknowledgement names nobody — an Alert Group acknowledged before 0.2.0 whose Timeline was no longer whole, or on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name, then by `public_id`.
+ * @summary Read Alert Group statistics by people
+ */
+export const getAlertGroupActorStatistics = async (params?: GetAlertGroupActorStatisticsParams, options?: Parameters<typeof apiFetch>[1]): Promise<AlertGroupActorStatistics> => {
+
+  return apiFetch<AlertGroupActorStatistics>(getGetAlertGroupActorStatisticsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAlertGroupActorStatisticsQueryKey = (params?: GetAlertGroupActorStatisticsParams,) => {
+    return [
+    `/api/v1/alert-group-actor-statistics`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAlertGroupActorStatisticsQueryOptions = <TData = Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(params?: GetAlertGroupActorStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAlertGroupActorStatisticsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>> = ({ signal }) => getAlertGroupActorStatistics(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAlertGroupActorStatisticsQueryResult = NonNullable<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>>
+export type GetAlertGroupActorStatisticsQueryError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse
+
+
+export function useGetAlertGroupActorStatistics<TData = Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params: undefined |  GetAlertGroupActorStatisticsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAlertGroupActorStatistics>>,
+          TError,
+          Awaited<ReturnType<typeof getAlertGroupActorStatistics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAlertGroupActorStatistics<TData = Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetAlertGroupActorStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAlertGroupActorStatistics>>,
+          TError,
+          Awaited<ReturnType<typeof getAlertGroupActorStatistics>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetAlertGroupActorStatistics<TData = Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetAlertGroupActorStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Read Alert Group statistics by people
+ */
+
+export function useGetAlertGroupActorStatistics<TData = Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError = BadRequestResponse | UnauthorizedResponse | ForbiddenResponse | UnprocessableResponse | TooManyRequestsResponse>(
+ params?: GetAlertGroupActorStatisticsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getAlertGroupActorStatistics>>, TError, TData>>, request?: SecondParameter<typeof apiFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetAlertGroupActorStatisticsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

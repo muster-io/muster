@@ -21,8 +21,8 @@ import (
 )
 
 // AlertGroups is what the API needs of internal/groups: the list with its counts, one Alert Group, its Alerts, its
-// Timeline, its Notes and its related Alert Groups, the statistics, the open count of Integrations, the move of a Route's
-// open Alert Groups to the Default route, and the ends of the Snooze presets.
+// Timeline, its Notes and its related Alert Groups, the statistics with those by people, the open count of
+// Integrations, the move of a Route's open Alert Groups to the Default route, and the ends of the Snooze presets.
 type AlertGroups interface {
 	List(ctx context.Context, r groups.ListRequest) (groups.ListPage, error)
 	Counts(ctx context.Context, f groups.Filter) (groups.Counts, error)
@@ -32,6 +32,7 @@ type AlertGroups interface {
 	Notes(ctx context.Context, publicID string, after *groups.NotePosition, limit int) (groups.NotePage, error)
 	Related(ctx context.Context, publicID string, after *groups.ListPosition, limit int) (groups.RelatedPage, error)
 	Statistics(ctx context.Context, r groups.StatisticsRequest) (groups.Statistics, error)
+	ActorStatistics(ctx context.Context, f groups.Filter) (groups.ActorStatistics, error)
 	OpenCounts(ctx context.Context, integrations []string) (map[string]int64, error)
 	MoveOpenAlertGroups(ctx context.Context, r groups.Requester, routeID string) (int, error)
 	SnoozePresets(ctx context.Context, c groups.Caller, timeZone string) (groups.PresetList, error)
@@ -55,7 +56,7 @@ type alertGroupKey struct {
 	ID int64     `json:"i"`
 }
 
-// filterParams are the filter parameters that listAlertGroups and getAlertGroupCounts share.
+// filterParams are the filter parameters that listAlertGroups, getAlertGroupCounts and the statistics share.
 type filterParams struct {
 	route, integration    *[]string
 	severity              *[]gen.SeverityLevel
@@ -65,11 +66,12 @@ type filterParams struct {
 	label                 *[]string
 	owner                 *string
 	team                  *string
+	firstAcknowledgedBy   *string
 	snoozedNoEnd, problem *bool
 	unclaimed             *bool
 	from, to              *time.Time
 	q                     *string
-	// me is the caller, whom owner=me names.
+	// me is the caller, whom owner=me, team=mine and first_acknowledged_by=me name.
 	me audit.Actor
 }
 
@@ -82,6 +84,9 @@ func filterOf(p filterParams) (groups.Filter, error) {
 	}
 	if p.team != nil {
 		f.Team = *p.team
+	}
+	if p.firstAcknowledgedBy != nil {
+		f.FirstAcknowledgedBy = *p.firstAcknowledgedBy
 	}
 	if p.route != nil {
 		f.Routes = *p.route
@@ -229,17 +234,22 @@ func (s *Server) ListRelatedAlertGroups(ctx context.Context, req gen.ListRelated
 	return gen.ListRelatedAlertGroups200JSONResponse(out), nil
 }
 
-// GetAlertGroupStatistics is getAlertGroupStatistics: per Route or per Integration, totals and days.
+// GetAlertGroupStatistics is getAlertGroupStatistics: per Route, per Integration or per Team, totals and days, of the
+// Alert Groups that started in the period and match the filters.
 func (s *Server) GetAlertGroupStatistics(ctx context.Context, req gen.GetAlertGroupStatisticsRequestObject) (
 	gen.GetAlertGroupStatisticsResponseObject, error) {
 	p := req.Params
-	r := groups.StatisticsRequest{GroupBy: string(p.GroupBy), From: p.From, To: p.To}
-	if p.Route != nil {
-		r.Routes = *p.Route
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if p.Integration != nil {
-		r.Integrations = *p.Integration
+	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
+		urgent: p.Urgent, reopened: p.Reopened, label: p.Label, team: p.Team,
+		firstAcknowledgedBy: p.FirstAcknowledgedBy, from: p.From, to: p.To, me: c.Actor})
+	if err != nil {
+		return nil, err
 	}
+	r := groups.StatisticsRequest{GroupBy: string(p.GroupBy), Filter: f}
 	if p.TimeZone != nil {
 		r.TimeZone = *p.TimeZone
 	}
@@ -261,6 +271,40 @@ func (s *Server) GetAlertGroupStatistics(ctx context.Context, req gen.GetAlertGr
 		out.Items = append(out.Items, item)
 	}
 	return gen.GetAlertGroupStatistics200JSONResponse(out), nil
+}
+
+// GetAlertGroupActorStatistics is getAlertGroupActorStatistics: by people, of the Alert Groups that started in the
+// period and match the filters, with the item of those whose first acknowledgement names nobody, actor null.
+func (s *Server) GetAlertGroupActorStatistics(ctx context.Context, req gen.GetAlertGroupActorStatisticsRequestObject) (
+	gen.GetAlertGroupActorStatisticsResponseObject, error) {
+	p := req.Params
+	c, err := caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := filterOf(filterParams{route: p.Route, integration: p.Integration, severity: p.Severity,
+		urgent: p.Urgent, reopened: p.Reopened, label: p.Label, team: p.Team,
+		firstAcknowledgedBy: p.FirstAcknowledgedBy, from: p.From, to: p.To, me: c.Actor})
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.alertGroups.ActorStatistics(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.AlertGroupActorStatistics{From: st.From, To: st.To,
+		Items: make([]gen.AlertGroupActorStatisticsItem, 0, len(st.Items))}
+	for _, it := range st.Items {
+		item := gen.AlertGroupActorStatisticsItem{AcknowledgedFirstCount: int(it.AcknowledgedFirst),
+			ResolvedCount: int(it.Resolved), TimeToAcknowledge: durationStatsOf(it.TimeToAcknowledge)}
+		if it.Actor != nil {
+			item.Actor.Set(actorRefOf(*it.Actor))
+		} else {
+			item.Actor.SetNull()
+		}
+		out.Items = append(out.Items, item)
+	}
+	return gen.GetAlertGroupActorStatistics200JSONResponse(out), nil
 }
 
 // ListSnoozePresets is listSnoozePresets (C-10.FR-18): the end of each Snooze preset now, in the time zone of the

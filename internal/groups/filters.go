@@ -41,8 +41,9 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Pointer + ": " + e.Code }
 
-// Filter is the filters of the Alert Group list and its counts (C-09.FR-13). The zero Filter selects the open Alert
-// Groups whose lifetime overlaps the last ListRange.
+// Filter is the filters of the Alert Group list and its counts (C-09.FR-13), and of the statistics (C-09.FR-30), which
+// one resolution shares. The zero Filter selects the open Alert Groups whose lifetime overlaps the last ListRange; the
+// statistics select the Alert Groups that started in it instead.
 type Filter struct {
 	// Statuses are the statuses to list; none means open (firing, acknowledged and snoozed), or every status for a
 	// number. The counts ignore them.
@@ -78,6 +79,9 @@ type Filter struct {
 	// Team is a Team's public_id, or TeamMine for the Teams of the User Me: the Alert Groups that have it among their
 	// Teams (C-09.FR-13, C-25.FR-2); empty does not filter.
 	Team string
+	// FirstAcknowledgedBy is a User's public_id, or OwnerMe for the User Me: the Alert Groups whose first
+	// acknowledgement that User made (C-09.FR-27, FR-30); empty does not filter. Only the statistics read it.
+	FirstAcknowledgedBy string
 }
 
 // The values of Filter.Owner that name no User.
@@ -107,6 +111,7 @@ type query struct {
 	unclaimed    pgtype.Bool
 	teamSet      bool
 	teamIDs      []int64
+	firstAckBy   pgtype.Int8
 	// rowwise are the Matchers the database does not apply.
 	rowwise []matchers.Matcher
 }
@@ -166,6 +171,12 @@ func (s *Service) resolve(ctx context.Context, f Filter, now time.Time) (query, 
 	if q.teamSet, q.teamIDs, err = s.byTeam(ctx, f.Team, f.Me); err != nil {
 		return q, err
 	}
+	if f.FirstAcknowledgedBy != "" {
+		if q.firstAckBy, err = s.user(ctx, f.FirstAcknowledgedBy, f.Me, "/query/first_acknowledged_by",
+			"A Service account acknowledges no Alert Groups; name a user instead of me."); err != nil {
+			return q, err
+		}
+	}
 	if f.SnoozedNoEnd != nil {
 		q.snoozedNoEnd = pgtype.Bool{Bool: *f.SnoozedNoEnd, Valid: true}
 	}
@@ -200,14 +211,23 @@ func (s *Service) owner(ctx context.Context, owner string, me audit.Actor) (bool
 		return false, pgtype.Int8{}, nil
 	case OwnerNone:
 		return true, pgtype.Int8{}, nil
-	case OwnerMe:
-		if me.Kind != audit.ActorUser {
-			return false, pgtype.Int8{}, &FieldError{Pointer: "/query/owner", Code: CodeUnsupported,
-				Detail: "A Service account owns no Alert Groups; name a user instead of me."}
-		}
-		return true, pgtype.Int8{Int64: me.ID, Valid: true}, nil
 	}
-	refs, err := lookup(publicid.User, "user", []string{owner}, "/query/owner", func(ids []string) ([]idRef, error) {
+	id, err := s.user(ctx, owner, me, "/query/owner", "A Service account owns no Alert Groups; name a user instead of me.")
+	return err == nil, id, err
+}
+
+// user resolves a filter by User at pointer: a User's public_id, deleted Users included, or OwnerMe for the calling
+// User. OwnerMe from a Service account is a FieldError with detail, and an id that names no User — a Service
+// account's included — another.
+func (s *Service) user(ctx context.Context, value string, me audit.Actor, pointer, detail string) (pgtype.Int8,
+	error) {
+	if value == OwnerMe {
+		if me.Kind != audit.ActorUser {
+			return pgtype.Int8{}, &FieldError{Pointer: pointer, Code: CodeUnsupported, Detail: detail}
+		}
+		return pgtype.Int8{Int64: me.ID, Valid: true}, nil
+	}
+	refs, err := lookup(publicid.User, "user", []string{value}, pointer, func(ids []string) ([]idRef, error) {
 		rows, err := s.store.ListUsersByPublicID(ctx, dbgen.ListUsersByPublicIDParams{OrgID: s.orgID, PublicIds: ids})
 		out := make([]idRef, len(rows))
 		for i, r := range rows {
@@ -216,9 +236,9 @@ func (s *Service) owner(ctx context.Context, owner string, me audit.Actor) (bool
 		return out, err
 	})
 	if err != nil {
-		return false, pgtype.Int8{}, err
+		return pgtype.Int8{}, err
 	}
-	return true, pgtype.Int8{Int64: refs[0].ID, Valid: true}, nil
+	return pgtype.Int8{Int64: refs[0].ID, Valid: true}, nil
 }
 
 // orNone is ids, or an empty list for nil, which the queries read as no filter.

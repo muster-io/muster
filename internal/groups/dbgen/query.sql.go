@@ -12,6 +12,122 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const actorStatistics = `-- name: ActorStatistics :many
+WITH selected AS (
+    SELECT g.first_acknowledged_by_user_id, g.resolved_by_kind, g.resolved_by_user_id,
+           g.resolved_by_service_account_id,
+           extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+    FROM alert_groups g
+    WHERE g.org_id = $1 AND g.created_at >= $2::timestamptz AND g.created_at < $3::timestamptz
+        AND (cardinality($4::bigint[]) = 0 OR g.route_id = ANY($4::bigint[]))
+        AND (cardinality($5::bigint[]) = 0 OR g.integration_ids && $5::bigint[])
+        AND (cardinality($6::text[]) = 0 OR g.severity_level = ANY($6::text[]))
+        AND ($7::boolean IS NULL
+             OR (g.severity_level = 'critical') = $7::boolean)
+        AND ($8::boolean IS NULL OR (g.reopen_count > 0) = $8::boolean)
+        AND (NOT $9::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY($10::bigint[])))
+        AND ($11::jsonb IS NULL OR g.common_labels @> $11::jsonb)
+        AND ($12::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = $12::bigint)
+        AND (NOT $13::boolean OR g.id = ANY($14::bigint[]))
+), acknowledged AS (
+    SELECT first_acknowledged_by_user_id AS user_id, count(*)::bigint AS n,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY ack) AS median,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY ack) AS p95
+    FROM selected
+    WHERE ack IS NOT NULL
+    GROUP BY first_acknowledged_by_user_id
+), resolved AS (
+    SELECT resolved_by_user_id AS user_id, resolved_by_service_account_id AS service_account_id, count(*)::bigint AS n
+    FROM selected
+    WHERE resolved_by_kind = 'user'
+    GROUP BY resolved_by_user_id, resolved_by_service_account_id
+)
+SELECT a.user_id AS acknowledged_by_user_id, r.user_id AS resolved_by_user_id, r.service_account_id,
+       coalesce(a.n, 0)::bigint AS acknowledged_first_count, coalesce(r.n, 0)::bigint AS resolved_count,
+       coalesce(a.median, 0)::float8 AS ack_median, coalesce(a.p95, 0)::float8 AS ack_p95
+FROM acknowledged a
+FULL OUTER JOIN resolved r ON r.user_id = a.user_id
+`
+
+type ActorStatisticsParams struct {
+	OrgID               int64
+	RangeFrom           time.Time
+	RangeTo             time.Time
+	RouteIds            []int64
+	IntegrationIds      []int64
+	Severities          []string
+	Urgent              pgtype.Bool
+	Reopened            pgtype.Bool
+	TeamSet             bool
+	TeamIds             []int64
+	Contains            []byte
+	FirstAcknowledgedBy pgtype.Int8
+	IdsSet              bool
+	Ids                 []int64
+}
+
+type ActorStatisticsRow struct {
+	AcknowledgedByUserID   pgtype.Int8
+	ResolvedByUserID       pgtype.Int8
+	ServiceAccountID       pgtype.Int8
+	AcknowledgedFirstCount int64
+	ResolvedCount          int64
+	AckMedian              float64
+	AckP95                 float64
+}
+
+// ActorStatistics aggregates the Alert Groups twice and joins both by actor (C-09.FR-28): per User of their first
+// acknowledgement, with its count, median and 95th percentile of time to acknowledge in seconds (0 without any), the
+// Alert Groups acknowledged with no User making one row with acknowledged_by_user_id null; and per resolver of a
+// Resolve by a User or a Service account. A User who did both is one row; a Service account only resolves.
+func (q *Queries) ActorStatistics(ctx context.Context, arg ActorStatisticsParams) ([]ActorStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, actorStatistics,
+		arg.OrgID,
+		arg.RangeFrom,
+		arg.RangeTo,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.Reopened,
+		arg.TeamSet,
+		arg.TeamIds,
+		arg.Contains,
+		arg.FirstAcknowledgedBy,
+		arg.IdsSet,
+		arg.Ids,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActorStatisticsRow{}
+	for rows.Next() {
+		var i ActorStatisticsRow
+		if err := rows.Scan(
+			&i.AcknowledgedByUserID,
+			&i.ResolvedByUserID,
+			&i.ServiceAccountID,
+			&i.AcknowledgedFirstCount,
+			&i.ResolvedCount,
+			&i.AckMedian,
+			&i.AckP95,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const addAlertTeams = `-- name: AddAlertTeams :exec
 INSERT INTO alert_teams (org_id, alert_id, team_id, rule, matcher)
 SELECT $1, t.alert_id, t.team_id, t.rule, nullif(t.matcher, '')
@@ -1392,17 +1508,42 @@ FROM (SELECT i.integration_id::bigint AS subject_id, (g.created_at AT TIME ZONE 
       FROM alert_groups g
       CROSS JOIN LATERAL unnest(g.integration_ids) AS i(integration_id)
       WHERE g.org_id = $2 AND g.created_at >= $3::timestamptz AND g.created_at < $4::timestamptz
-        AND (cardinality($5::bigint[]) = 0 OR i.integration_id = ANY($5::bigint[]))) AS s
+        AND (cardinality($5::bigint[]) = 0 OR g.route_id = ANY($5::bigint[]))
+        AND (cardinality($6::bigint[]) = 0 OR g.integration_ids && $6::bigint[])
+        AND (cardinality($7::text[]) = 0 OR g.severity_level = ANY($7::text[]))
+        AND ($8::boolean IS NULL
+             OR (g.severity_level = 'critical') = $8::boolean)
+        AND ($9::boolean IS NULL OR (g.reopen_count > 0) = $9::boolean)
+        AND (NOT $10::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY($11::bigint[])))
+        AND ($12::jsonb IS NULL OR g.common_labels @> $12::jsonb)
+        AND ($13::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = $13::bigint)
+        AND (NOT $14::boolean OR g.id = ANY($15::bigint[]))
+        AND (cardinality($6::bigint[]) = 0 OR i.integration_id = ANY($6::bigint[]))) AS s
 GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
 ORDER BY s.subject_id, s.day NULLS FIRST
 `
 
 type IntegrationStatisticsParams struct {
-	TimeZone       string
-	OrgID          int64
-	RangeFrom      time.Time
-	RangeTo        time.Time
-	IntegrationIds []int64
+	TimeZone            string
+	OrgID               int64
+	RangeFrom           time.Time
+	RangeTo             time.Time
+	RouteIds            []int64
+	IntegrationIds      []int64
+	Severities          []string
+	Urgent              pgtype.Bool
+	Reopened            pgtype.Bool
+	TeamSet             bool
+	TeamIds             []int64
+	Contains            []byte
+	FirstAcknowledgedBy pgtype.Int8
+	IdsSet              bool
+	Ids                 []int64
 }
 
 type IntegrationStatisticsRow struct {
@@ -1426,7 +1567,17 @@ func (q *Queries) IntegrationStatistics(ctx context.Context, arg IntegrationStat
 		arg.OrgID,
 		arg.RangeFrom,
 		arg.RangeTo,
+		arg.RouteIds,
 		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.Reopened,
+		arg.TeamSet,
+		arg.TeamIds,
+		arg.Contains,
+		arg.FirstAcknowledgedBy,
+		arg.IdsSet,
+		arg.Ids,
 	)
 	if err != nil {
 		return nil, err
@@ -3736,6 +3887,82 @@ func (q *Queries) ListServiceAccountRefs(ctx context.Context, arg ListServiceAcc
 	return items, nil
 }
 
+const listStatisticsGroupLabels = `-- name: ListStatisticsGroupLabels :many
+SELECT g.common_labels, array_agg(g.id ORDER BY g.id)::bigint[] AS ids
+FROM alert_groups g
+WHERE g.org_id = $1 AND g.created_at >= $2::timestamptz AND g.created_at < $3::timestamptz
+        AND (cardinality($4::bigint[]) = 0 OR g.route_id = ANY($4::bigint[]))
+        AND (cardinality($5::bigint[]) = 0 OR g.integration_ids && $5::bigint[])
+        AND (cardinality($6::text[]) = 0 OR g.severity_level = ANY($6::text[]))
+        AND ($7::boolean IS NULL
+             OR (g.severity_level = 'critical') = $7::boolean)
+        AND ($8::boolean IS NULL OR (g.reopen_count > 0) = $8::boolean)
+        AND (NOT $9::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY($10::bigint[])))
+        AND ($11::jsonb IS NULL OR g.common_labels @> $11::jsonb)
+        AND ($12::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = $12::bigint)
+GROUP BY g.common_labels
+`
+
+type ListStatisticsGroupLabelsParams struct {
+	OrgID               int64
+	RangeFrom           time.Time
+	RangeTo             time.Time
+	RouteIds            []int64
+	IntegrationIds      []int64
+	Severities          []string
+	Urgent              pgtype.Bool
+	Reopened            pgtype.Bool
+	TeamSet             bool
+	TeamIds             []int64
+	Contains            []byte
+	FirstAcknowledgedBy pgtype.Int8
+}
+
+type ListStatisticsGroupLabelsRow struct {
+	CommonLabels []byte
+	Ids          []int64
+}
+
+// ListStatisticsGroupLabels reads the common labels of the Alert Groups of the statistics' filters, with the ids of
+// the Alert Groups that have them, for the Matchers that Go applies.
+func (q *Queries) ListStatisticsGroupLabels(ctx context.Context, arg ListStatisticsGroupLabelsParams) ([]ListStatisticsGroupLabelsRow, error) {
+	rows, err := q.db.Query(ctx, listStatisticsGroupLabels,
+		arg.OrgID,
+		arg.RangeFrom,
+		arg.RangeTo,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.Reopened,
+		arg.TeamSet,
+		arg.TeamIds,
+		arg.Contains,
+		arg.FirstAcknowledgedBy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatisticsGroupLabelsRow{}
+	for rows.Next() {
+		var i ListStatisticsGroupLabelsRow
+		if err := rows.Scan(&i.CommonLabels, &i.Ids); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStatisticsIntegrations = `-- name: ListStatisticsIntegrations :many
 SELECT id, public_id, name
 FROM integrations
@@ -3810,6 +4037,48 @@ func (q *Queries) ListStatisticsRoutes(ctx context.Context, arg ListStatisticsRo
 	items := []ListStatisticsRoutesRow{}
 	for rows.Next() {
 		var i ListStatisticsRoutesRow
+		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStatisticsTeams = `-- name: ListStatisticsTeams :many
+SELECT id, public_id, name
+FROM teams
+WHERE org_id = $1
+  AND (CASE WHEN cardinality($2::bigint[]) > 0 THEN id = ANY($2::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY($3::bigint[]) END)
+ORDER BY name, id
+`
+
+type ListStatisticsTeamsParams struct {
+	OrgID   int64
+	OnlyIds []int64
+	WithIds []int64
+}
+
+type ListStatisticsTeamsRow struct {
+	ID       int64
+	PublicID string
+	Name     string
+}
+
+// ListStatisticsTeams lists the subjects of the statistics per Team, as ListStatisticsRoutes does.
+func (q *Queries) ListStatisticsTeams(ctx context.Context, arg ListStatisticsTeamsParams) ([]ListStatisticsTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listStatisticsTeams, arg.OrgID, arg.OnlyIds, arg.WithIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStatisticsTeamsRow{}
+	for rows.Next() {
+		var i ListStatisticsTeamsRow
 		if err := rows.Scan(&i.ID, &i.PublicID, &i.Name); err != nil {
 			return nil, err
 		}
@@ -4619,7 +4888,8 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
        last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
-       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at
+       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at,
+       first_acknowledged_by_user_id
 FROM alert_groups
 WHERE org_id = $1 AND id = ANY($2::bigint[])
 ORDER BY id
@@ -4688,6 +4958,7 @@ type LockGroupsRow struct {
 	RemindersUnanswered            int64
 	LastReminderAt                 pgtype.Timestamptz
 	OwnerAnsweredAt                pgtype.Timestamptz
+	FirstAcknowledgedByUserID      pgtype.Int8
 }
 
 // LockGroups locks Alert Groups for a change, in id order, so that two transactions never wait for each other. The lock
@@ -4761,6 +5032,7 @@ func (q *Queries) LockGroups(ctx context.Context, arg LockGroupsParams) ([]LockG
 			&i.RemindersUnanswered,
 			&i.LastReminderAt,
 			&i.OwnerAnsweredAt,
+			&i.FirstAcknowledgedByUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -5115,17 +5387,41 @@ FROM (SELECT g.route_id AS subject_id, (g.created_at AT TIME ZONE $1::text)::dat
              extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
       FROM alert_groups g
       WHERE g.org_id = $2 AND g.created_at >= $3::timestamptz AND g.created_at < $4::timestamptz
-        AND (cardinality($5::bigint[]) = 0 OR g.route_id = ANY($5::bigint[]))) AS s
+        AND (cardinality($5::bigint[]) = 0 OR g.route_id = ANY($5::bigint[]))
+        AND (cardinality($6::bigint[]) = 0 OR g.integration_ids && $6::bigint[])
+        AND (cardinality($7::text[]) = 0 OR g.severity_level = ANY($7::text[]))
+        AND ($8::boolean IS NULL
+             OR (g.severity_level = 'critical') = $8::boolean)
+        AND ($9::boolean IS NULL OR (g.reopen_count > 0) = $9::boolean)
+        AND (NOT $10::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY($11::bigint[])))
+        AND ($12::jsonb IS NULL OR g.common_labels @> $12::jsonb)
+        AND ($13::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = $13::bigint)
+        AND (NOT $14::boolean OR g.id = ANY($15::bigint[]))) AS s
 GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
 ORDER BY s.subject_id, s.day NULLS FIRST
 `
 
 type RouteStatisticsParams struct {
-	TimeZone  string
-	OrgID     int64
-	RangeFrom time.Time
-	RangeTo   time.Time
-	RouteIds  []int64
+	TimeZone            string
+	OrgID               int64
+	RangeFrom           time.Time
+	RangeTo             time.Time
+	RouteIds            []int64
+	IntegrationIds      []int64
+	Severities          []string
+	Urgent              pgtype.Bool
+	Reopened            pgtype.Bool
+	TeamSet             bool
+	TeamIds             []int64
+	Contains            []byte
+	FirstAcknowledgedBy pgtype.Int8
+	IdsSet              bool
+	Ids                 []int64
 }
 
 type RouteStatisticsRow struct {
@@ -5141,11 +5437,15 @@ type RouteStatisticsRow struct {
 	AckP95          float64
 }
 
-// The statistics (C-09.FR-15) aggregate the summary rows that started in [@range_from, @range_to): per subject, and
-// per subject and day of start in the time zone @time_zone. Time to resolve counts the resolved ones, time to
-// acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile interpolated, and 0
-// when their count is 0.
-// RouteStatistics aggregates the Alert Groups per Route, only the Routes @route_ids when set.
+// The statistics (C-09.FR-15, FR-28 to FR-30) aggregate the summary rows that started in [@range_from, @range_to) and
+// match the filters, which the list resolves the same way: the Routes @route_ids, the Integrations @integration_ids
+// (an overlap), the Severity levels @severities, @urgent, @reopened, with @team_set the Teams @team_ids, the = Matchers
+// @contains, the User of the first acknowledgement @first_acknowledged_by, and with @ids_set only the Alert Groups @ids
+// that passed the Matchers Go applies. Every aggregation starts from the period on alert_groups_started_idx. Per
+// subject, and per subject and day of start in the time zone @time_zone: time to resolve counts the resolved ones,
+// time to acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile
+// interpolated, and 0 when their count is 0.
+// RouteStatistics aggregates the Alert Groups per Route.
 func (q *Queries) RouteStatistics(ctx context.Context, arg RouteStatisticsParams) ([]RouteStatisticsRow, error) {
 	rows, err := q.db.Query(ctx, routeStatistics,
 		arg.TimeZone,
@@ -5153,6 +5453,16 @@ func (q *Queries) RouteStatistics(ctx context.Context, arg RouteStatisticsParams
 		arg.RangeFrom,
 		arg.RangeTo,
 		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.Reopened,
+		arg.TeamSet,
+		arg.TeamIds,
+		arg.Contains,
+		arg.FirstAcknowledgedBy,
+		arg.IdsSet,
+		arg.Ids,
 	)
 	if err != nil {
 		return nil, err
@@ -5207,11 +5517,12 @@ SET route_id = $1, moved_from_route_id = $2, title = $3,
     prior_snoozed_by_service_account_id = $36,
     grace_deadline = $37, event_seq = $38, last_changed_at = $39,
     first_acknowledged_at = $40,
-    first_published_at = $41, ack_timeout_started_at = $42,
-    ack_timeout_notices_sent = $43, unclaimed = $44, reminders_sent = $45,
-    reminders_unanswered = $46, last_reminder_at = $47,
-    owner_answered_at = $48
-WHERE org_id = $49 AND id = $50
+    first_acknowledged_by_user_id = $41,
+    first_published_at = $42, ack_timeout_started_at = $43,
+    ack_timeout_notices_sent = $44, unclaimed = $45, reminders_sent = $46,
+    reminders_unanswered = $47, last_reminder_at = $48,
+    owner_answered_at = $49
+WHERE org_id = $50 AND id = $51
 `
 
 type SaveGroupParams struct {
@@ -5255,6 +5566,7 @@ type SaveGroupParams struct {
 	EventSeq                       int64
 	LastChangedAt                  time.Time
 	FirstAcknowledgedAt            pgtype.Timestamptz
+	FirstAcknowledgedByUserID      pgtype.Int8
 	FirstPublishedAt               pgtype.Timestamptz
 	AckTimeoutStartedAt            pgtype.Timestamptz
 	AckTimeoutNoticesSent          int64
@@ -5310,6 +5622,7 @@ func (q *Queries) SaveGroup(ctx context.Context, arg SaveGroupParams) error {
 		arg.EventSeq,
 		arg.LastChangedAt,
 		arg.FirstAcknowledgedAt,
+		arg.FirstAcknowledgedByUserID,
 		arg.FirstPublishedAt,
 		arg.AckTimeoutStartedAt,
 		arg.AckTimeoutNoticesSent,
@@ -5468,6 +5781,120 @@ func (q *Queries) ShareUser(ctx context.Context, arg ShareUserParams) ([]int64, 
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const teamStatistics = `-- name: TeamStatistics :many
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT t.team_id AS subject_id, (g.created_at AT TIME ZONE $1::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      JOIN alert_group_teams t ON t.org_id = g.org_id AND t.alert_group_id = g.id
+      WHERE g.org_id = $2 AND g.created_at >= $3::timestamptz AND g.created_at < $4::timestamptz
+        AND (cardinality($5::bigint[]) = 0 OR g.route_id = ANY($5::bigint[]))
+        AND (cardinality($6::bigint[]) = 0 OR g.integration_ids && $6::bigint[])
+        AND (cardinality($7::text[]) = 0 OR g.severity_level = ANY($7::text[]))
+        AND ($8::boolean IS NULL
+             OR (g.severity_level = 'critical') = $8::boolean)
+        AND ($9::boolean IS NULL OR (g.reopen_count > 0) = $9::boolean)
+        AND (NOT $10::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY($11::bigint[])))
+        AND ($12::jsonb IS NULL OR g.common_labels @> $12::jsonb)
+        AND ($13::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = $13::bigint)
+        AND (NOT $14::boolean OR g.id = ANY($15::bigint[]))
+        AND (NOT $10::boolean OR t.team_id = ANY($11::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST
+`
+
+type TeamStatisticsParams struct {
+	TimeZone            string
+	OrgID               int64
+	RangeFrom           time.Time
+	RangeTo             time.Time
+	RouteIds            []int64
+	IntegrationIds      []int64
+	Severities          []string
+	Urgent              pgtype.Bool
+	Reopened            pgtype.Bool
+	TeamSet             bool
+	TeamIds             []int64
+	Contains            []byte
+	FirstAcknowledgedBy pgtype.Int8
+	IdsSet              bool
+	Ids                 []int64
+}
+
+type TeamStatisticsRow struct {
+	SubjectID       int64
+	Day             pgtype.Date
+	Total           bool
+	AlertGroupCount int64
+	ResolveCount    int64
+	ResolveMedian   float64
+	ResolveP95      float64
+	AckCount        int64
+	AckMedian       float64
+	AckP95          float64
+}
+
+// TeamStatistics aggregates the Alert Groups per Team of alert_group_teams — one with several Teams counts for each,
+// one without a Team for none — only the Teams @team_ids with @team_set.
+func (q *Queries) TeamStatistics(ctx context.Context, arg TeamStatisticsParams) ([]TeamStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, teamStatistics,
+		arg.TimeZone,
+		arg.OrgID,
+		arg.RangeFrom,
+		arg.RangeTo,
+		arg.RouteIds,
+		arg.IntegrationIds,
+		arg.Severities,
+		arg.Urgent,
+		arg.Reopened,
+		arg.TeamSet,
+		arg.TeamIds,
+		arg.Contains,
+		arg.FirstAcknowledgedBy,
+		arg.IdsSet,
+		arg.Ids,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TeamStatisticsRow{}
+	for rows.Next() {
+		var i TeamStatisticsRow
+		if err := rows.Scan(
+			&i.SubjectID,
+			&i.Day,
+			&i.Total,
+			&i.AlertGroupCount,
+			&i.ResolveCount,
+			&i.ResolveMedian,
+			&i.ResolveP95,
+			&i.AckCount,
+			&i.AckMedian,
+			&i.AckP95,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

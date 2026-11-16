@@ -6,7 +6,7 @@ import type { ActorRefKind } from './actorRefKind';
 import type { PublicId } from './publicId';
 
 /**
- * Who resolved an Alert Group or wrote a Note: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner.
+ * Who resolved an Alert Group or wrote a Note, or is a row of the statistics by people: a User or a Service account. An Owner is always a User (`UserRef`), because a Service account cannot become an Owner; a Service account is a row of the statistics by people only through what it resolved.
  */
 export interface ActorRef {
   kind: ActorRefKind;

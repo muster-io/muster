@@ -2738,18 +2738,18 @@ func TestIntegrationMigrate(t *testing.T) {
 		var out bytes.Buffer
 		log := logging.New(&out, logging.LevelInfo)
 		if err := d.CheckSchema(t.Context(), log); err == nil ||
-			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (44)") {
+			!strings.Contains(err.Error(), "database schema version 0 is older than this binary needs (45)") {
 			t.Errorf("CheckSchema before migrating: %v", err)
 		}
 		out.Reset()
 		if err := d.Migrate(t.Context(), log); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":44`) {
+		if !strings.Contains(out.String(), `"event":"migrations_applied","from":0,"to":45`) {
 			t.Errorf("logged %s", out.String())
 		}
 		out.Reset()
-		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":44`) {
+		if err := d.Migrate(t.Context(), log); err != nil || !strings.Contains(out.String(), `"event":"migrations_current","version":45`) {
 			t.Errorf("Migrate again: %v, logged %s", err, out.String())
 		}
 		if err := d.CheckSchema(t.Context(), log); err != nil {
@@ -2765,10 +2765,10 @@ func TestIntegrationMigrate(t *testing.T) {
 			out.Reset()
 			err := f(t.Context(), log)
 			var se *SchemaError
-			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (44)" {
+			if !errors.As(err, &se) || err.Error() != "database schema version 999 is newer than this binary knows (45)" {
 				t.Errorf("%s on version 999: %v", name, err)
 			}
-			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":44`) {
+			if !strings.Contains(out.String(), `"event":"schema_too_new","database_version":999,"known_version":45`) {
 				t.Errorf("%s logged %s", name, out.String())
 			}
 		}
@@ -4418,6 +4418,147 @@ func TestIntegrationTelegramDiscussionMembers(t *testing.T) {
 		}
 		if n := columns(t); n != 2 {
 			t.Errorf("up again: %d of the two columns", n)
+		}
+	})
+}
+
+// TestIntegrationFirstAcknowledgedBy runs 0045 over a database at 44 whose Timeline has a kept month, October, and a
+// month already dropped, July: up adds alert_groups.first_acknowledged_by_user_id with its foreign key and
+// alert_groups_first_acknowledged_by_check, both validated, and fills it from the earliest acknowledged entry of each
+// Alert Group with first_acknowledged_at whose Timeline is whole, with its created entry: one that Alice acknowledged
+// and Bob took over gets Alice; one whose Timeline partition was dropped gets nobody; one that Alice acknowledged in the
+// dropped month and Carol again, after an Unacknowledge, in the kept month gets nobody, not Carol; one never
+// acknowledged stays empty. The CHECK refuses the User of a first acknowledgement without its time, the foreign key an unknown User.
+// Down drops the column and the CHECK; up again fills it again (C-09.FR-27, C-09.AC-30).
+func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := newMigrationEnv(t, s, 44)
+		for _, m := range []struct{ name, from, to string }{{"p202607", "2026-07-01", "2026-08-01"},
+			{"p202610", "2026-10-01", "2026-11-01"}} {
+			e.exec(t, `CREATE TABLE timeline_entries_`+m.name+` PARTITION OF timeline_entries
+				FOR VALUES FROM ('`+m.from+` 00:00:00+00') TO ('`+m.to+` 00:00:00+00')`)
+		}
+		e.exec(t, `INSERT INTO users (org_id, public_id, login, name, role, source, status, created_at, updated_at)
+			SELECT o.id, u.public_id, u.login, u.login, 'responder', 'local', 'active', '2026-07-01', '2026-07-01'
+			FROM organizations o, (VALUES ('SR0000000000A1', 'alice'), ('SR0000000000B1', 'bob'),
+				('SR0000000000C1', 'carol')) AS u (public_id, login)`)
+		e.exec(t, `INSERT INTO routes (org_id, public_id, name, position, urgent, group_key, reopen_window_seconds,
+			grace_period_seconds, urgent_rise_removes_ack, snooze_durations_seconds, thread_batching_window_seconds,
+			storm_threshold, language, ack_timeout_enabled, ack_timeout_first_interval_seconds, reminders_enabled,
+			reminders_first_interval_seconds, reminders_cap_seconds, auto_unacknowledge, created_at, updated_at)
+			SELECT id, 'RT0000000000F1', 'r', 1, false, '{alertname}', 0, 0, true, '{}', 0, 10, 'en', false, 60,
+				false, 60, 60, false, '2026-07-01', '2026-07-01'
+			FROM organizations`)
+		// AGF1 in October, acknowledged by Alice and taken over by Bob; AGF2 in July, acknowledged by Bob; AGF3 in July,
+		// acknowledged by Alice, unacknowledged in July and acknowledged by Carol in October; AGF4 in October, never
+		// acknowledged.
+		e.exec(t, `INSERT INTO alert_groups (org_id, public_id, number, route_id, group_key_labels, group_key_values,
+			group_key_sha256, title, common_labels, common_annotations, integration_ids, status, severity_level, urgent,
+			first_acknowledged_at, created_at, last_changed_at)
+			SELECT r.org_id, g.public_id, g.number, r.id, '{alertname}', '{}', sha256(g.public_id::bytea), 't', '{}',
+				'{}', '{}', 'firing', 'warning', false, g.first_ack, g.created, g.created
+			FROM routes r, (VALUES
+				('AG00000000F001', 1, timestamptz '2026-10-02 10:05:00+00', timestamptz '2026-10-02 10:00:00+00'),
+				('AG00000000F002', 2, timestamptz '2026-07-02 10:05:00+00', timestamptz '2026-07-02 10:00:00+00'),
+				('AG00000000F003', 3, timestamptz '2026-07-03 10:05:00+00', timestamptz '2026-07-03 10:00:00+00'),
+				('AG00000000F004', 4, NULL, timestamptz '2026-10-04 10:00:00+00'))
+				AS g (public_id, number, first_ack, created)`)
+		n := 0
+		entry := func(group, event, actor, at string) {
+			t.Helper()
+			n++
+			kind, user, transport := "user", any(nil), "ui"
+			if actor == "" {
+				kind, transport = "system", "system"
+			} else {
+				user = actor
+			}
+			if _, err := e.d.Pool.Exec(t.Context(), `INSERT INTO timeline_entries (org_id, public_id, alert_group_id,
+				at, kind, event, event_seq, loudness, actor_kind, actor_user_id, transport)
+				SELECT g.org_id, $1, g.id, $2, 'status', $3, $4, 'quiet', $5,
+					(SELECT id FROM users WHERE login = $6), $8
+				FROM alert_groups g WHERE g.public_id = $7`, fmt.Sprintf("TE00000000F%03d", n), at, event, n, kind,
+				user, group, transport); err != nil {
+				t.Fatalf("%s %s: %v", group, event, err)
+			}
+		}
+		entry("AG00000000F001", "created", "", "2026-10-02 10:00:00+00")
+		entry("AG00000000F001", "acknowledged", "alice", "2026-10-02 10:05:00.000001+00")
+		entry("AG00000000F001", "takeover", "bob", "2026-10-02 10:06:00+00")
+		entry("AG00000000F002", "created", "", "2026-07-02 10:00:00+00")
+		entry("AG00000000F002", "acknowledged", "bob", "2026-07-02 10:05:00+00")
+		entry("AG00000000F003", "created", "", "2026-07-03 10:00:00+00")
+		entry("AG00000000F003", "acknowledged", "alice", "2026-07-03 10:05:00+00")
+		entry("AG00000000F003", "unacknowledged", "alice", "2026-07-03 10:06:00+00")
+		entry("AG00000000F003", "acknowledged", "carol", "2026-10-01 09:00:00+00")
+		entry("AG00000000F004", "created", "", "2026-10-04 10:00:00+00")
+		// Retention dropped July.
+		e.exec(t, `DROP TABLE timeline_entries_p202607`)
+		firsts := func(t *testing.T) string {
+			t.Helper()
+			rows, err := e.d.Pool.Query(t.Context(), `SELECT g.public_id || '=' || coalesce(u.login, '-')
+				FROM alert_groups g LEFT JOIN users u ON u.id = g.first_acknowledged_by_user_id ORDER BY g.number`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			var out []string
+			for rows.Next() {
+				var s string
+				if err := rows.Scan(&s); err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, s)
+			}
+			return strings.Join(out, " ")
+		}
+		columns := func(t *testing.T) int {
+			t.Helper()
+			return e.count(t, `SELECT count(*) FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'alert_groups'
+					AND column_name = 'first_acknowledged_by_user_id'`)
+		}
+		want := "AG00000000F001=alice AG00000000F002=- AG00000000F003=- AG00000000F004=-"
+
+		if err := e.mm.Migrate(45); err != nil {
+			t.Fatalf("up to 45: %v", err)
+		}
+		if got := firsts(t); got != want {
+			t.Errorf("after up: %s, want %s", got, want)
+		}
+		if got := e.constraints(t, []string{"alert_groups"}, "alert_groups_first_acknowledged_by"); got !=
+			"alert_groups.alert_groups_first_acknowledged_by_check:true "+
+				"alert_groups.alert_groups_first_acknowledged_by_user_id_fkey:true" {
+			t.Errorf("after up: constraints %s", got)
+		}
+		_, err := e.d.Pool.Exec(t.Context(), `UPDATE alert_groups SET first_acknowledged_by_user_id = (SELECT id FROM
+			users WHERE login = 'bob') WHERE public_id = 'AG00000000F004'`)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23514" ||
+			pe.ConstraintName != "alert_groups_first_acknowledged_by_check" {
+			t.Errorf("a first acknowledgement by a User without its time: %v", err)
+		}
+		_, err = e.d.Pool.Exec(t.Context(), `UPDATE alert_groups SET first_acknowledged_by_user_id = 999999
+			WHERE public_id = 'AG00000000F002'`)
+		if pe, ok := errors.AsType[*pgconn.PgError](err); !ok || pe.Code != "23503" {
+			t.Errorf("an unknown user: %v", err)
+		}
+
+		e.step(t, -1)
+		if v, dirty, err := e.mm.Version(); err != nil || dirty || v != 44 {
+			t.Errorf("after down: version %d, dirty %v, %v", v, dirty, err)
+		}
+		if n := columns(t); n != 0 {
+			t.Errorf("after down: %d columns", n)
+		}
+		if got := e.constraints(t, []string{"alert_groups"}, "alert_groups_first_acknowledged_by"); got != "" {
+			t.Errorf("after down: constraints %s", got)
+		}
+
+		if err := e.mm.Migrate(45); err != nil {
+			t.Fatalf("up again: %v", err)
+		}
+		if got := firsts(t); got != want {
+			t.Errorf("up again: %s, want %s", got, want)
 		}
 	})
 }

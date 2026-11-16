@@ -12,6 +12,7 @@ import type {
 
 import type {
   AlertGroup,
+  AlertGroupActorStatistics,
   AlertGroupAlertList,
   AlertGroupCounts,
   AlertGroupDeliveryList,
@@ -30,6 +31,7 @@ import {
   getAcknowledgeAlertGroupResponseMock,
   getAnswerReminderResponseMock,
   getCreateAlertGroupNoteResponseMock,
+  getGetAlertGroupActorStatisticsResponseMock,
   getGetAlertGroupCountsResponseMock,
   getGetAlertGroupResponseMock,
   getGetAlertGroupStatisticsResponseMock,
@@ -48,7 +50,7 @@ import {
   getUnsnoozeAlertGroupResponseMock
 } from './alert-groups.faker';
 
-export { getListAlertGroupsResponseMock, getGetAlertGroupCountsResponseMock, getGetAlertGroupStatisticsResponseMock, getGetAlertGroupResponseMock, getListAlertGroupAlertsResponseMock, getGetAlertGroupTimelineResponseMock, getListRelatedAlertGroupsResponseMock, getListAlertGroupDeliveriesResponseMock, getAcknowledgeAlertGroupResponseMock, getUnacknowledgeAlertGroupResponseMock, getResolveAlertGroupResponseMock, getUnresolveAlertGroupResponseMock, getSnoozeAlertGroupResponseMock, getUnsnoozeAlertGroupResponseMock, getListAlertGroupNotesResponseMock, getCreateAlertGroupNoteResponseMock, getAnswerReminderResponseMock, getRunBulkCommandResponseMock, getListSnoozePresetsResponseMock } from './alert-groups.faker';
+export { getListAlertGroupsResponseMock, getGetAlertGroupCountsResponseMock, getGetAlertGroupStatisticsResponseMock, getGetAlertGroupActorStatisticsResponseMock, getGetAlertGroupResponseMock, getListAlertGroupAlertsResponseMock, getGetAlertGroupTimelineResponseMock, getListRelatedAlertGroupsResponseMock, getListAlertGroupDeliveriesResponseMock, getAcknowledgeAlertGroupResponseMock, getUnacknowledgeAlertGroupResponseMock, getResolveAlertGroupResponseMock, getUnresolveAlertGroupResponseMock, getSnoozeAlertGroupResponseMock, getUnsnoozeAlertGroupResponseMock, getListAlertGroupNotesResponseMock, getCreateAlertGroupNoteResponseMock, getAnswerReminderResponseMock, getRunBulkCommandResponseMock, getListSnoozePresetsResponseMock } from './alert-groups.faker';
 
 
 export const getListAlertGroupsMockHandler = (overrideResponse?: AlertGroupList | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AlertGroupList> | AlertGroupList), options?: RequestHandlerOptions) => {
@@ -82,6 +84,18 @@ export const getGetAlertGroupStatisticsMockHandler = (overrideResponse?: AlertGr
     return HttpResponse.json(overrideResponse !== undefined
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getGetAlertGroupStatisticsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetAlertGroupActorStatisticsMockHandler = (overrideResponse?: AlertGroupActorStatistics | ((info: Parameters<Parameters<typeof http.get>[1]>[0]) => Promise<AlertGroupActorStatistics> | AlertGroupActorStatistics), options?: RequestHandlerOptions) => {
+  return http.get('*/alert-group-actor-statistics', async (info: Parameters<Parameters<typeof http.get>[1]>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetAlertGroupActorStatisticsResponseMock(),
       { status: 200
       })
   }, options)
@@ -282,6 +296,7 @@ export const getAlertGroupsMock = () => [
   getListAlertGroupsMockHandler(),
   getGetAlertGroupCountsMockHandler(),
   getGetAlertGroupStatisticsMockHandler(),
+  getGetAlertGroupActorStatisticsMockHandler(),
   getGetAlertGroupMockHandler(),
   getListAlertGroupAlertsMockHandler(),
   getGetAlertGroupTimelineMockHandler(),

@@ -121,16 +121,19 @@ function statisticsError(t: TFunction, err: unknown): string {
   return problemText(t, err);
 }
 
+/** The subjects this page offers; the views By Team and By people come later. */
+type PageSubject = Exclude<StatisticsSubject, "team">;
+
 function SubjectChoice({
   value,
   onChange,
 }: {
-  value: StatisticsSubject;
-  onChange: (next: StatisticsSubject) => void;
+  value: PageSubject;
+  onChange: (next: PageSubject) => void;
 }) {
   const { t } = useTranslation();
   const id = useId();
-  const options: { value: StatisticsSubject; label: string }[] = [
+  const options: { value: PageSubject; label: string }[] = [
     { value: "route", label: t("statistics.by.route") },
     { value: "integration", label: t("statistics.by.integration") },
   ];

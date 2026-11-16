@@ -8,8 +8,8 @@ depends_on: [S-118]
 covers: [C-09.FR-15, C-09.FR-27, C-09.FR-28, C-09.FR-29, C-09.FR-30, C-09.AC-27, C-09.AC-28, C-09.AC-29, C-09.AC-30, C-09.AC-31, C-09.AC-32, C-09.AC-33]
 files_touched:
   - api/openapi.yaml
-  - internal/db/migrations/00NN_first_acknowledged_by.up.sql
-  - internal/db/migrations/00NN_first_acknowledged_by.down.sql
+  - internal/db/migrations/0045_first_acknowledged_by.up.sql
+  - internal/db/migrations/0045_first_acknowledged_by.down.sql
   - internal/db/migrate_test.go
   - internal/db/db_test.go
   - design/db/schema.md
@@ -23,6 +23,7 @@ files_touched:
   - internal/groups/statistics_test.go
   - internal/groups/statistics_integration_test.go
   - internal/groups/list_test.go
+  - internal/groups/list_integration_test.go
   - internal/api/alertgroups.go
   - internal/api/alertgroups_test.go
   - internal/api/server.go
@@ -32,7 +33,7 @@ files_touched:
   - docs/install/versions.md
 acceptance:
   - "[C-09.FR-27, C-09.AC-27] The first Acknowledge of an Alert Group writes `first_acknowledged_by_user_id` in the transaction that sets `first_acknowledged_at`; a Takeover, an Unacknowledge, a later Acknowledge by someone else, a Reopen into acknowledged and an Unresolve change neither `first_acknowledged_at` nor `first_acknowledged_by_user_id`: Alice acknowledges 5 minutes after the start, Bob takes over and unacknowledges, Carol acknowledges, the system resolves and the Alert Group reopens, and the row still names Alice at the time of her acknowledgement (`commands_test.go`, `statistics_test.go`, `test/e2e/statistics_test.go`)."
-  - "[C-09.FR-27, C-09.AC-30] Migration `00NN_first_acknowledged_by` adds `alert_groups.first_acknowledged_by_user_id` with its foreign key to `users` and `alert_groups_first_acknowledged_by_check` (none without `first_acknowledged_at`), added `NOT VALID` and validated in a second transaction, and fills it in a third from the earliest `acknowledged` Timeline entry of each Alert Group that has `first_acknowledged_at` and whose Timeline is still whole, with its `created` entry: over a database at the version before it, an Alert Group that Alice acknowledged and Bob took over gets Alice; one whose Timeline partitions were all dropped gets nobody; one that Alice acknowledged in a dropped month and Carol again, after an Unacknowledge, in a kept month gets nobody, not Carol; and one never acknowledged stays empty; down drops the column and the CHECK, and up again fills it again (`migrate_test.go`)."
+  - "[C-09.FR-27, C-09.AC-30] Migration `0045_first_acknowledged_by` adds `alert_groups.first_acknowledged_by_user_id` with its foreign key to `users` and `alert_groups_first_acknowledged_by_check` (none without `first_acknowledged_at`), added `NOT VALID` and validated in a second transaction, and fills it in a third from the earliest `acknowledged` Timeline entry of each Alert Group that has `first_acknowledged_at` and whose Timeline is still whole, with its `created` entry: over a database at the version before it, an Alert Group that Alice acknowledged and Bob took over gets Alice; one whose Timeline partitions were all dropped gets nobody; one that Alice acknowledged in a dropped month and Carol again, after an Unacknowledge, in a kept month gets nobody, not Carol; and one never acknowledged stays empty; down drops the column and the CHECK, and up again fills it again (`migrate_test.go`)."
   - "[C-09.FR-28, C-09.AC-28] `getAlertGroupActorStatistics` returns, for Alice with three Alert Groups acknowledged first after 2, 4 and 30 minutes, Bob with one after 10 minutes, Bob resolving two of Alice's, the Service account terraform resolving Bob's and the system Alice's third: Alice `acknowledged_first_count` 3, `resolved_count` 0, `median_seconds` 240, `p95_seconds` 1644; Bob 1, 2, 600 and 600; terraform with `actor.kind` `service_account`, 0, 1 and `time_to_acknowledge.count` 0 with null times; in that order, by `acknowledged_first_count`, most first, then by name (`statistics_integration_test.go`)."
   - "[C-09.FR-28, C-09.FR-30, C-09.AC-30] The Alert Groups that have `first_acknowledged_at` and no `first_acknowledged_by_user_id` make one item with `actor` null, last, with their count and their own times and `resolved_count` 0; the sum of `acknowledged_first_count` over the items equals the sum of `time_to_acknowledge.count` of `getAlertGroupStatistics?group_by=route` for the same period and filters; with `first_acknowledged_by` set there is no item with `actor` null (`statistics_integration_test.go`, `migrate_test.go`)."
   - "[C-09.FR-15, C-09.FR-28, C-09.AC-29] Both operations select the Alert Groups that started in [`from`, `to`): an Alert Group that started on the last day of the period and was first acknowledged a day after `to` counts for whoever acknowledged it first, with a time to acknowledge of more than a day; one that started before `from` and was acknowledged inside the period counts for nobody (`statistics_integration_test.go`)."
@@ -89,7 +90,7 @@ issue: 567
     `public_id`, with `actor` null last. An actor with neither count is not an item.
   - `ActorRef`'s description adds "or is a row of the statistics by people"; a Service account is one only through
     what it resolved.
-- **Schema** (migration `00NN_first_acknowledged_by`; the orchestrator assigns `NN`, the next free number when the story
+- **Schema** (migration `0045_first_acknowledged_by`; the orchestrator assigns `NN`, the next free number when the story
   starts, and the files, `migrate_test.go`, `schema.md` and `versions.md` take it): `alert_groups` gains
   `first_acknowledged_by_user_id bigint` (foreign key to `users`), nullable and without a default, so the `ADD COLUMN`
   changes no row, and `alert_groups_first_acknowledged_by_check`: `first_acknowledged_by_user_id IS NULL OR

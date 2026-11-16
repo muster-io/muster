@@ -103,6 +103,11 @@ type fakeDB struct {
 	// hints are the live-update hints sent, stats the rows the statistics queries answer.
 	hints []db.Hint
 	stats []dbgen.RouteStatisticsRow
+	// statsArgs are the parameters of the last aggregation per subject, actorStats the rows ActorStatistics answers
+	// and actorArgs its last parameters.
+	statsArgs  dbgen.RouteStatisticsParams
+	actorStats []dbgen.ActorStatisticsRow
+	actorArgs  dbgen.ActorStatisticsParams
 	// received are the receipt times of the Stored Snapshots, by id.
 	received map[int64]time.Time
 	// problems are the Alert Groups with a Delivery problem, by id.
@@ -453,7 +458,7 @@ func (f *fakeDB) SaveGroup(_ context.Context, a dbgen.SaveGroupParams) error {
 	g.PriorSnoozedByUserID, g.PriorSnoozedByServiceAccountID = a.PriorSnoozedByUserID,
 		a.PriorSnoozedByServiceAccountID
 	g.GraceDeadline, g.EventSeq, g.LastChangedAt = a.GraceDeadline, a.EventSeq, a.LastChangedAt
-	g.FirstAcknowledgedAt = a.FirstAcknowledgedAt
+	g.FirstAcknowledgedAt, g.FirstAcknowledgedByUserID = a.FirstAcknowledgedAt, a.FirstAcknowledgedByUserID
 	g.FirstPublishedAt, g.AckTimeoutStartedAt, g.AckTimeoutNoticesSent = a.FirstPublishedAt, a.AckTimeoutStartedAt,
 		a.AckTimeoutNoticesSent
 	g.Unclaimed, g.RemindersSent, g.RemindersUnanswered = a.Unclaimed, a.RemindersSent, a.RemindersUnanswered
@@ -1155,7 +1160,8 @@ func TestGroupRoundTrip(t *testing.T) {
 		ResolvedByKind: txt("system"), ResolveReason: txt("gone"), ResolveReasonText: txt("gone"),
 		ReopenDeadline: ts(t0.Add(time.Minute)), PriorStatus: txt("snoozed"), PriorSnoozeUntil: ts(t0),
 		PriorSnoozeNoEnd: pgtype.Bool{Bool: false, Valid: true}, PriorSnoozedWhileUrgent: pgtype.Bool{Bool: true,
-			Valid: true}, PriorSnoozedByServiceAccountID: i8(8), GraceDeadline: ts(t0), EventSeq: 9, LastChangedAt: t0}
+			Valid: true}, PriorSnoozedByServiceAccountID: i8(8), GraceDeadline: ts(t0), EventSeq: 9, LastChangedAt: t0,
+		FirstAcknowledgedAt: ts(t0), FirstAcknowledgedByUserID: i8(7)}
 	g, err := groupOf(r)
 	if err != nil {
 		t.Fatal(err)
@@ -1164,7 +1170,8 @@ func TestGroupRoundTrip(t *testing.T) {
 	if p.ID != 4 || p.MovedFromRouteID != i8(5) || p.PriorStatus != txt("snoozed") ||
 		p.PriorSnoozedByServiceAccountID != i8(8) || !p.PriorSnoozedWhileUrgent.Bool || p.EventSeq != 9 ||
 		p.ResolveReason != txt("gone") || string(p.CommonLabels) != `{"a":"1"}` || p.Summary != txt("s") ||
-		!p.GraceDeadline.Valid || p.ReopenCount != 3 {
+		!p.GraceDeadline.Valid || p.ReopenCount != 3 || p.FirstAcknowledgedByUserID != i8(7) ||
+		p.FirstAcknowledgedAt != ts(t0) {
 		t.Errorf("params %+v", p)
 	}
 	if string(jsonOf(nil)) != `{}` {

@@ -98,7 +98,8 @@ SELECT id, public_id, number, route_id, moved_from_route_id, group_key_labels, g
        prior_snooze_no_end, prior_snoozed_while_urgent, prior_snoozed_by_user_id,
        prior_snoozed_by_service_account_id, grace_deadline, firing_again_after_id, event_seq, created_at,
        last_changed_at, first_acknowledged_at, first_published_at, ack_timeout_started_at, ack_timeout_notices_sent,
-       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at
+       unclaimed, reminders_sent, reminders_unanswered, last_reminder_at, owner_answered_at,
+       first_acknowledged_by_user_id
 FROM alert_groups
 WHERE org_id = @org_id AND id = ANY(@ids::bigint[])
 ORDER BY id
@@ -189,6 +190,7 @@ SET route_id = @route_id, moved_from_route_id = sqlc.narg('moved_from_route_id')
     prior_snoozed_by_service_account_id = sqlc.narg('prior_snoozed_by_service_account_id'),
     grace_deadline = sqlc.narg('grace_deadline'), event_seq = @event_seq, last_changed_at = @last_changed_at,
     first_acknowledged_at = sqlc.narg('first_acknowledged_at'),
+    first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by_user_id'),
     first_published_at = sqlc.narg('first_published_at'), ack_timeout_started_at = sqlc.narg('ack_timeout_started_at'),
     ack_timeout_notices_sent = @ack_timeout_notices_sent, unclaimed = @unclaimed, reminders_sent = @reminders_sent,
     reminders_unanswered = @reminders_unanswered, last_reminder_at = sqlc.narg('last_reminder_at'),
@@ -956,12 +958,16 @@ WHERE g.org_id = @org_id AND g.route_id = @route_id AND g.group_key_sha256 = @gr
 ORDER BY g.created_at DESC, g.id DESC
 LIMIT @lim;
 
--- The statistics (C-09.FR-15) aggregate the summary rows that started in [@range_from, @range_to): per subject, and
--- per subject and day of start in the time zone @time_zone. Time to resolve counts the resolved ones, time to
--- acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile interpolated, and 0
--- when their count is 0.
+-- The statistics (C-09.FR-15, FR-28 to FR-30) aggregate the summary rows that started in [@range_from, @range_to) and
+-- match the filters, which the list resolves the same way: the Routes @route_ids, the Integrations @integration_ids
+-- (an overlap), the Severity levels @severities, @urgent, @reopened, with @team_set the Teams @team_ids, the = Matchers
+-- @contains, the User of the first acknowledgement @first_acknowledged_by, and with @ids_set only the Alert Groups @ids
+-- that passed the Matchers Go applies. Every aggregation starts from the period on alert_groups_started_idx. Per
+-- subject, and per subject and day of start in the time zone @time_zone: time to resolve counts the resolved ones,
+-- time to acknowledge those acknowledged at least once; both are seconds, their median and 95th percentile
+-- interpolated, and 0 when their count is 0.
 
--- RouteStatistics aggregates the Alert Groups per Route, only the Routes @route_ids when set.
+-- RouteStatistics aggregates the Alert Groups per Route.
 -- name: RouteStatistics :many
 SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
        count(s.resolve)::bigint AS resolve_count,
@@ -975,7 +981,21 @@ FROM (SELECT g.route_id AS subject_id, (g.created_at AT TIME ZONE @time_zone::te
              extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
       FROM alert_groups g
       WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
-        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))) AS s
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+        AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+        AND (sqlc.narg('urgent')::boolean IS NULL
+             OR (g.severity_level = 'critical') = sqlc.narg('urgent')::boolean)
+        AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+        AND (NOT @team_set::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY(@team_ids::bigint[])))
+        AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+        AND (sqlc.narg('first_acknowledged_by')::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)
+        AND (NOT @ids_set::boolean OR g.id = ANY(@ids::bigint[]))) AS s
 GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
 ORDER BY s.subject_id, s.day NULLS FIRST;
 
@@ -995,9 +1015,126 @@ FROM (SELECT i.integration_id::bigint AS subject_id, (g.created_at AT TIME ZONE 
       FROM alert_groups g
       CROSS JOIN LATERAL unnest(g.integration_ids) AS i(integration_id)
       WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+        AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+        AND (sqlc.narg('urgent')::boolean IS NULL
+             OR (g.severity_level = 'critical') = sqlc.narg('urgent')::boolean)
+        AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+        AND (NOT @team_set::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY(@team_ids::bigint[])))
+        AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+        AND (sqlc.narg('first_acknowledged_by')::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)
+        AND (NOT @ids_set::boolean OR g.id = ANY(@ids::bigint[]))
         AND (cardinality(@integration_ids::bigint[]) = 0 OR i.integration_id = ANY(@integration_ids::bigint[]))) AS s
 GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
 ORDER BY s.subject_id, s.day NULLS FIRST;
+
+-- TeamStatistics aggregates the Alert Groups per Team of alert_group_teams — one with several Teams counts for each,
+-- one without a Team for none — only the Teams @team_ids with @team_set.
+-- name: TeamStatistics :many
+SELECT s.subject_id, s.day, (GROUPING(s.day) = 1)::boolean AS total, count(*)::bigint AS alert_group_count,
+       count(s.resolve)::bigint AS resolve_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.resolve), 0)::float8 AS resolve_p95,
+       count(s.ack)::bigint AS ack_count,
+       coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_median,
+       coalesce(percentile_cont(0.95) WITHIN GROUP (ORDER BY s.ack), 0)::float8 AS ack_p95
+FROM (SELECT t.team_id AS subject_id, (g.created_at AT TIME ZONE @time_zone::text)::date AS day,
+             extract(epoch FROM g.resolved_at - g.created_at)::float8 AS resolve,
+             extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+      FROM alert_groups g
+      JOIN alert_group_teams t ON t.org_id = g.org_id AND t.alert_group_id = g.id
+      WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+        AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+        AND (sqlc.narg('urgent')::boolean IS NULL
+             OR (g.severity_level = 'critical') = sqlc.narg('urgent')::boolean)
+        AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+        AND (NOT @team_set::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY(@team_ids::bigint[])))
+        AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+        AND (sqlc.narg('first_acknowledged_by')::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)
+        AND (NOT @ids_set::boolean OR g.id = ANY(@ids::bigint[]))
+        AND (NOT @team_set::boolean OR t.team_id = ANY(@team_ids::bigint[]))) AS s
+GROUP BY GROUPING SETS ((s.subject_id), (s.subject_id, s.day))
+ORDER BY s.subject_id, s.day NULLS FIRST;
+
+-- ActorStatistics aggregates the Alert Groups twice and joins both by actor (C-09.FR-28): per User of their first
+-- acknowledgement, with its count, median and 95th percentile of time to acknowledge in seconds (0 without any), the
+-- Alert Groups acknowledged with no User making one row with acknowledged_by_user_id null; and per resolver of a
+-- Resolve by a User or a Service account. A User who did both is one row; a Service account only resolves.
+-- name: ActorStatistics :many
+WITH selected AS (
+    SELECT g.first_acknowledged_by_user_id, g.resolved_by_kind, g.resolved_by_user_id,
+           g.resolved_by_service_account_id,
+           extract(epoch FROM g.first_acknowledged_at - g.created_at)::float8 AS ack
+    FROM alert_groups g
+    WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+        AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+        AND (sqlc.narg('urgent')::boolean IS NULL
+             OR (g.severity_level = 'critical') = sqlc.narg('urgent')::boolean)
+        AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+        AND (NOT @team_set::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY(@team_ids::bigint[])))
+        AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+        AND (sqlc.narg('first_acknowledged_by')::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)
+        AND (NOT @ids_set::boolean OR g.id = ANY(@ids::bigint[]))
+), acknowledged AS (
+    SELECT first_acknowledged_by_user_id AS user_id, count(*)::bigint AS n,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY ack) AS median,
+           percentile_cont(0.95) WITHIN GROUP (ORDER BY ack) AS p95
+    FROM selected
+    WHERE ack IS NOT NULL
+    GROUP BY first_acknowledged_by_user_id
+), resolved AS (
+    SELECT resolved_by_user_id AS user_id, resolved_by_service_account_id AS service_account_id, count(*)::bigint AS n
+    FROM selected
+    WHERE resolved_by_kind = 'user'
+    GROUP BY resolved_by_user_id, resolved_by_service_account_id
+)
+SELECT a.user_id AS acknowledged_by_user_id, r.user_id AS resolved_by_user_id, r.service_account_id,
+       coalesce(a.n, 0)::bigint AS acknowledged_first_count, coalesce(r.n, 0)::bigint AS resolved_count,
+       coalesce(a.median, 0)::float8 AS ack_median, coalesce(a.p95, 0)::float8 AS ack_p95
+FROM acknowledged a
+FULL OUTER JOIN resolved r ON r.user_id = a.user_id;
+
+-- ListStatisticsGroupLabels reads the common labels of the Alert Groups of the statistics' filters, with the ids of
+-- the Alert Groups that have them, for the Matchers that Go applies.
+-- name: ListStatisticsGroupLabels :many
+SELECT g.common_labels, array_agg(g.id ORDER BY g.id)::bigint[] AS ids
+FROM alert_groups g
+WHERE g.org_id = @org_id AND g.created_at >= @range_from::timestamptz AND g.created_at < @range_to::timestamptz
+        AND (cardinality(@route_ids::bigint[]) = 0 OR g.route_id = ANY(@route_ids::bigint[]))
+        AND (cardinality(@integration_ids::bigint[]) = 0 OR g.integration_ids && @integration_ids::bigint[])
+        AND (cardinality(@severities::text[]) = 0 OR g.severity_level = ANY(@severities::text[]))
+        AND (sqlc.narg('urgent')::boolean IS NULL
+             OR (g.severity_level = 'critical') = sqlc.narg('urgent')::boolean)
+        AND (sqlc.narg('reopened')::boolean IS NULL OR (g.reopen_count > 0) = sqlc.narg('reopened')::boolean)
+        AND (NOT @team_set::boolean
+             OR EXISTS (SELECT 1
+                        FROM alert_group_teams gt
+                        WHERE gt.org_id = g.org_id AND gt.alert_group_id = g.id
+                          AND gt.team_id = ANY(@team_ids::bigint[])))
+        AND (sqlc.narg('contains')::jsonb IS NULL OR g.common_labels @> sqlc.narg('contains')::jsonb)
+        AND (sqlc.narg('first_acknowledged_by')::bigint IS NULL
+             OR g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)
+GROUP BY g.common_labels;
 
 -- ListStatisticsRoutes lists the subjects of the statistics per Route: those that are not deleted and @with_ids (the
 -- deleted ones with Alert Groups in the period), or only @only_ids when set.
@@ -1013,6 +1150,15 @@ ORDER BY name, id;
 -- name: ListStatisticsIntegrations :many
 SELECT id, public_id, name
 FROM integrations
+WHERE org_id = @org_id
+  AND (CASE WHEN cardinality(@only_ids::bigint[]) > 0 THEN id = ANY(@only_ids::bigint[])
+            ELSE deleted_at IS NULL OR id = ANY(@with_ids::bigint[]) END)
+ORDER BY name, id;
+
+-- ListStatisticsTeams lists the subjects of the statistics per Team, as ListStatisticsRoutes does.
+-- name: ListStatisticsTeams :many
+SELECT id, public_id, name
+FROM teams
 WHERE org_id = @org_id
   AND (CASE WHEN cardinality(@only_ids::bigint[]) > 0 THEN id = ANY(@only_ids::bigint[])
             ELSE deleted_at IS NULL OR id = ANY(@with_ids::bigint[]) END)
