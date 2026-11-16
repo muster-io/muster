@@ -129,6 +129,8 @@ Names in the form `area.setting` refer to rows of [defaults.md](defaults.md); id
   _Revised for L2 (2026-10-26, 2026-11-15):_ a Slack Destination also takes, with `usergroups:read`, user groups and
   Team mentions as `<!subteam^ID>` (C-28.FR-2). It does not take `everyone`: `<!everyone>` from a bot mentions only in
   the workspace's general channel (F-127), where `<!channel>` reaches the same people.
+  _Revised for L2 (2026-11-16, #572):_ a person whom a Mention entry names without an Account link is left out of the
+  message (C-28.FR-3); only the Owner's Mentions and the footer name them by display name as text.
 - **C-24.FR-7** The adapter escapes alert data for Slack's mrkdwn (C-12.FR-7): `&`, `<` and `>` become `&amp;`,
   `&lt;` and `&gt;`, so that nothing in alert data becomes a link, a Mention, `<!channel>` or `<!here>` (F-097); `@`
   gets the zero-width space of C-12.FR-7; and since mrkdwn has no escape for `*`, `_`, `~` and `` ` `` (F-097), each of
@@ -345,6 +347,8 @@ Checked against the fake Slack server (C-01.FR-13), unless an acceptance stateme
   `section` carry `<@U…>` of her link and whose attachment carries no Mention; without a link she is named as text; a
   Destination that mentions `here` carries `<!here>`; a Slack Destination whose Mention settings name `all` or a group
   is refused; an Alert Group acknowledged by Alice shows "Acknowledged by {her display name}".
+  _Revised for L2 (2026-11-16, #572):_ a person whom a Mention entry names without an Account link is left out of the
+  message (C-28.FR-3); only the Owner's Mentions and the footer name them by display name as text.
 - **C-24.AC-16** A test message reaches the fake server as one message with "🧪 Test message" and changes no Alert
   Group's Timeline; the test's result says that it cannot press its own button; a press on its button is answered "This
   is a test message; nothing was changed".

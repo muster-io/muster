@@ -82,10 +82,14 @@ Names in the form `area.setting` refer to rows of [defaults.md](../l1/defaults.m
   read, so that 0.1 clients keep working, and a request with entries ignores it. The L1 column keeps what the migration
   found and is not written after it, so that 0.1 replicas of a rolling update mention as before; 0.3.0 removes the field
   and the column. The upgrade notes say so.
+  _Revised for L2 (2026-11-16, #572):_ the L1 form read back has the same Users and groups for each kind, listed in the
+  order of the first kind that lists each, since one ordered list of entries cannot keep a different order per kind.
 - **C-28.FR-6** When a Destination becomes a Destination of a Team (C-26.FR-1) and has no entry naming that Team, Muster
   adds the entry "Team {Team}" for every Loud event, recorded in the Audit log; it mentions someone only where the Team
   has a Team mention for the Destination's Connection. A Telegram Destination gets no such entry, since Telegram cannot
   mention Teams (FR-2). An Admin may remove it.
+  _Revised for L2 (2026-11-16, #572):_ a Destination that already has the most Mention entries a Destination takes (100)
+  gets no entry "Team {Team}".
 - **C-28.FR-7** The first publication of a Storm summary (C-11.FR-6) carries the Mentions of the entries for
   `storm_started` of that Destination, with "On-call of the Team from the label" and "Team from the label" taken from
   the Teams of the Alert Groups the summary counts; a Storm summary starts no Escalation chain.
@@ -161,6 +165,8 @@ Checked through the recording test adapter of C-11 and the fake messenger server
 - **C-28.AC-5** A Destination migrated from the L1 settings "`@channel` for `new_alert_group`, Alice for `ack_timeout`"
   has two entries — `@channel` for `new_alert_group` and `storm_started`, Alice for `ack_timeout` — and mentions on
   every Loud event exactly whom it mentioned before; its L1 form still reads the same.
+  _Revised for L2 (2026-11-16, #572):_ "the same" is read as in FR-5: the same Users and groups for each kind, in the
+  order of the first kind that lists each.
 - **C-28.AC-6** The first publication of a Storm summary mentions the targets of the entries for `storm_started`, and no
   chain starts for the summary.
 - **C-28.AC-7** A Destination whose own set has only Acknowledge, "Snooze 24 h" and "Until tomorrow" shows exactly those
