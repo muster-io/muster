@@ -1,6 +1,76 @@
 # Muster documentation, version latest
 
-The index of this text, with the rules for AI agents, is https://muster-io.github.io/muster/latest/llms.txt.
+The index of this text is https://muster-io.github.io/muster/latest/llms.txt; the rules for AI agents follow it.
+
+## Rules
+
+- **Sources of truth.** [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml) is the Bridge protocol and [`api/openapi.yaml`](https://muster-io.github.io/muster/latest/api/openapi.yaml) the HTTP API, both of this version of the documentation. Where a page and a specification disagree, the specification wins.
+- **Error classes.** Failures are RFC 9457 problems (`application/problem+json`) with a `class` member that the bridge chooses, one of `transient`, `rate_limited`, `gone`, `forbidden`, `invalid`. A missing channel is `forbidden`, never `gone`. Only the bridge decides `gone`: Muster never treats a message as `gone` because of a status code, and a bridge that means `gone` says so in `class`. See [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#error-classes).
+- **Waits.** For `rate_limited`, the bridge must send `Retry-After` in seconds, and Muster waits exactly that long, for the channel, or for every channel of the bot when `scope` is `bot`; a wait longer than 15 min, or none given, is treated as `transient`.
+- **Presses.** The bridge confirms a press to its messenger itself, within the messenger's deadline and at most 3 seconds after the press, before Muster has seen it; the bridge then reports the press as an event. Muster answers the person, when it has something to say, with a separate `answerEvent` call, made before it acknowledges the event. See [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#presses-within-3-seconds-and-answers-later).
+- **Idempotency.** Every request that creates something carries an `Idempotency-Key` header. The bridge stores each key per token with its successful (`2xx`) result for at least 24 hours and answers a repeated key with that first result and `replayed: true`, without creating anything again; a failed request stores nothing, so its retry is a new attempt. Muster reuses a key when it retries a request, also after a crash or a timeout. See [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#idempotency-key).
+- **Edit windows.** A bridge whose messenger lets a bot edit a message only for a while declares how long in its info, and Muster stops editing a message once it is older than `limits.edit_max_age_seconds`, less a safety margin of 60 s. When the status changes past the window, Muster posts a new Root message with the current state, Quietly, to the same channel, and replies under the old one. When the messenger refuses an edit earlier than declared, the bridge says so: an edit that the messenger refuses because the message is older than it allows is `gone` with the `reason` `edit_window_closed`, and Muster then treats the message as past its edit window. See [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md#edit-windows).
+- **Finishing a bridge.** A bridge is finished only when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) passes against it: the check exits `0` when no step failed. Most bridge authors should not write the protocol again. A bridge in Go or Python uses that language's bridge library ([Start with a library](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#start-with-a-library)); a bridge in another language follows [The protocol without a library](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-protocol-without-a-library).
+
+## Scenarios
+
+### Write a bridge in Go
+
+1. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-go-library): The Go library, installed with `go get github.com/muster-io/muster-bridge-go`, and [The example bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-example-bridge), which is built on the Go library and lives in its repository, in `examples/chat`.
+2. [Render the structured layout](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#render-the-structured-layout): A bridge renders either `body` or `layout`, never both. Render `body` whenever `layout` is absent. Go: `bridge.Layout`.
+3. [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): the Bridge Connection and its Destinations, and [what Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts).
+4. [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) and its specification, [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml).
+5. The repository [muster-io/muster-bridge-go](https://github.com/muster-io/muster-bridge-go): its README is the library's guide, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-go/blob/master/AGENTS.md) that of an agent changing the library.
+6. Finished when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) passes against the bridge.
+
+### Write a bridge in Python
+
+1. [Write a bridge](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#the-python-library): The Python library, installed in a virtual environment, `python3 -m venv .venv && . .venv/bin/activate`, with `pip install muster-bridge`. Its versions stay `0.x` until Muster 1.0.
+2. [Render the structured layout](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#render-the-structured-layout): Python: `Layout` and `MessageInput`; render `body` whenever `layout` is absent.
+3. [Connect a messenger through a bridge](https://muster-io.github.io/muster/latest/messengers/bridge.md): the Bridge Connection and its Destinations, and [what Muster posts](https://muster-io.github.io/muster/latest/messengers/bridge.md#what-muster-posts).
+4. [Bridge protocol](https://muster-io.github.io/muster/latest/reference/bridge-protocol.md) and its specification, [`api/bridge.yaml`](https://muster-io.github.io/muster/latest/api/bridge.yaml).
+5. The repository [muster-io/muster-bridge-python](https://github.com/muster-io/muster-bridge-python): its README is the library's guide, and its [AGENTS.md](https://github.com/muster-io/muster-bridge-python/blob/master/AGENTS.md) that of an agent changing the library.
+6. Finished when [`muster bridge check`](https://muster-io.github.io/muster/latest/messengers/write-a-bridge.md#muster-bridge-check) passes against the bridge.
+
+### Connect Alertmanager
+
+1. [Quick start](https://muster-io.github.io/muster/latest/quick-start.md): Muster with Docker Compose, an Integration and a test alert.
+2. [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md): one Integration per Alertmanager cluster, its token, and the receiver and the route of the snippet.
+3. [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md), which is part of the recommended setup of every Integration.
+4. [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Muster reads what Alertmanager sends.
+5. Finished when, after Alertmanager is reloaded, the Integration page shows the time of the last Snapshot ([Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md#create-a-token-and-paste-the-snippet)) and the Heartbeat is live ([Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md#turn-it-on)).
+
+### Connect Grafana
+
+1. [Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md), both ways: directly, from Grafana's built-in Alertmanager through a webhook contact point, with one Integration per Grafana cluster and organization, its token, the contact point and the notification policy ([Connect Grafana directly](https://muster-io.github.io/muster/latest/integrations/grafana.md#connect-grafana-directly)); or through an external Alertmanager, then [Connect Alertmanager](https://muster-io.github.io/muster/latest/integrations/alertmanager.md) ([Connect Grafana through an external Alertmanager](https://muster-io.github.io/muster/latest/integrations/grafana.md#connect-grafana-through-an-external-alertmanager)).
+2. [Heartbeat](https://muster-io.github.io/muster/latest/integrations/heartbeat.md): its setup is for Alertmanager, so it serves Grafana through an external Alertmanager. For the direct way, the same setup through a webhook contact point has not been verified with Grafana, and without a Heartbeat Muster never resolves an Alert as Stale ([Heartbeat](https://muster-io.github.io/muster/latest/integrations/grafana.md#heartbeat)).
+3. [Snapshot semantics](https://muster-io.github.io/muster/latest/concepts/snapshot-semantics.md): how Muster reads what Grafana's built-in Alertmanager or an external one sends, and the [Limits](https://muster-io.github.io/muster/latest/integrations/grafana.md#limits) of Grafana's way.
+4. Finished when, after an alert fires in Grafana, the Integration page shows the time of the last Snapshot ([Connect Grafana](https://muster-io.github.io/muster/latest/integrations/grafana.md#send-the-alerts-with-a-notification-policy)).
+
+### Connect Slack
+
+1. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#socket-mode-or-http): choose the event mode first, because the app's manifest differs. In Socket Mode the Leader holds a WebSocket connection to Slack, so Slack needs no address of Muster; over HTTP Slack must reach this address over HTTPS. If Slack is the only client outside your network that reaches the ingest listener, expose only `/api/v1/callbacks/`; Alertmanagers and Heartbeats use the same listener, so publish their paths too when they come from outside. Use one Slack app for each Connection ([One Slack app per Connection](https://muster-io.github.io/muster/latest/messengers/slack.md#one-slack-app-per-connection)).
+2. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-app-from-a-manifest): create the app from the manifest for Socket Mode or for HTTP. Muster needs the first six of these bot scopes and no other, and takes `usergroups:read` when you want to mention Teams by Slack user groups. Keep the tab on: the Messages tab carries the codes of Account links ([What the manifest sets](https://muster-io.github.io/muster/latest/messengers/slack.md#what-the-manifest-sets)).
+3. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#install-the-app-and-create-the-tokens): install the app, copy the bot token and, in Socket Mode, generate a token with the scope `connections:write`, or over HTTP copy the Signing Secret.
+4. [Connect Slack](https://muster-io.github.io/muster/latest/messengers/slack.md#create-the-connection): create the Connection of type Slack and run **Check connection**. A bot posts only to channels it is a member of. Invite it with `/invite @Muster` and create a Destination for each channel ([Invite the bot and create Destinations](https://muster-io.github.io/muster/latest/messengers/slack.md#invite-the-bot-and-create-destinations)).
+5. [Link Slack](https://muster-io.github.io/muster/latest/messengers/account-links.md#link-slack): people link their accounts with a code that the bot sends by direct message.
+6. Finished when a person presses a button of the test message and Muster answers "This is a test message; nothing was changed" ([The test message](https://muster-io.github.io/muster/latest/messengers/slack.md#the-test-message)).
+
+### Set up Teams and route to them
+
+1. [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md): A Team grants no Permission and limits none. An Alert belongs to a Team by the value of the Team label (`team` by default), which must equal the Team's slug, or by a Team matcher ([Which Alerts belong to a Team](https://muster-io.github.io/muster/latest/concepts/teams.md#which-alerts-belong-to-a-team)). On test clusters with a shared namespace, match `pod` or an app label.
+2. [Teams](https://muster-io.github.io/muster/latest/concepts/teams.md#membership-from-the-identity-provider): people join by hand or through identity provider groups, such as `teams/payments/*`.
+3. [Routing to Teams](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md): The feature is optional. Give Destinations Severity conditions and turn on "Also to the Teams from the label" on the Route; Teams that want their own Alert Groups add the Team label to the Group key; [A Route for test clusters](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#a-route-for-test-clusters) delivers test alerts without Escalation chains.
+4. [What critical changes](https://muster-io.github.io/muster/latest/concepts/what-critical-changes.md): Nothing else makes an Alert Group Urgent; read it before setting a Minimum severity.
+5. Finished when the [preview](https://muster-io.github.io/muster/latest/concepts/routing-to-teams.md#preview-where-alerts-go) of the Route lists the Teams and Destinations you expect.
+
+### Automate through the API
+
+1. [API](https://muster-io.github.io/muster/latest/reference/api.md): the conventions of the API and its tokens. Scripts send a Personal access token (`mstr_pat_`) or a Service account token (`mstr_sat_`) as a bearer token. [Sign-in](https://muster-io.github.io/muster/latest/sign-in/index.md#ways-to-sign-in) describes both.
+2. [`api/openapi.yaml`](https://muster-io.github.io/muster/latest/api/openapi.yaml), the OpenAPI 3.1 document that the binary serves at `/api/v1/openapi.yaml`.
+3. [API tokens and automation](https://muster-io.github.io/muster/latest/configure/api-tokens.md): Personal access tokens, Service accounts, the rate limit, `ETag` and `If-Match`, pagination.
+4. [Statuses and commands](https://muster-io.github.io/muster/latest/concepts/statuses-and-commands.md): the statuses of an Alert Group and the commands that change them.
+5. [The command line](https://muster-io.github.io/muster/latest/operations/cli.md): The commands are for emergencies, for setup and for diagnosis; everything else is in the web UI and the API.
 
 <!-- Source: https://muster-io.github.io/muster/latest/index.md -->
 # Muster
