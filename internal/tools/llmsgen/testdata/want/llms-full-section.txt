@@ -1,0 +1,24 @@
+# Muster documentation, version latest: Section
+
+This file holds the full text of the section Section. The index of the documentation is https://muster-io.github.io/muster/latest/llms.txt, and https://muster-io.github.io/muster/latest/llms-full.txt lists the files of the full text; the rules for AI agents are in https://muster-io.github.io/muster/latest/llms-full-guide.txt.
+
+<!-- Source: https://muster-io.github.io/muster/latest/section/index.md -->
+# Section index
+
+The section collects pages! Its index says so.
+
+<!-- Source: https://muster-io.github.io/muster/latest/section/titled.md -->
+# A heading the nav overrides
+
+A page whose title comes from the nav? Yes.
+
+<!-- Source: https://muster-io.github.io/muster/latest/section/nested/deep.md -->
+# Deep
+
+- Only a list: [up](https://muster-io.github.io/muster/latest/after.md) and [part](https://muster-io.github.io/muster/latest/section/nested/deep.md#deep-part).
+
+## Deep part
+
+```text
+code, no paragraph
+```

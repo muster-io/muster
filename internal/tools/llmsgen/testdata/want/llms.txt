@@ -26,4 +26,7 @@
 
 ## Optional
 
-- [Full text](https://muster-io.github.io/muster/latest/llms-full.txt): 3390 bytes, about 847 tokens.
+- [Guide](https://muster-io.github.io/muster/latest/llms-full-guide.txt): 733 bytes, about 183 tokens; [the list](https://muster-io.github.io/muster/latest/llms-full.txt).
+- [Home, Guide, After](https://muster-io.github.io/muster/latest/llms-full-home.txt): 3 pages, 2298 bytes, about 574 tokens.
+- [Section](https://muster-io.github.io/muster/latest/llms-full-section.txt): 3 pages, 968 bytes, about 242 tokens.
+- [Reference](https://muster-io.github.io/muster/latest/llms-full-reference.txt): 1 page, 665 bytes, about 166 tokens.

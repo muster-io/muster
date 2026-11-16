@@ -17,7 +17,7 @@ files_touched:
 acceptance:
   - "[C-27.FR-14] Concepts → Schedules has the worked example of a weekly Rotation layer around the clock under a working-hours Rotation layer with other people — the Schedule \"Main\" of \"payments\" of scenario 1 — and shows who is On-call on a Wednesday at 15:00 and at 21:00; several Schedules for a first and a second line, with the main Schedule naming the Team's On-call; Overrides, who may make them and that they send no message; gaps and the people whose Shifts are skipped; the Internal alert `MusterScheduleGap`, and that a Schedule which covers only part of the day, such as a second line in working hours, keeps it off; unreachable On-calls; and the iCal feed."
   - "[C-27.FR-14] The page has screenshots of the Schedule page with its two-week view and the Override form, and of \"On call now\" on the Home page; Concepts → Teams and the runbook of `MusterScheduleGap` link to it."
-  - "`make docs-screenshots GUIDES=schedules` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms-full.txt` lists the page in a scenario on setting up who is On-call."
+  - "`make docs-screenshots GUIDES=schedules` takes the screenshots of the new spec, every image has its alternative text, `make docs-check` passes, and `llms-full-guide.txt` lists the page in a scenario on setting up who is On-call."
 verify: "make docs-check"
 operator_attention: false
 issue: 426
@@ -32,7 +32,7 @@ issue: 426
 - The completion of Concepts → Schedules (C-27.FR-14) from the sections that S-131, S-133, S-164 and S-134 wrote: the
   worked example, several Schedules, Overrides, gaps and skipped people, the Internal alert and when to keep it off,
   unreachable On-calls and the iCal feed, with screenshots.
-- Links from Concepts → Teams and from the runbook of `MusterScheduleGap`, and the scenario in `llms-full.txt`.
+- Links from Concepts → Teams and from the runbook of `MusterScheduleGap`, and the scenario in `llms-full-guide.txt`.
 
 **OUT**
 
@@ -56,7 +56,7 @@ issue: 426
 - **Screenshots** (`web/e2e/screenshots/schedules.spec.ts`, Playwright on `muster dev`): the Schedule page with the
   two-week view, a gap and a warning; the Override form in the mode "I give my Shift to…"; "On call now" on the Home
   page; the images go to `docs/assets/screenshots/concepts/schedules/` and are never listed.
-- **llms-full.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Set up who is On-call" with Concepts → Teams and Concepts →
+- **llms-full-guide.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Set up who is On-call" with Concepts → Teams and Concepts →
   Schedules.
 
 ## Steps

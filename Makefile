@@ -106,7 +106,7 @@ DOCS_DEPS := $(DOCS_VENV)/.installed
 ZENSICAL := $(DOCS_VENV)/bin/zensical
 API_REFERENCE := docs/reference/api/spec/index.html
 BRIDGE_REFERENCE := docs/reference/bridge/spec/index.html
-# The version whose URLs the links of llms.txt and llms-full.txt name: latest, or the minor the docs workflow publishes.
+# The version whose URLs the links of llms.txt and the full text name: latest, or the minor the docs workflow publishes.
 DOCS_VERSION ?= latest
 
 # The third-party scripts of the site, served from the site itself so that a page loads nothing from another host but
@@ -675,10 +675,12 @@ docs-vendor:
 # anchor of web/src/lib/docs-links.json, the links of the web UI, is missing from the site; then the rendered references
 # are checked, then that every page the nav of mkdocs.yml names exists under docs/ and that every page under docs/,
 # except those exclude_docs names, is in the nav, and that no page loads a script or a stylesheet from another host and
-# every page with a diagram loads Mermaid from the site. Last, llmsgen writes llms.txt from docs/llms.txt.tmpl,
-# llms-full.txt, the Markdown version of every page and the copied specifications into site/, with links into
-# DOCS_VERSION, and checks them; it fails naming the file when the template names a page, an anchor, a phrase, a setting
-# or an enum that its source no longer has.
+# every page with a diagram loads Mermaid from the site. Last, llmsgen writes llms.txt from docs/llms.txt.tmpl, the
+# full text (the guide llms-full-guide.txt, one llms-full-<section>.txt per top-level section of the nav and
+# llms-full-home.txt for the pages outside any, and llms-full.txt, which lists them),
+# the Markdown version of every page and the copied specifications into site/, with links into DOCS_VERSION, and checks
+# them; it fails naming the file when the template names a page, an anchor, a phrase, a setting or an enum that its
+# source no longer has, and when a file of the full text reaches 1 MiB.
 docs: generate docs-api docs-vendor $(DOCS_DEPS) $(HELM) ## Generate, render the API and Bridge protocol references, build the site strictly into site/, check the web UI's documentation links against it and write its llms.txt for DOCS_VERSION
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
 		$(HELM) template muster $(CHART) -f $(CHART)/ci/all-options-values.yaml >"$$tmp/chart.yaml" && \

@@ -3,15 +3,18 @@
 
 // Command llmsgen writes the documentation for AI agents into the built site (C-21.FR-8, C-21.AC-4): a Markdown
 // version of every page of the navigation of mkdocs.yml, byte for byte its source; the specifications api/openapi.yaml
-// and api/bridge.yaml under api/; llms-full.txt, every page in the order of the navigation with its relative links made
-// absolute; and llms.txt, rendered from the template docs/llms.txt.tmpl, whose functions take every value from its
-// source; a template "full" in its file is written into llms-full.txt, before the pages, and not into llms.txt, which
-// stays an index. Every link names the version given by -version under the site_url of mkdocs.yml. make docs runs it after the
-// build. It fails, naming the file, when a page of the navigation does not exist or has no title, when the template
-// names a page, an anchor, a phrase, a setting or an enum that its source no longer has, when a link of either file
-// outside code is still relative or does not resolve under the site, when llms.txt links out of the site other than to
-// a repository under https://github.com/muster-io/, and when llms.txt is larger than 32 KiB or llms-full.txt is 1 MiB
-// or larger.
+// and api/bridge.yaml under api/; the full text, one file per top-level section of the navigation,
+// llms-full-<section>.txt, and one, llms-full-home.txt, for the top-level pages outside any section, each holding its
+// pages in the order of the navigation with their relative links made absolute; llms-full-guide.txt, the template
+// "full" of docs/llms.txt.tmpl when it defines one, the rules and the scenarios for agents; llms-full.txt, the list of
+// those files; and llms.txt, rendered from the template docs/llms.txt.tmpl, an index, whose functions take every value
+// from its source. Every link names the version given by -version under the site_url of mkdocs.yml. make docs runs it
+// after the build. It fails, naming the file, when a page of the navigation does not exist or has no title, when two
+// sections would write the same file, when the template names a page, an anchor, a phrase, a setting or an enum that its
+// source no longer has, when a link of an output outside code is still relative or does not resolve under the site,
+// when llms.txt, the guide or llms-full.txt links out of the site other than to a repository under
+// https://github.com/muster-io/, when llms.txt does not link every file of the full text, and when llms.txt is larger
+// than 32 KiB or any other output is 1 MiB or larger.
 package main
 
 import (
@@ -37,6 +40,10 @@ const (
 	mkdocsFile       = "mkdocs.yml"
 	llmsName         = "llms.txt"
 	fullName         = "llms-full.txt"
+	fullPrefix       = "llms-full-"
+	guideSlug        = "guide"
+	homeSlug         = "home"
+	guideTitle       = "Rules and scenarios for AI agents"
 	maxLLMSBytes     = 32 << 10
 	maxFullBytes     = 1 << 20
 	maxNoteRunes     = 100
@@ -164,8 +171,30 @@ type generator struct {
 	mapCalls               int
 }
 
-// generate writes the outputs into the site and returns the line with their sizes, or the problems found, each
-// starting with the file it concerns; a failed run leaves no llms.txt and no llms-full.txt.
+// output is a file that llmsgen writes into the site besides the Markdown versions and the specifications.
+type output struct {
+	FullFile
+	rel, text string
+	// strict outputs get the link checks of llms.txt: no relative link, and none out of the site but to muster-io.
+	strict bool
+	// hint says what to do when the output is too large.
+	hint string
+}
+
+// FullFile is a file of the full text as the template sees it; Pages is 0 for the guide and llms-full.txt.
+type FullFile struct {
+	Name, URL, Title     string
+	Pages, Bytes, Tokens int
+}
+
+// part is a file of the full text before it is written: a top-level section, or the top-level pages outside any.
+type part struct {
+	slug, title, what string
+	pages             []*page
+}
+
+// generate writes the outputs into the site and returns the lines with their sizes, or the problems found, each
+// starting with the file it concerns; a failed run leaves no llms.txt and no file of the full text.
 func generate(o options) (string, []string) {
 	g := &generator{
 		options:  o,
@@ -175,31 +204,58 @@ func generate(o options) (string, []string) {
 		specDocs: map[string]*specDoc{},
 		ids:      map[string]map[string]bool{},
 	}
-	var llms, full string
 	var tmpl *template.Template
-	var guide string
+	var guide *output
+	var sections []*output
 	if g.load() {
 		g.copySources()
 		tmpl = g.parseTemplate()
 	}
 	if len(g.problems) == 0 {
-		guide = g.renderGuide(tmpl)
-		full = g.fullText(guide)
+		guide = g.guideFile(tmpl)
+		sections = g.sectionFiles(guide != nil)
 	}
+	var outputs []*output
+	var llms string
 	if len(g.problems) == 0 {
-		g.write(g.fullPath(), []byte(full))
-		llms = g.render(tmpl, len(full))
+		index := g.indexFile(guide, sections)
+		outputs = append(outputs, index)
+		if guide != nil {
+			outputs = append(outputs, guide)
+		}
+		outputs = append(outputs, sections...)
+		for _, out := range outputs {
+			g.write(out.rel, []byte(out.text))
+		}
+		data := templateData{Version: g.version, Base: g.base, Full: index.FullFile}
+		if guide != nil {
+			data.Guide = &guide.FullFile
+		}
+		for _, s := range sections {
+			data.Sections = append(data.Sections, s.FullFile)
+		}
+		llms = g.render(tmpl, data)
 	}
 	if len(g.problems) == 0 {
 		g.write(g.llmsPath(), []byte(llms))
 		g.checkLinks(g.llmsPath(), llms, true)
-		g.checkLinks(g.fullPath(), full, false)
-		g.checkLinks(g.fullPath(), guide, true)
+		linked := map[string]bool{}
+		for _, u := range urls(prose(llms)) {
+			linked[u] = true
+		}
+		for _, out := range outputs {
+			g.checkLinks(out.rel, out.text, out.strict)
+			if !linked[out.URL] {
+				g.problem("%s: does not link %s; it links every file of the full text", g.llmsPath(), out.URL)
+			}
+		}
 		if len(llms) > maxLLMSBytes {
 			g.problem("%s: %d bytes; it must be at most 32 KiB (%d bytes)", g.llmsPath(), len(llms), maxLLMSBytes)
 		}
-		if len(full) >= maxFullBytes {
-			g.problem("%s: %d bytes; it must be smaller than 1 MiB (%d bytes)", g.fullPath(), len(full), maxFullBytes)
+		for _, out := range outputs {
+			if out.Bytes >= maxFullBytes {
+				g.problem("%s: %d bytes; it must be smaller than 1 MiB (%d bytes)%s", out.rel, out.Bytes, maxFullBytes, out.hint)
+			}
 		}
 	}
 	if len(g.problems) > 0 {
@@ -208,17 +264,46 @@ func generate(o options) (string, []string) {
 		}
 		return "", g.problems
 	}
-	return fmt.Sprintf("%s: %d bytes; %s: %d bytes, about %d tokens; %d pages",
-		g.llmsPath(), len(llms), g.fullPath(), len(full), len(full)/bytesPerToken, len(g.pages)), nil
+	lines := []string{fmt.Sprintf("%s: %d bytes", g.llmsPath(), len(llms))}
+	for _, out := range outputs {
+		line := fmt.Sprintf("%s: %d bytes, about %d tokens", out.rel, out.Bytes, out.Tokens)
+		if out.Pages > 0 {
+			line += "; " + countPages(out.Pages)
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, fmt.Sprintf("%d pages in %d section files", len(g.pages), len(sections)))
+	return strings.Join(lines, "\n"), nil
 }
 
 func (g *generator) llmsPath() string { return path.Join(g.siteDir, llmsName) }
 
-func (g *generator) fullPath() string { return path.Join(g.siteDir, fullName) }
+// newOutput makes an output of the site with its text and its sizes.
+func (g *generator) newOutput(name, title, text string, pages int) *output {
+	return &output{
+		FullFile: FullFile{
+			Name: name, URL: g.base + name, Title: title,
+			Pages: pages, Bytes: len(text), Tokens: len(text) / bytesPerToken,
+		},
+		rel:  path.Join(g.siteDir, name),
+		text: text,
+	}
+}
 
-// removeOutputs removes llms.txt and llms-full.txt, so that those of an earlier run never outlive a failed one.
+// removeOutputs removes llms.txt and every file of the full text, so that those of an earlier run, a section since
+// renamed included, never outlive a failed one or another run.
 func (g *generator) removeOutputs() {
-	for _, f := range []string{g.llmsPath(), g.fullPath()} {
+	files := []string{g.llmsPath(), path.Join(g.siteDir, fullName)}
+	entries, err := os.ReadDir(g.abs(g.siteDir))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		g.problem("%s: %v", g.siteDir, short(err))
+	}
+	for _, e := range entries {
+		if name := e.Name(); strings.HasPrefix(name, fullPrefix) && strings.HasSuffix(name, ".txt") && !e.IsDir() {
+			files = append(files, path.Join(g.siteDir, name))
+		}
+	}
+	for _, f := range files {
 		if err := os.Remove(g.abs(f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			g.problem("%s: %v", f, short(err))
 		}
@@ -374,28 +459,152 @@ func (g *generator) copySources() {
 	}
 }
 
-// fullText is llms-full.txt: the guide that the template defines as "full", if it does, then every page in the order
-// of the navigation after the line with its URL.
-func (g *generator) fullText(guide string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Muster documentation, version %s\n\n", g.version)
-	fmt.Fprintf(&b, "The index of this text is %s%s; the rules for AI agents follow it.\n", g.base, llmsName)
-	if guide != "" {
-		b.WriteString("\n")
-		b.WriteString(strings.Trim(guide, "\n"))
-		b.WriteString("\n")
-	}
-	for _, p := range g.pages {
-		found := len(g.problems)
-		text := g.absoluteLinks(p)
-		if len(g.problems) == found {
-			g.checkAbsolute(path.Join(g.docsDir, p.path), text, "is not made absolute")
+// parts groups the pages by the file of the full text that holds them: the top-level pages outside any section first,
+// then each top-level section with its nested sections, in the order of the navigation. A section without pages has
+// no file.
+func (g *generator) parts() []part {
+	home := part{slug: homeSlug, what: "the pages outside any section"}
+	owners := map[string]string{guideSlug: "the guide for AI agents", homeSlug: home.what}
+	var sections []part
+	for _, it := range g.nav {
+		if it.page != nil {
+			home.pages = append(home.pages, it.page)
+			continue
 		}
-		fmt.Fprintf(&b, "\n<!-- Source: %s%s -->\n", g.base, p.path)
-		b.WriteString(strings.TrimRight(text, "\n"))
-		b.WriteString("\n")
+		s := part{slug: slug(it.title), title: it.title, what: "the section " + it.title, pages: sectionPages(it.children)}
+		switch owner, taken := owners[s.slug]; {
+		case s.slug == "":
+			g.problem("%s: the section %q has no letter or digit to name its file %s<name>.txt", mkdocsFile, it.title, fullPrefix)
+			continue
+		case taken:
+			g.problem("%s: the section %q would write %s, the file of %s; rename one of them", mkdocsFile, it.title,
+				path.Join(g.siteDir, fullPrefix+s.slug+".txt"), owner)
+			continue
+		}
+		owners[s.slug] = s.what
+		if len(s.pages) > 0 {
+			sections = append(sections, s)
+		}
+	}
+	if len(home.pages) == 0 {
+		return sections
+	}
+	titles := make([]string, len(home.pages))
+	for i, p := range home.pages {
+		titles[i] = p.title
+	}
+	home.title = strings.Join(titles, ", ")
+	return append([]part{home}, sections...)
+}
+
+func sectionPages(items []*item) []*page {
+	var pages []*page
+	for _, it := range items {
+		if it.page != nil {
+			pages = append(pages, it.page)
+		}
+		pages = append(pages, sectionPages(it.children)...)
+	}
+	return pages
+}
+
+// slug names the file of a section after its title: its ASCII letters and digits in lower case, every run of other
+// characters a hyphen.
+func slug(title string) string {
+	var b strings.Builder
+	hyphen := false
+	for _, r := range strings.ToLower(title) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			if hyphen && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r)
+			hyphen = false
+			continue
+		}
+		hyphen = true
 	}
 	return b.String()
+}
+
+// sectionFiles makes the files of the full text, one per part: a title, a line naming the index, the list and, when
+// there is one, the guide, then every page of the part after the line with its URL.
+func (g *generator) sectionFiles(hasGuide bool) []*output {
+	var outs []*output
+	for _, pt := range g.parts() {
+		name := fullPrefix + pt.slug + ".txt"
+		var b strings.Builder
+		fmt.Fprintf(&b, "# Muster documentation, version %s: %s\n\n", g.version, pt.title)
+		fmt.Fprintf(&b, "This file holds the full text of %s. The index of the documentation is %s%s, and %s%s lists "+
+			"the files of the full text", pt.what, g.base, llmsName, g.base, fullName)
+		if hasGuide {
+			fmt.Fprintf(&b, "; the rules for AI agents are in %s%s%s.txt", g.base, fullPrefix, guideSlug)
+		}
+		b.WriteString(".\n")
+		for _, p := range pt.pages {
+			found := len(g.problems)
+			text := g.absoluteLinks(p)
+			if len(g.problems) == found {
+				g.checkAbsolute(path.Join(g.docsDir, p.path), text, "is not made absolute")
+			}
+			fmt.Fprintf(&b, "\n<!-- Source: %s%s -->\n", g.base, p.path)
+			b.WriteString(strings.TrimRight(text, "\n"))
+			b.WriteString("\n")
+		}
+		out := g.newOutput(name, pt.title, b.String(), len(pt.pages))
+		if pt.slug == homeSlug {
+			out.hint = "; move pages outside any section of the nav of " + mkdocsFile + " into a section"
+		} else {
+			out.hint = fmt.Sprintf("; split the section %s of the nav of %s", pt.title, mkdocsFile)
+		}
+		outs = append(outs, out)
+	}
+	return outs
+}
+
+// guideFile is llms-full-guide.txt, the template "full" of the file after a title and a line naming the index and
+// the list, or nil when the template defines none.
+func (g *generator) guideFile(t *template.Template) *output {
+	guide, ok := g.renderGuide(t)
+	if !ok {
+		return nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s, Muster documentation version %s\n\n", guideTitle, g.version)
+	fmt.Fprintf(&b, "The index of the documentation is %s%s, and %s%s lists the files of the full text, one per section.\n\n",
+		g.base, llmsName, g.base, fullName)
+	b.WriteString(strings.Trim(guide, "\n"))
+	b.WriteString("\n")
+	out := g.newOutput(fullPrefix+guideSlug+".txt", guideTitle, b.String(), 0)
+	out.strict = true
+	out.hint = "; shorten the template full of " + g.template
+	return out
+}
+
+// indexFile is llms-full.txt, which once held the whole text and now lists the files that hold it, so that a link to
+// it still leads to the text.
+func (g *generator) indexFile(guide *output, sections []*output) *output {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Muster documentation, version %s\n\n", g.version)
+	fmt.Fprintf(&b, "The full text of the documentation is split into one file per section of the navigation, each smaller "+
+		"than 1 MiB; this file lists them. The index of the documentation is %s%s.\n\n", g.base, llmsName)
+	if guide != nil {
+		fmt.Fprintf(&b, "- [%s](%s): %d bytes, about %d tokens.\n", guide.Title, guide.URL, guide.Bytes, guide.Tokens)
+	}
+	for _, s := range sections {
+		fmt.Fprintf(&b, "- [%s](%s): %s, %d bytes, about %d tokens.\n", s.Title, s.URL, countPages(s.Pages), s.Bytes, s.Tokens)
+	}
+	out := g.newOutput(fullName, "Full text", b.String(), 0)
+	out.strict = true
+	return out
+}
+
+// countPages is a number of pages with its noun.
+func countPages(n int) string {
+	if n == 1 {
+		return "1 page"
+	}
+	return fmt.Sprintf("%d pages", n)
 }
 
 // checkAbsolute reports every link or image destination and reference definition of a text, outside fenced code and
@@ -683,8 +892,8 @@ func resolveLink(base, page, target string) (string, bool) {
 	return base + p + rest, true
 }
 
-// guideName is the template that the file of the template may define for llms-full.txt alone: the rules and the
-// scenarios, which llms.txt, an index, leaves out.
+// guideName is the template that the file of the template may define for llms-full-guide.txt alone: the rules and
+// the scenarios, which llms.txt, an index, leaves out.
 const guideName = "full"
 
 // parseTemplate parses the template of llms.txt, with the functions that take every value from its source.
@@ -709,30 +918,34 @@ func (g *generator) parseTemplate() *template.Template {
 	return t
 }
 
+// templateData is the data of the template: Full is llms-full.txt, Guide llms-full-guide.txt, nil when the template
+// defines no "full", and Sections the files of the full text in their order.
 type templateData struct {
-	Version, Base         string
-	FullBytes, FullTokens int
+	Version, Base string
+	Full          FullFile
+	Guide         *FullFile
+	Sections      []FullFile
 }
 
-// renderGuide executes the template "full" of the file, when it defines one: the part that only llms-full.txt holds.
-// It runs before the size of llms-full.txt is known, so it has .Version and .Base only; .FullBytes and .FullTokens are 0.
-func (g *generator) renderGuide(t *template.Template) string {
+// renderGuide executes the template "full" of the file, when it defines one: the part that only llms-full-guide.txt
+// holds. It runs before the sizes of the files are known, so it has .Version and .Base only.
+func (g *generator) renderGuide(t *template.Template) (string, bool) {
 	guide := t.Lookup(guideName)
 	if guide == nil {
-		return ""
+		return "", false
 	}
 	var b strings.Builder
 	if err := guide.Execute(&b, templateData{Version: g.version, Base: g.base}); err != nil {
 		g.problem("%s", strings.TrimPrefix(err.Error(), "template: "))
-		return ""
+		return "", false
 	}
-	return b.String()
+	return b.String(), true
 }
 
 // render executes the template of llms.txt.
-func (g *generator) render(t *template.Template, fullBytes int) string {
+func (g *generator) render(t *template.Template, data templateData) string {
 	var b strings.Builder
-	if err := t.Execute(&b, templateData{g.version, g.base, fullBytes, fullBytes / bytesPerToken}); err != nil {
+	if err := t.Execute(&b, data); err != nil {
 		g.problem("%s", strings.TrimPrefix(err.Error(), "template: "))
 		return ""
 	}
@@ -946,7 +1159,7 @@ func (g *generator) mapItems(b *strings.Builder, items []*item, level int) {
 }
 
 // note is the one-line note of a page in the map: its description, cut at a word before maxNoteRunes characters and
-// ended with an ellipsis when it is longer, so that llms.txt stays an index; the page and llms-full.txt have the rest.
+// ended with an ellipsis when it is longer, so that llms.txt stays an index; the page and the full text have the rest.
 func note(description string) string {
 	r := []rune(description)
 	if len(r) <= maxNoteRunes {
@@ -969,14 +1182,15 @@ func mapHeading(b *strings.Builder, level int, title string) {
 }
 
 // checkLinks checks the URLs of an output: every one into the site must resolve under it, and outside code, which
-// holds no links, llms.txt links nowhere else than to the repositories of muster-io, and never by a relative target.
-func (g *generator) checkLinks(file, text string, inLLMS bool) {
+// holds no links, a strict output links nowhere else than to the repositories of muster-io, and never by a relative
+// target.
+func (g *generator) checkLinks(file, text string, strict bool) {
 	for _, u := range urls(text) {
 		if strings.HasPrefix(u, g.base) && !g.resolves(strings.TrimPrefix(u, g.base)) {
 			g.problem("%s: %s does not resolve under %s/", file, u, g.siteDir)
 		}
 	}
-	if !inLLMS {
+	if !strict {
 		return
 	}
 	g.checkAbsolute(file, text, "is not absolute")

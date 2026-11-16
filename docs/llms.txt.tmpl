@@ -81,7 +81,7 @@
 ## Start here
 
 - [`api/openapi.yaml`]({{spec "api/openapi.yaml"}}) is the HTTP API and [`api/bridge.yaml`]({{spec "api/bridge.yaml"}}) the Bridge protocol; where a page and a specification disagree, the specification wins.
-- The rules for agents (the error classes, waits, presses, idempotency, edit windows and when a bridge is finished) and the scenarios, each the pages to read in order and what finishes it, are at the top of [the full text]({{.Base}}llms-full.txt), before the text of every page.
+- The rules for agents (the error classes, waits, presses, idempotency, edit windows and when a bridge is finished) and the scenarios, each the pages to read in order and what finishes it, are in [the guide for agents]({{.Guide.URL}}); read it before the pages.
 
 ## Document map
 
@@ -89,4 +89,8 @@
 
 ## Optional
 
-- [Full text]({{.Base}}llms-full.txt): the rules, the scenarios and every page in one file, {{.FullBytes}} bytes, about {{.FullTokens}} tokens.
+The full text, one file per section of the document map; [`llms-full.txt`]({{.Full.URL}}) lists them.
+
+{{range .Sections -}}
+- [{{.Title}}]({{.URL}}): {{.Pages}} {{if eq .Pages 1}}page{{else}}pages{{end}}, about {{.Tokens}} tokens.
+{{end -}}

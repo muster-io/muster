@@ -18,7 +18,7 @@ files_touched:
 acceptance:
   - "[C-30.FR-11] Messengers → Notification gateways explains what a Notification gateway is and that Muster ships none and never calls by itself; setting one up — a Bridge Connection for a bridge in the role `gateway`, its check showing \"Notification gateway\", a bridge with both roles; confirming a contact in the profile, the code and its limits, what Admins see; how calls combine within `gateway.combine_window`, are retried and acknowledged only while nobody owns the Alert Group, with \"Already taken by …\"; Broken gateways and their runbook; and, until the push of Mentions in Threads is verified (S-160), that at night only a Notification gateway is reliable."
   - "[C-30.FR-11] Write a bridge has the section \"A gateway bridge\": the role in `info`, `sendNotification` with its `Idempotency-Key` and action data, answering during a call through `answerEvent` in the push mode so that the answer comes while the person is still on the line, `notification_acknowledged`, the error classes of calls and what makes a gateway Broken; with the gateway examples of the Go library first and the Python library after, and the protocol without a library."
-  - "[C-30.FR-11] The pages have screenshots of the profile's confirmed contact and of the Connection page of a gateway, taken by `web/e2e/screenshots/notification-gateways.spec.ts`; `make docs-screenshots GUIDES=notification-gateways` takes them, every image has its alternative text, `make docs-check` passes, and `llms-full.txt` lists the page in a scenario on reaching people at night."
+  - "[C-30.FR-11] The pages have screenshots of the profile's confirmed contact and of the Connection page of a gateway, taken by `web/e2e/screenshots/notification-gateways.spec.ts`; `make docs-screenshots GUIDES=notification-gateways` takes them, every image has its alternative text, `make docs-check` passes, and `llms-full-guide.txt` lists the page in a scenario on reaching people at night."
 verify: "make docs-check"
 operator_attention: false
 issue: 440
@@ -34,7 +34,7 @@ issue: 440
   calls and their combining, the acknowledgement from a call, Broken gateways, and the note about the night
   (C-30.FR-11).
 - "A gateway bridge" in Write a bridge, for authors of gateways, with both libraries (C-30.FR-11, ADR-0017).
-- Screenshots, links from the Bridge page and the Messengers overview, and the scenario in `llms-full.txt`.
+- Screenshots, links from the Bridge page and the Messengers overview, and the scenario in `llms-full-guide.txt`.
 
 **OUT**
 
@@ -52,20 +52,20 @@ issue: 440
   `docs/messengers/index.md` lists Notification gateways; `docs/index.md` links the page from its overview.
 - **Screenshots**: `web/e2e/screenshots/notification-gateways.spec.ts` on `muster dev` with the demo gateway — the
   profile's confirmed contact and the gateway's Connection page; the images are generated and not listed.
-- **llms-full.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Reach people at night" that names the page.
+- **llms-full-guide.txt** (the template `full` of `docs/llms.txt.tmpl`): a scenario "Reach people at night" that names the page.
 
 ## Steps
 
 1. Write the sections and the links. Check: `make docs-check`.
 2. Write the screenshot spec and take the images. Check: `make docs-screenshots GUIDES=notification-gateways`.
-3. Add the scenario to `llms-full.txt`. Check: `make docs-check`.
+3. Add the scenario to `llms-full-guide.txt`. Check: `make docs-check`.
 
 ## Verification
 
 `make docs-serve`, then open Messengers → Notification gateways: the sections above in order, the two screenshots with
 their alternative text, the link to the runbook and to Write a bridge → A gateway bridge, whose Go example runs
-`examples/gateway` of `muster-io/muster-bridge-go`; `make docs-check` passes; `site/llms-full.txt` lists the page under
-"Reach people at night".
+`examples/gateway` of `muster-io/muster-bridge-go`; `make docs-check` passes; `site/llms-full-guide.txt` lists the
+page under "Reach people at night".
 
 ## Open questions
 

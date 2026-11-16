@@ -19,4 +19,6 @@
 
 ## Optional
 
-- [Full text]({{.Base}}llms-full.txt): {{.FullBytes}} bytes, about {{.FullTokens}} tokens.
+- [Guide]({{.Guide.URL}}): {{.Guide.Bytes}} bytes, about {{.Guide.Tokens}} tokens; [the list]({{.Full.URL}}).
+{{range .Sections}}- [{{.Title}}]({{.URL}}): {{.Pages}} {{if eq .Pages 1}}page{{else}}pages{{end}}, {{.Bytes}} bytes, about {{.Tokens}} tokens.
+{{end -}}
