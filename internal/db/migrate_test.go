@@ -4436,7 +4436,8 @@ func TestIntegrationTelegramDiscussionMembers(t *testing.T) {
 //   - F005, which Alice acknowledged, unacknowledged and Carol acknowledged in the kept month, gets Alice;
 //   - F006, with two acknowledged entries at the same time, gets Bob, of the lower id;
 //   - F007 of the other Organization gets its own Dave, while F008, whose only acknowledged entry is one of the other
-//     Organization with its id, gets nobody.
+//     Organization with its id, gets nobody, and so does F009, acknowledged by Alice, whose only created entry is one
+//     of the other Organization with its id.
 //
 // The CHECK refuses the User of a first acknowledgement without its time, the foreign key an unknown User; the fill run
 // again keeps a value already set. Down drops the column and the CHECK; up again fills it again.
@@ -4479,7 +4480,8 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 				('RT0000000000FA', 'AG00000000F005', 5, timestamptz '2026-10-05 10:05:00+00', timestamptz '2026-10-05 10:00:00+00'),
 				('RT0000000000FA', 'AG00000000F006', 6, timestamptz '2026-10-06 10:05:00+00', timestamptz '2026-10-06 10:00:00+00'),
 				('RT0000000000FB', 'AG00000000F007', 1, timestamptz '2026-10-07 10:05:00+00', timestamptz '2026-10-07 10:00:00+00'),
-				('RT0000000000FA', 'AG00000000F008', 7, timestamptz '2026-10-08 10:05:00+00', timestamptz '2026-10-08 10:00:00+00'))
+				('RT0000000000FA', 'AG00000000F008', 7, timestamptz '2026-10-08 10:05:00+00', timestamptz '2026-10-08 10:00:00+00'),
+				('RT0000000000FA', 'AG00000000F009', 8, timestamptz '2026-10-09 10:05:00+00', timestamptz '2026-10-09 10:00:00+00'))
 				AS g (route, public_id, number, first_ack, created) ON g.route = r.public_id`)
 		n := 0
 		// entry records a status entry of the Alert Group, in the Organization of org when it is given, by the User of
@@ -4523,6 +4525,8 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 		entry("AG00000000F007", "acknowledged", "dave", "2026-10-07 10:05:00+00")
 		entry("AG00000000F008", "created", "", "2026-10-08 10:00:00+00")
 		entry("AG00000000F008", "acknowledged", "dave", "2026-10-08 10:04:00+00", "RG0000000000BB")
+		entry("AG00000000F009", "created", "", "2026-10-09 10:00:00+00", "RG0000000000BB")
+		entry("AG00000000F009", "acknowledged", "alice", "2026-10-09 10:05:00+00")
 		// Retention dropped July.
 		e.exec(t, `DROP TABLE timeline_entries_p202607`)
 		firsts := func(t *testing.T) string {
@@ -4550,7 +4554,7 @@ func TestIntegrationFirstAcknowledgedBy(t *testing.T) {
 					AND column_name = 'first_acknowledged_by_user_id'`)
 		}
 		want := "AG00000000F001=alice AG00000000F002=- AG00000000F003=- AG00000000F004=- AG00000000F005=alice " +
-			"AG00000000F006=bob AG00000000F007=dave AG00000000F008=-"
+			"AG00000000F006=bob AG00000000F007=dave AG00000000F008=- AG00000000F009=-"
 
 		if err := e.mm.Migrate(45); err != nil {
 			t.Fatalf("up to 45: %v", err)

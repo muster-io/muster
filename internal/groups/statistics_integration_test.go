@@ -26,10 +26,12 @@ import (
 
 // statRow is one summary row of the statistics tests: when it started, its first acknowledgement after the start and
 // by whom (0 for nobody), who resolved it (a User, a Service account, or the system with resolvedBySystem), its
-// labels, Severity level and Teams.
+// labels, Severity level, Teams, Integrations (the env's by default) and Reopen count.
 type statRow struct {
 	id               int64
 	route            int64
+	ints             []int64
+	reopens          int64
 	labels           map[string]string
 	severity         string
 	created          time.Time
@@ -46,7 +48,8 @@ type statRow struct {
 type statEnv struct {
 	*env
 	route                        int64
-	alice, bob, dora, terraform  int64
+	alice, bob, carol, dora      int64
+	terraform                    int64
 	payments, search, old, gone  int64
 	alicePublic, terraformPublic string
 	paymentsPublic, searchPublic string
@@ -74,6 +77,7 @@ func newStatEnv(t *testing.T, e *env) *statEnv {
 	}
 	se.alice, se.alicePublic = user("SR0000000000A1", "alice", "active"), "SR0000000000A1"
 	se.bob = user("SR0000000000B1", "bob", "active")
+	se.carol = user("SR0000000000C1", "carol", "active")
 	se.dora = user("SR0000000000D1", "deleted-user-SR0000000000D1", "deleted")
 	se.terraformPublic = "SA0000000000T1"
 	if err := e.d.Pool.QueryRow(t.Context(), `INSERT INTO service_accounts (org_id, public_id, name, role, status,
@@ -118,6 +122,9 @@ func (se *statEnv) insert(t *testing.T, r *statRow) {
 	if r.severity == "" {
 		r.severity = "warning"
 	}
+	if r.ints == nil {
+		r.ints = []int64{se.intID}
+	}
 	labels, _ := json.Marshal(r.labels)
 	var firstAck, ackBy, resolvedAt, kind, user, account, reason any
 	status := "firing"
@@ -143,11 +150,11 @@ func (se *statEnv) insert(t *testing.T, r *statRow) {
 		group_key_labels, group_key_values, group_key_sha256, title, common_labels, common_annotations,
 		integration_ids, status, severity_level, urgent, resolved_at, resolved_by_kind, resolved_by_user_id,
 		resolved_by_service_account_id, resolve_reason, first_acknowledged_at, first_acknowledged_by_user_id,
-		created_at, last_changed_at)
+		reopen_count, created_at, last_changed_at)
 		VALUES ($1, $2, $3, $4, '{alertname}', '{}', sha256(convert_to($2::text, 'UTF8')), 'Stat', $5, '{}', $6, $7,
-		        $8, false, $9, $10, $11, $12, $13, $14, $15, $16, $16)
-		RETURNING id`, se.orgID, public, se.next, r.route, labels, []int64{se.intID}, status, r.severity, resolvedAt,
-		kind, user, account, reason, firstAck, ackBy, r.created).Scan(&r.id); err != nil {
+		        $8, false, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17)
+		RETURNING id`, se.orgID, public, se.next, r.route, labels, r.ints, status, r.severity, resolvedAt,
+		kind, user, account, reason, firstAck, ackBy, r.reopens, r.created).Scan(&r.id); err != nil {
 		t.Fatalf("insert %v: %v", r.labels, err)
 	}
 	for _, team := range r.teams {
@@ -534,6 +541,227 @@ func TestIntegrationStatisticsPlans(t *testing.T) {
 				}
 				t.Logf("%s, %s:\n%s", c.query, name, plan)
 			}
+		}
+	})
+}
+
+// TestIntegrationStatisticsFilters is C-09.FR-30 and C-09.AC-29, AC-31, AC-32 on PostgreSQL, table-driven against an
+// oracle: two Routes, two Integrations, the Teams payments, search and the deleted old, Alert Groups acknowledged
+// first by Alice, Bob, Carol and nobody known, resolved by Users, terraform and the system, with Reopen counts 0 and 1,
+// one started exactly at from (in) and one exactly at to (out). Every filter value, without and with a Matcher =~ that
+// Go applies and two Alert Groups fail, gives the counts and times to acknowledge of the oracle By route, By
+// integration, By team and By people, every excluded Alert Group having had activity. Alice is in both Teams of the
+// Alert Group they share, so team=mine counts it once By route, By integration and By people, and once under each
+// Team By team.
+func TestIntegrationStatisticsFilters(t *testing.T) {
+	dbtest.ForEach(t, func(t *testing.T, s dbtest.Server) {
+		e := setup(t, s)
+		se := newStatEnv(t, e)
+		ctx := t.Context()
+		if _, err := e.d.Pool.Exec(ctx, `INSERT INTO team_users (org_id, team_id, user_id, by_hand, created_at)
+			VALUES ($1, $2, $3, true, $4)`, e.orgID, se.search, se.alice, t0); err != nil {
+			t.Fatal(err)
+		}
+		r2 := e.route(t, "stats2", "stats2", "alertname")
+		i2, err := e.ints.Create(ctx, by2, integrationInput("lab2"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var r1Public, i1Public string
+		if err := e.d.Pool.QueryRow(ctx, `SELECT r.public_id, i.public_id FROM routes r, integrations i
+			WHERE r.id = $1 AND i.id = $2`, se.route, e.intID).Scan(&r1Public, &i1Public); err != nil {
+			t.Fatal(err)
+		}
+		r1, i1 := se.route, e.intID
+		routeNames := map[int64]string{r1: "stats", r2.ID: "stats2"}
+		intNames := map[int64]string{i1: "lab", i2.ID: "lab2"}
+		teamNames := map[int64]string{se.payments: "payments", se.search: "search", se.old: "old"}
+		people := map[int64]string{se.alice: "alice", se.bob: "bob", se.carol: "carol"}
+		from, to := t0.Add(-48*time.Hour), t0.Add(-24*time.Hour)
+		at := func(h int) time.Time { return from.Add(time.Duration(h) * time.Hour) }
+		labels := func(cluster, ns, keep string) map[string]string {
+			return map[string]string{"cluster": cluster, "namespace": ns, "keep": keep}
+		}
+		rows := []*statRow{
+			{route: r1, ints: []int64{i1}, severity: "critical", labels: labels("c1", "payments", "yes"),
+				teams: []int64{se.payments, se.search}, ackBy: se.alice, ack: 2 * time.Minute, resolverUser: se.bob},
+			{route: r1, ints: []int64{i1, i2.ID}, labels: labels("c2", "payments", "yes"), teams: []int64{se.payments},
+				ackBy: se.carol, ack: 4 * time.Minute, resolverAccount: se.terraform, reopens: 1},
+			{route: r2.ID, ints: []int64{i2.ID}, severity: "critical", labels: labels("c3", "search", "yes"),
+				teams: []int64{se.search}, ackBy: se.bob, ack: 6 * time.Minute, resolverAccount: se.terraform},
+			{route: r2.ID, ints: []int64{i1}, labels: labels("c4", "search", "yes"), acked: true, ack: 8 * time.Minute,
+				resolverUser: se.alice, reopens: 1},
+			{route: r1, ints: []int64{i2.ID}, severity: "critical", labels: labels("c5", "payments", "no"),
+				teams: []int64{se.old}, ackBy: se.bob, ack: 10 * time.Minute, resolvedBySystem: true, reopens: 1},
+			{route: r2.ID, ints: []int64{i1, i2.ID}, labels: labels("c6", "payments", "no"), teams: []int64{se.payments},
+				ackBy: se.alice, ack: 12 * time.Minute, resolverUser: se.carol},
+			{route: r1, ints: []int64{i1}, severity: "critical", labels: labels("c7", "search", "yes"),
+				teams: []int64{se.search}, resolverUser: se.bob},
+			{route: r2.ID, ints: []int64{i1}, labels: labels("c8", "payments", "yes"), teams: []int64{se.payments},
+				ackBy: se.carol, ack: time.Minute},
+			{route: r1, ints: []int64{i1}, severity: "critical", labels: labels("c9", "payments", "yes"),
+				teams: []int64{se.payments, se.search}, ackBy: se.alice, ack: time.Minute, resolverUser: se.bob},
+			{route: r2.ID, ints: []int64{i2.ID}, severity: "critical", labels: labels("c10", "payments", "yes"),
+				teams: []int64{se.search}, ackBy: se.bob, ack: time.Minute, resolverUser: se.carol},
+		}
+		for i, r := range rows {
+			r.created = at(i + 1)
+		}
+		rows[7].created, rows[8].created, rows[9].created = from, to, from.Add(-time.Second)
+		for _, r := range rows {
+			se.insert(t, r)
+		}
+
+		type filterCase struct {
+			name string
+			f    groups.Filter
+			keep func(r *statRow) bool
+			// teams and ints are the Teams and Integrations that the filter of their kind chooses as items.
+			teams, ints []int64
+		}
+		yes, no := true, false
+		critical := []organization.SeverityLevel{"critical"}
+		warning := []organization.SeverityLevel{"warning"}
+		has := slices.Contains[[]int64]
+		overlaps := func(a, b []int64) bool { return slices.ContainsFunc(a, func(id int64) bool { return has(b, id) }) }
+		cases := []filterCase{
+			{name: "none", keep: func(*statRow) bool { return true }},
+			{name: "severity critical", f: groups.Filter{Severities: critical},
+				keep: func(r *statRow) bool { return r.severity == "critical" }},
+			{name: "severity warning", f: groups.Filter{Severities: warning},
+				keep: func(r *statRow) bool { return r.severity == "warning" }},
+			{name: "urgent", f: groups.Filter{Urgent: &yes}, keep: func(r *statRow) bool { return r.severity == "critical" }},
+			{name: "not urgent", f: groups.Filter{Urgent: &no}, keep: func(r *statRow) bool { return r.severity != "critical" }},
+			{name: "reopened", f: groups.Filter{Reopened: &yes}, keep: func(r *statRow) bool { return r.reopens > 0 }},
+			{name: "not reopened", f: groups.Filter{Reopened: &no}, keep: func(r *statRow) bool { return r.reopens == 0 }},
+			{name: "team payments", f: groups.Filter{Team: se.paymentsPublic},
+				keep: func(r *statRow) bool { return has(r.teams, se.payments) }, teams: []int64{se.payments}},
+			{name: "team search", f: groups.Filter{Team: se.searchPublic},
+				keep: func(r *statRow) bool { return has(r.teams, se.search) }, teams: []int64{se.search}},
+			{name: "my teams", f: groups.Filter{Team: groups.TeamMine},
+				keep:  func(r *statRow) bool { return overlaps(r.teams, []int64{se.payments, se.search}) },
+				teams: []int64{se.payments, se.search}},
+			{name: "route stats", f: groups.Filter{Routes: []string{r1Public}},
+				keep: func(r *statRow) bool { return r.route == r1 }},
+			{name: "route stats2", f: groups.Filter{Routes: []string{r2.PublicID}},
+				keep: func(r *statRow) bool { return r.route == r2.ID }},
+			{name: "integration lab", f: groups.Filter{Integrations: []string{i1Public}},
+				keep: func(r *statRow) bool { return has(r.ints, i1) }, ints: []int64{i1}},
+			{name: "integration lab2", f: groups.Filter{Integrations: []string{i2.PublicID}},
+				keep: func(r *statRow) bool { return has(r.ints, i2.ID) }, ints: []int64{i2.ID}},
+			{name: "namespace=payments", f: groups.Filter{Matchers: mustMatchers(t, `namespace="payments"`)},
+				keep: func(r *statRow) bool { return r.labels["namespace"] == "payments" }},
+			{name: "namespace!=payments", f: groups.Filter{Matchers: mustMatchers(t, `namespace!="payments"`)},
+				keep: func(r *statRow) bool { return r.labels["namespace"] != "payments" }},
+			{name: "first acknowledged by alice", f: groups.Filter{FirstAcknowledgedBy: se.alicePublic},
+				keep: func(r *statRow) bool { return r.ackBy == se.alice }},
+			{name: "first acknowledged by bob", f: groups.Filter{FirstAcknowledgedBy: "SR0000000000B1"},
+				keep: func(r *statRow) bool { return r.ackBy == se.bob }},
+			{name: "first acknowledged by me", f: groups.Filter{FirstAcknowledgedBy: groups.OwnerMe},
+				keep: func(r *statRow) bool { return r.ackBy == se.alice }},
+			{name: "critical and namespace=payments", f: groups.Filter{Severities: critical,
+				Matchers: mustMatchers(t, `namespace="payments"`)},
+				keep: func(r *statRow) bool { return r.severity == "critical" && r.labels["namespace"] == "payments" }},
+		}
+		inPeriod := func(r *statRow) bool { return !r.created.Before(from) && r.created.Before(to) }
+		subjects := func(st groups.Statistics) []string {
+			var out []string
+			for _, it := range st.Items {
+				if it.AlertGroupCount > 0 {
+					out = append(out, fmt.Sprintf("%s:%d:%d", it.Subject.Name, it.AlertGroupCount,
+						it.TimeToAcknowledge.Count))
+				}
+			}
+			slices.Sort(out)
+			return out
+		}
+		counted := func(m map[string][2]int) []string {
+			var out []string
+			for name, c := range m {
+				out = append(out, fmt.Sprintf("%s:%d:%d", name, c[0], c[1]))
+			}
+			slices.Sort(out)
+			return out
+		}
+		check := func(c filterCase) {
+			t.Helper()
+			f := c.f
+			f.From, f.To, f.Me = &from, &to, se.alicesActor
+			byRoute, byInt, byTeam, byPeople := map[string][2]int{}, map[string][2]int{}, map[string][2]int{},
+				map[string][2]int{}
+			add := func(m map[string][2]int, key string, ack, resolved int) {
+				v := m[key]
+				m[key] = [2]int{v[0] + ack, v[1] + resolved}
+			}
+			for _, r := range rows {
+				if !inPeriod(r) || !c.keep(r) {
+					continue
+				}
+				ack := 0
+				if r.acked || r.ackBy != 0 {
+					ack = 1
+				}
+				add(byRoute, routeNames[r.route], 1, ack)
+				for _, id := range r.ints {
+					if c.ints == nil || has(c.ints, id) {
+						add(byInt, intNames[id], 1, ack)
+					}
+				}
+				for _, id := range r.teams {
+					if c.teams == nil || has(c.teams, id) {
+						add(byTeam, teamNames[id], 1, ack)
+					}
+				}
+				switch {
+				case r.ackBy != 0:
+					add(byPeople, people[r.ackBy], 1, 0)
+				case r.acked:
+					add(byPeople, "unknown", 1, 0)
+				}
+				switch {
+				case r.resolverUser != 0:
+					add(byPeople, people[r.resolverUser], 0, 1)
+				case r.resolverAccount != 0:
+					add(byPeople, "terraform", 0, 1)
+				}
+			}
+			for _, v := range []struct {
+				groupBy string
+				want    map[string][2]int
+			}{{groups.ByRoute, byRoute}, {groups.ByIntegration, byInt}, {groups.ByTeam, byTeam}} {
+				st, err := e.groups.Statistics(ctx, groups.StatisticsRequest{GroupBy: v.groupBy, Filter: f})
+				if err != nil {
+					t.Fatalf("%s by %s: %v", c.name, v.groupBy, err)
+				}
+				if got, want := subjects(st), counted(v.want); !slices.Equal(got, want) {
+					t.Errorf("%s by %s: %v, want %v", c.name, v.groupBy, got, want)
+				}
+			}
+			st, err := e.groups.ActorStatistics(ctx, f)
+			if err != nil {
+				t.Fatalf("%s by people: %v", c.name, err)
+			}
+			var got []string
+			for _, it := range st.Items {
+				name := "unknown"
+				if it.Actor != nil {
+					name = it.Actor.Name
+				}
+				got = append(got, fmt.Sprintf("%s:%d:%d", name, it.AcknowledgedFirst, it.Resolved))
+			}
+			slices.Sort(got)
+			if want := counted(byPeople); !slices.Equal(got, want) {
+				t.Errorf("%s by people: %v, want %v", c.name, got, want)
+			}
+		}
+		for _, c := range cases {
+			check(c)
+			// The same with a Matcher =~ that Go applies, which the Alert Groups with keep=no fail.
+			c.name += ` and keep=~"y.*"`
+			c.f.Matchers = append(slices.Clone(c.f.Matchers), mustMatchers(t, `keep=~"y.*"`)...)
+			keep := c.keep
+			c.keep = func(r *statRow) bool { return keep(r) && r.labels["keep"] == "yes" }
+			check(c)
 		}
 	})
 }

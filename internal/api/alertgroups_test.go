@@ -766,7 +766,7 @@ func TestAlertGroupStatisticsAPI(t *testing.T) {
 	}
 	if r := fg.stats[0]; r.GroupBy != "route" || r.TimeZone != "Europe/Berlin" || !slices.Equal(r.Filter.Routes,
 		[]string{routeID}) || len(r.Filter.Integrations) != 1 || r.Filter.From == nil || r.Filter.To == nil ||
-		r.Filter.Me.Kind != audit.ActorUser {
+		r.Filter.Me.Kind != audit.ActorUser || r.Filter.Me.ID == 0 {
 		t.Errorf("request %+v", r)
 	}
 	// Per Team, with the filters of the list and the User of the first acknowledgement (C-09.FR-29, FR-30).
@@ -779,7 +779,7 @@ func TestAlertGroupStatisticsAPI(t *testing.T) {
 	if f := fg.stats[1].Filter; fg.stats[1].GroupBy != groups.ByTeam || f.Team != groups.TeamMine ||
 		len(f.Severities) != 1 || !*f.Urgent || *f.Reopened || len(f.Matchers) != 2 ||
 		f.FirstAcknowledgedBy != groups.OwnerMe || len(f.Routes) != 1 || len(f.Integrations) != 1 ||
-		f.Me.Kind != audit.ActorUser {
+		f.Me.Kind != audit.ActorUser || f.Me.ID == 0 {
 		t.Errorf("filter %+v", f)
 	}
 	if a := x.as(t, groupsReader, http.MethodGet, "/api/v1/alert-group-statistics?group_by=team&label=%3D%3D",
@@ -824,7 +824,7 @@ func TestAlertGroupActorStatisticsAPI(t *testing.T) {
 	}
 	if f := fg.actors[0]; len(f.Routes) != 1 || len(f.Integrations) != 1 || len(f.Severities) != 1 || !*f.Urgent ||
 		f.Team != "TM0000000000PA" || !*f.Reopened || len(f.Matchers) != 1 || f.FirstAcknowledgedBy != "SRAAAAAAAAAAA9" ||
-		f.From == nil || f.To == nil || f.Me.Kind != audit.ActorUser {
+		f.From == nil || f.To == nil || f.Me.Kind != audit.ActorUser || f.Me.ID == 0 {
 		t.Errorf("filter %+v", f)
 	}
 	for name, a := range map[string]answer{
@@ -850,7 +850,8 @@ func TestAlertGroupActorStatisticsAPI(t *testing.T) {
 		}
 	}
 	if a := x.as(t, serviceToken, http.MethodGet, path+"?team=mine&first_acknowledged_by=me", ""); a.status !=
-		http.StatusOK || fg.actors[len(fg.actors)-1].Me.Kind != audit.ActorServiceAccount {
+		http.StatusOK || fg.actors[len(fg.actors)-1].Me.Kind != audit.ActorServiceAccount ||
+		fg.actors[len(fg.actors)-1].Me.ID == 0 {
 		t.Errorf("a service account's filter = %d %+v", a.status, fg.actors[len(fg.actors)-1])
 	}
 	if a := x.as(t, groupsReader, http.MethodGet, path+"?label=%3D%3D", ""); a.status != http.StatusBadRequest {

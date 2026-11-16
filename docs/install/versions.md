@@ -223,12 +223,15 @@ Muster's versions are `0.N.x`, and 1.0 is a long way off.
       such a replica moves to another channel or discussion group during a rolling update keeps the absences seen in
       the old group until its next check: select **Check** on it once every replica runs 0.2.0.
     - Migration 0045 records who made the first acknowledgement of each Alert Group, for the statistics by people.
-      For the Alert Groups acknowledged before its fill commits it fills it from the earliest `acknowledged` entry of
+      For the Alert Groups acknowledged before its fill starts it fills it from the earliest `acknowledged` entry of
       their Timeline, but only where the Timeline is still whole, its `created` entry kept (`retention.alert_details`);
       the older Alert Groups name nobody, and the statistics by people count them in the row "Unknown". It is expand
-      only: a 0.1 replica neither reads nor writes the column and leaves it as it is. A first acknowledgement that a
-      0.1 replica records before the fill commits is filled with the others; one it records after the fill committed,
-      while the rollout lasts, names nobody and counts as "Unknown" too. Their time to acknowledge is kept as before.
+      only: a 0.1 replica neither reads nor writes the column and leaves it as it is. The fill sees the Alert Groups
+      as they were when it started: a first acknowledgement that a 0.1 replica records before then is filled with the
+      others; one it records after the fill started, while the rollout lasts, names nobody and counts as "Unknown"
+      too. A change that a 0.1 replica makes to an Alert Group the fill is writing waits until the fill commits; should
+      the two ever deadlock, PostgreSQL ends one of them, and a failed fill is recovered as described below. Their time
+      to acknowledge is kept as before.
 
     **Slack apps get an optional scope.** Team mentions in Slack need the bot scope `usergroups:read`, which the
     [manifest](../messengers/slack.md#create-the-app-from-a-manifest) now has. A Slack app installed before 0.2.0 keeps

@@ -4426,7 +4426,8 @@ paths:
         on a replica of an earlier version — make one item with `actor` null, last, with `resolved_count` 0; never with
         `first_acknowledged_by`. So `acknowledged_first_count` adds up over the items to the `time_to_acknowledge.count`
         of `getAlertGroupStatistics?group_by=route` for the same period and filters. The items are complete, not
-        paginated: by `acknowledged_first_count`, most first, then by name, then by `public_id`.'
+        paginated: by `acknowledged_first_count`, most first, then by name regardless of case, then by the exact name,
+        then by `public_id`.'
       x-permission: alert-groups:read
       x-listener: app
       security:

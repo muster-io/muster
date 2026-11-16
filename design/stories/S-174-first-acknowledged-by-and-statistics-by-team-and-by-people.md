@@ -86,8 +86,9 @@ issue: 567
     `time_zone`; `200` → `AlertGroupActorStatistics` {`from`, `to`, `items`}, each `AlertGroupActorStatisticsItem`
     {`actor` (`ActorRef`, or `null` for the row "Unknown"), `acknowledged_first_count`, `resolved_count`,
     `time_to_acknowledge` (`DurationStats`, whose `count` is `acknowledged_first_count`)}; `400`, `401`, `403`, `422`,
-    `429`. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name, then by
-    `public_id`, with `actor` null last. An actor with neither count is not an item.
+    `429`. The items are complete, not paginated: by `acknowledged_first_count`, most first, then by name regardless
+    of case, then by the exact name, then by `public_id`, with `actor` null last. An actor with neither count is not
+    an item.
   - `ActorRef`'s description adds "or is a row of the statistics by people"; a Service account is one only through
     what it resolved.
 - **Schema** (migration `0045_first_acknowledged_by`; the orchestrator assigns `NN`, the next free number when the story

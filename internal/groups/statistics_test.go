@@ -6,6 +6,7 @@ package groups
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -14,7 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/muster-io/muster/internal/audit"
 	"github.com/muster-io/muster/internal/groups/dbgen"
+	"github.com/muster-io/muster/internal/ingest"
 	"github.com/muster-io/muster/internal/matchers"
 	"github.com/muster-io/muster/internal/organization"
 )
@@ -351,5 +354,83 @@ func TestActorStatistics(t *testing.T) {
 	h.db.actorStats = nil
 	if st, err := h.svc.ActorStatistics(t.Context(), Filter{}); err != nil || st.Items == nil || len(st.Items) != 0 {
 		t.Errorf("nobody = %+v, %v", st, err)
+	}
+}
+
+// TestStatisticsFilterPredicates: the aggregations of the statistics and the read of their labels select the Alert
+// Groups by one predicate, the same word for word in each query, from the period to the first acknowledgement; the
+// aggregations also take the ids of the Matchers Go applies.
+func TestStatisticsFilterPredicates(t *testing.T) {
+	raw, err := os.ReadFile("query.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(raw)
+	const begin = "g.org_id = @org_id AND g.created_at >= @range_from"
+	const end = "g.first_acknowledged_by_user_id = sqlc.narg('first_acknowledged_by')::bigint)"
+	const ids = "(NOT @ids_set::boolean OR g.id = ANY(@ids::bigint[]))"
+	var first string
+	for _, name := range []string{"RouteStatistics", "IntegrationStatistics", "TeamStatistics", "ActorStatistics",
+		"ListStatisticsGroupLabels"} {
+		at := strings.Index(sql, "-- name: "+name+" ")
+		if at < 0 {
+			t.Fatalf("no query %s", name)
+		}
+		body := sql[at+1:]
+		if next := strings.Index(body, "-- name: "); next >= 0 {
+			body = body[:next]
+		}
+		b, e := strings.Index(body, begin), strings.Index(body, end)
+		if b < 0 || e < b {
+			t.Fatalf("%s has no filter predicate", name)
+		}
+		block := strings.Join(strings.Fields(body[b:e+len(end)]), " ")
+		if first == "" {
+			first = block
+		} else if block != first {
+			t.Errorf("the filter predicate of %s differs from RouteStatistics:\n%s\n%s", name, block, first)
+		}
+		if strings.Contains(body, ids) == (name == "ListStatisticsGroupLabels") {
+			t.Errorf("%s: the ids of the Matchers Go applies", name)
+		}
+	}
+}
+
+// TestActorStatisticsFirstAcknowledgement is C-09.AC-27 in the statistics by people: Alice acknowledges an Alert
+// Group 5 minutes after it starts, Bob takes it over and unacknowledges it, Carol acknowledges it, the system resolves
+// it and it reopens into acknowledged; By people credits Alice alone, with a time to acknowledge of 5 minutes, and has
+// no row for Bob or Carol.
+func TestActorStatisticsFirstAcknowledgement(t *testing.T) {
+	h := newHarness(t)
+	h.people()
+	carol := Caller{Actor: carol.Actor, Transport: audit.TransportUI, Permissions: responder}
+	a := h.alert(2, "warning", map[string]string{"alertname": "A", "cluster": "x"})
+	h.changes(t, ingest.ChangeFired, a)
+	g := h.groupOf(t, a)
+	h.clock.Advance(5 * time.Minute)
+	for _, step := range []func() (Result, error){
+		func() (Result, error) { return h.svc.Acknowledge(t.Context(), alice, g.PublicID) },
+		func() (Result, error) { return h.svc.Acknowledge(t.Context(), bob, g.PublicID) },
+		func() (Result, error) { return h.svc.Unacknowledge(t.Context(), bob, g.PublicID) },
+		func() (Result, error) { return h.svc.Acknowledge(t.Context(), carol, g.PublicID) },
+	} {
+		if _, err := step(); err != nil {
+			t.Fatal(err)
+		}
+		h.clock.Advance(time.Minute)
+	}
+	h.resolve(t, a)
+	h.clock.Advance(time.Minute)
+	h.refire(t, a)
+	if g.Status != "acknowledged" || g.OwnerUserID != i8(carolID) || g.ReopenCount != 1 {
+		t.Fatalf("after the reopen: %s, owner %v, reopen count %d", g.Status, g.OwnerUserID, g.ReopenCount)
+	}
+	st, err := h.svc.ActorStatistics(t.Context(), Filter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Items) != 1 || st.Items[0].Actor == nil || st.Items[0].Actor.Name != "Alice" ||
+		st.Items[0].AcknowledgedFirst != 1 || st.Items[0].Resolved != 0 || *st.Items[0].TimeToAcknowledge.Median != 300 {
+		t.Errorf("by people = %+v", st.Items)
 	}
 }

@@ -461,7 +461,55 @@ func (f *fakeDB) ActorStatistics(_ context.Context, arg dbgen.ActorStatisticsPar
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.actorArgs = arg
-	return f.actorStats, f.call("ActorStatistics")
+	if f.actorStats != nil {
+		return f.actorStats, f.call("ActorStatistics")
+	}
+	return f.actorStatsOfGroups(arg), f.call("ActorStatistics")
+}
+
+// actorStatsOfGroups aggregates the Alert Groups that started in the period as ActorStatistics does, without its
+// filters: per User of the first acknowledgement, with nobody's as one row, and per resolver of a person's Resolve.
+func (f *fakeDB) actorStatsOfGroups(arg dbgen.ActorStatisticsParams) []dbgen.ActorStatisticsRow {
+	type resolver struct{ user, account pgtype.Int8 }
+	acks, resolved := map[pgtype.Int8][]float64{}, map[resolver]int64{}
+	for _, g := range f.groups {
+		if g.CreatedAt.Before(arg.RangeFrom) || !g.CreatedAt.Before(arg.RangeTo) {
+			continue
+		}
+		if g.FirstAcknowledgedAt.Valid {
+			acks[g.FirstAcknowledgedByUserID] = append(acks[g.FirstAcknowledgedByUserID],
+				g.FirstAcknowledgedAt.Time.Sub(g.CreatedAt).Seconds())
+		}
+		if g.ResolvedByKind.String == ResolvedByUser {
+			resolved[resolver{g.ResolvedByUserID, g.ResolvedByServiceAccountID}]++
+		}
+	}
+	var out []dbgen.ActorStatisticsRow
+	for user, ds := range acks {
+		slices.Sort(ds)
+		r := dbgen.ActorStatisticsRow{AcknowledgedByUserID: user, AcknowledgedFirstCount: int64(len(ds)),
+			AckMedian: percentileCont(ds, 0.5), AckP95: percentileCont(ds, 0.95)}
+		if n, ok := resolved[resolver{user: user}]; ok && user.Valid {
+			r.ResolvedByUserID, r.ResolvedCount = user, n
+			delete(resolved, resolver{user: user})
+		}
+		out = append(out, r)
+	}
+	for r, n := range resolved {
+		out = append(out, dbgen.ActorStatisticsRow{ResolvedByUserID: r.user, ServiceAccountID: r.account,
+			ResolvedCount: n})
+	}
+	return out
+}
+
+// percentileCont is percentile_cont of sorted values: interpolated between the two nearest ranks.
+func percentileCont(sorted []float64, p float64) float64 {
+	pos := p * float64(len(sorted)-1)
+	lo := int(pos)
+	if lo+1 >= len(sorted) {
+		return sorted[lo]
+	}
+	return sorted[lo] + (pos-float64(lo))*(sorted[lo+1]-sorted[lo])
 }
 
 func (f *fakeDB) ListStatisticsGroupLabels(_ context.Context, arg dbgen.ListStatisticsGroupLabelsParams) (
