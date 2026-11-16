@@ -14,7 +14,7 @@ import type { AlertGroupStatisticsItem } from "../api/gen/model";
 import i18n from "../i18n";
 import { SESSION_QUERY_KEY, type SessionRead } from "../lib/api";
 import { barPercent, durationText } from "./statistics-chart";
-import { StatisticsTable } from "./statistics-table";
+import { type StatisticsSubject, StatisticsTable } from "./statistics-table";
 
 const NONE = { count: 0, median_seconds: null, p95_seconds: null };
 
@@ -43,14 +43,23 @@ const QUIET: AlertGroupStatisticsItem = {
   per_day: [],
 };
 
-async function renderTable(items: AlertGroupStatisticsItem[], empty = "Nothing") {
+async function renderTable(
+  items: AlertGroupStatisticsItem[],
+  empty = "Nothing",
+  groupBy: StatisticsSubject = "route",
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const read: SessionRead = { session: null, ended: false };
   queryClient.setQueryData(SESSION_QUERY_KEY, read);
   return render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={queryClient}>
-        <StatisticsTable groupBy="route" items={items} empty={empty} />
+        <StatisticsTable
+          groupBy={groupBy}
+          items={items}
+          empty={empty}
+          teamLink={(id, name) => <a href={`/statistics?by=people&team=${id}`}>{name}</a>}
+        />
       </QueryClientProvider>
     </I18nextProvider>,
   );
@@ -169,5 +178,41 @@ describe("StatisticsTable", () => {
     await expect
       .element(page.getByTestId("statistics-day").getByRole("rowheader"))
       .toHaveTextContent("7 окт. 2026 г.");
+  });
+
+  test("By team has its caption and column, its empty text and a link per Team", async () => {
+    const payments = { ...ST, subject: { id: "TM0000000000PA", name: "payments" } };
+    await renderTable([payments], "Nothing", "team");
+    await expect.element(page.getByRole("table", { name: "Statistics by team" })).toBeVisible();
+    await expect.element(page.getByRole("columnheader", { name: "Team" })).toBeVisible();
+    await expect
+      .element(row("payments").getByRole("link", { name: "payments" }))
+      .toHaveAttribute("href", "/statistics?by=people&team=TM0000000000PA");
+    await expect.element(row("payments").getByTestId("statistics-count")).toHaveTextContent("3");
+  });
+
+  test("the name of a Team opens no days; the button Per day does", async () => {
+    await renderTable([{ ...ST, subject: { id: "TM0000000000PA", name: "payments" } }], "", "team");
+    const perDay = row("payments").getByRole("button", { name: "Per day: payments" });
+    await expect.element(perDay).toHaveAttribute("aria-expanded", "false");
+    await expect.element(page.getByTestId("statistics-days")).not.toBeInTheDocument();
+    await perDay.click();
+    await expect.element(perDay).toHaveAttribute("aria-expanded", "true");
+    await expect
+      .element(page.getByRole("table", { name: "Alert Groups per day of start: payments" }))
+      .toBeVisible();
+    await expect.element(page.getByTestId("day-count")).toHaveTextContent("3");
+    await perDay.click();
+    await expect.element(page.getByTestId("statistics-days")).not.toBeInTheDocument();
+  });
+
+  test("By team in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    await renderTable([{ ...ST, subject: { id: "TM0000000000PA", name: "payments" } }], "", "team");
+    await expect.element(page.getByRole("table", { name: "Статистика по командам" })).toBeVisible();
+    await expect.element(page.getByRole("columnheader", { name: "Команда" })).toBeVisible();
+    await expect
+      .element(row("payments").getByRole("button", { name: "По дням: payments" }))
+      .toBeVisible();
   });
 });

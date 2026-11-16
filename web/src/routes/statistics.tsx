@@ -1,62 +1,53 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright The Muster Authors
 
-// The statistics page (C-09.FR-15): per Route or per Integration — all of them, or the chosen ones — and for a period,
-// the number of Alert Groups that started in it and the median and 95th percentile of time to acknowledge and time to
-// resolve, as totals and, under each item, per day. Days split in the time zone of the profile (or the browser's), which
-// the request passes. The choice and the period live in the URL, so a view is shared as a link.
+// The statistics page (C-09.FR-15, C-09.FR-28 to C-09.FR-30): per Route, Integration or Team, or by people, for a period
+// and the filters of the Alert Group list, which apply to every view. Per item it shows the number of Alert Groups that
+// started in the period and the median and 95th percentile of time to acknowledge and time to resolve, as totals and,
+// under each item, per day; by people, who acknowledged first and who resolved. Days split in the time zone of the
+// profile (or the browser's), which the request passes. The view, the period, the filters and the sorting live in the
+// URL, so a view is shared as a link. At phone width the filters move into a panel, as on the Alert Group list.
 
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
+import { SlidersHorizontalIcon } from "lucide-react";
 import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { z } from "zod";
 
-import { useGetAlertGroupStatistics } from "../api/gen/endpoints/alert-groups/alert-groups";
-import { useListIntegrations } from "../api/gen/endpoints/integrations/integrations";
-import { useListRoutes } from "../api/gen/endpoints/routes/routes";
-import type { GetAlertGroupStatisticsParams } from "../api/gen/model";
-import { MultiPicker } from "../components/alert-group-filters";
-import { RequirePermission, useCan } from "../components/app-shell";
+import {
+  getAlertGroupActorStatistics,
+  getGetAlertGroupActorStatisticsQueryKey,
+  useGetAlertGroupActorStatistics,
+  useGetAlertGroupStatistics,
+} from "../api/gen/endpoints/alert-groups/alert-groups";
+import { useWideLayout } from "../components/alert-group-table";
+import { RequirePermission } from "../components/app-shell";
 import { PageTitle } from "../components/docs-link";
-import { type StatisticsSubject, StatisticsTable } from "../components/statistics-table";
+import { StatisticsFilters } from "../components/statistics-filters";
+import { StatisticsPeopleTable } from "../components/statistics-people-table";
+import { StatisticsTable } from "../components/statistics-table";
 import { Alert, AlertDescription } from "../components/ui/alert";
+import { Button } from "../components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { NativeSelect, NativeSelectOption } from "../components/ui/native-select";
 import { isApiError, problemText } from "../lib/api";
-import { dayIn, startOfDayIn, useTimeFormat } from "../lib/time";
-
-/** The periods; the last 7 days (alert_group.list_range, which the server applies itself) when the URL names none. */
-const PERIODS = ["7d", "30d", "90d", "custom"] as const;
-type Period = (typeof PERIODS)[number];
-const DEFAULT_PERIOD: Period = "7d";
-const DAY_MS = 24 * 60 * 60 * 1000;
-const PERIOD_DAYS: Record<Exclude<Period, "custom">, number> = { "7d": 7, "30d": 30, "90d": 90 };
-
-/** A list of non-empty strings; one value in the URL may arrive as a plain string. */
-const strings = z
-  .preprocess((v) => (typeof v === "string" ? [v] : v), z.array(z.string().min(1)).min(1))
-  .optional()
-  .catch(undefined);
-
-/** A calendar day as YYYY-MM-DD. */
-const day = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/)
-  .optional()
-  .catch(undefined);
-
-const statisticsSearchSchema = z.object({
-  by: z.enum(["route", "integration"]).optional().catch(undefined),
-  period: z.enum(PERIODS).optional().catch(undefined),
-  from: day,
-  to: day,
-  route: strings,
-  integration: strings,
-});
-
-type StatisticsSearch = z.infer<typeof statisticsSearchSchema>;
+import {
+  DEFAULT_PERIOD,
+  DEFAULT_SORT,
+  DEFAULT_VIEW,
+  PERIODS,
+  type Period,
+  STATISTICS_VIEWS,
+  type StatisticsSearch,
+  type StatisticsView,
+  activeFilterCount,
+  statisticsRequest,
+  statisticsSearchSchema,
+} from "../lib/statistics-search";
+import { dayIn, useTimeFormat } from "../lib/time";
 
 export const Route = createFileRoute("/statistics")({
   validateSearch: statisticsSearchSchema,
@@ -64,41 +55,7 @@ export const Route = createFileRoute("/statistics")({
   component: StatisticsPage,
 });
 
-/**
- * The request for the view of the URL at an instant: nothing for the default period, which the server counts with its
- * own clock; the start of a preset; whole days of the time zone for a custom period, the last one included. A custom
- * period without both days, or one that does not start before it ends, is not sent.
- */
-function statisticsParams(
-  search: StatisticsSearch,
-  timeZone: string,
-  now: number,
-): GetAlertGroupStatisticsParams | "incomplete" | "invalid" {
-  const by = search.by ?? "route";
-  const params: GetAlertGroupStatisticsParams = { group_by: by, time_zone: timeZone };
-  if (by === "route" && search.route !== undefined) {
-    params.route = search.route;
-  }
-  if (by === "integration" && search.integration !== undefined) {
-    params.integration = search.integration;
-  }
-  const period = search.period ?? DEFAULT_PERIOD;
-  if (period === "custom") {
-    if (search.from === undefined || search.to === undefined) {
-      return "incomplete";
-    }
-    const from = startOfDayIn(search.from, timeZone);
-    const to = startOfDayIn(search.to, timeZone, 1);
-    if (from.getTime() >= to.getTime()) {
-      return "invalid";
-    }
-    params.from = from.toISOString();
-    params.to = to.toISOString();
-  } else if (period !== DEFAULT_PERIOD) {
-    params.from = new Date(now - PERIOD_DAYS[period] * DAY_MS).toISOString();
-  }
-  return params;
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function periodLabel(t: TFunction, period: Period): string {
   switch (period) {
@@ -121,38 +78,44 @@ function statisticsError(t: TFunction, err: unknown): string {
   return problemText(t, err);
 }
 
-/** The subjects this page offers; the views By Team and By people come later. */
-type PageSubject = Exclude<StatisticsSubject, "team">;
+function viewLabel(t: TFunction, view: StatisticsView): string {
+  switch (view) {
+    case "route":
+      return t("statistics.by.route");
+    case "integration":
+      return t("statistics.by.integration");
+    case "team":
+      return t("statistics.by.team");
+    default:
+      return t("statistics.by.people");
+  }
+}
 
 function SubjectChoice({
   value,
   onChange,
 }: {
-  value: PageSubject;
-  onChange: (next: PageSubject) => void;
+  value: StatisticsView;
+  onChange: (next: StatisticsView) => void;
 }) {
   const { t } = useTranslation();
   const id = useId();
-  const options: { value: PageSubject; label: string }[] = [
-    { value: "route", label: t("statistics.by.route") },
-    { value: "integration", label: t("statistics.by.integration") },
-  ];
   return (
     <fieldset className="flex min-w-0 flex-col gap-1.5">
       <legend className="mb-1.5 text-sm font-medium">{t("statistics.by.label")}</legend>
       <div className="flex flex-wrap gap-x-4 gap-y-2">
-        {options.map((o) => (
-          <div key={o.value} className="flex items-center gap-2">
+        {STATISTICS_VIEWS.map((v) => (
+          <div key={v} className="flex items-center gap-2">
             <input
-              id={`${id}-${o.value}`}
+              id={`${id}-${v}`}
               type="radio"
               name={`${id}-by`}
-              value={o.value}
-              checked={value === o.value}
-              onChange={() => onChange(o.value)}
+              value={v}
+              checked={value === v}
+              onChange={() => onChange(v)}
               className="size-4 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             />
-            <Label htmlFor={`${id}-${o.value}`}>{o.label}</Label>
+            <Label htmlFor={`${id}-${v}`}>{viewLabel(t, v)}</Label>
           </div>
         ))}
       </div>
@@ -236,14 +199,26 @@ function PeriodPicker({
   );
 }
 
+function emptyText(t: TFunction, view: StatisticsView): string {
+  switch (view) {
+    case "integration":
+      return t("statistics.emptyIntegrations");
+    case "team":
+      return t("statistics.emptyTeams");
+    default:
+      return t("statistics.emptyRoutes");
+  }
+}
+
 function Statistics() {
   const { t } = useTranslation();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
+  const queryClient = useQueryClient();
   const { timeZone } = useTimeFormat();
-  const canRoutes = useCan("routes:read");
-  const canIntegrations = useCan("integrations:read");
-  const by = search.by ?? "route";
+  const wide = useWideLayout();
+  const [sheet, setSheet] = useState(false);
+  const by = search.by ?? DEFAULT_VIEW;
   // The presets count back from when the page opened or the period was chosen, so the view holds still.
   const [at, setAt] = useState(() => Date.now());
   const update = (patch: Partial<StatisticsSearch>) => {
@@ -252,21 +227,99 @@ function Statistics() {
     }
     void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
   };
-  const params = useMemo(() => statisticsParams(search, timeZone, at), [search, timeZone, at]);
-  const request = typeof params === "string" ? undefined : params;
-  const statistics = useGetAlertGroupStatistics(request ?? { group_by: by }, {
+  const request = useMemo(() => statisticsRequest(search, timeZone, at), [search, timeZone, at]);
+  const itemParams = typeof request !== "string" && request.view !== "people" ? request : undefined;
+  const peopleParams =
+    typeof request !== "string" && request.view === "people" ? request : undefined;
+  const statistics = useGetAlertGroupStatistics(itemParams?.params ?? { group_by: "route" }, {
     query: {
-      enabled: request !== undefined,
+      enabled: itemParams !== undefined,
       // The last statistics stay while newer ones are read, but never those of the other choice.
       placeholderData: (previous) => (previous?.group_by === by ? previous : undefined),
     },
   });
-  const routes = useListRoutes(undefined, { query: { enabled: canRoutes && by === "route" } });
-  const integrations = useListIntegrations(
-    { limit: 500 },
-    { query: { enabled: canIntegrations && by === "integration" } },
+  const people = useGetAlertGroupActorStatistics(peopleParams?.params, {
+    query: {
+      enabled: peopleParams !== undefined,
+      placeholderData: (previous) => previous,
+    },
+  });
+  const current = by === "people" ? people : statistics;
+
+  // New Matchers are checked by the server first; a refused one leaves the URL, and the rows, as they were, and the
+  // field shows why.
+  const applyMatchers = async (next: string[]) => {
+    // The period does not matter to whether a Matcher is valid, so a period that cannot be sent does not skip the check.
+    const probe = statisticsRequest(
+      { ...search, label: next, by: "people", period: undefined, from: undefined, to: undefined },
+      timeZone,
+      at,
+    );
+    if (typeof probe !== "string" && probe.view === "people") {
+      await queryClient.fetchQuery({
+        queryKey: getGetAlertGroupActorStatisticsQueryKey(probe.params),
+        queryFn: ({ signal }) => getAlertGroupActorStatistics(probe.params, { signal }),
+        staleTime: 0,
+      });
+    }
+    update({ label: next.length > 0 ? next : undefined });
+  };
+
+  const active = activeFilterCount(search);
+  const filters = (
+    <StatisticsFilters
+      search={search}
+      onChange={update}
+      applyMatchers={applyMatchers}
+      problem={current.error}
+    />
   );
-  const items = statistics.data?.items ?? [];
+  const teamLink = (id: string, name: string) => (
+    <Link
+      to="/statistics"
+      search={{ ...search, by: "people", team: id }}
+      className="rounded-md outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      {name}
+    </Link>
+  );
+  const body =
+    typeof request === "string" ? (
+      <Alert variant="destructive">
+        <AlertDescription className="text-current">
+          {request === "invalid"
+            ? t("statistics.period.invalid")
+            : t("statistics.period.incomplete")}
+        </AlertDescription>
+      </Alert>
+    ) : current.isError ? (
+      <Alert variant="destructive">
+        <AlertDescription className="text-current">
+          {statisticsError(t, current.error)}
+        </AlertDescription>
+      </Alert>
+    ) : by === "people" ? (
+      people.data === undefined ? (
+        <Loading />
+      ) : (
+        <StatisticsPeopleTable
+          items={people.data.items}
+          sort={search.sort}
+          onSort={(next) => update({ sort: next === DEFAULT_SORT ? undefined : next })}
+          busy={people.isPlaceholderData}
+        />
+      )
+    ) : statistics.data === undefined ? (
+      <Loading />
+    ) : (
+      <StatisticsTable
+        groupBy={statistics.data.group_by}
+        items={statistics.data.items}
+        busy={statistics.isPlaceholderData}
+        empty={emptyText(t, by)}
+        teamLink={teamLink}
+      />
+    );
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -274,69 +327,65 @@ function Statistics() {
         <p className="text-sm text-muted-foreground">{t("statistics.hint", { timeZone })}</p>
       </div>
       <div
-        className="grid min-w-0 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        className="grid min-w-0 items-start gap-4 sm:grid-cols-2"
         role="group"
         aria-label={t("statistics.controls")}
       >
         <SubjectChoice
           value={by}
-          onChange={(next) =>
-            update({
-              by: next === "route" ? undefined : next,
-              route: undefined,
-              integration: undefined,
-            })
-          }
+          onChange={(next) => update({ by: next === DEFAULT_VIEW ? undefined : next })}
         />
         <PeriodPicker search={search} timeZone={timeZone} onChange={update} />
-        {by === "route" && canRoutes && (
-          <MultiPicker
-            testId="statistics-routes"
-            label={t("statistics.items.routes")}
-            placeholder={t("statistics.items.allRoutes")}
-            choices={(routes.data?.items ?? []).map((r) => ({ value: r.id, label: r.name }))}
-            value={search.route ?? []}
-            onChange={(next) => update({ route: next.length > 0 ? next : undefined })}
-          />
-        )}
-        {by === "integration" && canIntegrations && (
-          <MultiPicker
-            testId="statistics-integrations"
-            label={t("statistics.items.integrations")}
-            placeholder={t("statistics.items.allIntegrations")}
-            choices={(integrations.data?.items ?? []).map((i) => ({ value: i.id, label: i.name }))}
-            value={search.integration ?? []}
-            onChange={(next) => update({ integration: next.length > 0 ? next : undefined })}
-          />
-        )}
       </div>
-      {typeof params === "string" ? (
-        <Alert variant="destructive">
-          <AlertDescription className="text-current">
-            {params === "invalid"
-              ? t("statistics.period.invalid")
-              : t("statistics.period.incomplete")}
-          </AlertDescription>
-        </Alert>
-      ) : statistics.isError ? (
-        <Alert variant="destructive">
-          <AlertDescription className="text-current">
-            {statisticsError(t, statistics.error)}
-          </AlertDescription>
-        </Alert>
-      ) : statistics.data === undefined ? (
-        <p className="text-sm text-muted-foreground" role="status">
-          {t("common.loading")}
-        </p>
-      ) : (
-        <StatisticsTable
-          groupBy={statistics.data.group_by}
-          items={items}
-          busy={statistics.isPlaceholderData}
-          empty={by === "route" ? t("statistics.emptyRoutes") : t("statistics.emptyIntegrations")}
-        />
+      {!wide && (
+        <div>
+          <Button
+            variant="outline"
+            onClick={() => setSheet(true)}
+            aria-haspopup="dialog"
+            data-testid="filters-button"
+          >
+            <SlidersHorizontalIcon aria-hidden="true" />
+            {active > 0
+              ? t("alertGroups.filters.buttonActive", { count: active })
+              : t("alertGroups.filters.button")}
+          </Button>
+          <Dialog open={sheet} onOpenChange={setSheet}>
+            <DialogContent
+              closeLabel={t("common.close")}
+              className="top-0 right-0 bottom-0 left-auto flex h-dvh max-h-dvh w-full max-w-[min(24rem,100%)] translate-x-0 translate-y-0 flex-col gap-4 overflow-y-auto rounded-none sm:max-w-sm"
+            >
+              <DialogHeader>
+                <DialogTitle>{t("alertGroups.filters.title")}</DialogTitle>
+              </DialogHeader>
+              {filters}
+              <Button onClick={() => setSheet(false)}>{t("statistics.filters.done")}</Button>
+            </DialogContent>
+          </Dialog>
+        </div>
       )}
+      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
+        {wide && (
+          <aside
+            className="flex w-72 shrink-0 flex-col gap-3 rounded-lg border p-3"
+            aria-label={t("alertGroups.filters.title")}
+          >
+            <h2 className="text-sm font-semibold">{t("alertGroups.filters.title")}</h2>
+            {filters}
+          </aside>
+        )}
+        <div className="min-w-0 flex-1">{body}</div>
+      </div>
     </div>
+  );
+}
+
+function Loading() {
+  const { t } = useTranslation();
+  return (
+    <p className="text-sm text-muted-foreground" role="status">
+      {t("common.loading")}
+    </p>
   );
 }
 

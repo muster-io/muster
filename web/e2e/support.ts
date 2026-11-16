@@ -137,8 +137,17 @@ export async function fakeIntegration(name: string): Promise<string> {
   }
 }
 
-/** Creates a Route with the Paging profile for the alerts with team=<team>, grouped by groupKey. Returns its id. */
-export async function createRoute(name: string, team: string, groupKey: string[]): Promise<string> {
+/**
+ * Creates a Route with the profile (Paging by default) for the alerts whose label is value (the label "team" by
+ * default), grouped by groupKey. Returns its id.
+ */
+export async function createRoute(
+  name: string,
+  value: string,
+  groupKey: string[],
+  profile = "paging",
+  label = "team",
+): Promise<string> {
   const admin = await adminApi();
   try {
     const profiles = await admin.call<{ items: { id: string; policy: unknown }[] }>(
@@ -147,10 +156,10 @@ export async function createRoute(name: string, team: string, groupKey: string[]
     );
     const route = await admin.call<{ id: string }>("POST", "/api/v1/routes", {
       name,
-      matchers: [{ label: "team", op: "=", value: team }],
+      matchers: [{ label, op: "=", value }],
       group_key: groupKey,
       destination_ids: [],
-      policy: profiles.items.find((p) => p.id === "paging")?.policy,
+      policy: profiles.items.find((p) => p.id === profile)?.policy,
     });
     return route.id;
   } finally {
